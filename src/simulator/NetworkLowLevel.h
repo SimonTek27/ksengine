@@ -34,6 +34,7 @@ public:
     ksnet::Message* createMessage(int type);
 
     NetworkStats getStats() const { return m_stats; }
+    uint32_t clientId() const { return m_clientId; }
 
     // Callbacks (replacing Qt signals)
     std::function<void(uint32_t)> onConnected;
@@ -42,6 +43,10 @@ public:
     std::function<void(uint32_t, const std::string&, uint32_t)> onCarSpawned;
     std::function<void(uint32_t)> onCarDespawned;
     std::function<void(uint32_t, const std::string&, const std::string&)> onChatReceived;
+    std::function<void(uint8_t /*type*/, uint8_t /*phase*/, int /*curLap*/, int /*totalLaps*/, double /*timeRem*/)> onSessionState;
+    std::function<void(int /*seconds*/)> onRaceCountdown;
+    std::function<void(uint32_t /*carId*/, uint32_t /*lap*/, double /*time*/, double s1, double s2, double s3, bool valid)> onLapTime;
+    std::function<void(uint32_t /*carId*/, uint8_t /*type*/, float /*value*/, const std::string& /*reason*/)> onPenalty;
 
 private:
     void processMessages();
@@ -77,6 +82,7 @@ public:
     void update(double dt);
     void broadcastCarState(uint32_t carId, const CarStateData& state);
     void broadcastSessionState(uint8_t sessionType, uint8_t phase, int currentLap, int totalLaps, double timeRemaining);
+    void broadcastRaceCountdown(int seconds);
     void broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid);
     void broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason);
     void sendMessage(int clientIndex, int channel, ksnet::Message* msg);
@@ -85,6 +91,8 @@ public:
     int getClientCount() const;
     std::string getClientName(int clientIndex) const;
     uint32_t getClientCarId(int clientIndex) const;
+    const std::string& serverName() const { return m_serverName; }
+    const std::string& trackName() const { return m_trackName; }
 
     // Callbacks (replacing Qt signals)
     std::function<void(int, uint32_t, const std::string&)> onClientConnected;
@@ -108,6 +116,8 @@ private:
     ClientSlot m_clients[MAX_CLIENTS];
     SimulationLoop* m_simLoop = nullptr;
     MultiCarManager* m_multiCar = nullptr;
+    std::string m_serverName;
+    std::string m_trackName;
 };
 
 } // namespace net
