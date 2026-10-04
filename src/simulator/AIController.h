@@ -12,12 +12,13 @@
 
 namespace ks::sim {
 
+/** Snapshot of another car for overtake / traffic. */
 struct AiTrafficCar {
     int id = -1;
     float x = 0, z = 0;
     float heading = 0;
     float speed = 0;
-    float alongTrack = 0;
+    float alongTrack = 0; // optional cumulative distance
 };
 
 class AIController {
@@ -30,6 +31,7 @@ public:
     void update(const vec3& carPosition, float carHeading,
                 float speed, int gear, float dt);
 
+    /** With traffic awareness (preferred). */
     void update(const vec3& carPosition, float carHeading,
                 float speed, int gear, float dt,
                 const std::vector<AiTrafficCar>& traffic, int selfId);
@@ -63,7 +65,9 @@ private:
     int calculateGear(float speed) const;
     void rebuildCumulative();
     vec3 pointAt(int idx) const;
+    /** Track tangent at index (xz). */
     void tangentAt(int idx, float& tx, float& tz) const;
+    /** Evaluate traffic: adjust lateral offset + target speed. */
     void evaluateTraffic(const vec3& carPos, float carHeading, float speed,
                          int nearestIdx, const std::vector<AiTrafficCar>& traffic,
                          int selfId, float& targetSpeedInOut);
@@ -85,10 +89,10 @@ private:
     float m_aggression = 0.5f;
     float m_skill = 0.75f;
     float m_maxSteerRate = 2.0f;
-    float m_lateralOffset = 0.f;
+    float m_lateralOffset = 0.f;   // meters left/right of line
     float m_lateralTarget = 0.f;
     bool m_overtakeEnabled = true;
-    float m_overtakeSide = 1.f;
+    float m_overtakeSide = 1.f;    // +1 left, -1 right
 };
 
 } // namespace ks::sim
