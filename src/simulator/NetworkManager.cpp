@@ -71,6 +71,27 @@ void NetworkManager::setupClientSignals() {
     m_client->onCarStateReceived = [this](uint32_t carId, const net::CarStateData& state) {
         if (onRemoteCarStateReceived) onRemoteCarStateReceived(carId, state);
     };
+
+    m_client->onSessionState = [this](uint8_t type, uint8_t phase, int cur, int total, double rem) {
+        if (onSessionStateReceived) onSessionStateReceived(type, phase, cur, total, rem);
+        if (m_simLoop && m_simLoop->onSessionStateChanged)
+            m_simLoop->onSessionStateChanged(type, phase, cur, total, rem);
+    };
+
+    m_client->onRaceCountdown = [this](int seconds) {
+        if (onRaceCountdownReceived) onRaceCountdownReceived(seconds);
+        printf("NetworkManager: countdown %d\n", seconds);
+    };
+
+    m_client->onLapTime = [this](uint32_t carId, uint32_t lap, double t, double s1, double s2, double s3, bool valid) {
+        if (onLapTimeReceived) onLapTimeReceived(carId, lap, t, s1, s2, s3, valid);
+    };
+
+    m_client->onPenalty = [this](uint32_t carId, uint8_t type, float value, const std::string& reason) {
+        if (onPenaltyReceived) onPenaltyReceived(carId, type, value, reason);
+        printf("NetworkManager: penalty car=%u type=%u value=%.1f (%s)\n",
+               carId, (unsigned)type, value, reason.c_str());
+    };
 }
 
 void NetworkManager::setupServerSignals() {
@@ -113,7 +134,6 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
     m_client->setSimulationLoop(m_simLoop);
     rebindMultiCar();
 
-    // Host loopback client so the same MSG_* path is exercised locally.
     if (!m_client->connect("127.0.0.1", port, "Host", "gte3")) {
         printf("NetworkManager: Failed to connect as local client\n");
     }
@@ -129,13 +149,10 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 
 void NetworkManager::stopServer() {
     if (!m_hosting) return;
-
     m_client->disconnect();
     m_server->stop();
-
     m_hosting = false;
     m_connected = false;
-
     if (onServerStopped) onServerStopped();
     printf("NetworkManager: Server stopped\n");
 }
@@ -165,11 +182,9 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
 
 void NetworkManager::disconnectFromServer() {
     if (!m_connected) return;
-    if (m_hosting) return; // stopServer handles host teardown
-
+    if (m_hosting) return;
     m_client->disconnect();
     m_connected = false;
-
     if (onDisconnectedFromServer) onDisconnectedFromServer("Disconnected");
     printf("NetworkManager: Disconnected\n");
 }
@@ -195,11 +210,30 @@ void NetworkManager::sendChatMessage(const std::string& message) {
     m_client->sendMessage(net::CHANNEL_RELIABLE, chat);
 }
 
+void NetworkManager::broadcastSessionState(uint8_t type, uint8_t phase, int currentLap, int totalLaps, double timeRemaining) {
+    if (m_hosting && m_server)
+        m_server->broadcastSessionState(type, phase, currentLap, totalLaps, timeRemaining);
+}
+
+void NetworkManager::broadcastRaceCountdown(int seconds) {
+    if (m_hosting && m_server)
+        m_server->broadcastRaceCountdown(seconds);
+}
+
+void NetworkManager::broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid) {
+    if (m_hosting && m_server)
+        m_server->broadcastLapTime(carId, lapNumber, lapTime, s1, s2, s3, valid);
+}
+
+void NetworkManager::broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason) {
+    if (m_hosting && m_server)
+        m_server->broadcastPenalty(carId, penaltyType, value, reason);
+}
+
 void NetworkManager::hostBroadcastCarStates() {
     if (!m_hosting || !m_server || !m_simLoop) return;
     MultiCarManager* mc = m_simLoop->multiCarManager();
     if (!mc) return;
-    // Only the host's loopback client → nothing useful to send yet.
     if (clientCount() <= 1) return;
 
     net::CarStateData wire{};
@@ -256,19 +290,12 @@ void NetworkManager::onStatsTimer() {
     }
 }
 
-void NetworkManager::onSessionStateChanged(uint8_t type, uint8_t phase, int currentLap, int totalLaps, double timeRemaining) {
-    if (m_hosting && m_server) {
-        m_server->broadcastSessionState(type, phase, currentLap, totalLaps, timeRemaining);
-    }
-}
-
 void NetworkManager::updatePlayerList() {
     std::vector<std::string> players;
     if (m_hosting) {
         players.push_back("Host (You)");
-        for (int i = 0; i < m_server->getClientCount(); ++i) {
+        for (int i = 0; i < m_server->getClientCount(); ++i)
             players.push_back(m_server->getClientName(i));
-        }
     } else if (m_connected) {
         players.push_back(m_driverName);
     }
