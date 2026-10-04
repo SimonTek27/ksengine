@@ -5,8 +5,8 @@
 #include <QVector>
 #include <QMap>
 #include <functional>
-#include "engine/mesh/MeshOperations.h"
-#include "mesh/BooleanOps.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/BooleanOps.h"
 
 namespace ks {
 

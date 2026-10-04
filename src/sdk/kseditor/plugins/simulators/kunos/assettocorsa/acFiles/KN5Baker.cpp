@@ -34,13 +34,13 @@ QString sanitizeFileName(const QString& name) {
     return out;
 }
 
-// Applies kn5.worldMatrix to a position (w=1) or direction (w=0). See the
-// KNOWN LIMITATION note in KN5Baker.h: this is the only transform the parser
-// currently exposes.
+// Applies a KN5 matrix to a position (w=1) or direction (w=0). Row-vector
+// convention, p' = p * M, translation in m[3][0..2] — same as the engine's
+// transformByMatrix in src/engine/FileFormat/Kn5Baker.cpp.
 QVector3D transformPoint(const KN5Parser::Matrix4x4& m, const QVector3D& p, float w) {
-    float x = m.m[0][0]*p.x() + m.m[0][1]*p.y() + m.m[0][2]*p.z() + m.m[0][3]*w;
-    float y = m.m[1][0]*p.x() + m.m[1][1]*p.y() + m.m[1][2]*p.z() + m.m[1][3]*w;
-    float z = m.m[2][0]*p.x() + m.m[2][1]*p.y() + m.m[2][2]*p.z() + m.m[2][3]*w;
+    float x = p.x()*m.m[0][0] + p.y()*m.m[1][0] + p.z()*m.m[2][0] + w*m.m[3][0];
+    float y = p.x()*m.m[0][1] + p.y()*m.m[1][1] + p.z()*m.m[2][1] + w*m.m[3][1];
+    float z = p.x()*m.m[0][2] + p.y()*m.m[1][2] + p.z()*m.m[2][2] + w*m.m[3][2];
     return QVector3D(x, y, z);
 }
 
@@ -94,11 +94,13 @@ BakeResult bakeKN5ToNativeMeshes(const QString& kn5Path, const std::string& outp
         verts.reserve(static_cast<size_t>(mesh.positions.size()));
         for (int i = 0; i < mesh.positions.size(); ++i) {
             BakedVertex bv;
-            QVector3D pos = transformPoint(kn5.worldMatrix, mesh.positions[i], 1.0f);
+            // mesh.worldMatrix is the accumulated transform from parse()
+            // (root Base included), so nested node transforms bake correctly.
+            QVector3D pos = transformPoint(mesh.worldMatrix, mesh.positions[i], 1.0f);
             bv.px = pos.x(); bv.py = pos.y(); bv.pz = pos.z();
 
             QVector3D n = (i < mesh.normals.size()) ? mesh.normals[i] : QVector3D(0, 1, 0);
-            QVector3D nt = transformPoint(kn5.worldMatrix, n, 0.0f).normalized();
+            QVector3D nt = transformPoint(mesh.worldMatrix, n, 0.0f).normalized();
             bv.nx = nt.x(); bv.ny = nt.y(); bv.nz = nt.z();
 
             QVector2D uv = (i < mesh.uv0.size()) ? mesh.uv0[i] : QVector2D(0, 0);

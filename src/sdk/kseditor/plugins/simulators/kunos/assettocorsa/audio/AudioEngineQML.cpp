@@ -1,8 +1,8 @@
 #include "AudioEngineQML.h"
-#include "engine/Audio/AudioTypes.h"
+#include "sdk/kseditor/engine/Audio/AudioTypes.h"
 #include "CarAudioEngine.h"
 #include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/ksAssettocorsasndeventdefs.h"
-#include "engine/FileFormat/ACGuidsParser.h"
+#include "sdk/kseditor/engine/FileFormat/ACGuidsParser.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QDebug>

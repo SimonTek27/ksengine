@@ -202,57 +202,25 @@ bool KN5Decrypt::unprotect(const QString& kn5Path, QString* error) {
     QByteArray fileData = file.readAll();
     file.close();
 
-    // Check if file has unpack protection
-    // Protection is indicated by a specific flag in the KN5 header
-    if (fileData.size() < 20) {
-        m_lastError = "File too small to be a valid KN5";
-        if (error) *error = m_lastError;
-        return false;
-    }
-
-    // Check KN5 magic
-    quint32 magic = 0;
-    memcpy(&magic, fileData.constData(), 4);
-    if (magic != 0x354E4B) { // "KN5"
+    // Real KN5 magic: 6 ASCII bytes "sc6969"
+    if (fileData.size() < 10 || memcmp(fileData.constData(), "sc6969", 6) != 0) {
         m_lastError = "Not a valid KN5 file";
         if (error) *error = m_lastError;
         return false;
     }
 
-    // Check for unpack protection flag
-    quint32 flags = 0;
-    memcpy(&flags, fileData.constData() + 8, 4);
-
-    // Bit 1 (0x02) typically indicates unpack protection
-    if (!(flags & 0x02)) {
-        // No protection detected
-        return true;
-    }
-
-    // Create backup
-    QString backupPath = kn5Path + ".bak";
-    if (!QFile::copy(kn5Path, backupPath)) {
-        qWarning() << "KN5Decrypt: Failed to create backup at" << backupPath;
-        return false;
-    }
-
-    // Remove protection flag
-    flags &= ~0x02;
-
-    // Write modified file
-    QByteArray modifiedData = fileData;
-    memcpy(modifiedData.data() + 8, &flags, 4);
-
-    QFile outFile(kn5Path);
-    if (!outFile.open(QIODevice::WriteOnly)) {
-        m_lastError = "Cannot write to KN5 file: " + kn5Path;
+    // The only protection this class handles is the CSP kn5enc envelope;
+    // decrypt() strips it. There is no in-header "unpack flag" in the real
+    // format — an earlier implementation that cleared bit 0x02 of the u32
+    // at offset 8 actually corrupted textureCount/materialCount.
+    if (fileData.contains(CSP_ENVELOPE_MARKER)) {
+        m_lastError = "KN5 is CSP-protected (__AC_SHADERS_PATCH_KN5ENC_v1__); "
+                      "use decrypt() instead";
         if (error) *error = m_lastError;
         return false;
     }
 
-    outFile.write(modifiedData);
-    outFile.close();
-
+    // Plain KN5: nothing to remove.
     return true;
 }
 
@@ -270,15 +238,12 @@ bool KN5Decrypt::isKN5Unprotectable(const QString& kn5Path) {
     QFile file(kn5Path);
     if (!file.open(QIODevice::ReadOnly)) return false;
 
-    QByteArray header = file.peek(20);
+    QByteArray header = file.peek(1024);
     file.close();
 
-    if (header.size() < 12) return false;
-
-    quint32 flags = 0;
-    memcpy(&flags, header.constData() + 8, 4);
-
-    return (flags & 0x02) != 0;
+    // Only the CSP kn5enc envelope is removable (via decrypt()). The earlier
+    // implementation inspected a nonexistent "protection flag" at offset 8.
+    return header.contains(CSP_ENVELOPE_MARKER);
 }
 
 bool KN5Decrypt::findEncryptedEnvelope(const QByteArray& data, int& offset, int& length) {

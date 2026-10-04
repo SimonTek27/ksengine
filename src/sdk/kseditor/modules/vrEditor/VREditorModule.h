@@ -2,7 +2,7 @@
 
 #include "editor/EditorModule.h"
 #if __has_include("engine/devices/vr/XrManager.h")
-#include "engine/devices/vr/XrManager.h"
+#include "sdk/kseditor/engine/devices/vr/XrManager.h"
 #if defined(XR_VERSION_1_0) || defined(XR_NULL_HANDLE)
 #define HAS_XR 1
 #else
@@ -12,10 +12,10 @@
 #define HAS_XR 0
 #endif
 #if __has_include("engine/devices/vr/XrViewportRenderer.h")
-#include "engine/devices/vr/XrViewportRenderer.h"
+#include "sdk/kseditor/engine/devices/vr/XrViewportRenderer.h"
 #endif
 #if __has_include("engine/devices/vr/XrInput.h")
-#include "engine/devices/vr/XrInput.h"
+#include "sdk/kseditor/engine/devices/vr/XrInput.h"
 #endif
 
 #include <QTimer>
@@ -44,9 +44,9 @@ public:
     QString getModuleIcon() const override { return QString(); }
     int getModulePriority() const override { return 50; }
 
-    ks::device::XrManager* xrManager() const { return m_xrManager; }
-    ks::device::XrViewportRenderer* viewportRenderer() { return m_viewportRenderer; }
-    ks::device::XrInput* xrInput() { return m_xrInput; }
+    vr::XrManager* xrManager() const { return m_xrManager; }
+    vr::XrViewportRenderer* viewportRenderer() { return m_viewportRenderer; }
+    vr::XrInput* xrInput() { return m_xrInput; }
 
     bool isVRModeActive() const { return m_vrActive; }
 
@@ -102,9 +102,9 @@ private:
 
     VkShaderModule compileGLSL(VkDevice device, const char* source, VkShaderStageFlagBits stage);
 
-    ks::device::XrManager* m_xrManager = nullptr;
-    ks::device::XrViewportRenderer* m_viewportRenderer = nullptr;
-    ks::device::XrInput* m_xrInput = nullptr;
+    vr::XrManager* m_xrManager = nullptr;
+    vr::XrViewportRenderer* m_viewportRenderer = nullptr;
+    vr::XrInput* m_xrInput = nullptr;
 
     SceneGraph* m_scene = nullptr;
 

@@ -103,6 +103,10 @@ public:
     std::function<void()> onRecordReplayRequested;
     std::function<void(const std::string&)> onOpenContentBrowserRequested;
     std::function<void(const std::string&)> onOpenSettingsPanelRequested;
+    // Roadmap 3.1 - network actions from the MULTI PLAYER section.
+    std::function<void()> onHostServerRequested;
+    std::function<void()> onOpenServerBrowserRequested;
+    std::function<void()> onDisconnectRequested;
 
 private:
     void buildMainMenu();

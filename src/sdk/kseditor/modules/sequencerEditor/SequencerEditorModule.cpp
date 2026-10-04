@@ -4,6 +4,7 @@
 // ============================================================================
 
 #include "SequencerEditorModule.h"
+#include "sdk/kseditor/engine/Video/VideoEncoder.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -701,7 +702,7 @@ bool SequencerEditorModule::renderToVideo(const QString& outputPath, int width, 
     VideoEncoderBatch batch;
     bool ok = batch.encodeWithRenderCallback(
         totalFrames,
-        [this, width, height, fps](int frameNum) -> QImage {
+        [this, width, height, fps, totalFrames](int frameNum) -> QImage {
             float t = static_cast<float>(frameNum) / fps;
 
             QImage frame(width, height, QImage::Format_RGB888);

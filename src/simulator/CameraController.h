@@ -26,6 +26,12 @@ public:
     void setFov(float fov) { m_fov = fov; }
     void setNearPlane(float n) { m_nearPlane = n; }
     void setFarPlane(float f) { m_farPlane = f; }
+    // Read back by SimulationLoop so the renderer (and the shadow cascades,
+    // which fit themselves to the camera frustum) use the *same* clip range
+    // the projection matrix was built with, instead of hardcoded defaults.
+    float nearPlane() const { return m_nearPlane; }
+    float farPlane() const { return m_farPlane; }
+    float aspectRatio() const { return m_aspectRatio; }
 
     void setChaseDistance(float d) { m_chaseDistance = d; }
     void setChaseHeight(float h) { m_chaseHeight = h; }

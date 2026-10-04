@@ -6,7 +6,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 
-#include "engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
 
 namespace ks {
 

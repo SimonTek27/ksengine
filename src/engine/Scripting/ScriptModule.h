@@ -1,10 +1,11 @@
 #pragma once
 // ks::Engine module for scripting: owns the Lua lifecycle (initialize the
 // host, run the queued startup scripts, release on shutdown) and pumps the
-// per-tick `on_update(dt)` hook at the fixed engine timestep.
+// per-tick update event at the fixed engine timestep.
 //
 // Header-only and a Meyers singleton, matching SceneModule.
 #include "../EngineModule.h"
+#include "ModSdk.h"
 #include "ScriptHost.h"
 #include <string>
 #include <vector>
@@ -33,6 +34,9 @@ public:
     bool initialize() override {
         if (m_initialized) return true;
         if (!ScriptHost::instance().initialize()) return false;
+        // Mod SDK prelude (ks.on/ks.get/...) goes in before any queued
+        // startup script so mods can register handlers in their body.
+        if (!modsdk::install()) return false;
         for (const std::string& path : m_pending)
             ScriptHost::instance().runFile(path); // failure lands in lastError()
         m_pending.clear();
@@ -49,7 +53,9 @@ public:
         if (!m_initialized) return;
         auto& host = ScriptHost::instance();
         host.setNumber("delta_time", dt);
-        if (host.hasFunction("on_update")) host.callFunction("on_update", dt);
+        // SDK event "update": every ks.on("update") handler, then the
+        // conventional on_update global (both inside the dispatcher).
+        host.emitEvent("update", {dt});
     }
 
     // Scripting observes simulation state, so it runs after gameplay modules.

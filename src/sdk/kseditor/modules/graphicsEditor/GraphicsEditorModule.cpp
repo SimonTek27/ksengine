@@ -1,8 +1,8 @@
 ﻿#include "GraphicsEditorModule.h"
-#include "Graphics/VulkanRenderer.h"
-#include "VulkanShaderLoader.h"
-#include "RenderGraph.h"
-#include "SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/VulkanRenderer.h"
+#include "sdk/kseditor/engine/Graphics/VulkanShaderLoader.h"
+#include "sdk/kseditor/engine/Graphics/RenderGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>

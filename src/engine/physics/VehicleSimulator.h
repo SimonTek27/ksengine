@@ -64,6 +64,9 @@ public:
     void loadSuspensionFromIni(const std::string& path);
 
     int currentGear() const { return m_currentGear; }
+    const std::vector<double>& gearRatios() const { return m_gearRatios; }
+    float finalDrive() const { return static_cast<float>(m_finalDrive); }
+    float wheelRadius() const { return static_cast<float>(m_wheelRadius); }
     double rpm() const { return m_rpm; }
 
     PacejkaTireModel& tires() { return m_tires; }

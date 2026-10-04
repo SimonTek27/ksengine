@@ -1,5 +1,5 @@
 #include "ModuleGuiBase.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QMainWindow>
 #include <QStandardPaths>
 #include <QStyle>

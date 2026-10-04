@@ -1,7 +1,7 @@
 #include "FontCreatorQmlBridge.h"
 #include "fonteditor_acffile.h"
 #include "fonteditor_glyphmodel.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 
 #include <QFontDatabase>
 #include <QFile>

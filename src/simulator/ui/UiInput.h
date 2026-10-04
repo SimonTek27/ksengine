@@ -64,11 +64,11 @@ struct UiHitTarget {
 class UiInput {
 public:
     void beginFrame() {
-        for (int i = 0; i < 3; ++i) {
-            m_state.clicked[i] = false;
-            m_state.released[i] = false;
-        }
-        m_state.wheel = 0;
+        // Hit targets are registered by build() during this frame; the
+        // one-frame input flags are NOT cleared here - the message pump
+        // runs before renderFrame, so clearing them here would wipe every
+        // click/scroll before any overlay could read it. They are retired
+        // in endFrame() instead.
         m_targets.clear();
     }
 
@@ -93,6 +93,11 @@ public:
         }
         if (!m_state.down[0])
             m_pressedId = -1;
+        for (int i = 0; i < 3; ++i) {
+            m_state.clicked[i] = false;
+            m_state.released[i] = false;
+        }
+        m_state.wheel = 0;
     }
 
     void inject(const MouseEvent& e) {

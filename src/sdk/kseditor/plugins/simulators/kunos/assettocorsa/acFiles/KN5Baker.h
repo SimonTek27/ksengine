@@ -15,14 +15,10 @@
 // content loading in the editor. This file only reads what KN5Parser already
 // exposes.
 //
-// KNOWN LIMITATION (inherited from KN5Parser, not introduced here):
-// KN5Parser.cpp reads mesh.nodeIndex but never parses or exposes a KN5
-// node/scene-graph — there is no per-node parent transform available
-// anywhere in KN5File. Only the single file-level kn5.worldMatrix is applied
-// here, uniformly, to every mesh. Meshes authored directly in that space
-// bake correctly; meshes that depend on additional node-local offsets from
-// the (unparsed) KN5 node tree will not be positioned correctly until
-// KN5Parser itself is extended to parse that tree.
+// Transform handling: KN5Parser::parse() accumulates the KN5 node tree into a
+// per-mesh Mesh::worldMatrix (row-vector, including the root Base node), and
+// the baker applies that matrix to every vertex — nested node transforms bake
+// correctly.
 //
 // Skinned meshes are skipped (NativeRenderer has no bone/skinning support
 // yet); only static geometry is baked.

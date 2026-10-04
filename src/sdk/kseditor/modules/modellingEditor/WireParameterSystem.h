@@ -4,7 +4,7 @@
 #include <QVector>
 #include <QVariant>
 
-#include "engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
 
 namespace ks {
 

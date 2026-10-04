@@ -1,4 +1,4 @@
-#include "engine/animation/AnimationTimeline.h"
+#include "sdk/kseditor/engine/animation/AnimationTimeline.h"
 #include "TimelineEditor.h"
 #include "animation/AnimationSystem.h"
 
@@ -181,10 +181,12 @@ float AnimationTimeline::evaluateTrack(const QString& animId,
                                         const QString& trackId,
                                         int frame) const
 {
-    if (!m_tracks.contains(animId) || !m_tracks[animId].contains(trackId))
-        return 0.f;
+    const auto animIt = m_tracks.constFind(animId);
+    if (animIt == m_tracks.constEnd()) return 0.f;
+    const auto trackIt = animIt->constFind(trackId);
+    if (trackIt == animIt->constEnd()) return 0.f;
 
-    const auto& kfs = m_tracks[animId][trackId].keyframes;
+    const auto& kfs = trackIt->keyframes;
     if (kfs.isEmpty()) return 0.f;
 
     // Exact match
@@ -309,8 +311,9 @@ QMap<int, float> AnimationTimeline::bakeTrack(const QString& animId,
                                                int step) const
 {
     QMap<int, float> baked;
-    if (!m_animations.contains(animId)) return baked;
-    const auto& anim = m_animations[animId];
+    const auto animIt = m_animations.constFind(animId);
+    if (animIt == m_animations.constEnd()) return baked;
+    const auto& anim = animIt.value();
     for (int f = anim.startFrame; f <= anim.endFrame; f += qMax(1, step))
         baked[f] = evaluateTrack(animId, trackId, f);
     return baked;

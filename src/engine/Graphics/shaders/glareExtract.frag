@@ -1,9 +1,11 @@
 #version 450
 
-// Bright-pass extraction for PPFilterPreset::Glare. Samples the HDR scene
-// color and keeps only the portion above `threshold`, with a soft knee so
-// the transition isn't a hard clip (matches how most bloom-capable engines,
-// CryEngine included, avoid a harsh cutoff in the extract pass).
+// Bright-pass extraction for the bloom chain. Samples the HDR scene color
+// and keeps only the portion above `threshold`, with a soft knee so the
+// transition isn't a hard clip (matches how most bloom-capable engines,
+// CryEngine included, avoid a harsh cutoff in the extract pass). Driven by
+// NativeRenderer's deferred path: set 0 binding 0 is the TAA-resolved frame,
+// the result is blurred by bloomBlur.frag and folded back in by tonemap.frag.
 
 layout(location = 0) in vec2 fragTexCoord;
 

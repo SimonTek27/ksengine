@@ -1,34 +1,34 @@
-# Danni meccanici veicolo
+# Vehicle mechanical damage
 
-## Due layer
+## Two layers
 
-1. **Impact** — `DamageSystem::processCollision` / `applyMechanicalImpact` (zone body + engine/susp/aero)
-2. **Wear continuo** — `applyMechanicalWear` ogni frame da telemetria
+1. **Impact** — `DamageSystem::processCollision` / `applyMechanicalImpact` (body zones + engine/susp/aero)
+2. **Continuous wear** — `applyMechanicalWear` every frame from telemetry
 
-## Wear continuo
+## Continuous wear
 
-| Sistema | Trigger | Effetto |
+| System | Trigger | Effect |
 |---------|---------|---------|
-| **Motore** | over-rev, surriscaldo, olio basso | health↓, powerLoss, seize |
-| **Cambio** | frizione in slip, power-shift | clutchDamage, gearDamage, stuck |
-| **Sospensioni** | bottom-out, cordoli | geometry, arm, toe/camber, broken |
-| **Freni** | pad wear, temp | fade, discDamage |
+| **Engine** | over-rev, overheating, low oil | health↓, powerLoss, seize |
+| **Gearbox** | clutch slipping, power-shift | clutchDamage, gearDamage, stuck |
+| **Suspension** | bottom-out, kerbs | geometry, arm, toe/camber, broken |
+| **Brakes** | pad wear, temp | fade, discDamage |
 
-## Impatto
+## Impact
 
 ```cpp
 applyMechanicalImpact(dmg, energy, localX, localY, localZ, nx, ny, nz);
-// oppure da pit:
+// or from the pit:
 applyPitContactDamage(dmg, contact.impulse, mass, localX, localZ);
 ```
 
-## Loop simulazione
+## Simulation loop
 
 ```cpp
-// collisioni / muri / pit
+// collisions / walls / pit
 if (hit) applyMechanicalImpact(...);
 
-// ogni frame
+// every frame
 MechTelemetry t;
 t.rpm = …; t.maxRpm = …; t.coolantTempC = …;
 t.brakeTempC[i] = …; t.suspensionTravel[i] = …; t.curbLoad[i] = …;
@@ -41,8 +41,8 @@ vehicle.setBrakeScale(m.braking);
 if (m.engineDead) cutIgnition();
 ```
 
-## File
+## Files
 
-- `src/engine/physics/DamageSystem.h/.cpp` — zone + componenti + repair
+- `src/engine/physics/DamageSystem.h/.cpp` — zones + components + repair
 - `src/engine/physics/MechanicalDamage.h` — wear + impact bridge
-- `docs/DAMAGE_RF2_STYLE.md` — overview precedente
+- `docs/DAMAGE_RF2_STYLE.md` — previous overview

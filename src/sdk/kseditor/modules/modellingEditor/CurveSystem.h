@@ -6,7 +6,7 @@
 #include <QMatrix4x4>
 #include <QString>
 #include <QVariantMap>
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 
 namespace ks {
 

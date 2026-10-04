@@ -1,5 +1,5 @@
 #include "ContentRepair.h"
-#include "../assets/SimInstallDetector.h"
+#include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/KsAssettoCorsaContentPath.h"
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
@@ -198,9 +198,9 @@ QVector<ContentIssue> ContentValidator::validateMeshFile(const QString& path) {
             return issues;
         }
 
-        // Check KN5 magic
-        char magic[4];
-        if (file.read(magic, 4) != 4 || memcmp(magic, "KN5\0", 4) != 0) {
+        // Check KN5 magic: 6 ASCII bytes "sc6969" (real Assetto Corsa format)
+        char magic[6];
+        if (file.read(magic, 6) != 6 || memcmp(magic, "sc6969", 6) != 0) {
             ContentIssue issue;
             issue.id = "kn5_bad_magic";
             issue.title = "Invalid KN5: " + fi.fileName();
@@ -1309,55 +1309,56 @@ bool ContentRepairEngine::recoverCorruptedKn5(const QString& filePath) {
     QByteArray entire = file.readAll();
     quint32 fileSize = entire.size();
 
-    // Check if the header is already valid
-    if (fileSize >= 8 && memcmp(entire.constData(), "KN5", 3) == 0) {
+    // Check if the header is already valid (real magic: "sc6969")
+    if (fileSize >= 10 && memcmp(entire.constData(), "sc6969", 6) == 0) {
         file.close();
         return true;
     }
 
-    // Try to find KN5 magic anywhere in the file (partial overwrite)
+    // Try to find the KN5 magic anywhere in the file (partial overwrite)
     int magicOffset = -1;
-    for (int i = 0; i < fileSize - 3; ++i) {
-        if (memcmp(entire.constData() + i, "KN5", 3) == 0) {
+    for (int i = 0; i + 6 <= int(fileSize); ++i) {
+        if (memcmp(entire.constData() + i, "sc6969", 6) == 0) {
             magicOffset = i;
             break;
         }
     }
 
     if (magicOffset >= 0) {
-        // Found embedded KN5 data - try to preserve it by shifting to start
+        // Found embedded KN5 data - preserve it by shifting it to the start
         QByteArray salvaged = entire.mid(magicOffset);
         file.seek(0);
-        // Restore magic null terminator
-        if (salvaged[3] != 0) salvaged[3] = 0;
         file.write(salvaged);
         file.resize(fileSize - magicOffset);
         file.close();
         return true;
     }
 
-    // No KN5 data found - write a valid minimal KN5 file with proper header
+    // No KN5 data found - write a valid minimal KN5: magic "sc6969", version
+    // 5, zero texture/material counts, and a single identity Base root node
+    // (nodeClass=1, empty name, no children, active, 16-float identity).
+    // Padded to 1024 bytes so size-based "empty mesh" checks pass; readers
+    // tolerate trailing bytes (observed in real mod files).
     file.seek(0);
-    // KN5 format: magic=0x346E6B73 ("skn4"), version=5, 12 uint32 fields
-    struct {
-        quint32 magic     = 0x346E6B73; // "skn4"
-        quint32 version   = 5;
-        quint32 flags     = 0;
-        quint32 texCount  = 0;
-        quint32 matCount  = 0;
-        quint32 nodeCount = 0;
-        quint32 hdrSize   = 0;
-        quint32 nodeOff   = 0;
-        quint32 texOff    = 0;
-        quint32 vbOff     = 0;
-        quint32 ibOff     = 0;
-        quint32 vbSize    = 0;
-        quint32 ibSize    = 0;
-    } header;
-    file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    // World matrix (identity) - required for a complete valid file
-    float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
-    file.write(reinterpret_cast<const char*>(identity), sizeof(identity));
+    QByteArray stub;
+    auto putU32 = [&stub](quint32 v) {
+        char b[4] = {char(v & 0xFF), char((v >> 8) & 0xFF),
+                     char((v >> 16) & 0xFF), char((v >> 24) & 0xFF)};
+        stub.append(b, 4);
+    };
+    stub.append("sc6969", 6);
+    putU32(5); // version
+    putU32(0); // textureCount
+    putU32(0); // materialCount
+    putU32(1); // root nodeClass = Base
+    putU32(0); // name length = 0
+    putU32(0); // childrenCount
+    stub.append(char(1)); // active
+    const float identity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
+    stub.append(reinterpret_cast<const char*>(identity), sizeof(identity));
+    stub.append(QByteArray(1024 - stub.size(), '\0'));
+    file.write(stub);
+    file.resize(stub.size());
     file.close();
     return true;
 }
@@ -1468,10 +1469,9 @@ QVector<ContentIssue> ContentRepairEngine::scanForCorruptedFiles(const QString& 
         } else if (ext == "kn5") {
             QFile kn5(path);
             if (kn5.open(QIODevice::ReadOnly)) {
-                quint8 magic[4];
-                if (kn5.read(reinterpret_cast<char*>(magic), 4) == 4) {
-                    quint32 expectedMagic = 0x354e4b53; // "SKN5"
-                    if (magic[0] != 'S' || magic[1] != 'K' || magic[2] != 'N' || magic[3] != '5') {
+                char magic[6];
+                if (kn5.read(magic, 6) == 6) {
+                    if (memcmp(magic, "sc6969", 6) != 0) {
                         ContentIssue issue;
                         issue.id = "corrupted_file";
                         issue.title = "Corrupted KN5: " + fi.fileName();
@@ -2013,7 +2013,7 @@ void ContentRepairModule::scanContent() {
     emit scanStarted();
 
     // Try to find AC installation
-    QString acRoot = SimInstallDetector::findBestInstallation();
+    QString acRoot = KsACPaths::findBestInstallation();
     if (acRoot.isEmpty()) {
         m_summaryLabel->setText("No AC installation found. Use 'Scan Dir...' to select content.");
         return;

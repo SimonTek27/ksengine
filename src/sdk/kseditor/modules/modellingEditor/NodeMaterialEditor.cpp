@@ -586,15 +586,31 @@ MaterialNode* MaterialGraph::createNode(const QString& type, const QPointF& posi
 }
 
 void MaterialGraph::deleteNode(const QString& nodeId) {
+    MaterialNode* target = nullptr;
+    int index = -1;
     for (int i = 0; i < nodes.size(); ++i) {
         if (nodes[i]->id == nodeId) {
-            delete nodes[i];
-            nodes.removeAt(i);
-            if (outputNode && outputNode->id == nodeId) {
-                outputNode = nullptr;
-            }
+            target = nodes[i];
+            index = i;
             break;
         }
+    }
+    if (!target) return;
+    // Drop every link pointing at the node before freeing it, so
+    // updateLinks() never dereferences a dangling pointer.
+    for (auto* node : nodes) {
+        if (node == target) continue;
+        for (auto it = node->linkedNodes.begin(); it != node->linkedNodes.end(); ) {
+            if (it.value() == target)
+                it = node->linkedNodes.erase(it);
+            else
+                ++it;
+        }
+    }
+    delete target;
+    nodes.removeAt(index);
+    if (outputNode == target) {
+        outputNode = nullptr;
     }
     updateLinks(nodeId);
 }

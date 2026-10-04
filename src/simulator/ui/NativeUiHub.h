@@ -6,12 +6,15 @@
 #include "UiRenderer.h"
 #include "TextRenderer.h"
 #include "UiInput.h"
+#include "FontTtfLoader.h"
 #include "DeviceSettingsOverlay.h"
 #include "MultiplayerOverlay.h"
+#include "ChatOverlay.h"
 #include "RaceTelemetryHud.h"
 #include "../GameMenuOverlay.h"
 #include "../DashboardOverlay.h"
 #include "../TelemetryOverlay.h"
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <cstdio>
@@ -32,8 +35,10 @@ public:
         m_telem = std::make_unique<TelemetryOverlay>();
         m_devices = std::make_unique<DeviceSettingsOverlay>();
         m_mp = std::make_unique<MultiplayerOverlay>();
+        m_chat = std::make_unique<ChatOverlay>();
         m_raceHud.setMode(RaceHudMode::Race);
         m_renderer.setFont(m_text.atlasPtr());
+        applyConfiguredFont();
     }
 
     GameMenuOverlay& menu() { return *m_menu; }
@@ -41,6 +46,7 @@ public:
     TelemetryOverlay& telemetry() { return *m_telem; }
     DeviceSettingsOverlay& devices() { return *m_devices; }
     MultiplayerOverlay& multiplayer() { return *m_mp; }
+    ChatOverlay& chat() { return *m_chat; }
     RaceTelemetryHud& raceHud() { return m_raceHud; }
     UiRenderer& renderer() { return m_renderer; }
     TextRenderer& text() { return m_text; }
@@ -80,17 +86,22 @@ public:
 
         m_devices->build(dl, width, height, &m_input);
         m_mp->build(dl, width, height, &m_input);
+        m_chat->build(dl, width, height, &m_input);
 
         m_renderer.endFrame();
         m_input.endFrame();
     }
 
     bool handleKey(int key) {
+        // Composer open: everything is chat until Enter/Esc closes it, so a
+        // half-typed message never reaches the menu or the server browser.
+        if (m_chat->isTyping()) return m_chat->handleKey(key);
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
         if (m_menu->isVisible() && m_menu->handleKeyPress(key)) return true;
-        // T = cycle race HUD mode
-        if (key == 'T' || key == 't') {
+        if (m_chat->handleKey(key)) return true;
+        // Y = cycle race HUD mode (T is taken by the telemetry overlay)
+        if (key == 'Y' || key == 'y') {
             m_raceHud.cycleMode();
             return true;
         }
@@ -102,6 +113,9 @@ public:
         }
         return false;
     }
+
+    /** WM_CHAR payload, routed straight to the composer while it is open. */
+    bool handleChar(int character) { return m_chat->handleChar(character); }
 
     bool handleMouse(const MouseEvent& e) {
         m_input.inject(e);
@@ -141,10 +155,30 @@ public:
     }
 
     bool blocksDrivingInput() const {
-        return m_menu->isInputBlocked() || m_devices->isVisible() || m_mp->isVisible();
+        return m_menu->isInputBlocked() || m_devices->isVisible() || m_mp->isVisible() ||
+               m_chat->isTyping();
     }
 
 private:
+    /** KS_FONT_TTF=/path/to/font.ttf (+ optional KS_FONT_PX=16) swaps the baked 8x8 set. */
+    void applyConfiguredFont() {
+        const char* path = std::getenv("KS_FONT_TTF");
+        if (path == nullptr || *path == '\0') return;
+        float pixelSize = 16.f;
+        if (const char* raw = std::getenv("KS_FONT_PX"); raw != nullptr && *raw != '\0') {
+            const float parsed = std::strtof(raw, nullptr);
+            if (parsed > 0.f && parsed <= 512.f) pixelSize = parsed;
+        }
+        std::string error;
+        FontAtlas& font = *m_text.atlasPtr();
+        if (!loadTtfFont(font, path, pixelSize, &error)) {
+            std::printf("[ui] KS_FONT_TTF ignored: %s\n", error.c_str());
+            return;
+        }
+        std::printf("[ui] font %s @ %.1f px -> %dx%d atlas\n", path, pixelSize,
+                    font.width(), font.height());
+    }
+
     static TextStyle sty(const Color& c, float scale, bool boldFeel = false) {
         TextStyle s;
         s.color = c;
@@ -317,6 +351,7 @@ private:
     std::unique_ptr<TelemetryOverlay> m_telem;
     std::unique_ptr<DeviceSettingsOverlay> m_devices;
     std::unique_ptr<MultiplayerOverlay> m_mp;
+    std::unique_ptr<ChatOverlay> m_chat;
 };
 
 } // namespace ui

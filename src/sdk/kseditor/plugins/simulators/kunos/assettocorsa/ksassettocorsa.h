@@ -31,7 +31,7 @@
 #include <QPainter>
 #include <QLinearGradient>
 #include <QFont>
-#include "engine/Video/VideoEncoder.h"
+#include "sdk/kseditor/engine/Video/VideoEncoder.h"
 #include <QColor>
 #include <QFont>
 #include <QImage>

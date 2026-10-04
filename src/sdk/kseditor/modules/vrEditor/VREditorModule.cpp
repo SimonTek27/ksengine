@@ -1,10 +1,10 @@
 #include "VREditorModule.h"
 #if defined(XR_VERSION_1_0) || defined(XR_NULL_HANDLE)
-#include "engine/Graphics/VulkanRenderer.h"
-#include "engine/Graphics/VulkanIntegration.h"
-#include "engine/Graphics/SceneGraph.h"
-#include "engine/Graphics/SceneMesh.h"
-#include "engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/VulkanRenderer.h"
+#include "sdk/kseditor/engine/Graphics/VulkanIntegration.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
 
 #include <cstring>
 #include <QDebug>

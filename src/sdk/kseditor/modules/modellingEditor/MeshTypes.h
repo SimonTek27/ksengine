@@ -1,6 +1,6 @@
 #pragma once
 
-#include "engine/mesh/GeometryTypes.h"
+#include "sdk/kseditor/engine/mesh/GeometryTypes.h"
 
 namespace ks::geometry {
 

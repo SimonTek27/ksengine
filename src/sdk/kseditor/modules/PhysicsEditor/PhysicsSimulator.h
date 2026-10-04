@@ -6,7 +6,7 @@
 #include <QPointF>
 #include <QElapsedTimer>
 
-#include "engine/physics/VehiclePhysics.h"
+#include "engine/physics/PhysicsCoreTypes.h"
 #include "simulator/phys_TireModel.h"
 #include "simulator/phys_LapTimer.h"
 #include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/physics/phys_Simulator.h"

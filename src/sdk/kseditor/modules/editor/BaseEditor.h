@@ -38,12 +38,12 @@
 #include <cmath>
 #include <algorithm>
 
-#include "../Math/MathCore.h"
+#include "Math/MathCore.h"
 
 namespace ks {
-class SceneGraph; // SceneGraph is directly in namespace ks
+class SceneGraph;
 class SceneObject;
-}
+} // namespace ks
 
 using ks::SceneGraph;
 using ks::SceneObject;

@@ -65,6 +65,21 @@ QStringList HelpContentRegistry::categories()
     return cats;
 }
 
+QString HelpBrowser::categoryForContext(const QString& context)
+{
+    const QString ctx = context.trimmed().toLower();
+    const QStringList cats = HelpContentRegistry::categories();
+    if (!ctx.isEmpty()) {
+        for (const QString& cat : cats) {
+            const QString c = cat.toLower();
+            if (c.contains(ctx) || ctx.contains(c)) return cat;
+        }
+        for (const HelpTopic& t : HelpContentRegistry::allTopics()) {
+            if (t.id.toLower().contains(ctx) || t.title.toLower().contains(ctx)) return t.category;
+        }
+    }
+    return cats.isEmpty() ? QString() : cats.first();
+}
 void HelpContentRegistry::loadDefaults()
 {
     if (!s_helpTopics.isEmpty()) return;

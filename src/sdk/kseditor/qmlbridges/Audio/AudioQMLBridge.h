@@ -7,7 +7,7 @@
 #include <QVector>
 #include <QVariantList>
 #include <QTimer>
-#include "AudioClip.h"
+#include "sdk/kseditor/engine/Audio/AudioClip.h"
 
 class WaveProcessor;
 class WaveformEngine;

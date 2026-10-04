@@ -1,9 +1,9 @@
 #include "SoundEditorModule.h"
 #include "AudioEditorModule.h"
-#include "engine/Audio/AudioStudioTypes.h"
+#include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
 #include "sdk/kseditor/qmlbridges/Audio/AudioWaveformBridge.h"
-#include "engine/Audio/KsACSndEventBridge.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/Audio/KsACSndEventBridge.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QQmlContext>

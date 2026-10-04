@@ -49,7 +49,7 @@ public:
     explicit BitmapText(const FontAtlas& font) : m_font(font) {}
 
     float lineHeight(float scale, float spacing = 1.25f) const {
-        return FontAtlas::kGlyphH * scale * spacing;
+        return m_font.baseLineHeight() * scale * spacing;
     }
 
     /** Width of a single line (no newlines). */

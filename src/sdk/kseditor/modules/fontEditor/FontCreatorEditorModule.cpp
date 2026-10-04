@@ -1,6 +1,6 @@
 #include "FontCreatorEditorModule.h"
 #include "FontCreatorQmlBridge.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QVBoxLayout>
 #include <QUrl>
 #include <QQmlContext>

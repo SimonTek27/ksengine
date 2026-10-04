@@ -1,12 +1,12 @@
-# Collisioni in pit lane
+# Pit lane collisions
 
-## Modello
+## Model
 
-- **Car–car**: OBB 2D (lunghezza × larghezza) su XZ, SAT + separazione soft + impulso
-- **Car–muro**: corridoio ±`pitHalfWidthM` dall’asse pit
-- Velocità tipiche basse → `restitution` 0.15, `maxImpulse` limitato
+- **Car–car**: 2D OBB (length × width) on XZ, SAT + soft separation + impulse
+- **Car–wall**: corridor ±`pitHalfWidthM` from the pit axis
+- Low typical speeds → `restitution` 0.15, limited `maxImpulse`
 
-## Pipeline frame
+## Frame pipeline
 
 ```text
 queue.updateCar / update
@@ -17,10 +17,10 @@ col.step(dt)          // contacts + resolve pose/vel
     ▼
 applyPitCollisionResults → vehicle poses
     ▼
-damageImpulseFor(id)  → DamageSystem se relSpeed > threshold
+damageImpulseFor(id)  → DamageSystem if relSpeed > threshold
 ```
 
-## Codice
+## Code
 
 ```cpp
 PitLaneCollision col;
@@ -44,13 +44,13 @@ for (auto& b : col.bodies())
     vehicle.setPosVel(b.carId, b.x, b.z, b.vx, b.vz);
 ```
 
-## Parametri utili
+## Useful parameters
 
-| Campo | Default | Ruolo |
-|-------|---------|--------|
-| `pitHalfWidthM` | 3.5 | semi-larghezza corridoio |
-| `minSpacing` (queue) | 8 | evita overlap prima del contatto |
-| `restitution` | 0.15 | rimbalzo soft |
-| `damageSpeedThreshold` | 2.5 m/s | sotto = solo push |
+| Field | Default | Role |
+|-------|---------|------|
+| `pitHalfWidthM` | 3.5 | corridor half-width |
+| `minSpacing` (queue) | 8 | prevents overlap before contact |
+| `restitution` | 0.15 | soft bounce |
+| `damageSpeedThreshold` | 2.5 m/s | below = push only |
 
 File: `src/simulator/PitLaneCollision.h`

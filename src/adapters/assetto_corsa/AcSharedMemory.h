@@ -213,6 +213,27 @@ struct AcLiveInput {
     bool engineSeized = false;
 };
 
+/**
+ * Maps ks::sim::RaceFlag numeric codes (None=0 Green=1 Yellow=2 Blue=3
+ * White=4 Black=5 Checkered=6 Meatball=7 SafetyCar=8) to AC_FLAG_TYPE
+ * (SPageFileGraphic.flag): NO=0 BLUE=1 YELLOW=2 BLACK=3 WHITE=4
+ * CHECKERED=5 PENALTY=6. AC has no green/SC code: green = NO_FLAG,
+ * safety car = yellow; meatball = penalty flag (closest match).
+ */
+inline int ksRaceFlagToAcFlag(int raceFlag)
+{
+    switch (raceFlag) {
+        case 2: return 2; // Yellow     -> AC_YELLOW_FLAG
+        case 3: return 1; // Blue       -> AC_BLUE_FLAG
+        case 4: return 4; // White      -> AC_WHITE_FLAG
+        case 5: return 3; // Black      -> AC_BLACK_FLAG
+        case 6: return 5; // Checkered  -> AC_CHECKERED_FLAG
+        case 7: return 6; // Meatball   -> AC_PENALTY_FLAG
+        case 8: return 2; // SafetyCar  -> AC_YELLOW_FLAG
+        default: return 0; // None/Green -> AC_NO_FLAG
+    }
+}
+
 inline void formatAcTime(wchar_t* dst, size_t n, int ms) {
     if (!dst || n < 2) return;
     if (ms <= 0) {

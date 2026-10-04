@@ -5,7 +5,7 @@
 //
 // Usage: kn5baker <input.kn5> <output_directory>
 
-#include "simulators/kunos/assettocorsa/acFiles/KN5Baker.h"
+#include "plugins/simulators/kunos/assettocorsa/acFiles/KN5Baker.h"
 
 #include <QCoreApplication>
 #include <QString>

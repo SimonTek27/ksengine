@@ -1,4 +1,4 @@
-# Uscita dal garage — logica dettagliata
+# Garage exit — detailed logic
 
 ## State machine
 
@@ -27,29 +27,29 @@ Returning ──► (near box + slow) ──► InGarage
 Blocked   ──► recovery when condition clears + still requesting
 ```
 
-## Condizioni di uscita
+## Exit conditions
 
-| Check | Effetto |
+| Check | Effect |
 |-------|---------|
-| Session Practice/Qualify | uscita sempre consentita |
-| Session Race | solo se `allowExitInRace` e pit aperta |
-| `pitLaneOpen` | altrimenti Blocked / PitClosed |
-| Motore acceso | obbligatorio se `requireEngineOn` |
-| Cono di uscita libero | altrimenti wait in BoxClear |
-| `requestCancel` | torna InGarage |
+| Session Practice/Qualify | exit always allowed |
+| Session Race | only if `allowExitInRace` and pit open |
+| `pitLaneOpen` | otherwise Blocked / PitClosed |
+| Engine running | required if `requireEngineOn` |
+| Exit cone free | otherwise wait in BoxClear |
+| `requestCancel` | returns to InGarage |
 
-## Output verso simulazione
+## Output to simulation
 
-| Flag | Uso |
+| Flag | Use |
 |------|-----|
-| `holdControls` | ignora gas in box |
-| `snapToBox` | tiene la pose sul box |
-| `pitLimiterActive` | applica `applyPitLimiter` |
-| `engineShouldRun` | avvia motore |
-| `allowDrive` | integra fisica |
+| `holdControls` | ignore throttle in garage |
+| `snapToBox` | keeps the pose on the box |
+| `pitLimiterActive` | applies `applyPitLimiter` |
+| `engineShouldRun` | starts the engine |
+| `allowDrive` | integrates physics |
 | `statusText` | HUD |
 
-## Esempio integrazione
+## Integration example
 
 ```cpp
 GarageExitController exit;
@@ -71,7 +71,7 @@ if (out.pitLimiterActive)
     throttle = GarageExitController::applyPitLimiter(speed, throttle, out.pitLimiterMaxMs);
 ```
 
-## Config consigliata
+## Recommended config
 
 ```cpp
 GarageExitConfig cfg;

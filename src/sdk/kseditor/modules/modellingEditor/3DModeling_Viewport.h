@@ -1,11 +1,11 @@
 #pragma once
 // Common viewport types are now in core/mesh/Viewport3DSystem.h
 // VulkanViewportRenderer remains here due to Vulkan dependencies.
-#include "engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
 
 #include <QVulkanWindow>
 #include <QVulkanWindowRenderer>
-#include "engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
 
 namespace ks {
 

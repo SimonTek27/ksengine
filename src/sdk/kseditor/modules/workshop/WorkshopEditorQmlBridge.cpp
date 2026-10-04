@@ -1,6 +1,6 @@
 #include "WorkshopEditorQmlBridge.h"
 #include "WorkshopEditorModule.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QDir>
 #include <QWidget>
 #include <QFileInfo>

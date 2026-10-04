@@ -9,7 +9,7 @@
 #include <QUuid>
 #include <QVector3D>
 
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 
 namespace ks {
 namespace geometry_nodes {

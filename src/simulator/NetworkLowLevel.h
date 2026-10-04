@@ -53,6 +53,9 @@ private:
     uint32_t m_clientId = 0;
     double m_sendAccumulator = 0;
     double m_timeSinceLastPacket = 0;
+    std::string m_driverName;
+    std::string m_carName;
+    bool m_joinSent = false;
 
     SimulationLoop* m_simLoop = nullptr;
     MultiCarManager* m_multiCar = nullptr;

@@ -105,8 +105,12 @@ void GameMenuOverlay::buildSingleplayerMenu()
 void GameMenuOverlay::buildMultiplayerMenu()
 {
     m_items.clear();
-    m_items.push_back({ "RANKED", "Competitive sessions", [this]() {} });
-    m_items.push_back({ "CASUAL", "Open lobbies", [this]() {} });
+    m_items.push_back({ "HOST SESSION", "Run a server on this machine (LAN/online)",
+        [this]() { if (onHostServerRequested) onHostServerRequested(); } });
+    m_items.push_back({ "JOIN SESSION", "Open the server browser, F2 also brings it up",
+        [this]() { if (onOpenServerBrowserRequested) onOpenServerBrowserRequested(); } });
+    m_items.push_back({ "DISCONNECT", "Leave the current session or stop the server",
+        [this]() { if (onDisconnectRequested) onDisconnectRequested(); } });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }

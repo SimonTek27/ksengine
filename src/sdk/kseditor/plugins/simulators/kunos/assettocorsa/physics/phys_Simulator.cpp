@@ -1,5 +1,5 @@
 #include "phys_Simulator.h"
-#include "engine/physics/VehiclePhysics.h"
+#include "sdk/kseditor/engine/physics/VehicleSimulator.h"
 #include "HybridSystem.h"
 #include "BrakeThermalModel.h"
 

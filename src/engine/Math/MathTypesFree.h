@@ -97,13 +97,21 @@ struct mat4 {
         return r;
     }
 
+    // Vulkan/D3D clip space: NDC z spans [0,1] (not OpenGL's [-1,1]) — the
+    // renderer this feeds is Vulkan-only (gl_FragCoord.z is [0,1] there too),
+    // so an OpenGL-style projection would push half the depth range through a
+    // clamped viewport and desynchronise every depth comparison — shadow
+    // tests included. NDC y also points downward in Vulkan (y = -1 is the top
+    // of the framebuffer), so the y scale is negated: without it the image is
+    // mirrored vertically and screen-space winding flips, which makes
+    // VK_FRONT_FACE_COUNTER_CLOCKWISE + back-face culling discard front faces.
     static mat4 perspective(float fovY, float aspect, float zNear, float zFar) {
         float tanHalf = std::tan(fovY * 0.5f);
         mat4 r;
         r(0,0) = 1.0f / (aspect * tanHalf);
-        r(1,1) = 1.0f / tanHalf;
-        r(2,2) = -(zFar + zNear) / (zFar - zNear);
-        r(2,3) = -(2.0f * zFar * zNear) / (zFar - zNear);
+        r(1,1) = -1.0f / tanHalf;
+        r(2,2) = -zFar / (zFar - zNear);
+        r(2,3) = -(zFar * zNear) / (zFar - zNear);
         r(3,2) = -1.0f;
         r(3,3) = 0;
         return r;
@@ -111,15 +119,21 @@ struct mat4 {
 
     // Orthographic projection (needed for directional-light / cascaded
     // shadow-map frustums, which don't converge to a point like perspective).
+    // Same Vulkan [0,1] depth convention as perspective() above.
+    // y row negated to match perspective(): in Vulkan NDC y = -1 is the top
+    // of the framebuffer, so world-space `top` must map to -1 and `bottom`
+    // to +1. Shadow cascades build their light matrix with this, and both the
+    // depth pass and the shadow lookup use the same matrix, so the mirroring
+    // stays self-consistent while the winding stays front-facing.
     static mat4 ortho(float left, float right, float bottom, float top, float zNear, float zFar) {
         mat4 r;
         memset(r.m, 0, sizeof(r.m));
         r(0,0) = 2.0f / (right - left);
-        r(1,1) = 2.0f / (top - bottom);
-        r(2,2) = -2.0f / (zFar - zNear);
+        r(1,1) = -2.0f / (top - bottom);
+        r(2,2) = -1.0f / (zFar - zNear);
         r(0,3) = -(right + left) / (right - left);
-        r(1,3) = -(top + bottom) / (top - bottom);
-        r(2,3) = -(zFar + zNear) / (zFar - zNear);
+        r(1,3) = (top + bottom) / (top - bottom);
+        r(2,3) = -zNear / (zFar - zNear);
         r(3,3) = 1.0f;
         return r;
     }

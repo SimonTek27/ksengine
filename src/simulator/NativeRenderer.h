@@ -39,10 +39,12 @@
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
+#include <set>
 #include <unordered_map>
 #include <cstdint>
 #include <memory>
 #include "MathTypes.h"
+#include "engine/Math/Frustum.h"
 
 namespace ks::sim {
 
@@ -71,6 +73,11 @@ struct NativeMesh {
     VkDeviceMemory vertexMemory = VK_NULL_HANDLE;
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VkDeviceMemory indexMemory = VK_NULL_HANDLE;
+    // Local-space AABB, computed once when the mesh is uploaded. Empty meshes
+    // leave hasBounds false and are never culled (there is nothing to test).
+    vec3 boundsMin{};
+    vec3 boundsMax{};
+    bool hasBounds = false;
 };
 
 struct DirectionalLight {
@@ -145,8 +152,44 @@ public:
         m_camFar = farPlane;
         mat4 invView = view.inverse();
         m_camPosWS = vec3(invView(0, 3), invView(1, 3), invView(2, 3));
+        // Marks the camera matrices as authoritative. Frustum culling stays
+        // disabled until this happens — an identity view/projection would
+        // otherwise yield a frustum that culls nearly the whole scene.
+        m_cameraValid = true;
     }
     void setSun(const DirectionalLight& light) { m_sun = light; }
+
+    // Linear height fog, applied by both the forward and the deferred path
+    // (the deferred path previously hard-coded these constants in GLSL, so a
+    // weather change could not reach the shader at all).
+    void setFog(const vec3& color, float density, float heightFalloff) {
+        m_fogColor = color;
+        m_fogDensity = density;
+        m_fogHeightFalloff = heightFalloff;
+    }
+
+    // Per-frame culling counters, mostly there so the win/loss of culling can
+    // be observed without a profiler: submitted = drawMesh() calls received,
+    // drawn = what reached the command buffer, culled = rejected by the
+    // frustum test, occluded = rejected by the previous-frame depth grid.
+    struct FrameStats {
+        uint32_t submitted = 0;
+        uint32_t drawn = 0;
+        uint32_t culled = 0;
+        uint32_t occluded = 0;
+    };
+    void setFrustumCulling(bool enabled) { m_frustumCulling = enabled; }
+    bool frustumCulling() const { return m_frustumCulling; }
+    // Previous-frame depth occlusion culling (see engine/Math/OcclusionTest.h
+    // for the predicate). On by default; KS_OCCLUSION_CULL=0 turns it off,
+    // and it disables itself if the downsample pass or the readback cannot
+    // be built (missing shader, no host-visible memory, ...).
+    void setOcclusionCulling(bool enabled) { m_occlusionCulling = enabled; }
+    bool occlusionCulling() const { return m_occlusionCulling; }
+    const FrameStats& lastFrameStats() const { return m_stats; }
+    // Names already reported as "queued but never uploaded", so the warning
+    // is emitted once per mesh rather than once per frame.
+    std::set<std::string> m_missingBufferLogged;
 
     // Deferred lighting path. Off by default: endFrame() keeps running the
     // exact forward pipeline it always has until this is turned on, so
@@ -166,6 +209,75 @@ public:
     void setTaa(bool enabled) { m_taa = enabled; }
     bool isTaa() const { return m_taa; }
 
+    // Screen-space ambient occlusion (roadmap ksengine-vs-cryengine P0).
+    // Computed inline by the deferred lighting pass out of the GBuffer it
+    // already reads, so it needs no extra image or pass; like TAA it is
+    // deferred-only, and setSsao(true) alone is not enough - setDeferred(true)
+    // has to be called too (done for you by SimulatorApp when KS_SSAO=1).
+    // radius is in world units, intensity 0..1 scales how much of the
+    // computed occlusion reaches the ambient term, bias rejects self-hits on
+    // the occluding surface itself.
+    void setSsao(bool enabled, float radius = 0.5f, float intensity = 1.0f,
+                 float bias = 0.02f) {
+        m_ssao = enabled;
+        m_ssaoRadius = radius;
+        m_ssaoIntensity = intensity;
+        m_ssaoBias = bias;
+    }
+    bool isSsao() const { return m_ssao; }
+
+    // Screen-space reflections (roadmap ksengine-vs-cryengine P0). Marched
+    // inline by the deferred lighting pass against the GBuffer world
+    // positions, so - like SSAO - no extra image, pass or descriptor: the
+    // hit is shaded from the hit pixel's albedo/normal with the sun, which
+    // is an approximation of a lit reflection. maxDistance is in world units,
+    // roughnessThreshold is the cut-off above which reflections fade out
+    // (there is no mip chain to blur them with).
+    void setSsr(bool enabled, float maxDistance = 8.0f, float intensity = 1.0f,
+                float roughnessThreshold = 0.6f) {
+        m_ssr = enabled;
+        m_ssrMaxDistance = maxDistance;
+        m_ssrIntensity = intensity;
+        m_ssrRoughnessThreshold = roughnessThreshold;
+    }
+    bool isSsr() const { return m_ssr; }
+
+    // Motion blur (roadmap ksengine-vs-cryengine P0), gathered inside the
+    // deferred resolve pass from a motion vector reconstructed out of the
+    // world positions and the previous view-projection, so no velocity buffer
+    // is needed. strength scales the raw screen-space motion, maxLength caps
+    // the gather radius as a fraction of the screen (0.03 = 3%).
+    void setMotionBlur(bool enabled, float strength = 1.0f, int samples = 8,
+                       float maxLength = 0.03f) {
+        m_motionBlur = enabled;
+        m_mbStrength = strength;
+        m_mbSamples = samples > 0 ? samples : 1;
+        m_mbMaxLength = maxLength;
+    }
+    bool isMotionBlur() const { return m_motionBlur; }
+
+    // Display transform of the deferred path (the tonemap.frag pass that now
+    // owns the backbuffer). Exposure and the tone-curve operator are the two
+    // knobs the SDR and HDR10 encodings share; modes: 0 none, 1 Reinhard,
+    // 2 ACES, 3 Uncharted2, 4 Filmic.
+    void setExposure(float e) { m_exposure = e; }
+    float exposure() const { return m_exposure; }
+    void setTonemapMode(int mode) { m_tonemapMode = mode; }
+    void setHdrWhiteNits(float nits) { if (nits > 0.0f) m_hdrWhiteNits = nits; }
+    float hdrWhiteNits() const { return m_hdrWhiteNits; }
+
+    // HDR10 output. Requests a VK_COLOR_SPACE_HDR10_ST2084_EXT swapchain
+    // (10-bit A2B10G10R10, PQ/Rec.2020) and makes the display pass encode
+    // for it; falls back to the 8-bit sRGB swapchain (with an explicit log)
+    // when the driver, the surface or the format is not there. Needs the
+    // deferred path — the forward path writes the backbuffer directly and
+    // has no display pass to run the encoding in — so setHdrOutput(true)
+    // alone is not enough: setDeferred(true) has to be called too (done for
+    // you by SimulatorApp when KS_HDR=1).
+    void setHdrOutput(bool enabled) { m_hdrRequested = enabled; }
+    bool hdrOutput() const { return m_hdrOutput; }
+    bool hdrRequested() const { return m_hdrRequested; }
+
     // Real frame lifecycle. beginFrame() acquires a swapchain image and
     // resets the per-frame draw list; drawMesh() *queues* a (mesh, model
     // matrix) pair rather than drawing immediately, because the shadow
@@ -177,12 +289,38 @@ public:
     void drawMesh(const std::string& name, const mat4& modelMatrix);
     void endFrame();
 
+    // One-shot readback of the backbuffer (forward path, or the deferred
+    // path's display pass). Call requestScreenshot() before endFrame(); once
+    // endFrame() returns, screenshotReady() is true and screenshotPixels()
+    // holds tightly packed BGRA8 rows (VK_FORMAT_B8G8R8A8_UNORM swapchain
+    // extent, origin top-left as stored). One frame per request; the wait
+    // for the copy happens inside endFrame(), so this stalls — it is a
+    // validation/screenshot hook, not a per-frame feature.
+    // Used by tests/ksengine/test_renderer.cpp (roadmap 2.1).
+    void requestScreenshot() { m_screenshotPending = true; m_screenshotReady = false; }
+    bool screenshotReady() const { return m_screenshotReady; }
+    const std::vector<unsigned char>& screenshotPixels() const { return m_screenshotPixels; }
+
     // UI overlay GPU pass. SimulationLoop owns the pass (it builds the font
     // atlas + per-frame dynamic VB/IB); NativeRenderer keeps it alive and
     // pumps a frame through it while its render pass is open.
     void setUiGpuPass(std::shared_ptr<ui::UiGpuPass> pass) { m_uiPass = std::move(pass); }
     ui::UiGpuPass* uiGpuPass() { return m_uiPass.get(); }
     void drawUi(const ui::UiRenderer& ui);
+
+    // --- Particles (roadmap ksengine-vs-cryengine P1) ---
+    // Uploads this frame's billboard quads and nothing else: floatCount is a
+    // count of *floats* in the flat record ParticleSystem::buildQuads packs
+    // (12 floats per vertex, 6 vertices per particle). Call it before
+    // endFrame(); an empty count skips the draw entirely, so a scene with no
+    // particles costs one branch. One frame in flight (beginFrame() waits on
+    // the only fence) means the host-visible buffer may be rewritten in
+    // place every frame.
+    void setParticleVertices(const float* data, size_t floatCount);
+    size_t particleVertexCount() const { return m_particleVerts.size(); }
+    // Pass-wide alpha multiplier for the sprite quad (params.x of the push
+    // constants); 0 hides every particle without dropping the upload.
+    void setParticleAlpha(float a) { m_particleAlpha = a; }
 
     // Viewport hint from SimulationLoop::setViewportSize(). The swapchain
     // itself is recreated by SimulatorApp's WM_SIZE handler.
@@ -226,7 +364,12 @@ private:
     VkImageView m_depthView = VK_NULL_HANDLE;
 
     VkSemaphore m_imageAvailable = VK_NULL_HANDLE;
-    VkSemaphore m_renderFinished = VK_NULL_HANDLE;
+    // One render-finished semaphore per swapchain image: a queued present on
+    // image i may still be waiting on it when the next frame re-signals for
+    // image i (VUID-vkQueueSubmit-pSignalSemaphores-00067). Keyed on the
+    // acquired index, image i's previous present has completed by the time
+    // the swapchain hands image i back to us. Filled in createSwapChain().
+    std::vector<VkSemaphore> m_renderFinished;
     VkFence m_inFlightFence = VK_NULL_HANDLE;
     uint32_t m_currentImageIndex = 0;
 
@@ -263,6 +406,19 @@ private:
     void destroyDeferredResources();
     void writeLightingDescriptorSet(VkImageView shadowView, VkSampler shadowSampler);
     void writeResolveDescriptorSet();
+    // Per-frame half of the display/bloom descriptors: both the bright-pass
+    // extract and the tonemap pass read the history slot *this* frame's
+    // resolve writes, so they are re-pointed every frame.
+    void writeDisplayDescriptorSets(VkImageView resolvedView);
+
+    // --- Occlusion culling: previous-frame max-depth grid ---
+    // ensureOcclusionResources() builds the downsample pass + host readback
+    // lazily on the first frame that needs them; recordOcclusionPass() runs
+    // the downsample + copy after whichever geometry pass ran this frame;
+    // destroyOcclusionResources() tears it all down with the swapchain.
+    bool ensureOcclusionResources();
+    void destroyOcclusionResources();
+    void recordOcclusionPass(VkImage depthImage, VkImageView depthView);
 
     static constexpr int kGBufferCount = 3;
     static constexpr int kHistoryCount = 2;
@@ -279,6 +435,22 @@ private:
     int m_historyIndex = 0;
     mat4 m_prevViewProj;
     std::string m_shaderDir;
+
+    // Display transform / HDR output (see setExposure/setHdrOutput).
+    bool m_hdrRequested = false;        // caller asked for HDR10 ...
+    bool m_hdrOutput = false;           // ... and the swapchain really is one
+    bool m_swapchainColorSpaceExt = false; // VK_EXT_swapchain_colorspace (instance ext) present
+    VkColorSpaceKHR m_swapChainColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    float m_exposure = 1.0f;
+    int m_tonemapMode = 2;              // 0 none, 1 Reinhard, 2 ACES, 3 Uncharted2, 4 Filmic
+    static constexpr float kHdrPeakNits = 1000.0f; // highlight ceiling for the PQ shoulder
+    // Nits given to the graded SDR-range signal (1.0) in the PQ encode. This
+    // has to match the OS's SDR-white for HDR and SDR to look the same: Windows
+    // composites SDR windows against its own SDR-white, measured at 80 nits
+    // here (capture calibration against the SDR path), while BT.2408's 203
+    // made the same frame ~2.5x brighter than SDR. Override per machine with
+    // KS_HDR_WHITE_NITS.
+    float m_hdrWhiteNits = 80.0f;
 
     VkFormat m_gbufferFormats[kGBufferCount] = {
         VK_FORMAT_R8G8B8A8_UNORM,
@@ -328,11 +500,48 @@ private:
     VkPipeline m_resolvePipeline = VK_NULL_HANDLE;
     VkShaderModule m_resolveFragModule = VK_NULL_HANDLE;
 
+    // --- Bloom (glareExtract.frag bright pass + bloomBlur.frag separable
+    // blur, half resolution): input/blur targets ping-pong so the blur can
+    // read A and write B, then read B and write A back for the display pass.
+    VkImage m_bloomImages[2]{};
+    VkDeviceMemory m_bloomMemory[2]{};
+    VkImageView m_bloomViews[2]{};
+    VkExtent2D m_bloomExtent{};
+    VkRenderPass m_bloomRenderPass = VK_NULL_HANDLE;  // shared by extract + both blurs
+    VkFramebuffer m_bloomFramebuffers[2]{};
+    VkDescriptorSetLayout m_bloomInputSetLayout = VK_NULL_HANDLE; // 1 sampler, shared
+    VkDescriptorPool m_bloomPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_bloomExtractSet = VK_NULL_HANDLE; // per-frame: resolved frame
+    VkDescriptorSet m_bloomBlurSets[2]{};               // static: A, then B
+    VkPipelineLayout m_bloomLayout = VK_NULL_HANDLE;    // shared: set0 + 16B push
+    VkPipeline m_bloomExtractPipeline = VK_NULL_HANDLE;
+    VkPipeline m_bloomBlurPipeline = VK_NULL_HANDLE;
+    VkShaderModule m_glareFragModule = VK_NULL_HANDLE;
+    VkShaderModule m_blurFragModule = VK_NULL_HANDLE;
+
+    // --- Display pass: the only writer of the backbuffer on the deferred
+    // path — tonemap.frag turns the resolved linear-HDR frame into sRGB
+    // (SDR) or PQ/Rec.2020 (HDR10) pixels. ---
+    VkRenderPass m_displayRenderPass = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> m_displayFramebuffers;
+    VkDescriptorSetLayout m_displaySetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_displayPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_displaySet = VK_NULL_HANDLE;
+    VkPipelineLayout m_displayLayout = VK_NULL_HANDLE;
+    VkPipeline m_displayPipeline = VK_NULL_HANDLE;
+    VkShaderModule m_tonemapFragModule = VK_NULL_HANDLE;
+
     std::unordered_map<std::string, NativeMesh> m_meshes;
     std::vector<std::string> m_staticSceneMeshNames;
 
     struct QueuedDraw { std::string meshName; mat4 model; };
+    // Everything that survived the frustum test: the shadow cascades render
+    // this list (an object hidden from the camera can still cast a visible
+    // shadow) ...
     std::vector<QueuedDraw> m_drawList;
+    // ... while the camera passes render this one, which additionally
+    // excludes what the previous-frame depth grid says is occluded.
+    std::vector<QueuedDraw> m_mainDrawList;
 
     mat4 m_view;
     mat4 m_proj;
@@ -341,6 +550,111 @@ private:
     float m_camFar = 500.0f;
     DirectionalLight m_sun;
     CascadedShadowMap* m_shadowMap = nullptr;
+
+    // Culling state. The frustum is rebuilt once per frame in beginFrame()
+    // from whatever setCamera() last supplied.
+    bool m_cameraValid = false;
+    bool m_frustumCulling = true;
+    ks::math::Frustum m_frustum;
+    FrameStats m_stats;
+
+    // Previous-frame occlusion grid (see engine/Math/OcclusionTest.h).
+    // Pipeline: endFrame() max-pools the depth buffer and copies it into
+    // m_occlReadback; the *next* beginFrame() linearises that copy into
+    // m_occlGrid; drawMesh() tests against m_occlGrid while projecting with
+    // m_prevViewProj + (m_occlR22, m_occlR23) — all three describe the same
+    // frame, so the grid and the projection can never drift apart.
+    bool m_occlusionCulling = true;
+    bool m_occlusionFailed = false;   // sticky: build failed, stop trying
+    bool m_occlusionReady = false;
+    bool m_occlPending = false;       // readback copy recorded, not consumed
+    bool m_occlGridValid = false;     // m_occlGrid usable for tests
+    int m_occlGridW = 0;
+    int m_occlGridH = 0;
+    int m_occlFullW = 0;              // depth image extent the grid maps to
+    int m_occlFullH = 0;
+    float m_occlR22 = 0.0f;           // projection row 2 of the grid's frame
+    float m_occlR23 = 0.0f;
+    std::vector<float> m_occlGrid;    // linear distance (m) per tile
+
+    VkImage m_hizImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_hizMemory = VK_NULL_HANDLE;
+    VkImageView m_hizView = VK_NULL_HANDLE;
+    VkRenderPass m_hizRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_hizFramebuffer = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_hizSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_hizPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_hizSet = VK_NULL_HANDLE;
+    VkSampler m_hizSampler = VK_NULL_HANDLE;
+    VkPipelineLayout m_hizLayout = VK_NULL_HANDLE;
+    VkPipeline m_hizPipeline = VK_NULL_HANDLE;
+    VkShaderModule m_hizVertModule = VK_NULL_HANDLE;
+    VkShaderModule m_hizFragModule = VK_NULL_HANDLE;
+    VkBuffer m_occlReadback = VK_NULL_HANDLE;
+    VkDeviceMemory m_occlReadbackMemory = VK_NULL_HANDLE;
+    void* m_occlReadbackMapped = nullptr;
+
+    // --- Particles (roadmap P1): sprite pipelines + a host-visible quad
+    // buffer rewritten every frame. Built lazily on the first frame that
+    // actually has particles to draw, so a scene without them never creates
+    // a pipeline, a buffer or a shader module. The forward pipeline is
+    // created against m_renderPass and the deferred one against
+    // m_gbufferRenderPass, so they are torn down in two different places
+    // (shutdown / destroyDeferredResources respectively).
+    bool ensureParticlePipelines(bool deferred);
+    bool ensureParticleBuffer(VkDeviceSize bytes);
+    void recordParticles(const mat4& viewProjRender, bool deferred);
+    void destroyParticlePipelines();
+    void destroyParticleGbufPipeline();
+    void destroyParticleBuffer();
+
+    std::vector<float> m_particleVerts;   // this frame's quads, CPU side
+    float m_particleAlpha = 1.0f;
+    VkBuffer m_particleBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_particleMemory = VK_NULL_HANDLE;
+    void* m_particleMapped = nullptr;     // persistent map (one frame in flight)
+    VkDeviceSize m_particleCapacity = 0;
+    VkPipelineLayout m_particleLayout = VK_NULL_HANDLE;
+    VkPipeline m_particleFwdPipeline = VK_NULL_HANDLE;
+    VkPipeline m_particleGbufPipeline = VK_NULL_HANDLE;
+    VkShaderModule m_particleVertModule = VK_NULL_HANDLE;
+    VkShaderModule m_particleFragModule = VK_NULL_HANDLE;
+    VkShaderModule m_particleGbufFragModule = VK_NULL_HANDLE;
+    bool m_particleShadersFailed = false; // missing .spv: stop trying, once
+    bool m_particleGbufFailed = false;    // ...and same, GBuffer variant only
+
+    // --- Screenshot readback (requestScreenshot() / endFrame()) ---    // Host-visible copy target for the swapchain image, built lazily on the
+    // first request and destroyed with the swapchain (extent-bound).
+    bool ensureScreenshotBuffer();
+    void recordScreenshotCopy();
+    void destroyScreenshotResources();
+    bool m_screenshotPending = false;   // caller asked for this frame
+    bool m_screenshotRecorded = false;  // copy recorded in the current endFrame
+    bool m_screenshotReady = false;     // m_screenshotPixels holds valid rows
+    VkBuffer m_shotBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_shotMemory = VK_NULL_HANDLE;
+    void* m_shotMapped = nullptr;
+    VkDeviceSize m_shotSize = 0;
+    std::vector<unsigned char> m_screenshotPixels;
+
+    vec3 m_fogColor{0.35f, 0.55f, 0.75f};
+    float m_fogDensity = 0.0028f;
+    float m_fogHeightFalloff = 0.018f;
+
+    bool m_ssao = false;
+    float m_ssaoRadius = 0.5f;
+    float m_ssaoIntensity = 1.0f;
+    float m_ssaoBias = 0.02f;
+
+    bool m_ssr = false;
+    float m_ssrMaxDistance = 8.0f;
+    float m_ssrIntensity = 1.0f;
+    float m_ssrRoughnessThreshold = 0.6f;
+
+    bool m_motionBlur = false;
+    float m_mbStrength = 1.0f;
+    int m_mbSamples = 8;
+    float m_mbMaxLength = 0.03f;
 
     std::shared_ptr<ui::UiGpuPass> m_uiPass;
     int m_viewportW = 1280;

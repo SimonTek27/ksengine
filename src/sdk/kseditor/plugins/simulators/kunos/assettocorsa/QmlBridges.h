@@ -7,9 +7,9 @@
 #include <QVariantMap>
 #include <QVector3D>
 #include <QQuickItem>
-#include "engine/mesh/MeshRenderer.h"
-#include "engine/mesh/MeshOperations.h"
-#include "engine/mesh/AdvancedMeshOps.h"
+#include "sdk/kseditor/engine/mesh/MeshRenderer.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/AdvancedMeshOps.h"
 #include "acCSP/CspConfigParser.h"
 #include "KsAssettoCorsaContentPath.h"
 #include "sdk/kseditor/modules/PaintEditor/PaintSystem.h"

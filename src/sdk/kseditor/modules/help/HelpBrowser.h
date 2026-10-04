@@ -34,6 +34,7 @@ public:
     explicit HelpBrowser(QWidget* parent = nullptr);
 
     void showTopic(const QString& topicId);
+    static QString categoryForContext(const QString& context);
 
 private slots:
     void onTopicSelected(QTreeWidgetItem* current, QTreeWidgetItem* previous);

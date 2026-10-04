@@ -1,7 +1,7 @@
 #include "StartupDialog.h"
 #include "sys/LogManager.h"
 #include "sys/SettingsManager.h"
-#include "assets/SimInstallDetector.h"
+#include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/KsAssettoCorsaContentPath.h"
 
 #include <QApplication>
 #include <QMessageBox>
@@ -825,7 +825,7 @@ QString StartupDialog::resolveACContentPath() const
     }
     
     // Auto-detect
-    QString detectedRoot = ks::SimInstallDetector::findBestInstallation();
+    QString detectedRoot = ks::KsACPaths::findBestInstallation();
     if (!detectedRoot.isEmpty()) {
         QString contentPath = QDir::cleanPath(detectedRoot + "/content");
         if (QDir(contentPath).exists()) {

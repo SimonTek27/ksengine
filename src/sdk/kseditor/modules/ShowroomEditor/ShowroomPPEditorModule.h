@@ -1,7 +1,7 @@
 #pragma once
 
 #include "editor/EditorModule.h"
-#include "engine/Config/PPFilterPreset.h"
+#include "sdk/kseditor/engine/Config/PPFilterPreset.h"
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QCheckBox>

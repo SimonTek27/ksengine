@@ -4,7 +4,7 @@
 #include <QByteArray>
 #include <QVector>
 #include <QMap>
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 
 namespace ks {
 

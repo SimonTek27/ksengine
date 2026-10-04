@@ -5,7 +5,7 @@
 #include <QString>
 #include <QMap>
 #include <QVector>
-#include "engine/Audio/AudioTypes.h"
+#include "sdk/kseditor/engine/Audio/AudioTypes.h"
 
 namespace ks { namespace audio {
 

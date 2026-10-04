@@ -47,8 +47,31 @@ public:
 
     void loadAiSpline(const std::string& trackDirectory);
 
+    /** Spawn `count` AI cars on a staggered two-wide grid on the loaded
+     *  spline (roadmap 3.5): rows sit `spacing` meters apart, closed
+     *  splines stagger behind the start line, open ones forward from it.
+     *  Cars start with their simulation running. Empty without a spline. */
+    std::vector<int> spawnGrid(int count, const std::string& carName,
+                               const std::string& driverPrefix, float spacing = 6.0f);
+
     void setPlayerCarId(int id) { m_playerCarId = id; }
     void setCollisionEnabled(bool e) { m_collisionEnabled = e; }
+
+    /** Propagate the session flag's AI limiter to every AI car (and cars
+     *  added later inherit it). No-op when no AI cars exist yet. */
+    void setAISpeedFactor(float f);
+
+    /** Hand the car to an external driver (roadmap 3.1): drops the spline
+     *  AI controller so update() stops feeding it controls, leaving the
+     *  vehicle to whatever writes setThrottle/setBrake/setSteering -
+     *  networked input on a host, a synced host state on a client.
+     *  Returns false when there is no such car. */
+    bool setCarExternallyDriven(int carId);
+
+    /** Tag `carId` as owned by server slot `clientIndex` (implies
+     *  setCarExternallyDriven) so the entry can be found back through
+     *  getCarByClientIndex(). Returns false when there is no such car. */
+    bool setCarClientIndex(int carId, int clientIndex);
 
     std::function<void(int, const std::string&)> onCarAdded;
     std::function<void(int)> onCarRemoved;
@@ -64,6 +87,8 @@ private:
     int m_playerCarId = -1;
     bool m_collisionEnabled = true;
     std::string m_aiSplinePath;
+    ks::ai::AiSpline m_gridSpline;
+    float m_aiSpeedFactor = 1.0f;
 };
 
 } // namespace ks::sim

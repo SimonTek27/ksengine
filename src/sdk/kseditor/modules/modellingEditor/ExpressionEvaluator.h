@@ -42,14 +42,14 @@ public:
         ExpressionEvaluator ev(expression, x);
         ev.skipSpace();
         double result = 0.0;
-        const bool parsed = ev.parseExpr(result, ok);
-        if (parsed && ok && !ev.atEnd()) {
-            *ok = false;
+        ev.parseExpr(result, ok);
+        if (ev.m_ok && !ev.atEnd()) {
             ev.m_error = QStringLiteral("Unexpected trailing input at position %1").arg(ev.m_pos);
-            return 0.0;
+            ev.m_ok = false;
         }
-        if (ok) *ok = parsed;
-        return ok && !parsed ? 0.0 : result;
+        const bool success = ev.m_ok;
+        if (ok) *ok = success;
+        return success ? result : 0.0;
     }
 
     static QString lastError() { return lastErrorStorage(); }

@@ -4,7 +4,6 @@
 // ============================================================================
 
 #include "BlueprintEditorModule.h"
-#include "NodeGraphWidget.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -145,7 +144,7 @@ void BlueprintEditorModule::buildUI()
     auto* centerLayout = new QVBoxLayout(centerPanel);
     centerLayout->setContentsMargins(0, 0, 0, 0);
 
-    m_graphWidget = new NodeGraphWidget();
+    m_graphWidget = new ui::NodeGraphWidget();
     centerLayout->addWidget(m_graphWidget);
 
     m_statusLabel = new QLabel("Ready");
@@ -231,7 +230,7 @@ void BlueprintEditorModule::buildUI()
         }
     });
 
-    connect(m_graphWidget, &NodeGraphWidget::graphChanged,
+    connect(m_graphWidget, &ui::NodeGraphWidget::graphChanged,
             this, &BlueprintEditorModule::onGraphChanged);
 }
 
@@ -274,6 +273,14 @@ void BlueprintEditorModule::buildNodePalette()
             nodeItem->setForeground(0, color);
         }
     }
+}
+
+// ============================================================================
+// refreshNodePalette
+// ============================================================================
+void BlueprintEditorModule::refreshNodePalette()
+{
+    buildNodePalette();
 }
 
 // ============================================================================

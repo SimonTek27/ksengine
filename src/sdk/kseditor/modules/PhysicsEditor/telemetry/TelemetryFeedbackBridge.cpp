@@ -47,7 +47,7 @@ void TelemetryFeedbackBridge::startFeedback() {
     connect(m_simulator->lapTimer(), &phys_LapTimer::lapCompleted,
             this, [this](double lapTime, double) {
         onLapCompleted(lapTime);
-    }, Qt::UniqueConnection);
+    });
 
     if (!m_simulator->isRunning()) {
         m_simulator->startSimulation();
@@ -194,8 +194,8 @@ void TelemetryFeedbackBridge::onSimStateUpdated(const SimulationState& state) {
     sample.throttle = m_simulator->getState().velocity.length() > 0.1 ? 1.0 : m_simulator->getState().rpm / m_simulator->maxRpm();
     sample.brake = m_simulator->getState().brake;
     sample.steering = m_simulator->getState().steering;
-    sample.latG = m_simulator->getState().acceleration.x() / 9.81;
-    sample.lonG = m_simulator->getState().acceleration.z() / 9.81;
+    sample.latG = m_simulator->getState().acceleration.x / 9.81;
+    sample.lonG = m_simulator->getState().acceleration.z / 9.81;
 
     // Re-read actual values from simulator
     sample.throttle = 0;

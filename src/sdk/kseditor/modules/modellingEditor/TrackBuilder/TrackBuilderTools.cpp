@@ -12,7 +12,7 @@
 #include <QPainterPath>
 #include <QVector3D>
 #include <QSet>
-#include "engine/FileFormat/FBXParser.h"
+#include "sdk/kseditor/engine/FileFormat/FBXParser.h"
 
 // ============================================================================
 // Project management

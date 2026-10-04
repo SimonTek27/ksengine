@@ -1,5 +1,5 @@
 #include "SceneObjectListModel.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 #include <QUrl>
 
 namespace ks {

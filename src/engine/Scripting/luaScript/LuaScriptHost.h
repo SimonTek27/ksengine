@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 // Opaque, declared here so lua.h never has to leak into the public engine
 // interface — the state is created, used and destroyed entirely inside
@@ -50,6 +51,23 @@ public:
     // Calls the global function `name` with a single numeric argument.
     bool callFunction(const std::string& name, double arg);
 
+    // Calls the global function `name` with numeric arguments.
+    bool callFunction(const std::string& name, const std::vector<double>& args);
+
+    // Mod SDK event dispatch: routes to the SDK dispatcher `__ks_event(name,
+    // ...)` when the prelude from ModSdk.cpp is loaded, otherwise falls back
+    // to the conventional global `on_<name>(...)`. Numbers are pushed first,
+    // then strings. No handler at all is success — mods opt in by defining
+    // one; false only when the Lua side raised an error (see lastError()).
+    // With no state (scripting never started / HAS_LUA=0) it is a no-op.
+    bool emitEvent(const std::string& name,
+                   const std::vector<double>& numbers = {},
+                   const std::vector<std::string>& strings = {});
+
+    // Lines collected from the `ks.log()` API since the last call
+    // (ring-bounded to 512 entries, oldest dropped).
+    std::vector<std::string> takeLog();
+
     const std::string& lastError() const { return m_lastError; }
 
     lua_State* state() { return m_state; }
@@ -57,8 +75,13 @@ public:
 private:
     bool report(int status);
 
+    // C binding registered as `ks.log` at initialize(); keeps the buffer
+    // ring-bounded so a chatty mod cannot grow it without limit.
+    static int l_log(lua_State* L);
+
     lua_State* m_state = nullptr;
     mutable std::string m_lastError;
+    std::vector<std::string> m_log;
 };
 
 }} // namespace ks::scripting

@@ -1,5 +1,5 @@
 #include "WorkshopManager.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QFileInfo>
 #include <QDirIterator>
 #include <QUuid>

@@ -1,4 +1,4 @@
-#include "AudioCore.h"
+#include "sdk/kseditor/engine/Audio/AudioCore.h"
 
 #include <QDebug>
 #include <QFile>

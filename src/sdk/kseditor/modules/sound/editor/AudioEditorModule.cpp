@@ -1,11 +1,11 @@
 #include "AudioEditorModule.h"
-#include "engine/Audio/AudioStudioTypes.h"
-#include "engine/Audio/AudioTypes.h"
-#include "engine/FileFormat/FSPROImporter.h"
-#include "engine/FileFormat/BankWriter.h"
-#include "engine/FileFormat/KSAudioImporter.h"
-#include "engine/FileFormat/KSAudioExporter.h"
-#include "engine/FileFormat/KSAudioValidator.h"
+#include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
+#include "sdk/kseditor/engine/Audio/AudioTypes.h"
+#include "sdk/kseditor/engine/FileFormat/FSPROImporter.h"
+#include "sdk/kseditor/engine/FileFormat/BankWriter.h"
+#include "sdk/kseditor/engine/FileFormat/KSAudioImporter.h"
+#include "sdk/kseditor/engine/FileFormat/KSAudioExporter.h"
+#include "sdk/kseditor/engine/FileFormat/KSAudioValidator.h"
 
 #include <QFile>
 #include <QJsonDocument>

@@ -3,6 +3,9 @@
   "vendor": {
     "kseditor": {
       "autoFormat": true
+    },
+    "qt-project.org/Presets": {
+      "checksum": "KHiuxpq9JTjxPWcnvSlcIUMDPKE="
     }
   },
   "configurePresets": [
@@ -29,6 +32,18 @@
         "QT6_PATH": "C:/Qt/6.11.1/msvc2022_64"
       },
       "binaryDir": "${sourceDir}/out/build/msvc-release"
+    },
+    {
+      "hidden": true,
+      "name": "Qt",
+      "cacheVariables": {
+        "CMAKE_PREFIX_PATH": "$env{QTDIR}"
+      },
+      "vendor": {
+        "qt-project.org/Qt": {
+          "checksum": "wVa86FgEkvdCTVp1/nxvrkaemJc="
+        }
+      }
     }
   ],
   "buildPresets": [

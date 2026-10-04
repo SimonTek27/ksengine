@@ -1,8 +1,8 @@
 #include "3DModeling_io.h"
 #include "3DModeling.h"
-#include "engine/FileFormat/KS3DReader.h"
-#include "engine/FileFormat/KS3DWriter.h"
-#include "engine/FileFormat/Rhino3dmParser.h"
+#include "sdk/kseditor/engine/FileFormat/KS3DReader.h"
+#include "sdk/kseditor/engine/FileFormat/KS3DWriter.h"
+#include "sdk/kseditor/engine/FileFormat/Rhino3dmParser.h"
 #include <QDebug>
 #include <QFile>
 #include <QVBoxLayout>
@@ -17,7 +17,7 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <unordered_map>
-#include "engine/FileFormat/FBXParser.h"
+#include "sdk/kseditor/engine/FileFormat/FBXParser.h"
 #include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/acFiles/FBXExporter.h"
 #if HAS_QT3D
 #include <Qt3DRender/qgeometryrenderer.h>

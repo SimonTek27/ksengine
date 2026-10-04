@@ -47,6 +47,13 @@ bool LuaScriptHost::initialize() {
         return false;
     }
     luaL_openlibs(m_state);
+    // Mod SDK `ks` table: the C-backed half (ks.log) lives here; the rest
+    // (ks.on / ks.get / ks.set / ks.version / __ks_event) is added by the
+    // pure-Lua prelude in ModSdk.cpp.
+    lua_newtable(m_state);
+    lua_pushcfunction(m_state, &LuaScriptHost::l_log);
+    lua_setfield(m_state, -2, "log");
+    lua_setglobal(m_state, "ks");
     m_lastError.clear();
     return true;
 #else
@@ -170,6 +177,11 @@ bool LuaScriptHost::hasFunction(const std::string& name) const {
 }
 
 bool LuaScriptHost::callFunction(const std::string& name, double arg) {
+    return callFunction(name, std::vector<double>{arg});
+}
+
+bool LuaScriptHost::callFunction(const std::string& name,
+                                 const std::vector<double>& args) {
 #if HAS_LUA
     if (!m_state) {
         m_lastError = "script host not initialized";
@@ -181,13 +193,78 @@ bool LuaScriptHost::callFunction(const std::string& name, double arg) {
         lua_pop(m_state, 1);
         return false;
     }
-    lua_pushnumber(m_state, arg);
-    return report(lua_pcall(m_state, 1, 0, 0));
+    for (double value : args)
+        lua_pushnumber(m_state, value);
+    return report(lua_pcall(m_state, static_cast<int>(args.size()), 0, 0));
 #else
     (void)name;
-    (void)arg;
+    (void)args;
     m_lastError = "Lua support was not compiled in (HAS_LUA=0)";
     return false;
+#endif
+}
+
+bool LuaScriptHost::emitEvent(const std::string& name,
+                              const std::vector<double>& numbers,
+                              const std::vector<std::string>& strings) {
+#if HAS_LUA
+    if (!m_state) return true; // scripting not started: nothing to dispatch
+    const auto pushArgs = [&]() {
+        for (double value : numbers)
+            lua_pushnumber(m_state, value);
+        for (const std::string& value : strings)
+            lua_pushlstring(m_state, value.data(), value.size());
+    };
+    const int nargs = static_cast<int>(numbers.size() + strings.size());
+
+    // Prefer the SDK dispatcher when the prelude from ModSdk.cpp is loaded:
+    // it fans the event out to every ks.on handler plus on_<name>.
+    lua_getglobal(m_state, "__ks_event");
+    if (lua_isfunction(m_state, -1)) {
+        lua_pushlstring(m_state, name.data(), name.size());
+        pushArgs();
+        return report(lua_pcall(m_state, nargs + 1, 0, 0));
+    }
+    lua_pop(m_state, 1);
+
+    // Plain scripts without the prelude: the conventional global hook.
+    const std::string hook = "on_" + name;
+    lua_getglobal(m_state, hook.c_str());
+    if (!lua_isfunction(m_state, -1)) {
+        lua_pop(m_state, 1);
+        return true; // no handler registered — not an error
+    }
+    pushArgs();
+    return report(lua_pcall(m_state, nargs, 0, 0));
+#else
+    (void)name;
+    (void)numbers;
+    (void)strings;
+    return true;
+#endif
+}
+
+std::vector<std::string> LuaScriptHost::takeLog() {
+    std::vector<std::string> out;
+    out.swap(m_log);
+    return out;
+}
+
+int LuaScriptHost::l_log(lua_State* L) {
+#if HAS_LUA
+    auto& self = LuaScriptHost::instance();
+    const char* msg = luaL_optstring(L, 1, "");
+    self.m_log.emplace_back(msg ? msg : "");
+    constexpr std::size_t kMaxLogLines = 512;
+    if (self.m_log.size() > kMaxLogLines)
+        self.m_log.erase(self.m_log.begin(),
+                         self.m_log.begin() +
+                             static_cast<std::ptrdiff_t>(self.m_log.size() -
+                                                         kMaxLogLines));
+    return 0;
+#else
+    (void)L;
+    return 0;
 #endif
 }
 

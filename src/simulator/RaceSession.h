@@ -3,6 +3,7 @@
  * Race session state — flags, penalties, phases (parity 2.4 scaffold).
  * Qt-free. Independent of AC branding.
  */
+#include "RaceFlag.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -25,18 +26,6 @@ enum class SessionPhase : uint8_t {
     SafetyCar = 4,
     Checkered = 5,
     Finished = 6
-};
-
-enum class RaceFlag : uint8_t {
-    None = 0,
-    Green = 1,
-    Yellow = 2,
-    Blue = 3,
-    White = 4,
-    Black = 5,
-    Checkered = 6,
-    Meatball = 7,  // mechanical black/orange
-    SafetyCar = 8
 };
 
 enum class PenaltyType : uint8_t {

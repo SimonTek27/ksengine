@@ -21,6 +21,10 @@ CPackConfig.cmake
 CPackSourceConfig.cmake
 *.cmake
 !CMakeLists.txt
+# ...but cmake/*.cmake are hand-written build modules (KsShaders.cmake and
+# friends), not generated files: without this the shared shader rules would
+# never be committed and a fresh clone would fail to configure.
+!cmake/*.cmake
 
 # Visual Studio / IDE
 .vs/

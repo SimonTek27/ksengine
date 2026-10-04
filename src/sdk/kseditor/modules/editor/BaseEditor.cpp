@@ -9,9 +9,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMessageBox>
-#include "mesh/MeshOperations.h"
-#include "Graphics/SceneGraph.h"
-#include "Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
 
 namespace ks {
 

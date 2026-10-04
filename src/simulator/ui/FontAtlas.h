@@ -2,7 +2,8 @@
 /**
  * Bitmap font atlas (Qt-free).
  * Built-in 8x8 monospace glyphs for ASCII 32..126 baked into an R8 texture.
- * Optional load from external raw/PNG path can replace the bake later.
+ * loadR8() swaps in an external sheet with the same layout, loadTtf() swaps in
+ * a variable-sized atlas rasterized from a real TrueType font.
  */
 #include <cstdint>
 #include <string>
@@ -10,6 +11,8 @@
 #include <array>
 #include <cmath>
 #include <algorithm>
+
+#include "../../engine/FileFormat/TtfAtlas.h"
 
 namespace ks {
 namespace sim {
@@ -37,17 +40,19 @@ public:
 
     FontAtlas() { bakeDefault(); }
 
-    int width() const { return kAtlasW; }
-    int height() const { return kAtlasH; }
+    int width() const { return m_width; }
+    int height() const { return m_height; }
     const std::vector<uint8_t>& pixelsR8() const { return m_pixels; }
 
-    /** White texel UV for solid rects (top-left of space glyph is empty; use dedicated white). */
+    /** Unscaled distance between two baselines (before style lineSpacing). */
+    float baseLineHeight() const { return m_baseLineHeight; }
+
+    /** White texel UV for solid rects (dedicated texel, not a glyph). */
     void whiteUV(float& u0, float& v0, float& u1, float& v1) const {
-        // 1x1 white at bottom-right padding of last cell
-        u0 = (kAtlasW - 1.5f) / kAtlasW;
-        v0 = (kAtlasH - 1.5f) / kAtlasH;
-        u1 = (kAtlasW - 0.5f) / kAtlasW;
-        v1 = (kAtlasH - 0.5f) / kAtlasH;
+        u0 = m_whiteU0;
+        v0 = m_whiteV0;
+        u1 = m_whiteU1;
+        v1 = m_whiteV1;
     }
 
     bool hasGlyph(unsigned char ch) const {
@@ -71,20 +76,63 @@ public:
     }
 
     float lineHeight(float scale = 1.f) const {
-        return kGlyphH * scale * 1.25f;
+        return m_baseLineHeight * scale * 1.25f;
     }
 
     /** Replace atlas from external R8 buffer (must be kAtlasW * kAtlasH). */
     bool loadR8(const uint8_t* data, int w, int h) {
         if (!data || w != kAtlasW || h != kAtlasH) return false;
         m_pixels.assign(data, data + static_cast<size_t>(w * h));
+        m_width = kAtlasW;
+        m_height = kAtlasH;
+        m_baseLineHeight = static_cast<float>(kGlyphH);
+        setBuiltinWhiteUV();
         rebuildGlyphTable();
         // ensure white pixel
         m_pixels[static_cast<size_t>(kAtlasW * kAtlasH - 1)] = 255;
         return true;
     }
 
+    /** Replace atlas and metrics from a TrueType atlas built by TtfRasterizer. */
+    bool loadTtf(const ks::engine::fileformat::TtfAtlas& atlas) {
+        if (!atlas.valid() ||
+            atlas.glyphs.size() != static_cast<size_t>(kGlyphCount)) {
+            return false;
+        }
+        m_pixels = atlas.pixels;
+        m_width = atlas.width;
+        m_height = atlas.height;
+        m_baseLineHeight = atlas.lineHeight;
+        m_whiteU0 = atlas.whiteU0;
+        m_whiteV0 = atlas.whiteV0;
+        m_whiteU1 = atlas.whiteU1;
+        m_whiteV1 = atlas.whiteV1;
+        for (size_t i = 0; i < atlas.glyphs.size(); ++i) {
+            const auto& src = atlas.glyphs[i];
+            GlyphInfo g;
+            g.u0 = src.u0;
+            g.v0 = src.v0;
+            g.u1 = src.u1;
+            g.v1 = src.v1;
+            g.xoff = src.xoff;
+            g.yoff = src.yoff;
+            g.advance = src.advance;
+            g.width = src.width;
+            g.height = src.height;
+            m_glyphs[i] = g;
+        }
+        return true;
+    }
+
 private:
+    void setBuiltinWhiteUV() {
+        // 1x1 white at bottom-right padding of last cell
+        m_whiteU0 = (static_cast<float>(kAtlasW) - 1.5f) / static_cast<float>(kAtlasW);
+        m_whiteV0 = (static_cast<float>(kAtlasH) - 1.5f) / static_cast<float>(kAtlasH);
+        m_whiteU1 = (static_cast<float>(kAtlasW) - 0.5f) / static_cast<float>(kAtlasW);
+        m_whiteV1 = (static_cast<float>(kAtlasH) - 0.5f) / static_cast<float>(kAtlasH);
+    }
+
     void rebuildGlyphTable() {
         for (int i = 0; i < kGlyphCount; ++i) {
             const int col = i % kCols;
@@ -255,11 +303,22 @@ private:
         }
         // white pixel for solid fills
         m_pixels[static_cast<size_t>(kAtlasW * kAtlasH - 1)] = 255;
+        m_width = kAtlasW;
+        m_height = kAtlasH;
+        m_baseLineHeight = static_cast<float>(kGlyphH);
+        setBuiltinWhiteUV();
         rebuildGlyphTable();
     }
 
     std::vector<uint8_t> m_pixels;
     std::array<GlyphInfo, kGlyphCount> m_glyphs{};
+    int m_width = kAtlasW;
+    int m_height = kAtlasH;
+    float m_baseLineHeight = static_cast<float>(kGlyphH);
+    float m_whiteU0 = 0.f;
+    float m_whiteV0 = 0.f;
+    float m_whiteU1 = 1.f;
+    float m_whiteV1 = 1.f;
 };
 
 } // namespace ui

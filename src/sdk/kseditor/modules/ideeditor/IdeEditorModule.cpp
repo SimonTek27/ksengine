@@ -1,6 +1,6 @@
 #include "IdeEditorModule.h"
 #include "IdeEditorWidget.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 
 #include <QVBoxLayout>
 #include <QMainWindow>

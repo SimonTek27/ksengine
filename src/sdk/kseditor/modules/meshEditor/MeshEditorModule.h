@@ -1,7 +1,7 @@
 #pragma once
 
 #include "editor/ModuleGuiBase.h"
-#include "mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 #include <QTabWidget>
 
 namespace ks { class Skeleton; }

@@ -4,7 +4,7 @@
 #include <QJsonObject>
 #include <cmath>
 
-#include "engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
 
 namespace ks {
 

@@ -1,3 +1,3 @@
 #pragma once
 // Redirect to engine canonical version
-#include "engine/physics/phys_Simulator.h"
+#include "sdk/kseditor/engine/physics/phys_Simulator.h"

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "NetworkLowLevel.h"
+#include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -16,6 +18,10 @@ class NetworkManager {
 public:
     explicit NetworkManager(SimulationLoop* simLoop);
     ~NetworkManager();
+
+    // Pumps the transport (server + client) and the stats poller. Called once
+    // per frame from SimulationLoop::tick().
+    void update(double dt);
 
     bool hostServer(uint16_t port = 40000, int maxClients = 8,
                     const std::string& serverName = "ksEditor Server",
@@ -38,6 +44,10 @@ public:
     std::string trackName() const { return m_trackName; }
     std::string localDriverName() const { return m_driverName; }
     std::string localCarName() const { return m_carName; }
+    /** Server slot handed out in MSG_SERVER_WELCOME (0 for the host's own
+     *  loopback client). Lets the sim recognise its own car among the
+     *  spawn/state messages the server relays. */
+    uint32_t localClientId() const { return m_localClientId; }
     net::NetworkStats stats() const { return m_stats; }
 
     net::NetworkClient* client() { return m_client.get(); }
@@ -82,6 +92,7 @@ private:
     std::string m_driverName;
     std::string m_carName;
     uint16_t m_port = 0;
+    uint32_t m_localClientId = 0;
 
     net::NetworkStats m_stats;
 
@@ -104,6 +115,8 @@ public:
     explicit NetworkManager(SimulationLoop*) {}
     ~NetworkManager() = default;
 
+    void update(double) {}
+
     bool hostServer(uint16_t = 40000, int = 8, const std::string& = {}, const std::string& = {}) { return false; }
     void stopServer() {}
     bool isHosting() const { return false; }
@@ -121,6 +134,7 @@ public:
     std::string trackName() const { return {}; }
     std::string localDriverName() const { return {}; }
     std::string localCarName() const { return {}; }
+    uint32_t localClientId() const { return 0; }
     net::NetworkStats stats() const { return {}; }
 
     net::NetworkClient* client() { return nullptr; }

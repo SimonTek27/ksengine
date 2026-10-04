@@ -1,5 +1,5 @@
 #include "ModifierStack.h"
-#include "engine/mesh/ModifierSystem.h"
+#include "sdk/kseditor/engine/mesh/ModifierSystem.h"
 #include "AdditionalModifiers.h"
 
 namespace ks {

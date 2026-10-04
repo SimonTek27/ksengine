@@ -8,11 +8,11 @@
 #include <QDoubleSpinBox>
 #include <QCheckBox>
 
-#include "engine/mesh/Viewport3DSystem.h"
-#include "engine/mesh/MeshRenderer.h"
-#include "engine/Graphics/SceneObject.h"
-#include "engine/Graphics/SceneMesh.h"
-#include "engine/Graphics/VulkanRenderer.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/mesh/MeshRenderer.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/VulkanRenderer.h"
 #include "ShowroomSystem.h"
 
 namespace ks {

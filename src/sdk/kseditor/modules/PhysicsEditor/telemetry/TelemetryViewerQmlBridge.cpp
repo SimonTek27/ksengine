@@ -1,7 +1,7 @@
 #include "TelemetryViewerQmlBridge.h"
 #include <cmath>
 #include <algorithm>
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QTableWidget>

@@ -1,0 +1,206 @@
+﻿#include "AIAudioStemSeparator.h"
+#include <QProcess>
+#include <QDebug>
+#include <QDir>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QCoreApplication>
+
+namespace ks { namespace audio {
+
+// Helper: convert StemInfo to QJsonObject for JSON signaling
+static QJsonObject stemInfoToJson(const AIAudioStemSeparator::StemInfo& info) {
+    QJsonObject obj;
+    obj["name"] = info.name;
+    obj["filepath"] = info.filepath;
+    obj["duration"] = info.duration;
+    obj["channels"] = info.channels;
+    obj["sampleRate"] = info.sampleRate;
+    return obj;
+}
+
+// Helper: convert QJsonObject to StemInfo
+static AIAudioStemSeparator::StemInfo stemInfoFromJson(const QJsonObject& obj) {
+    AIAudioStemSeparator::StemInfo info;
+    info.name = obj.value("name").toString();
+    info.filepath = obj.value("filepath").toString();
+    info.duration = static_cast<float>(obj.value("duration").toDouble());
+    info.channels = obj.value("channels").toInt();
+    info.sampleRate = obj.value("sampleRate").toInt();
+    return info;
+}
+
+void AIAudioStemSeparator::separate(const QString& inputFilePath, const QString& outputDir)
+{
+    emit separationStarted(inputFilePath, outputDir);
+    emit separationProgress("Initializing stem separation...", 0);
+
+    SeparationResult result = runPythonSeparation(inputFilePath, outputDir);
+
+    if (!result.error.isEmpty()) {
+        emit separationError(result.error);
+        return;
+    }
+
+    emit separationProgress(result.message.isEmpty() ? "Processing stems..." : result.message, 70);
+
+    // Post-process stem info - resolve relative paths
+    QVector<AIAudioStemSeparator::StemInfo> stemInfos;
+    for (const auto& stem : result.stems) {
+        AIAudioStemSeparator::StemInfo info;
+        info.name = stem.name;
+        // Make filepath relative or absolute as needed
+        info.filepath = stem.filepath;  // Keep as-is, UI will handle
+        info.duration = stem.duration;
+        info.channels = stem.channels;
+        info.sampleRate = stem.sampleRate;
+        stemInfos.append(info);
+    }
+
+    emit separationCompleted({result.success, result.inputFile, result.outputDirectory, stemInfos, result.message, result.error, result.sampleRate});
+}
+
+AIAudioStemSeparator::SeparationResult AIAudioStemSeparator::runPythonSeparation(const QString& inputFilePath, const QString& outputDir)
+{
+    SeparationResult result;
+    result.inputFile = inputFilePath;
+    result.sampleRate = 44100;
+
+    // Ensure output directory exists
+    QDir dir(outputDir);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+    result.outputDirectory = outputDir;
+
+    // Determine input file basename (without extension) for stem naming
+    QFileInfo inputInfo(inputFilePath);
+    QString baseName = inputInfo.baseName();
+
+    // Build command to run Python stem separator
+    QString pythonScript = QCoreApplication::applicationDirPath() + "/../../../../resources/python/stem_separator.py";
+    // Normalize the path - go up from build directory to source
+    // This is a simplified path - in production, use qmake/installed path
+    pythonScript = QDir::cleanPath(pythonScript);
+
+    QStringList args;
+    args << inputFilePath << outputDir;
+
+    // Determine model and method based on class settings
+    // For now, use FFT method as it doesn't require external dependencies
+    args << "--model" << "fft" << "--method" << "fft";
+
+    qDebug() << "Running stem separation with Python script:" << pythonScript << args;
+
+    QProcess process;
+    process.setWorkingDirectory(QDir::currentPath());
+
+    // Connect signals for real-time feedback
+    connect(&process, &QProcess::readyReadStandardOutput, [&]() {
+        QString output = QString::fromLocal8Bit(process.readAllStandardOutput());
+        Q_FOREACH (const QString& line, output.split('\n')) {
+            if (line.contains("Progress")) {
+                bool ok;
+                int percent = line.split(':').last().trimmed().toInt(&ok);
+                if (ok && percent >= 0 && percent <= 100) {
+                    emit separationProgress(line, percent);
+                }
+            }
+        }
+    });
+
+    connect(&process, &QProcess::readyReadStandardError, [&]() {
+        QString error = QString::fromLocal8Bit(process.readAllStandardError());
+        qDebug() << "Stem separation stderr:" << error;
+        // Could emit progress updates from error output too
+    });
+
+    connect(&process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            [&](int exitCode, QProcess::ExitStatus exitStatus) {
+        QString stdoutOutput = QString::fromLocal8Bit(process.readAllStandardOutput());
+        QString stderrOutput = QString::fromLocal8Bit(process.readAllStandardError());
+
+        qDebug() << "Stem separation process finished. Exit code:" << exitCode
+                 << "Status:" << (exitStatus == QProcess::NormalExit ? "Normal" : "Crash");
+
+        if (exitCode == 0) {
+            // Parse Python script JSON output
+            QJsonDocument doc = QJsonDocument::fromJson(stdoutOutput.toUtf8());
+            if (!doc.isNull() && doc.isObject()) {
+                QJsonObject obj = doc.object();
+                result.success = obj.value("success").toBool();
+                result.message = obj.value("message").toString();
+                result.error = obj.value("error").toString();
+
+                // Parse stems
+                if (obj.contains("stems")) {
+                    QJsonArray stemsArray = obj["stems"].toArray();
+                    for (const auto& stemVal : stemsArray) {
+                        if (stemVal.isObject()) {
+                            QJsonObject stemObj = stemVal.toObject();
+                            StemInfo info;
+                            info.name = stemObj.value("name").toString();
+                            info.filepath = stemObj.value("filepath").toString();
+                            info.duration = static_cast<float>(stemObj.value("duration").toDouble());
+                            info.channels = stemObj.value("channels").toInt();
+                            info.sampleRate = stemObj.value("sampleRate").toInt();
+                            result.stems.append(info);
+                        }
+                    }
+                }
+
+                if (result.success) {
+                    // Set default sample rate if not specified
+                    if (result.stems.isEmpty()) {
+                        // Create default stem info
+                        StemInfo info;
+                        info.name = "stem";
+                        info.filepath = outputDir + "/" + baseName + "_stem.wav";
+                        info.duration = 0.0f;
+                        info.channels = 2;
+                        info.sampleRate = 44100;
+                        result.stems.append(info);
+                    }
+                }
+            } else {
+                // No JSON output, treat as success if exit code 0
+                result.success = true;
+                result.message = "Separation completed (no JSON output)";
+
+                // Create basic stem info
+                StemInfo info;
+                info.name = "stem";
+                info.filepath = outputDir + "/" + baseName + "_stem.wav";
+                info.duration = 0.0f;
+                info.channels = 2;
+                info.sampleRate = 44100;
+                result.stems.append(info);
+            }
+        } else {
+            result.error = stderrOutput.isEmpty() ? "Separation process failed" : stderrOutput;
+            qDebug() << "Separation error:" << result.error;
+        }
+
+        // Finalize
+        emit separationCompleted(result);
+    });
+
+    // Start the Python process
+    process.start(pythonScript, args);
+
+    if (!process.waitForStarted(5000)) {
+        result.error = "Failed to start Python process for stem separation";
+        emit separationError(result.error);
+        SeparationResult emptyResult;
+        emit separationCompleted(emptyResult);
+    }
+
+    return result;
+}
+
+// Static member definition for singleton pattern
+AIAudioStemSeparator* AIAudioStemSeparator::s_instance = nullptr;
+
+}} // namespace ks::audio

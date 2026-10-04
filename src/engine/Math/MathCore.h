@@ -1,5 +1,4 @@
 #pragma once
-/** MathCore — Qt-free (std only). No Qt types. */
 
 // Prevent Windows.h from defining min/max macros
 #ifndef NOMINMAX
@@ -9,6 +8,11 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#ifdef KS_HAS_QT
+#include <QMatrix4x4>
+#include <QVector3D>
+#include <QVector2D>
+#endif
 
 // Math constants
 namespace ks::math {
@@ -39,6 +43,9 @@ struct Vec2 {
 
     Vec2() : x(0.0f), y(0.0f) {}
     Vec2(float x_, float y_) : x(x_), y(y_) {}
+#ifdef KS_HAS_QT
+    explicit Vec2(const QVector2D& v) : x(v.x()), y(v.y()) {}
+#endif
 
     Vec2& operator+=(const Vec2& o) { x += o.x; y += o.y; return *this; }
     Vec2& operator-=(const Vec2& o) { x -= o.x; y -= o.y; return *this; }
@@ -50,6 +57,9 @@ struct Vec2 {
 
     float& operator[](int i) { return (&x)[i]; }
     const float& operator[](int i) const { return (&x)[i]; }
+#ifdef KS_HAS_QT
+    QVector2D toQVector2D() const { return QVector2D(x, y); }
+#endif
 };
 
 inline Vec2 operator+(const Vec2& a, const Vec2& b) { return Vec2(a.x + b.x, a.y + b.y); }
@@ -83,6 +93,9 @@ struct Vec3 {
 
     Vec3() : x(0.0f), y(0.0f), z(0.0f) {}
     Vec3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
+#ifdef KS_HAS_QT
+    explicit Vec3(const QVector3D& v) : x(v.x()), y(v.y()), z(v.z()) {}
+#endif
 
     Vec3& operator+=(const Vec3& o) { x += o.x; y += o.y; z += o.z; return *this; }
     Vec3& operator-=(const Vec3& o) { x -= o.x; y -= o.y; z -= o.z; return *this; }
@@ -95,13 +108,14 @@ struct Vec3 {
     float& operator[](int i) { return (&x)[i]; }
     const float& operator[](int i) const { return (&x)[i]; }
 
-    Vec3 normalized() const {
-        float len = std::sqrt(x*x + y*y + z*z);
-        return (len > ks::math::EPSILON) ? Vec3(x/len, y/len, z/len) : Vec3(0,0,0);
-    }
+    Vec3 normalized() const { float len = std::sqrt(x*x + y*y + z*z); return (len > ks::math::EPSILON) ? Vec3(x/len, y/len, z/len) : Vec3(0,0,0); }
     static Vec3 cross(const Vec3& a, const Vec3& b) {
         return Vec3(a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x);
     }
+
+#ifdef KS_HAS_QT
+    QVector3D toQVector3D() const { return QVector3D(x, y, z); }
+#endif
 };
 
 inline Vec3 operator+(const Vec3& a, const Vec3& b) { return Vec3(a.x + b.x, a.y + b.y, a.z + b.z); }
@@ -174,17 +188,23 @@ inline Vec3 abs(const Vec3& v) {
     return Vec3(std::abs(v.x), std::abs(v.y), std::abs(v.z));
 }
 
+// Aliases for code expecting Vector2/Vector3 naming
 using Vector2 = Vec2;
 using Vector3 = Vec3;
 
+// ============================================================================
+// Mat3 - 3x3 Matrix (column-major, for rotation/scale)
+// ============================================================================
 struct Mat3 {
-    float m[9];
+    float m[9]; // column-major: m[col*3+row]
 
     Mat3() { memset(m, 0, sizeof(m)); m[0] = m[4] = m[8] = 1.0f; }
+
     explicit Mat3(const float* data) { memcpy(m, data, sizeof(m)); }
 
     float& operator()(int row, int col) { return m[col * 3 + row]; }
     const float& operator()(int row, int col) const { return m[col * 3 + row]; }
+
     float* data() { return m; }
     const float* data() const { return m; }
 
@@ -220,7 +240,7 @@ struct Mat3 {
     }
 };
 
-inline Mat3 Mat3::identity() { return Mat3(); }
+inline Mat3 Mat3::identity() { Mat3 r; return r; }
 
 inline Mat3 Mat3::fromRotationX(float a) {
     Mat3 r;
@@ -287,6 +307,9 @@ inline Mat3 Mat3::inverse() const {
     return r;
 }
 
+// ============================================================================
+// Quaternion
+// ============================================================================
 struct Quat {
     float x, y, z, w;
 
@@ -325,6 +348,7 @@ struct Quat {
 
     Mat3 toMat3() const;
     Vec3 toEuler() const;
+
     Quat slerp(const Quat& to, float t) const;
     Quat operator/(float s) const { return Quat(x/s, y/s, z/s, w/s); }
 
@@ -332,6 +356,7 @@ struct Quat {
         float len = std::sqrt(x*x + y*y + z*z);
         return (len > ks::math::EPSILON) ? Vec3(x/len, y/len, z/len) : Vec3(1, 0, 0);
     }
+
     float angle() const {
         return 2.0f * std::acos(ks::math::clamp(w, -1.0f, 1.0f));
     }
@@ -439,65 +464,218 @@ inline Vec3 Quat::toEuler() const {
     return Vec3(roll, pitch, yaw);
 }
 
+// ============================================================================
+// Ray
+// ============================================================================
 struct Ray {
     Vec3 origin;
     Vec3 direction;
+
     Ray() = default;
     Ray(const Vec3& o, const Vec3& d) : origin(o), direction(normalize(d)) {}
+
     Vec3 at(float t) const { return origin + direction * t; }
 };
 
+// ============================================================================
+// Plane
+// ============================================================================
 struct Plane {
     Vec3 normal;
-    float distance;
+    float distance; // signed distance from origin (n·p = d)
+
     Plane() : normal(0, 1, 0), distance(0) {}
     Plane(const Vec3& n, float d) : normal(normalize(n)), distance(d) {}
     Plane(const Vec3& a, const Vec3& b, const Vec3& c) {
         normal = normalize(cross(b - a, c - a));
         distance = dot(normal, a);
     }
+
     float signedDistance(const Vec3& p) const { return dot(normal, p) - distance; }
     Vec3 projectPoint(const Vec3& p) const { return p - normal * signedDistance(p); }
     bool isFrontFacing(const Vec3& viewDir) const { return dot(normal, viewDir) < 0.0f; }
 };
 
+// ============================================================================
+// Axis-Aligned Bounding Box
+// ============================================================================
 struct AABB {
     Vec3 min;
     Vec3 max;
-    AABB() : min(ks::math::FLOAT_MAX, ks::math::FLOAT_MAX, ks::math::FLOAT_MAX),
-             max(-ks::math::FLOAT_MAX, -ks::math::FLOAT_MAX, -ks::math::FLOAT_MAX) {}
+
+    AABB() : min(ks::math::FLOAT_MAX, ks::math::FLOAT_MAX, ks::math::FLOAT_MAX), max(-ks::math::FLOAT_MAX, -ks::math::FLOAT_MAX, -ks::math::FLOAT_MAX) {}
     AABB(const Vec3& p) : min(p), max(p) {}
     AABB(const Vec3& min_, const Vec3& max_) : min(min_), max(max_) {}
+
     Vec3 center() const { return (min + max) * 0.5f; }
     Vec3 extents() const { return (max - min) * 0.5f; }
     Vec3 size() const { return max - min; }
+    float surfaceArea() const {
+        Vec3 s = size();
+        return 2.0f * (s.x*s.y + s.x*s.z + s.y*s.z);
+    }
+    float volume() const {
+        Vec3 s = size();
+        return s.x * s.y * s.z;
+    }
+
     bool isValid() const { return min.x <= max.x && min.y <= max.y && min.z <= max.z; }
+
     void expand(const Vec3& p) { min = minVec(min, p); max = maxVec(max, p); }
     void expand(const AABB& other) { min = minVec(min, other.min); max = maxVec(max, other.max); }
+
     bool contains(const Vec3& p) const {
         return p.x >= min.x && p.x <= max.x && p.y >= min.y && p.y <= max.y && p.z >= min.z && p.z <= max.z;
     }
+
+    bool intersects(const AABB& other) const {
+        return min.x <= other.max.x && max.x >= other.min.x
+            && min.y <= other.max.y && max.y >= other.min.y
+            && min.z <= other.max.z && max.z >= other.min.z;
+    }
+
+    bool intersect(const Ray& ray, float& tMin, float& tMax) const;
 };
 
+inline bool AABB::intersect(const Ray& ray, float& tMin, float& tMax) const {
+    Vec3 invDir(1.0f / ray.direction.x, 1.0f / ray.direction.y, 1.0f / ray.direction.z);
+    Vec3 t0 = (min - ray.origin) * invDir;
+    Vec3 t1 = (max - ray.origin) * invDir;
+    Vec3 tNear = minVec(t0, t1);
+    Vec3 tFar = maxVec(t0, t1);
+    tMin = std::max({tNear.x, tNear.y, tNear.z});
+    tMax = std::min({tFar.x, tFar.y, tFar.z});
+    return tMin <= tMax && tMax >= 0.0f;
+}
+
+// ============================================================================
+// Intersection helpers
+// ============================================================================
+inline bool intersectRayPlane(const Ray& ray, const Plane& plane, float& t) {
+    float denom = dot(plane.normal, ray.direction);
+    if (std::abs(denom) < ks::math::EPSILON) return false;
+    t = (plane.distance - dot(plane.normal, ray.origin)) / denom;
+    return t >= 0.0f;
+}
+
+inline bool intersectRayTriangle(const Ray& ray, const Vec3& v0, const Vec3& v1, const Vec3& v2, float& t, float& u, float& v) {
+    Vec3 e1 = v1 - v0;
+    Vec3 e2 = v2 - v0;
+    Vec3 h = cross(ray.direction, e2);
+    float a = dot(e1, h);
+    if (std::abs(a) < ks::math::EPSILON) return false;
+    float f = 1.0f / a;
+    Vec3 s = ray.origin - v0;
+    u = f * dot(s, h);
+    if (u < 0.0f || u > 1.0f) return false;
+    Vec3 q = cross(s, e1);
+    v = f * dot(ray.direction, q);
+    if (v < 0.0f || u + v > 1.0f) return false;
+    t = f * dot(e2, q);
+    return t >= 0.0f;
+}
+
+inline bool intersectRaySphere(const Ray& ray, const Vec3& center, float radius, float& t0, float& t1) {
+    Vec3 oc = ray.origin - center;
+    float a = dot(ray.direction, ray.direction);
+    float b = 2.0f * dot(oc, ray.direction);
+    float c = dot(oc, oc) - radius * radius;
+    float disc = b * b - 4.0f * a * c;
+    if (disc < 0.0f) return false;
+    float sqrtDisc = std::sqrt(disc);
+    t0 = (-b - sqrtDisc) / (2.0f * a);
+    t1 = (-b + sqrtDisc) / (2.0f * a);
+    return true;
+}
+
+// ============================================================================
+// Matrix4 (existing, extended)
+// ============================================================================
 namespace ks {
 
 struct Matrix4 {
+    struct Translation { float x, y, z; } translation_ = {0,0,0};
+    Vec3 rotation_ = {0,0,0};
+    Vec3 scale_ = {1,1,1};
     float m[4][4];
-    Vec3 translation_;
 
-    Matrix4() {
-        memset(m, 0, sizeof(m));
-        m[0][0] = m[1][1] = m[2][2] = m[3][3] = 1.0f;
+    const float* data() const { return &m[0][0]; }
+    float* data() { return &m[0][0]; }
+
+    operator const float*() const { return &m[0][0]; }
+    operator float*() { return &m[0][0]; }
+
+    Matrix4() { rebuild(); }
+
+    void rebuild() {
+        float cx = cosf(rotation_.x), sx = sinf(rotation_.x);
+        float cy = cosf(rotation_.y), sy = sinf(rotation_.y);
+        float cz = cosf(rotation_.z), sz = sinf(rotation_.z);
+
+        float r00 = cy * cz;
+        float r01 = cz * sx * sy - cx * sz;
+        float r02 = cx * cz * sy + sx * sz;
+        float r10 = cy * sz;
+        float r11 = sx * sy * sz + cx * cz;
+        float r12 = cx * sy * sz - cz * sx;
+        float r20 = -sy;
+        float r21 = cy * sx;
+        float r22 = cx * cy;
+
+        m[0][0] = r00 * scale_.x; m[0][1] = r01 * scale_.x; m[0][2] = r02 * scale_.x;
+        m[1][0] = r10 * scale_.y; m[1][1] = r11 * scale_.y; m[1][2] = r12 * scale_.y;
+        m[2][0] = r20 * scale_.z; m[2][1] = r21 * scale_.z; m[2][2] = r22 * scale_.z;
+        m[0][3] = m[1][3] = m[2][3] = 0.0f;
+
+        m[3][0] = translation_.x; m[3][1] = translation_.y; m[3][2] = translation_.z; m[3][3] = 1.0f;
     }
 
-    float* data() { return &m[0][0]; }
-    const float* data() const { return &m[0][0]; }
+    void setTranslation(const Vec3& t) { translation_.x = t.x; translation_.y = t.y; translation_.z = t.z; rebuild(); }
+    Translation translation() const { return translation_; }
+    Vec3 rotation() const { return rotation_; }
+    void setRotation(const Vec3& r) { rotation_ = r; rebuild(); }
+    Vec3 scale() const { return scale_; }
+    void setScale(const Vec3& s) { scale_ = s; rebuild(); }
 
-    static Matrix4 identity() { return Matrix4(); }
+    Matrix4 operator*(const Matrix4& o) const {
+        Matrix4 r;
+        for (int i = 0; i < 4; i++)
+            for (int j = 0; j < 4; j++) {
+                r.m[i][j] = 0;
+                for (int k = 0; k < 4; k++)
+                    r.m[i][j] += m[i][k] * o.m[k][j];
+            }
+        return r;
+    }
+
+    Vec3 operator*(const Vec3& v) const {
+        float invW = 1.0f / (m[3][0]*v.x + m[3][1]*v.y + m[3][2]*v.z + m[3][3]);
+        return Vec3(
+            (m[0][0]*v.x + m[0][1]*v.y + m[0][2]*v.z + m[0][3]) * invW,
+            (m[1][0]*v.x + m[1][1]*v.y + m[1][2]*v.z + m[1][3]) * invW,
+            (m[2][0]*v.x + m[2][1]*v.y + m[2][2]*v.z + m[2][3]) * invW
+        );
+    }
+
+    // Determinant of 4x4 matrix
+    float determinant() const;
+
+    // Transpose (upper 3x3 only for rotation)
+    Matrix4 transposed() const;
+
+    // Full 4x4 inverse (for affine transforms)
+    Matrix4 inverse() const;
+
+    // Static constructors for view/projection matrices
+    static Matrix4 Identity() { Matrix4 m; return m; }
+    static Matrix4 fromTranslation(const Vec3& t) { Matrix4 m; m.setTranslation(t); return m; }
+    static Matrix4 fromScale(const Vec3& s) { Matrix4 m; m.setScale(s); return m; }
+    static Matrix4 fromRotation(const Vec3& r) { Matrix4 m; m.setRotation(r); return m; }
     static Matrix4 fromQuat(const Quat& q);
     static Matrix4 lookAt(const Vec3& eye, const Vec3& target, const Vec3& up);
-    static Matrix4 perspective(float fovRad, float aspect, float nearZ, float farZ);
-    static Matrix4 orthographic(float left, float right, float bottom, float top, float nearZ, float farZ);
+    static Matrix4 perspective(float fovRad, float aspect, float near, float far);
+    static Matrix4 orthographic(float left, float right, float bottom, float top, float near, float far);
+    static Matrix4 frustum(float left, float right, float bottom, float top, float near, float far);
 
     Mat3 toMat3() const {
         Mat3 r;
@@ -506,67 +684,138 @@ struct Matrix4 {
         r(2,0)=m[2][0]; r(2,1)=m[2][1]; r(2,2)=m[2][2];
         return r;
     }
+
     Quat toQuat() const { return Quat::fromMatrix(toMat3()); }
+
+#ifdef KS_HAS_QT
+    QMatrix4x4 toQMatrix4x4() const {
+        QMatrix4x4 qm;
+        for (int i = 0; i < 4; ++i)
+            for (int j = 0; j < 4; ++j)
+                qm(i, j) = m[i][j];
+        return qm;
+    }
+#endif
 };
 
 inline Matrix4 Matrix4::fromQuat(const Quat& q) {
     Mat3 r = q.toMat3();
-    Matrix4 out;
+    Matrix4 m;
     for (int i = 0; i < 3; i++)
         for (int j = 0; j < 3; j++)
-            out.m[i][j] = r(i, j);
-    out.m[3][3] = 1.0f;
-    return out;
+            m.m[i][j] = r(i, j);
+    m.m[3][3] = 1.0f;
+    return m;
 }
 
 inline Matrix4 Matrix4::lookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
     Vec3 f = normalize(target - eye);
     Vec3 s = normalize(cross(f, up));
     Vec3 u = cross(s, f);
-    Matrix4 out;
-    out.m[0][0] = s.x; out.m[0][1] = s.y; out.m[0][2] = s.z;
-    out.m[1][0] = u.x; out.m[1][1] = u.y; out.m[1][2] = u.z;
-    out.m[2][0] = -f.x; out.m[2][1] = -f.y; out.m[2][2] = -f.z;
-    out.m[3][0] = -dot(s, eye); out.m[3][1] = -dot(u, eye); out.m[3][2] = dot(f, eye);
-    out.m[3][3] = 1.0f;
-    out.m[0][3] = out.m[1][3] = out.m[2][3] = 0.0f;
-    out.translation_ = Vec3(out.m[3][0], out.m[3][1], out.m[3][2]);
-    return out;
+    Matrix4 m;
+    m.m[0][0] = s.x; m.m[0][1] = s.y; m.m[0][2] = s.z;
+    m.m[1][0] = u.x; m.m[1][1] = u.y; m.m[1][2] = u.z;
+    m.m[2][0] = -f.x; m.m[2][1] = -f.y; m.m[2][2] = -f.z;
+    m.m[3][0] = -dot(s, eye); m.m[3][1] = -dot(u, eye); m.m[3][2] = dot(f, eye);
+    m.m[3][3] = 1.0f;
+    m.m[0][3] = m.m[1][3] = m.m[2][3] = 0.0f;
+    m.translation_.x = m.m[3][0]; m.translation_.y = m.m[3][1]; m.translation_.z = m.m[3][2];
+    return m;
 }
 
 inline Matrix4 Matrix4::perspective(float fovRad, float aspect, float nearZ, float farZ) {
     float f = 1.0f / std::tan(fovRad * 0.5f);
-    Matrix4 out;
-    memset(out.m, 0, sizeof(out.m));
-    out.m[0][0] = f / aspect;
-    out.m[1][1] = f;
-    out.m[2][2] = (farZ + nearZ) / (nearZ - farZ);
-    out.m[2][3] = -1.0f;
-    out.m[3][2] = (2.0f * farZ * nearZ) / (nearZ - farZ);
-    return out;
+    Matrix4 m;
+    memset(m.m, 0, sizeof(m.m));
+    m.m[0][0] = f / aspect;
+    m.m[1][1] = f;
+    m.m[2][2] = (farZ + nearZ) / (nearZ - farZ);
+    m.m[2][3] = -1.0f;
+    m.m[3][2] = (2.0f * farZ * nearZ) / (nearZ - farZ);
+    m.m[3][3] = 0.0f;
+    return m;
 }
 
 inline Matrix4 Matrix4::orthographic(float left, float right, float bottom, float top, float nearZ, float farZ) {
-    Matrix4 out;
-    memset(out.m, 0, sizeof(out.m));
-    out.m[0][0] = 2.0f / (right - left);
-    out.m[1][1] = 2.0f / (top - bottom);
-    out.m[2][2] = -2.0f / (farZ - nearZ);
-    out.m[3][0] = -(right + left) / (right - left);
-    out.m[3][1] = -(top + bottom) / (top - bottom);
-    out.m[3][2] = -(farZ + nearZ) / (farZ - nearZ);
-    out.m[3][3] = 1.0f;
-    return out;
+    Matrix4 m;
+    memset(m.m, 0, sizeof(m.m));
+    m.m[0][0] = 2.0f / (right - left);
+    m.m[1][1] = 2.0f / (top - bottom);
+    m.m[2][2] = -2.0f / (farZ - nearZ);
+    m.m[3][0] = -(right + left) / (right - left);
+    m.m[3][1] = -(top + bottom) / (top - bottom);
+    m.m[3][2] = -(farZ + nearZ) / (farZ - nearZ);
+    m.m[3][3] = 1.0f;
+    return m;
+}
+
+inline Matrix4 Matrix4::frustum(float left, float right, float bottom, float top, float nearZ, float farZ) {
+    Matrix4 m;
+    memset(m.m, 0, sizeof(m.m));
+    m.m[0][0] = 2.0f * nearZ / (right - left);
+    m.m[1][1] = 2.0f * nearZ / (top - bottom);
+    m.m[2][0] = (right + left) / (right - left);
+    m.m[2][1] = (top + bottom) / (top - bottom);
+    m.m[2][2] = -(farZ + nearZ) / (farZ - nearZ);
+    m.m[2][3] = -1.0f;
+    m.m[3][2] = -2.0f * farZ * nearZ / (farZ - nearZ);
+    m.m[3][3] = 0.0f;
+    return m;
+}
+
+inline float Matrix4::determinant() const {
+    return m[0][0] * (m[1][1]*(m[2][2]*m[3][3]-m[2][3]*m[3][2]) - m[1][2]*(m[2][1]*m[3][3]-m[2][3]*m[3][1]) + m[1][3]*(m[2][1]*m[3][2]-m[2][2]*m[3][1]))
+         - m[0][1] * (m[1][0]*(m[2][2]*m[3][3]-m[2][3]*m[3][2]) - m[1][2]*(m[2][0]*m[3][3]-m[2][3]*m[3][0]) + m[1][3]*(m[2][0]*m[3][2]-m[2][2]*m[3][0]))
+         + m[0][2] * (m[1][0]*(m[2][1]*m[3][3]-m[2][3]*m[3][1]) - m[1][1]*(m[2][0]*m[3][3]-m[2][3]*m[3][0]) + m[1][3]*(m[2][0]*m[3][1]-m[2][1]*m[3][0]))
+         - m[0][3] * (m[1][0]*(m[2][1]*m[3][2]-m[2][2]*m[3][1]) - m[1][1]*(m[2][0]*m[3][2]-m[2][2]*m[3][0]) + m[1][2]*(m[2][0]*m[3][1]-m[2][1]*m[3][0]));
+}
+
+inline Matrix4 Matrix4::transposed() const {
+    Matrix4 r;
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            r.m[i][j] = m[j][i];
+    r.translation_ = translation_;
+    r.rotation_ = rotation_;
+    r.scale_ = scale_;
+    return r;
+}
+
+inline Matrix4 Matrix4::inverse() const {
+    float det = static_cast<const Matrix4*>(this)->determinant();
+    if (std::abs(det) < ks::math::EPSILON) return Identity();
+    float invDet = 1.0f / det;
+    Matrix4 r;
+    auto& a = m;
+    r.m[0][0] = (a[1][1]*(a[2][2]*a[3][3]-a[2][3]*a[3][2]) - a[1][2]*(a[2][1]*a[3][3]-a[2][3]*a[3][1]) + a[1][3]*(a[2][1]*a[3][2]-a[2][2]*a[3][1])) * invDet;
+    r.m[0][1] = -(a[0][1]*(a[2][2]*a[3][3]-a[2][3]*a[3][2]) - a[0][2]*(a[2][1]*a[3][3]-a[2][3]*a[3][1]) + a[0][3]*(a[2][1]*a[3][2]-a[2][2]*a[3][1])) * invDet;
+    r.m[0][2] = (a[0][1]*(a[1][2]*a[3][3]-a[1][3]*a[3][2]) - a[0][2]*(a[1][1]*a[3][3]-a[1][3]*a[3][1]) + a[0][3]*(a[1][1]*a[3][2]-a[1][2]*a[3][1])) * invDet;
+    r.m[0][3] = -(a[0][1]*(a[1][2]*a[2][3]-a[1][3]*a[2][2]) - a[0][2]*(a[1][1]*a[2][3]-a[1][3]*a[2][1]) + a[0][3]*(a[1][1]*a[2][2]-a[1][2]*a[2][1])) * invDet;
+    r.m[1][0] = -(a[1][0]*(a[2][2]*a[3][3]-a[2][3]*a[3][2]) - a[1][2]*(a[2][0]*a[3][3]-a[2][3]*a[3][0]) + a[1][3]*(a[2][0]*a[3][2]-a[2][2]*a[3][0])) * invDet;
+    r.m[1][1] = (a[0][0]*(a[2][2]*a[3][3]-a[2][3]*a[3][2]) - a[0][2]*(a[2][0]*a[3][3]-a[2][3]*a[3][0]) + a[0][3]*(a[2][0]*a[3][2]-a[2][2]*a[3][0])) * invDet;
+    r.m[1][2] = -(a[0][0]*(a[1][2]*a[3][3]-a[1][3]*a[3][2]) - a[0][2]*(a[1][0]*a[3][3]-a[1][3]*a[3][0]) + a[0][3]*(a[1][0]*a[3][2]-a[1][2]*a[3][0])) * invDet;
+    r.m[1][3] = (a[0][0]*(a[1][2]*a[2][3]-a[1][3]*a[2][2]) - a[0][2]*(a[1][0]*a[2][3]-a[1][3]*a[2][0]) + a[0][3]*(a[1][0]*a[2][2]-a[1][2]*a[2][0])) * invDet;
+    r.m[2][0] = (a[1][0]*(a[2][1]*a[3][3]-a[2][3]*a[3][1]) - a[1][1]*(a[2][0]*a[3][3]-a[2][3]*a[3][0]) + a[1][3]*(a[2][0]*a[3][1]-a[2][1]*a[3][0])) * invDet;
+    r.m[2][1] = -(a[0][0]*(a[2][1]*a[3][3]-a[2][3]*a[3][1]) - a[0][1]*(a[2][0]*a[3][3]-a[2][3]*a[3][0]) + a[0][3]*(a[2][0]*a[3][1]-a[2][1]*a[3][0])) * invDet;
+    r.m[2][2] = (a[0][0]*(a[1][1]*a[3][3]-a[1][3]*a[3][1]) - a[0][1]*(a[1][0]*a[3][3]-a[1][3]*a[3][0]) + a[0][3]*(a[1][0]*a[3][1]-a[1][1]*a[3][0])) * invDet;
+    r.m[2][3] = -(a[0][0]*(a[1][1]*a[2][3]-a[1][3]*a[2][1]) - a[0][1]*(a[1][0]*a[2][3]-a[1][3]*a[2][0]) + a[0][3]*(a[1][0]*a[2][1]-a[1][1]*a[2][0])) * invDet;
+    r.m[3][0] = -(a[1][0]*(a[2][1]*a[3][2]-a[2][2]*a[3][1]) - a[1][1]*(a[2][0]*a[3][2]-a[2][2]*a[3][0]) + a[1][2]*(a[2][0]*a[3][1]-a[2][1]*a[3][0])) * invDet;
+    r.m[3][1] = (a[0][0]*(a[2][1]*a[3][2]-a[2][2]*a[3][1]) - a[0][1]*(a[2][0]*a[3][2]-a[2][2]*a[3][0]) + a[0][2]*(a[2][0]*a[3][1]-a[2][1]*a[3][0])) * invDet;
+    r.m[3][2] = -(a[0][0]*(a[1][1]*a[3][2]-a[1][2]*a[3][1]) - a[0][1]*(a[1][0]*a[3][2]-a[1][2]*a[3][0]) + a[0][2]*(a[1][0]*a[3][1]-a[1][1]*a[3][0])) * invDet;
+    r.m[3][3] = (a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1]) - a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0]) + a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0])) * invDet;
+    return r;
 }
 
 } // namespace ks
 
+// Vector4 (simple 4-float vector for vertex data)
 struct Vector4 {
     float x, y, z, w;
     Vector4() : x(0), y(0), z(0), w(0) {}
     Vector4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
 };
 
+// Global aliases
 using Matrix4 = ks::Matrix4;
 using Vec4 = Vector4;
 using Mat4 = Matrix4;

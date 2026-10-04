@@ -12,10 +12,10 @@
 #include <QPainter>
 #include <QApplication>
 
-#include "engine/Graphics/VulkanRenderer.h"
-#include "engine/Graphics/SceneGraph.h"
-#include "engine/Graphics/SceneObject.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/VulkanRenderer.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 
 namespace ks {
 using namespace ks;

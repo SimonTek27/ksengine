@@ -60,26 +60,30 @@ else()
 endif()
 
 set(SRC "${CMAKE_CURRENT_SOURCE_DIR}/../src")
-set(COMMON "${SRC}/core")
-set(MODULES "${SRC}/modules")
+set(ENGINE "${SRC}/engine")
+set(KS "${SRC}/sdk/kseditor")
+# Legacy name: old src/core split between engine/ and sdk/kseditor/modules/.
+set(COMMON "${KS}/modules")
+set(MODULES "${KS}/modules")
 set(PHYSICS "${MODULES}/PhysicsEditor")
-set(PLUGIN_PHYSICS "${SRC}/plugins/simulators/kunos/assettocorsa/physics")
+set(PLUGIN_PHYSICS "${KS}/plugins/simulators/kunos/assettocorsa/physics")
 
+# ${KS} (the Qt-rich overlay src/sdk/kseditor) must come before ${SRC}/
+# ${ENGINE}: quoted includes like "engine/mesh/X.h" would otherwise resolve
+# to the qt-free stub headers under src/engine and fail with namespace
+# mismatches (same rule as the kslib/kseditor targets).
 set(KS_TEST_INCLUDES
-    ${SRC} ${COMMON} ${MODULES}
-    ${SRC}/core ${SRC}/core/Config
-    ${SRC}/core/FileFormat ${SRC}/core/sys ${SRC}/core/tools ${SRC}/core/editor
-    ${SRC}/core/material ${SRC}/core/mesh ${SRC}/core/network ${SRC}/core/modmanager
-    ${SRC}/core/assets ${SRC}/core/FfbEditor ${SRC}/core/Graphics
-    ${SRC}/core/ppfiltersEditor ${SRC}/core/formatTools ${SRC}/core/Scripting
-    ${SRC}/core/AIEditor ${SRC}/core/animation ${SRC}/core/workshop
-    ${PHYSICS} ${PHYSICS}/SetupEditor ${PLUGIN_PHYSICS}
-    ${MODULES}/soundEditor ${MODULES}/modellingEditor
-    ${MODULES}/displayEditor ${MODULES}/LicensePlatesEditor
-    ${MODULES}/fontEditor ${MODULES}/ppfiltersEditor
-    ${MODULES}/FfbEditor ${MODULES}/ShowroomEditor
-    ${MODULES}/AIEditor ${MODULES}/formatTools
-    ${MODULES}/ServerConfigEditor
+    ${KS} ${SRC} ${ENGINE} ${COMMON} ${MODULES}
+    ${ENGINE}/Config ${ENGINE}/sys ${ENGINE}/Tools ${ENGINE}/tools ${ENGINE}/FileFormat
+    ${ENGINE}/assets ${ENGINE}/material ${ENGINE}/mesh ${ENGINE}/Graphics
+    ${ENGINE}/animation ${ENGINE}/physics ${ENGINE}/AI ${ENGINE}/scene
+    ${ENGINE}/Scripting ${ENGINE}/Math ${ENGINE}/Audio
+    ${COMMON}/editor ${COMMON}/modmanager ${COMMON}/tools ${COMMON}/help ${COMMON}/vcs
+    ${COMMON}/modellingEditor ${COMMON}/workshop ${COMMON}/cockpitInstruments
+    ${COMMON}/fontEditor ${COMMON}/LicensePlatesEditor ${COMMON}/ShowroomEditor
+    ${COMMON}/PaintEditor ${COMMON}/paint ${COMMON}/sound ${COMMON}/moduleManager
+    ${PHYSICS} ${PHYSICS}/telemetry ${PHYSICS}/SetupEditor ${PLUGIN_PHYSICS}
+    ${MODULES}/editor/ppfiltersEditor
 )
 
 # Bullet is configured by the top-level project, but this is an independent
@@ -131,13 +135,13 @@ macro(ks_add_test TARGET_NAME)
     set_tests_properties(${TARGET_NAME} PROPERTIES TIMEOUT 60)
 endmacro()
 
-ks_add_test(test_boolean_ops  unit/test_BooleanOps.cpp
-    ${MODULES}/modellingEditor/BooleanOps.cpp
+ks_add_test(test_boolean_ops  kseditor/test_BooleanOps.cpp
+    ${KS}/engine/mesh/BooleanOps.cpp
 )
 if(CGAL_FOUND)
     target_link_libraries(test_boolean_ops PRIVATE CGAL::CGAL)
 endif()
-ks_add_test(test_all_physics unit/test_PhysicsSimulator.cpp
+ks_add_test(test_all_physics kseditor/test_PhysicsSimulator.cpp
     ${PHYSICS}/PhysicsSimulator.cpp
     ${PHYSICS}/PhysicsProfiler.cpp
     ${PLUGIN_PHYSICS}/PacejkaTireModel.cpp
@@ -146,18 +150,18 @@ ks_add_test(test_all_physics unit/test_PhysicsSimulator.cpp
     ${PLUGIN_PHYSICS}/BrakeThermalModel.cpp
     ${PLUGIN_PHYSICS}/SuspensionModel.cpp
     ${PLUGIN_PHYSICS}/AeroModel.cpp
-    ${COMMON}/physics/PhysicsEngine.cpp
+    ${KS}/engine/physics/PhysicsEngine.cpp
     ${PLUGIN_PHYSICS}/HybridSystem.cpp
 )
-ks_add_test(test_all_ai      unit/test_AllAI.cpp
-    ${COMMON}/AIEditor/AITelemetryTrainer.cpp
-    ${COMMON}/AIEditor/AiBehaviorModel.cpp
-    ${COMMON}/AIEditor/MultiCarAI.cpp
+ks_add_test(test_all_ai      kseditor/test_AllAI.cpp
+    ${MODULES}/editor/AIEditor/AITelemetryTrainer.cpp
+    ${MODULES}/editor/AIEditor/AiBehaviorModel.cpp
+    ${MODULES}/editor/AIEditor/MultiCarAI.cpp
 )
-ks_add_test(test_ai_behavior  unit/test_AI.cpp
-    ${COMMON}/AIEditor/AiBehaviorModel.cpp
+ks_add_test(test_ai_behavior  kseditor/test_AI.cpp
+    ${MODULES}/editor/AIEditor/AiBehaviorModel.cpp
 )
-ks_add_test(test_telemetry_feedback unit/test_TelemetryFeedback.cpp
+ks_add_test(test_telemetry_feedback kseditor/test_TelemetryFeedback.cpp
     ${PHYSICS}/telemetry/TelemetryFeedbackBridge.cpp
     ${PHYSICS}/telemetry/TelemetryQmlBridge.cpp
     ${PHYSICS}/PhysicsSimulator.cpp
@@ -168,53 +172,64 @@ ks_add_test(test_telemetry_feedback unit/test_TelemetryFeedback.cpp
     ${PLUGIN_PHYSICS}/BrakeThermalModel.cpp
     ${PLUGIN_PHYSICS}/SuspensionModel.cpp
     ${PLUGIN_PHYSICS}/AeroModel.cpp
-    ${COMMON}/physics/PhysicsEngine.cpp
+    ${KS}/engine/physics/PhysicsEngine.cpp
     ${PLUGIN_PHYSICS}/HybridSystem.cpp
 )
-ks_add_test(test_physics_profiler unit/test_PhysicsProfiler.cpp
+ks_add_test(test_physics_profiler kseditor/test_PhysicsProfiler.cpp
     ${PHYSICS}/PhysicsProfiler.cpp
 )
-ks_add_test(test_laptime_validation unit/test_LapTimeValidation.cpp
+ks_add_test(test_laptime_validation kseditor/test_LapTimeValidation.cpp
     ${PHYSICS}/telemetry/LapTimeValidation.cpp
 )
-ks_add_test(test_license_plates unit/test_LicensePlates.cpp
+ks_add_test(test_license_plates kseditor/test_LicensePlates.cpp
     ${COMMON}/editor/EditorModule.cpp
     ${PHYSICS}/../LicensePlatesEditor/LicensePlateEditorModule.cpp
     ${PHYSICS}/../LicensePlatesEditor/QRCodeWriter.cpp
 )
-ks_add_test(test_display_editor unit/test_CockpitInstruments.cpp
-    ${MODULES}/displayEditor/CockpitInstruments.cpp
-    ${MODULES}/displayEditor/CockpitInstrumentsQmlBridge.cpp
-    ${MODULES}/displayEditor/LuaExpressionEvaluator.cpp
+ks_add_test(test_display_editor kseditor/test_CockpitInstruments.cpp
+    ${MODULES}/cockpitInstruments/CockpitInstruments.cpp
+    ${MODULES}/cockpitInstruments/CockpitInstrumentsQmlBridge.cpp
+    ${MODULES}/cockpitInstruments/LuaExpressionEvaluator.cpp
 )
-ks_add_test(test_ppfilter_color_grading unit/test_PPFilterColorGrading.cpp
-    ${COMMON}/ppfiltersEditor/PPFilterColorGrading.cpp
+ks_add_test(test_ppfilter_color_grading kseditor/test_PPFilterColorGrading.cpp
+    ${MODULES}/editor/ppfiltersEditor/PPFilterColorGrading.cpp
 )
-ks_add_test(test_modmanager_deps unit/test_ModManagerDeps.cpp)
-ks_add_test(test_modmanager_features unit/test_ModManagerFeatures.cpp
+ks_add_test(test_modmanager_deps kseditor/test_ModManagerDeps.cpp)
+ks_add_test(test_modmanager_features kseditor/test_ModManagerFeatures.cpp
     ${COMMON}/modmanager/ModCollection.cpp
 )
-ks_add_test(test_font_generator unit/test_FontGenerator.cpp)
-ks_add_test(test_audio_effects_advanced unit/test_AudioEffectsAdvanced.cpp)
-ks_add_test(test_content_repair unit/test_ContentRepair.cpp
+# FontAtlasGenerator/AtlasConfig (modules/fontEditor/FontGenerator.h) no
+# longer exist anywhere in src — the font system was refactored to the
+# FontCreator API. Test target disabled until rewritten against it.
+# ks_add_test(test_font_generator kseditor/test_FontGenerator.cpp)
+ks_add_test(test_audio_effects_advanced kseditor/test_AudioEffectsAdvanced.cpp)
+ks_add_test(test_content_repair kseditor/test_ContentRepair.cpp
     ${COMMON}/modmanager/ContentRepair.cpp
     ${COMMON}/modmanager/ContentRepairTool.cpp
-    ${COMMON}/sys/LogManager.cpp
-    ${COMMON}/editor/EditorModule.cpp
-    ${COMMON}/editor/EditorConfig.cpp
-    ${COMMON}/assets/Paths.cpp
+    ${KS}/engine/sys/LogManager.cpp
+    ${KS}/engine/Config/EditorConfig.cpp
+    ${MODULES}/editor/EditorModule.cpp
+    ${ENGINE}/assets/Paths.cpp
+    ${ENGINE}/assets/SimInstallDetector.cpp
+    ${KS}/plugins/simulators/kunos/assettocorsa/KsAssettoCorsaContentPath.cpp
 )
-ks_add_test(test_csp_config unit/test_CspConfig.cpp
-    ${COMMON}/Config/CspConfigParser.cpp
+ks_add_test(test_csp_config kseditor/test_CspConfig.cpp
+    ${KS}/engine/Config/CspConfigParser.cpp
 )
-ks_add_test(test_workshop unit/test_Workshop.cpp
+ks_add_test(test_kn5_parser kseditor/test_KN5Parser.cpp
+    ${KS}/plugins/simulators/kunos/assettocorsa/acFiles/KN5Parser.cpp
+    ${KS}/plugins/simulators/kunos/assettocorsa/acFiles/KN5Baker.cpp
+    ${KS}/plugins/simulators/kunos/assettocorsa/acFiles/KN5Decrypt.cpp
+    ${ENGINE}/FileFormat/Kn5Reader.cpp
+)
+ks_add_test(test_workshop kseditor/test_Workshop.cpp
     ${COMMON}/workshop/WorkshopManager.cpp
-    ${COMMON}/sys/LogManager.cpp
+    ${KS}/engine/sys/LogManager.cpp
 )
-ks_add_test(test_physics_mesh unit/test_PhysicsMeshGenerator.cpp
+ks_add_test(test_physics_mesh kseditor/test_PhysicsMeshGenerator.cpp
     ${MODULES}/modellingEditor/PhysicsMeshGenerator.cpp
-    ${COMMON}/mesh/MeshOperations.cpp
-    ${MODULES}/modellingEditor/BooleanOps.cpp
+    ${KS}/engine/mesh/MeshOperations.cpp
+    ${KS}/engine/mesh/BooleanOps.cpp
 )
 if(CGAL_FOUND)
     target_link_libraries(test_physics_mesh PRIVATE CGAL::CGAL)
@@ -236,138 +251,138 @@ if(HAS_VHACD)
     # VHACD depends on Bullet (LinearMath / ConvexHullComputer)
 endif()
 # Test subdivision - uses fallback when OpenSubdiv not available
-ks_add_test(test_subdivision unit/test_SubdivisionSurface.cpp
-    ${COMMON}/mesh/SubdivisionSurface.cpp
+ks_add_test(test_subdivision kseditor/test_SubdivisionSurface.cpp
+    ${KS}/engine/mesh/SubdivisionSurface.cpp
 )
-ks_add_test(test_texture_paint unit/test_TexturePaintSystem.cpp
-    ${COMMON}/material/TexturePaintSystem.cpp
+ks_add_test(test_texture_paint kseditor/test_TexturePaintSystem.cpp
+    ${KS}/engine/material/TexturePaintSystem.cpp
 )
-ks_add_test(test_lod_generator unit/test_LODGenerator.cpp
-    ${COMMON}/mesh/MeshOperations.cpp
-    ${MODULES}/modellingEditor/BooleanOps.cpp
+ks_add_test(test_lod_generator kseditor/test_LODGenerator.cpp
+    ${KS}/engine/mesh/MeshOperations.cpp
+    ${KS}/engine/mesh/BooleanOps.cpp
 )
 if(CGAL_FOUND)
     target_link_libraries(test_lod_generator PRIVATE CGAL::CGAL)
 endif()
-ks_add_test(test_asset_dedup unit/test_AssetDedup.cpp
-    ${COMMON}/assets/AssetManager.cpp
-    ${COMMON}/assets/AssetFileWatcher.cpp
-    ${COMMON}/assets/AssetSearchEngine.cpp
+ks_add_test(test_asset_dedup kseditor/test_AssetDedup.cpp
+    ${KS}/engine/assets/AssetManager.cpp
+    ${KS}/engine/assets/AssetFileWatcher.cpp
+    ${KS}/engine/assets/AssetSearchEngine.cpp
 )
-ks_add_test(test_sculpt_mode_minimal unit/test_SculptMode_minimal.cpp
+ks_add_test(test_sculpt_mode_minimal kseditor/test_SculptMode_minimal.cpp
 )
 
-ks_add_test(test_sculpt_mode unit/test_SculptMode.cpp
-    ${COMMON}/mesh/SculptMode.cpp
+ks_add_test(test_sculpt_mode kseditor/test_SculptMode.cpp
+    ${KS}/engine/mesh/SculptMode.cpp
 )
-ks_add_test(test_mesh_operations unit/test_MeshOperations.cpp
-    ${COMMON}/mesh/MeshOperations.cpp
+ks_add_test(test_mesh_operations kseditor/test_MeshOperations.cpp
+    ${KS}/engine/mesh/MeshOperations.cpp
 )
 if(CGAL_FOUND)
-    target_sources(test_mesh_operations PRIVATE ${MODULES}/modellingEditor/BooleanOps.cpp)
+    target_sources(test_mesh_operations PRIVATE ${KS}/engine/mesh/BooleanOps.cpp)
     target_link_libraries(test_mesh_operations PRIVATE CGAL::CGAL)
 endif()
-ks_add_test(test_modifiers unit/test_Modifiers.cpp
-    ${COMMON}/mesh/MeshOperations.cpp
-    ${COMMON}/mesh/ModifierSystem.cpp
-    ${COMMON}/mesh/SkeletonSystem.cpp
-    ${COMMON}/mesh/SubdivisionSurface.cpp
+ks_add_test(test_modifiers kseditor/test_Modifiers.cpp
+    ${KS}/engine/mesh/MeshOperations.cpp
+    ${KS}/engine/mesh/ModifierSystem.cpp
+    ${KS}/engine/mesh/SkeletonSystem.cpp
+    ${KS}/engine/mesh/SubdivisionSurface.cpp
     ${MODULES}/modellingEditor/AdditionalModifiers.cpp
 )
 target_include_directories(test_modifiers PRIVATE ${MODULES}/modellingEditor)
 if(CGAL_FOUND)
-    target_sources(test_modifiers PRIVATE ${MODULES}/modellingEditor/BooleanOps.cpp)
+    target_sources(test_modifiers PRIVATE ${KS}/engine/mesh/BooleanOps.cpp)
     target_link_libraries(test_modifiers PRIVATE CGAL::CGAL)
 endif()
-ks_add_test(test_advanced_sculpt unit/test_AdvancedSculpt.cpp
-    ${COMMON}/mesh/AdvancedSculpt.cpp
-    ${COMMON}/mesh/SculptMode.cpp
+ks_add_test(test_advanced_sculpt kseditor/test_AdvancedSculpt.cpp
+    ${KS}/engine/mesh/AdvancedSculpt.cpp
+    ${KS}/engine/mesh/SculptMode.cpp
 )
-ks_add_test(test_constraints unit/test_Constraints.cpp
+ks_add_test(test_constraints kseditor/test_Constraints.cpp
     ${MODULES}/modellingEditor/ConstraintSystem.cpp
-    ${COMMON}/Graphics/SceneGraph.cpp
-    ${COMMON}/Graphics/SceneObject.cpp
+    ${KS}/engine/Graphics/SceneGraph.cpp
+    ${KS}/engine/Graphics/SceneObject.cpp
 )
-ks_add_test(test_controller_system unit/test_ControllerSystem.cpp
+ks_add_test(test_controller_system kseditor/test_ControllerSystem.cpp
     ${MODULES}/modellingEditor/ControllerSystem.cpp
     ${MODULES}/modellingEditor/SceneParamAccess.cpp
-    ${COMMON}/Graphics/SceneGraph.cpp
-    ${COMMON}/Graphics/SceneObject.cpp
+    ${KS}/engine/Graphics/SceneGraph.cpp
+    ${KS}/engine/Graphics/SceneObject.cpp
 )
-ks_add_test(test_wire_parameters unit/test_WireParameterSystem.cpp
+ks_add_test(test_wire_parameters kseditor/test_WireParameterSystem.cpp
     ${MODULES}/modellingEditor/WireParameterSystem.cpp
     ${MODULES}/modellingEditor/SceneParamAccess.cpp
-    ${COMMON}/Graphics/SceneGraph.cpp
-    ${COMMON}/Graphics/SceneObject.cpp
+    ${KS}/engine/Graphics/SceneGraph.cpp
+    ${KS}/engine/Graphics/SceneObject.cpp
 )
-ks_add_test(test_skin_wrap unit/test_SkinWrapSystem.cpp
+ks_add_test(test_skin_wrap kseditor/test_SkinWrapSystem.cpp
     ${MODULES}/modellingEditor/SkinWrapSystem.cpp
-    ${COMMON}/Graphics/SceneGraph.cpp
-    ${COMMON}/Graphics/SceneObject.cpp
+    ${KS}/engine/Graphics/SceneGraph.cpp
+    ${KS}/engine/Graphics/SceneObject.cpp
 )
-ks_add_test(test_ray_trace unit/test_RayTrace.cpp
+ks_add_test(test_ray_trace kseditor/test_RayTrace.cpp
     ${MODULES}/modellingEditor/RayTraceRenderer.cpp
 )
-ks_add_test(test_light_system unit/test_LightSystem.cpp
+ks_add_test(test_light_system kseditor/test_LightSystem.cpp
     ${MODULES}/modellingEditor/LightSystem.cpp
 )
-ks_add_test(test_bake_texture unit/test_BakeTexture.cpp
+ks_add_test(test_bake_texture kseditor/test_BakeTexture.cpp
     ${MODULES}/modellingEditor/TextureBaker.cpp
     ${MODULES}/modellingEditor/Geometry3D.cpp
 )
-ks_add_test(test_animation_system unit/test_AnimationSystem.cpp
-    ${COMMON}/animation/AnimationSystem.cpp
+ks_add_test(test_animation_system kseditor/test_AnimationSystem.cpp
+    ${KS}/engine/animation/AnimationSystem.cpp
     ${COMMON}/editor/TimelineEditor.cpp
 )
-ks_add_test(test_material_system unit/test_MaterialSystem.cpp
-    ${COMMON}/material/MaterialSystem.cpp
+ks_add_test(test_material_system kseditor/test_MaterialSystem.cpp
+    ${KS}/engine/material/MaterialSystem.cpp
 )
-ks_add_test(test_node_material_editor unit/test_NodeMaterialEditor.cpp
+ks_add_test(test_node_material_editor kseditor/test_NodeMaterialEditor.cpp
     ${MODULES}/modellingEditor/NodeMaterialEditor.cpp
 )
-ks_add_test(test_usda_exporter unit/test_USDAExporter.cpp
-    ${COMMON}/FileFormat/USDAExporter.cpp
+ks_add_test(test_usda_exporter kseditor/test_USDAExporter.cpp
+    ${KS}/engine/FileFormat/USDAExporter.cpp
 )
-ks_add_test(test_theme_system unit/test_ThemeSystem.cpp
-    ${COMMON}/tools/ThemeSystem.cpp
+ks_add_test(test_theme_system kseditor/test_ThemeSystem.cpp
+    ${KS}/engine/Tools/ThemeSystem.cpp
 )
-ks_add_test(test_undo_redo unit/test_UndoRedo.cpp
-    ${COMMON}/sys/UndoStack.cpp
+ks_add_test(test_undo_redo kseditor/test_UndoRedo.cpp
+    ${KS}/engine/sys/UndoStack.cpp
 )
-ks_add_test(test_validation_system unit/test_ValidationSystem.cpp
-    ${COMMON}/tools/QualitySystem.cpp
+ks_add_test(test_validation_system kseditor/test_ValidationSystem.cpp
+    ${KS}/engine/Tools/QualitySystem.cpp
 )
-ks_add_test(test_state_machine unit/test_StateMachine.cpp
-    ${COMMON}/sys/StateMachine.cpp
+ks_add_test(test_state_machine kseditor/test_StateMachine.cpp
+    ${KS}/engine/sys/StateMachine.cpp
 )
-ks_add_test(test_command_palette unit/test_CommandPalette.cpp
+ks_add_test(test_command_palette kseditor/test_CommandPalette.cpp
     ${MODULES}/modellingEditor/CommandPalette.cpp
 )
-ks_add_test(test_cache_manager unit/test_CacheManager.cpp
-    ${COMMON}/tools/CacheManager.cpp
+ks_add_test(test_cache_manager kseditor/test_CacheManager.cpp
+    ${KS}/engine/Tools/CacheManager.cpp
 )
-ks_add_test(test_settings_system unit/test_SettingsSystem.cpp
-    ${COMMON}/sys/SettingsManager.cpp
+ks_add_test(test_settings_system kseditor/test_SettingsSystem.cpp
+    ${KS}/sys/SettingsManager.cpp
 )
-ks_add_test(test_backup_system unit/test_BackupSystem.cpp
-    ${COMMON}/tools/BackupSystem.cpp
+ks_add_test(test_backup_system kseditor/test_BackupSystem.cpp
+    ${KS}/engine/Tools/BackupSystem.cpp
 )
-ks_add_test(test_recent_files unit/test_RecentFilesManager.cpp
-    ${COMMON}/assets/RecentFilesManager.cpp
+ks_add_test(test_recent_files kseditor/test_RecentFilesManager.cpp
+    ${KS}/engine/assets/RecentFilesManager.cpp
 )
-ks_add_test(test_notification_system unit/test_NotificationSystem.cpp
-    ${COMMON}/tools/NotificationSystem.cpp
+ks_add_test(test_notification_system kseditor/test_NotificationSystem.cpp
+    ${KS}/engine/Tools/NotificationSystem.cpp
 )
-ks_add_test(test_auto_save unit/test_AutoSave.cpp
-    ${COMMON}/tools/AutoSave.cpp
+ks_add_test(test_auto_save kseditor/test_AutoSave.cpp
+    ${KS}/engine/Tools/AutoSave.cpp
 )
-ks_add_test(test_showroom_editor unit/test_ShowroomEditor.cpp
+ks_add_test(test_showroom_editor kseditor/test_ShowroomEditor.cpp
     ${MODULES}/ShowroomEditor/ShowroomEditorModule.cpp
     ${MODULES}/ShowroomEditor/ShowroomSystem.cpp
     ${MODULES}/ShowroomEditor/ShowroomViewport3D.cpp
     ${COMMON}/editor/EditorModule.cpp
-    ${COMMON}/editor/EditorConfig.cpp
-    ${COMMON}/sys/LogManager.cpp
+    ${KS}/engine/Config/EditorConfig.cpp
+    ${KS}/engine/sys/LogManager.cpp
 )
 
 # kseditor_lib is a monolithic static library, so any test executable may pull in
@@ -430,7 +445,7 @@ endforeach()
 # Plugin smoke test — loads ksAssettoCorsa.dll at runtime via QLibrary and
 # verifies all C API exports. Does NOT link kseditor_lib; purely dynamic.
 if(WIN32)
-    add_executable(test_ksAssettoCorsa unit/test_ksAssettoCorsa.cpp)
+    add_executable(test_ksAssettoCorsa kseditor/test_ksAssettoCorsa.cpp)
     target_link_libraries(test_ksAssettoCorsa PRIVATE Qt6::Core Qt6::Test)
     target_include_directories(test_ksAssettoCorsa PRIVATE ${KS_TEST_INCLUDES})
     target_compile_definitions(test_ksAssettoCorsa PRIVATE WINVER=0x0A00 _WIN32_WINNT=0x0A00)

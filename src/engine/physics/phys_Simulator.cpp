@@ -1,5 +1,6 @@
 #include "phys_Simulator.h"
 #include "PhysicsLogger.h"
+#include "../../Config/IniFile.h"
 
 #include <algorithm>
 #include <array>
@@ -404,7 +405,29 @@ void phys_Simulator::loadEngineFromIni(const std::string& path) {
     m_maxRpm = m_engine.getConfig().maxRPM;
     m_enginePowerKw = m_engine.getConfig().peakPower;
 }
-void phys_Simulator::loadTyresFromIni(const std::string& /*path*/) {}
+void phys_Simulator::loadTyresFromIni(const std::string& path) {
+    ks::config::IniFile ini;
+    if (!ini.load(path)) return;
+    // Slip-curve summary keys (same names the Qt loader probes).
+    physics::TireSlipCurve c = m_tireCurve;
+    if (ini.contains("", "LATERAL_STIFFNESS"))
+        c.stiffnessLateral = ini.getDouble("", "LATERAL_STIFFNESS", c.stiffnessLateral);
+    if (ini.contains("", "LONGITUDINAL_STIFFNESS"))
+        c.stiffnessLongitudinal = ini.getDouble("", "LONGITUDINAL_STIFFNESS", c.stiffnessLongitudinal);
+    if (ini.contains("", "FRICTION"))
+        c.peakLateralMu = ini.getDouble("", "FRICTION", c.peakLateralMu);
+    else if (ini.contains("", "GRIP"))
+        c.peakLateralMu = ini.getDouble("", "GRIP", c.peakLateralMu);
+    if (ini.contains("", "FRICTION") || ini.contains("", "GRIP"))
+        c.peakLongitudinalMu = c.peakLateralMu;
+    if (ini.contains("", "PEAK_SLIP_ANGLE"))
+        c.peakSlipAngle = ini.getDouble("", "PEAK_SLIP_ANGLE", c.peakSlipAngle);
+    if (ini.contains("", "PEAK_SLIP_RATIO"))
+        c.peakSlipRatio = ini.getDouble("", "PEAK_SLIP_RATIO", c.peakSlipRatio);
+    setTireModel(c);
+    // Full A/B/C coefficient sets straight onto the per-wheel Pacejka models.
+    for (int w = 0; w < 4; ++w) m_tires.pacejka(w).loadFromIni(path);
+}
 void phys_Simulator::loadDrivetrainFromIni(const std::string& path) {
     m_diff.loadFromIni(path);
 }

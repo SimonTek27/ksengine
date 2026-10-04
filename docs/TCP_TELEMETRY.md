@@ -1,104 +1,104 @@
-# Comunicazione TCP in ksim — esplorazione
+# TCP communication in ksim — exploration
 
-## Stato repo (oggi)
+## Repo status (today)
 
-| Canale | Esiste | Uso |
+| Channel | Exists | Use |
 |--------|--------|-----|
-| **Shared memory** | Sì | Overlay locali (layout AC-compat) |
-| **UDP out** | Sì (`UdpTelemetryBridge`, :20777) | Telemetria best-effort LAN |
-| **UDP in** | Sì (`UdpTelemetryListener`, :20747) | Stream esterni |
-| **yojimbo / netcode** | Parziale (`NetworkManager`) | Multiplayer game state |
-| **TCP telemetria** | **No** (fino a questo doc) | — |
-| **MQTT** | Stub (`MqttClient`) | Non produzione |
+| **Shared memory** | Yes | Local overlays (AC-compatible layout) |
+| **UDP out** | Yes (`UdpTelemetryBridge`, :20777) | Best-effort LAN telemetry |
+| **UDP in** | Yes (`UdpTelemetryListener`, :20747) | External streams |
+| **yojimbo / netcode** | Partial (`NetworkManager`) | Multiplayer game state |
+| **TCP telemetry** | **No** (up to this doc) | — |
+| **MQTT** | Stub (`MqttClient`) | Not production |
 
-Nel codice **non** c’era ancora un publisher TCP dedicato alla telemetria.
-Il multiplayer punta su **UDP affidabile applicativo** (yojimbo), non su TCP grezzo.
+The code **did not** yet contain a dedicated TCP publisher for telemetry.
+Multiplayer relies on **application-level reliable UDP** (yojimbo), not raw TCP.
 
 ---
 
-## Confronto canali (sim racing)
+## Channel comparison (sim racing)
 
 | | Shared memory | UDP | TCP |
 |--|---------------|-----|-----|
-| **Latenza** | Minima (stesso PC) | Bassa | Più alta (handshake, buffer) |
-| **Affidabilità** | N/A locale | No (perdite ok) | Sì (ordine + ritrasmissione) |
-| **Remoto** | No | Sì | Sì |
-| **Multi-reader** | Eccellente | Broadcast/multicast | 1 connessione = 1 client (o fan-out server) |
-| **Rate tipico** | 100–1000 Hz | 20–60 Hz | 10–60 Hz |
-| **Casi d’uso** | Dash locale, FFB app | Phone dash, log leggeri | Logger remoto, tool analysis, relay WAN |
+| **Latency** | Minimal (same PC) | Low | Higher (handshake, buffering) |
+| **Reliability** | N/A local | No (losses ok) | Yes (ordering + retransmission) |
+| **Remote** | No | Yes | Yes |
+| **Multi-reader** | Excellent | Broadcast/multicast | 1 connection = 1 client (or server fan-out) |
+| **Typical rate** | 100–1000 Hz | 20–60 Hz | 10–60 Hz |
+| **Use cases** | Local dash, FFB apps | Phone dash, light logging | Remote logger, analysis tools, WAN relay |
 
-Industry practice: **SM** e **UDP** dominano la telemetria live; **TCP** compare per
-logging affidabile, remote coaching, o bridge “SM → rete”.
-
----
-
-## Quando usare TCP in ksim
-
-1. **Logger remoto** su altro PC senza tollerare buchi nei sample
-2. **Tool analysis** che fa request/response (es. “dammi ultimo giro”)
-3. **Relay** che legge SM e inoltra a cloud / coach
-4. **Non** per FFB o HUD a 1 kHz (troppa jitter)
-
-## Quando non usarlo
-
-- FFB / motion (preferire SM o UDP locale)
-- Multiplayer gameplay (yojimbo già orientato a lag compensation)
-- Broadcast a N app sullo stesso host (SM vince)
+Industry practice: **SM** and **UDP** dominate live telemetry; **TCP** shows up for
+reliable logging, remote coaching, or an "SM → network" bridge.
 
 ---
 
-## Design proposto: `TcpTelemetryBridge`
+## When to use TCP in ksim
+
+1. **Remote logger** on another PC that cannot tolerate gaps in samples
+2. **Analysis tool** doing request/response (e.g. "give me the last lap")
+3. **Relay** reading SM and forwarding to cloud / coach
+4. **Not** for FFB or a 1 kHz HUD (too much jitter)
+
+## When not to use it
+
+- FFB / motion (prefer local SM or UDP)
+- Multiplayer gameplay (yojimbo already targets lag compensation)
+- Broadcast to N apps on the same host (SM wins)
+
+---
+
+## Proposed design: `TcpTelemetryBridge`
 
 ```
 SimulationLoop::tick
-  → publishSharedMemory()   // locale
+  → publishSharedMemory()   // local
   → publishUdpTelemetry()   // best-effort
-  → publishTcpTelemetry()   // solo se client connesso
+  → publishTcpTelemetry()   // only if a client is connected
 ```
 
-### Protocollo (v1)
+### Protocol (v1)
 
-Stream **TCP**, little-endian, messaggi con length-prefix:
+**TCP** stream, little-endian, length-prefixed messages:
 
 ```
 [uint32 le length][payload]
 
-payload = stesso layout di UdpTelemPacket (magic KSIM, version 1)
-   oppure
-payload = JSON UTF-8 (se jsonMode)
+payload = same layout as UdpTelemPacket (magic KSIM, version 1)
+   or
+payload = UTF-8 JSON (if jsonMode)
 ```
 
-- Server: ascolta `0.0.0.0:20778` (default)
-- Accetta **un client** (v1); disconnect → torna in listen
-- Rate limit: invia al massimo ogni N ms (default 16 ms ≈ 60 Hz) anche se il tick è 1 kHz
+- Server: listens on `0.0.0.0:20778` (default)
+- Accepts **one client** (v1); on disconnect → back to listen
+- Rate limit: send at most every N ms (default 16 ms ≈ 60 Hz) even if the tick is 1 kHz
 
-### Porte ksim (riepilogo)
+### ksim ports (summary)
 
-| Porta | Protocollo | Direzione |
+| Port | Protocol | Direction |
 |-------|------------|-----------|
-| 20747 | UDP | In (listener esterno) |
-| 20777 | UDP | Out telemetria |
-| 20778 | TCP | Out telemetria affidabile |
+| 20747 | UDP | In (external listener) |
+| 20777 | UDP | Telemetry out |
+| 20778 | TCP | Reliable telemetry out |
 
 ---
 
-## Multiplayer vs telemetria
+## Multiplayer vs telemetry
 
 | | Game net (yojimbo) | Telemetry TCP |
 |--|--------------------|---------------|
-| Payload | Input, car state, session | Solo telemetria lettura |
-| QoS | Lag compensation, snapshot | Stream monotono sample |
-| Sicurezza | Auth netcode | Bind localhost o LAN trusted |
+| Payload | Input, car state, session | Read-only telemetry |
+| QoS | Lag compensation, snapshot | Monotonic sample stream |
+| Security | Netcode auth | Bind localhost or trusted LAN |
 
-Non mescolare i due: il client di gara non deve dipendere dal canale telemetria.
+Do not mix the two: the race client must not depend on the telemetry channel.
 
 ---
 
-## Roadmap TCP
+## TCP roadmap
 
-| Step | Descrizione |
+| Step | Description |
 |------|-------------|
-| **P0** | Server TCP + length-prefix + `UdpTelemPacket` (questo commit) |
+| **P0** | TCP server + length-prefix + `UdpTelemPacket` (this commit) |
 | P1 | Multi-client fan-out |
-| P2 | Comandi client (`PING`, `SET_RATE`, `GET_STATIC`) |
-| P3 | TLS opzionale / token auth per WAN |
+| P2 | Client commands (`PING`, `SET_RATE`, `GET_STATIC`) |
+| P3 | Optional TLS / token auth for WAN |

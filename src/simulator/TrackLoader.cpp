@@ -1,9 +1,9 @@
 #include "TrackLoader.h"
 #include "engine/AI/AiFileReader.h"
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -14,10 +14,19 @@ namespace ks::sim {
 
 namespace {
 
-constexpr uint32_t kKn5Magic = 0x346E6B73;
-constexpr uint32_t kKn5MinVersion = 4;
-constexpr uint32_t kKn5MaxVersion = 5;
-constexpr std::size_t kKn5HeaderBytes = 13 * sizeof(uint32_t);
+// Real Assetto Corsa KN5 header, verified against ~2770 content files (the
+// format's magic is the ASCII string "sc6969" — NOT the "skn4" dword this
+// file previously assumed, which rejected every real track). Full layout:
+// src/engine/FileFormat/Kn5Reader.h. Header-only checks here: loadTrack
+// validates before the heavier mesh pipeline ever sees the file.
+constexpr char kKn5Magic[] = "sc6969";
+constexpr std::size_t kKn5MagicBytes = 6;
+constexpr int32_t kKn5MinVersion = 4;
+constexpr int32_t kKn5MaxVersion = 6;
+constexpr int32_t kKn5MaxTextureCount = 100000;
+// magic + version + textureCount (v4/v5 header; v6 adds one extra int32,
+// which is bounds-checked by the read below).
+constexpr std::size_t kKn5MinBytes = kKn5MagicBytes + 2 * sizeof(int32_t);
 
 bool hasKn5Extension(const fs::path& path)
 {
@@ -54,8 +63,10 @@ TrackData TrackLoader::loadTrackFolder(const std::string& trackDirectory)
     track.kn5HeaderValidated = true;
 
     std::string splinePath = findAiSpline(trackDirectory);
-    if (!splinePath.empty())
+    if (!splinePath.empty()) {
+        track.aiSplinePath = splinePath;
         track.aiSplineLoaded = loadAiSpline(track, splinePath);
+    }
 
     loadTrackIni(track, trackDirectory);
     return track;
@@ -71,45 +82,57 @@ TrackData TrackLoader::loadKn5File(const std::string& kn5Path)
 
     std::error_code error;
     const uint64_t fileSize = fs::file_size(kn5Path, error);
-    if (error || fileSize < kKn5HeaderBytes) {
+    if (error || fileSize < kKn5MinBytes) {
         m_lastError = "KN5 header is missing or truncated: " + kn5Path;
         return track;
     }
 
     std::ifstream input(kn5Path, std::ios::binary);
-    std::array<uint32_t, 13> header{};
-    for (uint32_t& field : header) {
-        unsigned char bytes[4];
-        if (!input.read(reinterpret_cast<char*>(bytes), sizeof(bytes))) {
-            m_lastError = "Failed to read KN5 header: " + kn5Path;
-            return track;
-        }
-        field = static_cast<uint32_t>(bytes[0]) |
-                (static_cast<uint32_t>(bytes[1]) << 8) |
-                (static_cast<uint32_t>(bytes[2]) << 16) |
-                (static_cast<uint32_t>(bytes[3]) << 24);
+    char magic[kKn5MagicBytes];
+    if (!input.read(magic, sizeof(magic))) {
+        m_lastError = "Failed to read KN5 header: " + kn5Path;
+        return track;
     }
-
-    if (header[0] != kKn5Magic) {
+    if (std::memcmp(magic, kKn5Magic, sizeof(magic)) != 0) {
         m_lastError = "Invalid KN5 magic: " + kn5Path;
         return track;
     }
-    if (header[1] < kKn5MinVersion || header[1] > kKn5MaxVersion) {
-        m_lastError = "Unsupported KN5 version " + std::to_string(header[1]) +
+
+    // KN5 is little-endian; assemble explicitly rather than reinterpret_cast
+    // so the check stays correct on any host byte order.
+    auto readHeaderInt = [&input](int32_t& value) -> bool {
+        unsigned char bytes[4];
+        if (!input.read(reinterpret_cast<char*>(bytes), sizeof(bytes)))
+            return false;
+        value = static_cast<int32_t>(
+            static_cast<uint32_t>(bytes[0]) |
+            (static_cast<uint32_t>(bytes[1]) << 8) |
+            (static_cast<uint32_t>(bytes[2]) << 16) |
+            (static_cast<uint32_t>(bytes[3]) << 24));
+        return true;
+    };
+
+    int32_t version = 0;
+    if (!readHeaderInt(version)) {
+        m_lastError = "Failed to read KN5 version: " + kn5Path;
+        return track;
+    }
+    if (version < kKn5MinVersion || version > kKn5MaxVersion) {
+        m_lastError = "Unsupported KN5 version " + std::to_string(version) +
                       ": " + kn5Path;
         return track;
     }
-    if (header[5] == 0) {
-        m_lastError = "KN5 contains no nodes: " + kn5Path;
-        return track;
+    if (version > 5) { // v6+ carries one extra header int32 before the counts
+        int32_t extra = 0;
+        if (!readHeaderInt(extra)) {
+            m_lastError = "Failed to read KN5 header: " + kn5Path;
+            return track;
+        }
     }
-
-    if ((header[6] != 0 && header[6] > fileSize) ||
-        header[7] > fileSize || header[8] > fileSize ||
-        header[9] > fileSize || header[10] > fileSize ||
-        static_cast<uint64_t>(header[9]) + header[11] > fileSize ||
-        static_cast<uint64_t>(header[10]) + header[12] > fileSize) {
-        m_lastError = "KN5 header points outside the file: " + kn5Path;
+    int32_t textureCount = 0;
+    if (!readHeaderInt(textureCount) || textureCount < 0 ||
+        textureCount > kKn5MaxTextureCount) {
+        m_lastError = "KN5 texture count is implausible: " + kn5Path;
         return track;
     }
 
@@ -212,8 +235,53 @@ bool TrackLoader::loadTrackIni(TrackData& track, const std::string& trackDir)
         ini = fs::path(trackDir) / "surfaces.ini";
     if (!fs::exists(ini))
         return false;
-    (void)track;
-    return true;
+
+    std::ifstream in(ini);
+    if (!in) return false;
+
+    std::string line, key;
+    float friction = 1.0f;
+    auto upper = [](std::string s) {
+        for (char& ch : s)
+            ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        return s;
+    };
+    auto flush = [&]() {
+        if (key.empty()) return;
+        track.surfaceFriction[upper(key)] = friction;
+        const std::string ku = upper(key);
+        if (ku == "ROAD" || ku == "ASPHALT") track.baseGrip = friction;
+        key.clear();
+        friction = 1.0f;
+    };
+    auto trim = [](std::string& s) {
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    };
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        auto sc = line.find(';');
+        if (sc != std::string::npos) line = line.substr(0, sc);
+        auto hc = line.find('#');
+        if (hc != std::string::npos) line = line.substr(0, hc);
+        trim(line);
+        if (line.empty()) continue;
+        if (line.front() == '[') { flush(); continue; }
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+        trim(k); trim(v);
+        const std::string ku = upper(k);
+        try {
+            if (ku == "KEY" || ku == "NAME") key = v;
+            else if (ku == "FRICTION" || ku == "GRIP") friction = std::stof(v);
+        } catch (...) {
+            continue;
+        }
+    }
+    flush();
+    track.surfacesLoaded = !track.surfaceFriction.empty();
+    return track.surfacesLoaded;
 }
 
 } // namespace ks::sim

@@ -20,15 +20,16 @@
 #include "../resources/ui/FileTreeWidget.h"
 #include "../resources/ui/ProjectSearchWidget.h"
 #include "../resources/ui/TerminalWidget.h"
-#include "core/vcs/GitStatusWidget.h"
-#include "sys/ModuleManager.h"
+#include "modules/vcs/GitStatusWidget.h"
+#include "modules/moduleManager/ModuleManager.h"
 #include "sys/SettingsManager.h"
 #include "../resources/ui/RibbonUI.h"
-#include "core/tools/TemplateManager.h"
-#include "core/tools/FileDiffEngine.h"
-#include "core/tools/AutoSave.h"
-#include "core/help/HelpSystem.h"
-#include "core/help/HelpBrowser.h"
+#include "modules/tools/TemplateManager.h"
+#include "modules/tools/FileDiffEngine.h"
+#include "modules/tools/AutoSave.h"
+#include "modules/tools/CrashRecovery.h"
+#include "modules/help/HelpSystem.h"
+#include "modules/help/HelpBrowser.h"
 
 namespace Constants {
     inline const QString PROJECT_EXTENSION = ".ksep";

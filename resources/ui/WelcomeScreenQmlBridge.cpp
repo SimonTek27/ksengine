@@ -1,5 +1,5 @@
 #include "WelcomeScreenQmlBridge.h"
-#include "core/help/HelpSystem.h"
+#include "modules/help/HelpSystem.h"
 #include <QFileInfo>
 #include <QDir>
 #include <QGuiApplication>

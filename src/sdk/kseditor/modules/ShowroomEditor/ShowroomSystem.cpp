@@ -1,7 +1,7 @@
 #include "ShowroomSystem.h"
 #include "ShowroomViewport3D.h"
-#include "engine/FileFormat/INIParser.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/FileFormat/INIParser.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QFile>
 #include <QDir>
 #include <QStandardPaths>

@@ -1,9 +1,9 @@
 #include "EditorApp.h"
 #include "sdk/kseditor/modules/modellingEditor/3DModeling.h"
 #include "sdk/kseditor/modules/modellingEditor/3DModeling_io.h"
-#include "engine/physics/PhysicsEngine.h"
-#include "engine/physics/VehiclePhysics.h"
-#include "engine/physics/TrackPhysics.h"
+#include "sdk/kseditor/engine/physics/PhysicsEngine.h"
+#include "sdk/kseditor/engine/physics/VehicleSimulator.h"
+#include "sdk/kseditor/engine/physics/TrackSimulator.h"
 #include "sdk/kseditor/plugins/simulators/kunos/KsPlugin.h"
 #include <QFile>
 #include <QJsonDocument>
@@ -36,7 +36,7 @@ bool ksEditor::initialize()
     m_importer = new io::ImportExport3D(this);
 
     m_physicsWorld = new physics::PhysicsWorld(this);
-    m_carPhysics = new physics::VehicleSimulator(this);
+    m_carPhysics = new physics::VehicleSimulator();
 
     // Initialize new editor modules
     // WeatherModule excluded from build (old WeatherConfig API, needs rewrite)
@@ -253,7 +253,7 @@ void ksEditor::loadTrack(const QString& path)
 void ksEditor::loadCar(const QString& path)
 {
     if (!m_carPhysics) {
-        m_carPhysics = new physics::VehicleSimulator(this);
+        m_carPhysics = new physics::VehicleSimulator();
     }
     m_carPhysics->loadVehicleParams(path);
     // Load associated INI files from same folder

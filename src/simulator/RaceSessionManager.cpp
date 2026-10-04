@@ -12,6 +12,7 @@ void RaceSessionManager::configure(const RaceConfig& config)
     m_config = config;
     m_active = false;
     m_paused = false;
+    setFlag(RaceFlag::None);
     m_sessionTime = 0;
     m_remainingTime = 0;
     m_lapStartTime = 0;
@@ -42,10 +43,31 @@ void RaceSessionManager::configure(const RaceConfig& config)
         m_playerCarIndex = 0;
 }
 
+// sortStandings() reorders the vector, so identity lookups (player, target
+// car) must go through the carIndex field — indexing m_standings by
+// m_playerCarIndex pointed at the wrong driver once the order changed.
+DriverStanding* RaceSessionManager::standingFor(int carIndex)
+{
+    for (auto& s : m_standings)
+        if (s.carIndex == carIndex) return &s;
+    return nullptr;
+}
+
+void RaceSessionManager::updateCarProgress(int carIndex, int currentLap, float totalDistance)
+{
+    if (!m_active) return;
+    DriverStanding* standing = standingFor(carIndex);
+    if (!standing) return;
+    standing->currentLap = currentLap;
+    standing->totalDistance = totalDistance;
+    updateStandings();
+}
+
 void RaceSessionManager::startSession()
 {
     m_active = true;
     m_paused = false;
+    setFlag(RaceFlag::Green);
     m_sessionTime = 0;
     m_lapStartTime = 0;
     m_lastCrossingDistance = 0;
@@ -95,6 +117,7 @@ void RaceSessionManager::endSession()
 
     m_active = false;
     m_paused = false;
+    setFlag(RaceFlag::Checkered);
     m_countingDown = false;
     m_countdownValue = 0;
     m_countdownTimer = 0;
@@ -143,13 +166,12 @@ void RaceSessionManager::update(const ks::physics::SimulationState& state, float
     m_timing.currentLapDistance = state.currentLapDistance;
     m_timing.lapTime = m_sessionTime - m_lapStartTime;
 
-    if (m_playerCarIndex >= 0 && m_playerCarIndex < static_cast<int>(m_standings.size())) {
-        auto& player = m_standings[m_playerCarIndex];
-        player.currentLap = m_currentLap;
-        player.totalDistance = state.currentLapDistance + m_currentLap * m_config.trackLength;
-        player.lastLapTime = m_timing.lastLapTime;
-        player.bestLapTime = m_timing.bestLapTime;
-        player.totalTime = m_sessionTime;
+    if (DriverStanding* player = standingFor(m_playerCarIndex)) {
+        player->currentLap = m_currentLap;
+        player->totalDistance = state.currentLapDistance + m_currentLap * m_config.trackLength;
+        player->lastLapTime = m_timing.lastLapTime;
+        player->bestLapTime = m_timing.bestLapTime;
+        player->totalTime = m_sessionTime;
     }
 
     checkLapCrossing(state);
@@ -177,12 +199,11 @@ void RaceSessionManager::checkLapCrossing(const ks::physics::SimulationState& st
             m_timing.bestLapTime = lapTime;
         }
 
-        if (m_playerCarIndex >= 0 && m_playerCarIndex < static_cast<int>(m_standings.size())) {
-            auto& player = m_standings[m_playerCarIndex];
-            player.currentLap = m_currentLap;
-            player.lastLapTime = lapTime;
-            player.bestLapTime = m_timing.bestLapTime;
-            player.totalTime = m_sessionTime;
+        if (DriverStanding* player = standingFor(m_playerCarIndex)) {
+            player->currentLap = m_currentLap;
+            player->lastLapTime = lapTime;
+            player->bestLapTime = m_timing.bestLapTime;
+            player->totalTime = m_sessionTime;
         }
 
         printf("RaceSessionManager: Lap %d completed in %fs (best: %fs)\n",
@@ -196,11 +217,10 @@ void RaceSessionManager::checkLapCrossing(const ks::physics::SimulationState& st
         if (onLapCompleted) onLapCompleted(m_currentLap, lapTime, m_timing.bestLapTime);
 
         if (m_config.totalLaps > 0 && m_currentLap >= m_config.totalLaps) {
-            if (m_playerCarIndex >= 0 && m_playerCarIndex < static_cast<int>(m_standings.size())) {
-                auto& player = m_standings[static_cast<size_t>(m_playerCarIndex)];
-                player.finished = true;
-                player.totalDistance = currentDist +
-                                      m_currentLap * m_config.trackLength;
+            if (DriverStanding* player = standingFor(m_playerCarIndex)) {
+                player->finished = true;
+                player->totalDistance = currentDist +
+                                        m_currentLap * m_config.trackLength;
             }
             m_lastCrossingDistance = currentDist;
             endSession();
@@ -272,7 +292,17 @@ void RaceSessionManager::startCountdown(float countdownSeconds)
     m_countdownValue = countdownSeconds;
     m_countdownTimer = 0;
     m_lastCountdownInt = static_cast<int>(countdownSeconds) + 1;
+    setFlag(RaceFlag::None);
     printf("RaceSessionManager: Starting countdown %fs\n", countdownSeconds);
+}
+
+float RaceSessionManager::aiSpeedFactor() const
+{
+    switch (m_flag) {
+        case RaceFlag::Yellow:     return 0.6f;
+        case RaceFlag::SafetyCar:  return 0.5f;
+        default:                   return 1.0f;
+    }
 }
 
 void RaceSessionManager::updateCountdown(float dt)
@@ -291,6 +321,7 @@ void RaceSessionManager::updateCountdown(float dt)
 
     if (m_countdownValue <= 0.0f) {
         m_countingDown = false;
+        setFlag(RaceFlag::Green);
         if (onCountdownFinished) onCountdownFinished();
         printf("RaceSessionManager: Countdown finished - GO!\n");
     }
@@ -306,7 +337,8 @@ void RaceSessionManager::addPenalty(int carIndex, Penalty::Type type, float valu
     penalty.value = value;
     penalty.reason = reason;
     m_pendingPenalties.push_back(penalty);
-    m_standings[static_cast<size_t>(carIndex)].penalties.push_back(penalty);
+    if (DriverStanding* standing = standingFor(carIndex))
+        standing->penalties.push_back(penalty);
 
     if (onPenaltyIssued) {
         const char* typeName = "Time Added";
@@ -327,12 +359,13 @@ void RaceSessionManager::servePenalty(int carIndex)
                     p.type == Penalty::Type::StopGo;
         if (p.targetCarIndex == carIndex && !p.served && pitPenalty) {
             p.served = true;
-            auto& standingPenalties = m_standings[static_cast<size_t>(carIndex)].penalties;
-            for (auto& standingPenalty : standingPenalties) {
-                if (!standingPenalty.served && standingPenalty.type == p.type &&
-                    standingPenalty.value == p.value && standingPenalty.reason == p.reason) {
-                    standingPenalty.served = true;
-                    break;
+            if (DriverStanding* standing = standingFor(carIndex)) {
+                for (auto& standingPenalty : standing->penalties) {
+                    if (!standingPenalty.served && standingPenalty.type == p.type &&
+                        standingPenalty.value == p.value && standingPenalty.reason == p.reason) {
+                        standingPenalty.served = true;
+                        break;
+                    }
                 }
             }
             printf("RaceSessionManager: Penalty served by car %d\n", carIndex);
@@ -363,16 +396,15 @@ void RaceSessionManager::applyPenalties()
 {
     for (const auto& penalty : m_pendingPenalties) {
         if (penalty.served) continue;
-        if (penalty.targetCarIndex < 0 || penalty.targetCarIndex >= (int)m_standings.size()) continue;
-
-        auto& standing = m_standings[penalty.targetCarIndex];
+        DriverStanding* standing = standingFor(penalty.targetCarIndex);
+        if (!standing) continue;
 
         switch (penalty.type) {
             case Penalty::Type::TimeAdded:
-                standing.totalTime += penalty.value;
+                standing->totalTime += penalty.value;
                 break;
             case Penalty::Type::Disqualification:
-                standing.disqualified = true;
+                standing->disqualified = true;
                 break;
             default:
                 break;

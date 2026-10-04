@@ -1,43 +1,47 @@
 # ksengine — Roadmap Parity (multi-target)
 
-**Aggiornato:** 2026-09-30
+**Updated:** 2026-10-04
 
-Target: **AC** feeling/telemetria · **rF2** piattaforma · **GD** libreria  
-Identità prodotto: **ksim** (formati AC solo in `adapters/`).
+Target: **AC** feel/telemetry · **rF2** platform · **GD** library  
+Product identity: **ksim** (AC formats only in `adapters/`).
 
 ---
 
-## 0. Stato attuale
+## 0. Current status
 
-| Area | Stato |
+| Area | Status |
 | --- | --- |
 | Loop 1 kHz + ECS | OK |
-| Fisica veicolo | OK |
+| Vehicle physics | OK |
 | FFB / input | OK |
 | Shared memory | **DONE** |
 | UDP `:20777` | **DONE** |
 | TCP `:20778` | **DONE** |
-| Lap / settori | **DONE** |
+| Lap / sectors | **DONE** |
 | Race HUD | **DONE** |
-| C API headless | **DONE** |
+| Headless C API | **DONE** |
 | Replay binary | **DONE** |
-| **Determinismo test** | **DONE** (`test_determinism`) |
+| **Determinism test** | **DONE** (`test_determinism`) |
 | **Golden harness** | Scaffold + CTest (`test_PhysicsGolden`) |
-| **RaceSession flags/penalties** | Scaffold (`RaceSession.h`) |
+| **RaceSession flags/penalties** | Scaffold (`RaceSession.h`) + flag authority/SM channel (2026-10) |
 | Qt-free engine+sim | **0 hit Qt** |
-| Audio bank | Stub |
-| Multiplayer maturo | TODO |
+| Audio bank | **DONE** - RIFF/FEV + STDT + FSB5 + WAV extract (2026-10) |
+| Validated renderer | **DONE** — `test_renderer` GPU readback (2026-10) |
+| Mature multiplayer | **DONE** — ksnet + loopback session (`test_multiplayer`) + sim netcode host/client + chat/menu UI (2026-10) |
+| Track tooling | **DONE** — `ks_tracktool` + `AiFileWriter` (2026-10) |
+| Mod SDK Lua | **DONE** — `ks.on`/`dispatch` + `scripts/*.lua` loader (2026-10) |
+| Race AI | **DONE** - grid on fast_lane.ai, lap wrap, steering feedforward, standings feed (`ai_race_test`) (2026-10) |
 
 ---
 
-## 1. Fondamenta — P0
+## 1. Foundations — P0
 
 | # | Milestone | Status |
 | --- | --- | --- |
-| 1.1 | Validazione fisica vs dati reali | **Scaffold** — CSV sintetico; target corr > 0.95 con giro reale |
+| 1.1 | Physics validation vs real data | **Scaffold** — synthetic CSV; target corr > 0.95 with a real lap - **pipeline ready**: `KS_GOLDEN_CSV` export + round-trip `test_GoldenExport` |
 | 1.2 | Shared-memory | **DONE** |
 | 1.3 | Headless C API | **DONE** |
-| 1.4 | Determinismo & replay | **DONE** test dual-run; replay via C API |
+| 1.4 | Determinism & replay | **DONE** dual-run test; replay via C API |
 
 ### CTest parity
 
@@ -51,35 +55,58 @@ ctest -R "test_determinism|test_PhysicsGolden" --output-on-failure
 
 | # | Milestone | Status |
 | --- | --- | --- |
-| 2.1 | Renderer validato | TODO |
-| 2.2 | Loader contenuti | Parziale |
-| 2.3 | Feeling correlato | Bloccato da 1.1 reale |
-| 2.4 | Sessioni (flag, penalità) | **Scaffold** `RaceSession` — da cablare in SimulationLoop |
-| 2.5 | Audio bank | Stub |
+| 2.1 | Validated renderer | **DONE** — `test_renderer` (qt-free CTest): Vulkan instance→Win32 surface→device→swapchain→forward pipeline on a hidden window + pixel readback (`NativeRenderer::requestScreenshot()` new). Checks: clear = exact fog color, quad with front winding visible (~22% coverage) vs reverse winding rejected by back-face culling (<2%), center lit white (FrameData UBO sun/fog + MVP push constants), culling stats `drawn=1/culled=0`; from 2026-10 also one deferred frame with SSAO + SSR + motion blur all enabled (`setSsao`/`setSsr`/`setMotionBlur`, env `KS_SSAO`/`KS_SSR`/`KS_MOTIONBLUR`: GBuffer -> lighting+SSAO+SSR -> resolve+motion blur -> ACES display pass) asserting the quad survives the round-trip and stays brighter than the background. From 2026-10-04 two more differential pairs feed a real particle sprite (`engine/Graphics/ParticleSystem::buildQuads`, one red 0.6 m quad at (0,0,1.5)) through `NativeRenderer::setParticleVertices`: forward (alpha-blended) and deferred (GBuffer contribution), each rendered with and without the upload and required to differ (`changed > framePx/100`) with the centre pixel red-dominant (readback is BGRA), and a pair of terrain frames (P2 trackside ground from `TerrainMesh`, ~36% of the pixels move on each path, `drawn` up by one); `png_test` (qt-free) covers the new std-only grayscale PNG heightmap reader behind `KS_TERRAIN_PATH` (8/16-bit round-trips, all five filters, chunk handling, rejected inputs, file round-trip). Graceful SKIP without extensions/GPU |
+| 2.2 | Content loaders | **DONE (offline)** — power.lut `rpm\|torque` (+ sibling probe in `loadFromIni`, interpolate), Pacejka A/B/C coefficients per FL/FR/RL/RR section + round-trip, drivetrain GEAR_1..N, tyres → phys_Simulator/vehicle, surfaces.ini → `TrackData.surfaceFriction/baseGrip` (`test_physics_ini`, `track_loader_test` extended). **DDS/KN5 texture extraction DONE** - `DdsReader.{h,cpp}` std-only (bounds-checked header, BC1/BC2/BC3 block decode, masked RGB/A 8/16/24/32 bit, luminance, DX10 header -> mip 0 in RGBA8), `Kn5ParseOptions::keep_texture_data` opt-in (default off, no runtime cost), `bakeKn5` writes `textures/<name>` byte-for-byte, `kn5baker` reports extracted payload/DDS; synthetic `dds_test` + `kn5_test` on real content (80/80 DDS in `abarth500.kn5`). **.ksanim in engine DONE** - `KsAnim.{h,cpp}` std-only (v0/v1/v2 verified on ~2000 real AC files: the entry walk must end exactly at EOF; names with UTF-8 byte length, not QDataStream's `QString` which misinterprets them, with compat for the high-bit Latin-1 form), `KsAnimKeyframe::toMatrix()` -> row-major matrix compatible with KN5 (translation in [12..14]), `sample()` with quaternion slerp / nearest-keyframe pick for v1; `ksanim_test` (synthetic v1+v2 + smoke on real `car_door_L.ksanim` v1 and `shift.ksanim` v2). **data.acd DONE** - `AcdReader.{h,cpp}` std-only: archive without magic, purely structural identification (record walk must end exactly at EOF: 43 records / 156587 B on `abarth500`, 70 / 199569 on `acfl_2006_bmwsauber`); record = `u32 nameLen` + ASCII name + `u32 charCount` + `charCount` 32-bit words (one byte per word, hence the ~4x size of the `data/` directory); optional 8 B header tolerated (only if the first long is negative); ROT deciphering `plain[i] = cipher[i] - key[i % len]` with an 8-octet key derived from the vehicle folder, index restarting at 0 for each file (`createAcdKey` = original 8-octet algorithm by aluigi QuickBMS, all 8 cross-checked by hand on 4 cars with known plaintext); `acd_test` (4 ground-truth keys, synthetic round-trip with empty file and rotation past the dashes, rejection paths, real walk + 411 files deciphered byte-exact against `data/`). **OBJ/MTL importer DONE** - `CADOBJParser.{h,cpp}` rewritten (std-only, taking the Qt copy and fixing it): vertex/UV/normal weld per (v,vt,vn) triple with fan triangulation of n-gon polygons (the Qt copy read only 4 corners and dropped the rest), relative negative indices, split per `o`/`g`, `usemtl`, `mtllib` resolved next to the model, bounds-checked indices and malformed input rejected by `error()`; `obj_test` (synthetic quad/ngon/`v//vn`/negative indices/objects+materials/rejection + real smoke `f300.obj`: 23279 vertices, 19608 faces of which 142 ngons up to 19 sides -> 39191 triangles, 11 meshes, 2 materials from `f300.mtl`). **model importers DONE** - two std-only readers on the shared scene `ModelScene.h` (`ModelMesh`/`ModelMaterial`: weld per vertex/normal/uv triple + fan triangulation, same shape for both formats). **Binary FBX** `FbxReader.{h,cpp}` - 27 B header (magic + version), node record `u32 endOffset` + `u32 numProperties` + `u32 propertyListLen` + `u8` length-prefixed name, absolute endOffset covering children and the null record (13 zero bytes), ~168 B footer outside the walk; arrays **`u32 count` + `u32 encoding` + `u32 compressedLength`** with `encoding 1` = a zlib stream inflated by `Deflate.{h,cpp}` (stored/fixed/dynamic decode + RFC 1950 wrapper and adler32, written by hand because zlib is not present on this machine); extraction of `Vertices` / `PolygonVertexIndex` (polygons closed by the sign bit, vertex `~idx`), `LayerElementNormal` / `LayerElementUV` layers with `MappingInformationType` + `ReferenceInformationType` (Direct and IndexToDirect), materials from `Properties70` and `Geometry -> Model <- Material` binding via `Connections`; `fbx_test` (synthetic FBX assembled byte by byte, with compressed and raw arrays, plus smoke on `coverspring.fbx` 7400: 2 meshes / 3858 vertices / 5272 faces / 4 materials, `model.fbx` 7200: 138 meshes / 147867 triangles including `encoding 0` arrays, `steer.FBX`) + `deflate_test` (stored/fixed/dynamic, zlib wrapper, error paths). **font DONE** - real TrueType reader + rasterizer, std-only (no FreeType). `TtfReader.{h,cpp}`: bounds-checked sfnt directory (every table offset/length), scaler magic rejects `CFF/OTTO` and `ttcf` (2 of the 33 AC fonts are OTTO), required `head` (unitsPerEm + indexToLocFormat) / `maxp` / `cmap`, cmap format 4 with **both** paths (`idDelta` and `idRangeOffset` -> `glyphIdArray`), format 12 (binary search over groups), formats 6 and 0, `hmtx` with numberOfHMetrics < numGlyphs (last advance reused, out-of-range gid = 0), simple glyphs (flag repeat, 8/16-bit deltas, validated contour ranges) and **composite** glyphs (byte/word args, F2Dot14 scale and 2x2 matrix, non-XY args ignored, recursion capped at 8), `name` -> family (UTF-16BE -> UTF-8). `TtfRasterizer.{h,cpp}`: quadratic flattening with a pixel-space control-point/cord tolerance (max 12 levels) and implicit on-curve midpoints, each pixel row sampled on 8 sub-scanlines with crossings sorted and filled by the **non-zero winding rule** -> exact horizontal coverage + vertical AA; `buildTtfAtlas` shelf-packs ASCII 32..126 with a reserved 2-row white texel. `ttf_test`: byte-assembled synthetic font (5 glyf entries: blank, square, quadratic curve, composite translated (+50,+30), blank space; long loca; cmap format 4 using idDelta for space/`?` and glyphIdArray for A/B/C) with exact box and pixel expectations (square at 100px -> 62x72 box with 4200 lit pixels and zero partials, composite offset +5/-3 px, curve with > 0 partial pixels, atlas advances 800*32/1000 = 25.6 and space 300*0.032 = 9.6), 7 rejection paths (truncated, OTTO, bad scaler, 0 tables, offset past EOF, missing cmap, short loca), ground truth on 3 real AC fonts (`1979.ttf` upem 1000 / 165 glyf / gid A = 35 / adv 1145 / 2 contours, `DSEG7Classic-Bold` 72 glyf / 19 hmetrics / 6 contours, `Roboto-Black` upem 2048 / 1294 glyf / adv 1395), sweep of 32 real `.ttf` (30 loaded + rasterized, 2 CFF/OTTO rejected). Integration: `FontAtlas::loadTtf` (width/height/baseLineHeight/whiteUV became members, `BitmapText::lineHeight` now uses `baseLineHeight()`) + `ui::loadTtfFont` wired into `NativeUiHub` behind opt-in `KS_FONT_TTF`/`KS_FONT_PX`; headless smoke: `Formula-Medium.ttf @ 20px -> 251x125 atlas`, Poppins OTTO degrades with `[ui] KS_FONT_TTF ignored: ...`. **2.2 fully DONE** - suites qt-free 37/37, Qt 51/51 (2026-10) |
+| 2.3 | Related feel | Blocked by a real 1.1 |
+| 2.4 | Sessions (flags, penalties) | **Scaffold** `RaceSession` — DONE: wired into SimulationLoop (countdown, lap limit, checkered flag via RaceSessionManager) |
+| 2.5 | Audio bank | **DONE** - standalone RIFF/FEV parser in `BankParserBridge.cpp` (no Qt): bounds-checked chunk walk, 24 PRMB parameters (name + default), 16 EVTB events linked to parameters via GUID, **readable event names** from the STDT pool (24-bit radix-tree) of the companion `.strings.bank` - 16/16 resolved `event:/...` (GUID = 16 raw bytes, shared `guidToString`); **FSB5 decoded per sample** (base header 0x3C/0x40, `sample mode` u64 + extra flags -> frames, 32-byte offsets, channels, sample rate, PCM16 codec) with `channels/rate/codec/dataOffset/dataSize` + structured name table (28 sounds); **WAV extraction** via `extractBankSampleToWav` (sample0 = 122640 B payload); **`SimulationLoop::loadCarAudio` wiring**: lazy WASAPI init + delegation to `SimulatorAudio::loadCarAudio`, called from `loadCar`, fed to `updatePhysics` in `tick()`; `bank_test` extended |
 
 ## 3. rF2-like — P2
 
 | # | Status |
 | --- | --- |
-| 3.1 Multiplayer maturo | TODO |
-| 3.2 Dedicated server | Sbloccato (C API) |
-| 3.3 Tooling pista | TODO |
-| 3.4 Mod SDK Lua | TODO |
-| 3.5 AI gara | TODO |
+| 3.1 Mature multiplayer | **DONE** — `ksnet` library (UDP transport with a yojimbo-compatible API: CONNECT/ACK/REJECT handshake, reliable-ordered channel with sliding window + ack bits + retransmit, unreliable channel, ping/RTT/bandwidth, server-side timeout with free slots) under `src/core/engine/Network/ksnet`, CMake gate enabled in both builds (qt-free + full, `Yojimbo::yojimbo` -> `ksnet`). Fixes: `NetworkClient` now sends `MSG_CLIENT_JOIN` on the first CONNECTED state (the welcome never arrived before), `NetworkManager` instantiated and pumped by `SimulationLoop::tick()` (never constructed before), `sendChatMessage` implemented (was a stub), server-side disconnect detection + despawn + `onClientDisconnected` callback. Test `test_multiplayer` (127.0.0.1 loopback): welcome round-trip host+guest, cross-client chat relay, car state broadcast, clean disconnect (qt-free suite 30/30). Sim netcode (2026-10): `broadcastLocalCarState` (broadcasts the state of all host MultiCar cars), `handleRemoteCarState` (writes the received state into `VehicleSimulator::state()`), `applyRemoteInput` (latched controls applied once per physics step in `applyInput`), callbacks `onRemoteClientJoined`/`onRemoteClientLeft`/`onRemoteCarSpawned`/`onRemoteCarDespawned`/`onRemoteCarStateReceived` wired in the `SimulationLoop` constructor; `MultiCarManager::setCarClientIndex`/`setCarExternallyDriven` (the remote car loses the AI spline), host avatar seeded from the local vehicle, replay of already-present spawns to the late joiner in `spawnCarForClient`, `ai_race_test` (car handoff -> remote driving). Chat/menu UI (2026-10): a single `GameMenuOverlay` (the callbacks lived on a second, never-drawn instance), `handleUiKey`/`handleUiChar`/`handleUiMouse*` reachable from `SimulatorApp` (F1/F2/Esc, WM_CHAR for text, mouse), `ChatOverlay` (log + composer) and the F2 browser wired to `NetworkManager` (host/join/disconnect from the MULTI PLAYER menu, `sendChatMessage`, status line), physics paused but rendering active with modal overlay, `UiInput` fix (click/scroll flags were cleared in `beginFrame` before anyone read them). Remaining: LAN broadcast discovery, player list in F2 (`onPlayerListUpdated` not wired) |
+| 3.2 Dedicated server | DONE (`ks_server` on the C API, smoke test in the suite) |
+| 3.3 Track tooling | **DONE** - qt-free CLI `ks_tracktool` (`scaffold`: creates a valid track folder with a minimal v5 `model.kn5` readable by the full engine reader, `data/surfaces.ini` and `ai/fast_lane.ai` (generated oval); `validate`: KN5/AI spline/surfaces report with exit code; `spline-info`: dumps the AI line). Added the `AiFileWriter` (`src/engine/AI`, binary magic `0x00414900` v1, byte-for-byte compatible with the Qt `AiSplineEditor`). Fix: `TrackLoader` never populated `TrackData::aiSplinePath`. Tests: `track_tool_test` (exact writer/reader roundtrip, scaffold -> full TrackLoader + Kn5Reader, negative cases) + 5 end-to-end CTest runs of the CLI (scaffold/validate/spline-info/missing/usage). qt-free suite 26/26, Qt 51/51 (2026-10) |
+| 3.4 Mod SDK Lua | **DONE** - Lua mod SDK under `src/engine/Scripting` (`ModSdk.h/.cpp` + Lua prelude): API `ks.on(event, fn)` (handler registration), `ks.get/ks.set` (slots), `ks.log` (C binding, 512-bounded buffer), `ks.version`. Engine→mod dispatch `modsdk::dispatch(event, numbers, strings)` with fan-out to all `ks.on` handlers + conventional global hooks `on_<event>`, each call isolated in pcall (a broken mod logs the error and does not block the simulator). Loader `loadModScripts`: `<content>/scripts/*.lua` in deterministic order (fallback to the .lua files at the root), per-file errors without stopping the others. Host extensions: multi-arg `callFunction`, `emitEvent`, `takeLog`. Sim integration: `ScriptModule` installs the prelude before the startup scripts and pumps the `update` event; `SimulationLoop` loads track/car mods (`loadTrackFolder`/`loadCar`) and forwards session events (lap/sector/position/penalty/flag/session_start/session_end) from `RaceSessionManager` (new `onFlagChanged` callback; internal flag transitions go through `setFlag` to generate Green/Checkered events). NOTE: the name `emit` collides with the Qt macro → the API is called `dispatch`. Test `mod_sdk_test` (qt-free suite 27/27, Qt 51/51) |
+| 3.5 Race AI | **DONE** - two-file grid on `ai/fast_lane.ai` (`MultiCarManager::spawnGrid`: drivers 1-2 front row at ±1.5 m, subsequent rows at 6 m, tangent heading, `addCar` starts the simulation and honors `startPosition`); `SimulationLoop` instantiates `m_multiCar` **before** `m_network`, loads the track spline (`loadTrackFolder` → `loadAiSpline`), spawns AI at `beginRaceSession` (`KS_AI_CARS`/`aiCars`, default 3), passes `state.heading`, `setAISpeedFactor` authority from flags (checkered → 0) and reports AI lap+progress to `RaceSessionManager::updateCarProgress` (lookup by `carIndex`, fix for the reordered player-vs-AI identity regression) + modsdk `ai_lap` event. Lap wrap for a static .ai spline without a `lap` field: wrap when prevProg ≥½ and prog ≤¼ with a guard of distance travelled ≥ half a lap (spawning behind the line does not count). AI driving: inverted steering sign (net yaw opposite to the input), speed-dependent lookahead (8+1.2·v), curvature feedforward with **`atan2` wrap** (w jumped by 2π at the ±π boundary → full opposite lock → chasing the line), twice-filtered derivative term (removes the ~16 s oscillation), step throttle (speed hold against scrub), P=0.6. Related physics: **friction circle on the forces** in `PacejkaTireModel::calculateForces` (the old `alpha/0.12` proxy limited Fy to ~140 N at 3600 N load → car impossible in corners; now full MF + combined clamp) — NOTE: multiplying `BCD_y` by `Fz_kN` (the classic formula) was tried and rejected: without tyre relaxation the car spins on itself at low speed → current lateral stiffness is below the real one, physics gap to close with relaxation length. Fixture: R50 oval, `kLineSpeed` 14 m/s (ay 3.9), 28 s settle + 8 s measurement window (decaying transient). Test `ai_race_test` (grid, spawn, acceleration, line `maxOffTrack < 12`, ≥1 lap ×3 AI, lap event, flag limiter, standings + regression lookup): suite **qt-free 28/28, Qt 51/51** |
 
 ## 4. Godot — P3
 
 | # | Status |
 | --- | --- |
-| 4.1 GDExtension | API pronta |
-| 4.2 Headless no Vulkan | TODO flag |
-| 4.3 Scene bridge | TODO |
+| 4.1 GDExtension | API ready |
+| 4.2 Headless no Vulkan | **DONE** - `KS_HEADLESS=1` flag in `SimulatorApp`: no Win32 window, no Vulkan instance/surface/device/swapchain, `SimulationLoop` runs with renderer `nullptr` (every path already null-checked); the session starts without a menu and `KS_HEADLESS_SECONDS=N` auto-exits for CI. Test `sim_headless_smoke` (boot + 2 s + exit 0). Related FIX (pre-existing, both modes): deterministic teardown in `WinMain` (`g_menu.reset()` + `g_simulation.reset()` before exit) — via the CRT, `Engine::instance()` (magic static constructed after `g_simulation`) was destroyed BEFORE `~SimulationLoop`, which then touched the already-destroyed `m_modules`/`m_mutex` -> AV 0xC0000005 on exit. Suite **qt-free 29/29, Qt 51/51** |
+| 4.3 Scene bridge | **DONE** - scene section in the C API (`ksengine_c.h`): ECS entities (`ks_engine_scene_create/destroy/alive`, generation handles -> old handles do not alias reused slots), transform/mesh round-trip (`set_transform` with partial arrays = NULL means unchanged, `set_mesh` attach/detach), host-side enumeration (`ks_engine_scene_snapshot` in two steps: first count, then fill only if the buffer is big enough — query size and realloc), dirty counter `ks_engine_scene_revision` (bumped on every mutation and on every step that moves the vehicle entity, with an epsilon so the counter does not spin with the engine stopped), vehicle bind pose (`ks_engine_scene_bind_vehicle`: the pose is written at the end of `ks_engine_step` into the entity, auto-destroy on entity destroy). Completed `ks_engine_get_state` (yaw/pitch/roll, fuel, tyre temperatures — fields declared in the header but never filled). Test `scene_bridge_test` (round-trip, snapshot sizing, stale handles, revision, bind/unbind): suite **qt-free 30/30** |
 
 ---
 
-## Prossimi passi
+## 5. LFS-like — parity with lfs.net
 
-1. Cablare `RaceSession` in `SimulationLoop` (sostituire PHASE_* grezzi)
-2. Export telemetria reale → `tests/data/golden_lap.csv` → corr > 0.95
-3. Dedicated server binary su C API
-4. Flag yellow/SC → riduci velocità AI + SM `flag` channel
+Analysis of `https://www.lfs.net/` compared against the code (2026-10-03). Result: physics, base multiplayer and telemetry are on par; what's missing is the ecosystem (server browser, control API) and the game modes.
+
+| # | Milestone | Priority | Evidence |
+| --- | --- | --- | --- |
+| 5.1 | Server browser / master server + LAN discovery | **P0** | only hardcoded `127.0.0.1` rows (`src/simulator/SimulationLoop.cpp:975`, `src/simulator/SimulatorApp.cpp:514`); no announce/query/ping/LAN broadcast anywhere in the repo. F2 browser = empty UI shell (`src/simulator/ui/MultiplayerOverlay.h`) |
+| 5.2 | Bidirectional external control API (InSim-style) | **P0** | outbound-only telemetry: `src/simulator/TcpTelemetryBridge.h` is send-only, `include/ksengine_c.h` is in-process; no remote commands (admin chat, car change, spectate, votes, bans, results). `docs/TCP_TELEMETRY.md` marks client commands as P2 |
+| 5.3 | Real sessions/modes (practice / qualifying / time trial / autocross / drift / cruise) | **P1** | enums exist (`src/simulator/RaceSession.h:14`, `NetworkConfig.h:61`) but the runtime hardcodes `SESSION_RACE` + 5 laps (`src/simulator/SimulationLoop.cpp:394`, `:357`); PRACTICE/QUICK RACE/TIME ATTACK menu entries all hit the same callback (`src/simulator/GameMenuOverlay.cpp:94-99`). No cones/checkpoints, drift score, drag, free-roam |
+| 5.4 | Track limits → penalties (wiring) | **P1** | pipeline complete but never triggered: `RaceSessionManager::reportTrackLimitsViolation` (`src/simulator/RaceSessionManager.cpp:377`) → `addPenalty` → `broadcastPenalty` (`NetworkLowLevel.cpp:446`) have no external caller; no track-boundary detection |
+| 5.5 | Setup save/load/sharing | **P1** | `SetupGarage::onSetupChanged` (`src/simulator/SetupGarage.h:95`) is never assigned → setup edits never reach physics; no file I/O in the sim; `MSG_CAR_SETUP` (`NetworkConfig.h:53`) declared but not implemented. Editor-side only: `SetupEditorQmlBridge.cpp:36,71` (`loadSetup`/`saveSetup`) |
+| 5.6 | Replay playback + viewer | **P1** | record only: `SimulatorApp.cpp:475` `printf("Load replay: not implemented yet.\n")`; `src/simulator/ReplayRecorder` has `startPlayback` but is never instantiated (dead code); `ksengine_c.h` has no replay-load. LFS: SPR/MPR + RAF analyser |
+| 5.7 | Multiple track layouts (LYT-style) | **P1** | `TrackData` (`src/simulator/TrackLoader.h`) = {name, kn5Path, aiSplinePath, sectors, surfaceFriction}: one circuit = one path, no variants/reverse; `ui_track.json` `configurations` never parsed; `tools/tracktool` only does scaffold/validate/spline |
+| 5.8 | Weather/time-of-day exposed in UI/server config | **P1** | physics+render ready but unreachable: `SimulationLoop::setTimeOfDay`/`setWeatherPreset` (`src/simulator/SimulationLoop.h:168,170`) have no callers, `WeatherPhysics::apply*` presets never invoked; fixed defaults (12:00, dry 26 °C) |
+| 5.9 | Persistent PB / statistics (basis for an LFS-World-like service) | **P2** | best lap/sectors held in memory and cleared at session end (`src/simulator/LapSectorTimer.h:79,88`); no results written to disk, no HTTP client in the sim; `GameMenuOverlay.h:31` `DriverProfile` not persisted |
+| 5.10 | Runtime championships + results export | **P2** | Qt editor only (`src/sdk/kseditor/.../championshipEditor/`); the engine has session/flags but no season/points model nor results publishing |
+| 5.11 | Docs: cover 5.1–5.9 + fix stale paths | **P2** | no doc covers server browsing, control API, setups, layouts, modes, PB; `docs/file_formats.md:71-72` cites non-existent `.setup`/`ReplayParser` and the whole `src/core/*` tree (today only `src/core/engine/Network/ksnet`) — same for `audio.md`, `graphics.md`, `plugins.md`, `video.md`, `overview.md` |
+
+Not included: license tier gating (demo/S1/S2/S3) — out of scope for an open source product.
+
+---
+
+## Next steps
+
+1. Wire `RaceSession` into `SimulationLoop` (replace the raw PHASE_*) - **DONE**: RaceSessionManager drives the countdown, lap limit and checkered flag; PHASE_* remains only for state publication
+2. Real telemetry export → `tests/data/golden_lap.csv` → corr > 0.95 - **DONE (pipeline)**: `KS_GOLDEN_CSV` export (SimulationLoop 50 Hz, written at session end) + round-trip `test_GoldenExport` (corr > 0.95); only the real lap is missing
+3. Dedicated server binary on the C API - **DONE**: `ks_server` (tools/ks_server) on the extended `ksengine_c` (`ks_engine_session_*`: countdown/lap/time limit, advanced in `ks_engine_step`); target in the qt-free branch + `ks_server_smoke` smoke test; ODR-safe (`ksengine_c` does NOT compile VehicleSimulator when ksengine exists)
+4. Yellow/SC flag - reduce AI speed + SM `flag` channel - **DONE**: flag authority in `RaceSessionManager` (Yellow 0.6 / SC 0.5 -> `aiSpeedFactor`), propagation `MultiCarManager.setAISpeedFactor` -> `AIController`, AC SHM channel `live.flag = ksRaceFlagToAcFlag(...)` + `SimulationLoop::setRaceFlag` API; test `test_race_flags`. NB: the `SimulationLoop::m_multiCar` not-instantiated gap **was solved in 3.5** (built in the constructor, spline loaded from `loadTrackFolder`, AI spawned at `beginRaceSession`)
+5. LFS parity (section 5) - P0: server browser/discovery (5.1) + external control API (5.2); then P1: modes/sessions (5.3), track limits (5.4), setups (5.5), replay playback (5.6), layouts (5.7), weather/time (5.8)

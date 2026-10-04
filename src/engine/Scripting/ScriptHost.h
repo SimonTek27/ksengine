@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 namespace ks { namespace scripting {
 
@@ -27,6 +28,17 @@ public:
 
     // Calls the global function `name` with a single numeric argument.
     bool callFunction(const std::string& name, double arg);
+
+    // Calls the global function `name` with numeric arguments.
+    bool callFunction(const std::string& name, const std::vector<double>& args);
+
+    // Mod SDK event dispatch — see LuaScriptHost::emitEvent().
+    bool emitEvent(const std::string& name,
+                   const std::vector<double>& numbers = {},
+                   const std::vector<std::string>& strings = {});
+
+    // Lines collected from ks.log() since the last call (bounded ring).
+    std::vector<std::string> takeLog();
 
     // Message from the last failed call, or empty after a successful one.
     const std::string& lastError() const;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MathTypes.h"
+#include "RaceFlag.h"
 #include "engine/physics/PhysicsCoreTypes.h"
 #include <string>
 #include <vector>
@@ -89,14 +90,31 @@ public:
     const std::vector<DriverStanding>& standings() const { return m_standings; }
 
     void setPlayerCarIndex(int idx) {
-        if (idx >= 0 && idx < static_cast<int>(m_standings.size()))
-            m_playerCarIndex = idx;
+        for (const auto& s : m_standings)
+            if (s.carIndex == idx) { m_playerCarIndex = idx; return; }
     }
+
+    /** Race standings feed (roadmap 3.5): report a car's lap count and total
+     *  distance, re-sort and fire onPositionChanged when the player's slot
+     *  moves. No-op when the session is not active or the car is unknown.
+     *  carIndex is the identity field, not the (reordered) vector slot. */
+    void updateCarProgress(int carIndex, int currentLap, float totalDistance);
 
     void setGridPosition(int carIndex, int gridPosition);
     void startCountdown(float countdownSeconds = 5.0f);
     bool isCountingDown() const { return m_countingDown; }
     float countdownValue() const { return m_countdownValue; }
+
+    /** Race flag authority (yellow/SC etc.). Resets on configure.
+     *  Fires onFlagChanged only on an actual transition. */
+    void setFlag(RaceFlag f) {
+        if (f == m_flag) return;
+        m_flag = f;
+        if (onFlagChanged) onFlagChanged(f);
+    }
+    RaceFlag flag() const { return m_flag; }
+    /** AI speed limiter implied by the flag: yellow 0.6, SC 0.5, else 1.0. */
+    float aiSpeedFactor() const;
 
     void addPenalty(int carIndex, Penalty::Type type, float value, const std::string& reason);
     void servePenalty(int carIndex);
@@ -115,9 +133,11 @@ public:
     std::function<void()> onCountdownFinished;
     std::function<void(int, const std::string&, const std::string&)> onPenaltyIssued;
     std::function<void(int, int)> onTrackLimitsWarning;
+    std::function<void(RaceFlag)> onFlagChanged;
 
 private:
     void checkLapCrossing(const ks::physics::SimulationState& state);
+    DriverStanding* standingFor(int carIndex);
     void updateStandings();
     void sortStandings();
     void applyPenalties();
@@ -127,6 +147,7 @@ private:
     RaceConfig m_config;
     bool m_active = false;
     bool m_paused = false;
+    RaceFlag m_flag = RaceFlag::None;
 
     float m_sessionTime = 0;
     float m_remainingTime = 0;

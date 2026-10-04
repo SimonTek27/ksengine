@@ -1,8 +1,8 @@
 #pragma once
 
 #include "engine/sys/ModuleManager.h"
-#include "engine/mesh/Viewport3DSystem.h"
-#include "engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
 #include "CarBuilder/CarEditorWidget.h"
 #include "TrackBuilder/TrackEditorWidget.h"
 #include "CharacterBuilder/CharacterEditorWidget.h"

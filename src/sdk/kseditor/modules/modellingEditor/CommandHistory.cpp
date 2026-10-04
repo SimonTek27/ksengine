@@ -1,8 +1,8 @@
 #include "CommandHistory.h"
 #include "3DModelingQmlBridge.h"
-#include "engine/Graphics/SceneGraph.h"
-#include "engine/Graphics/SceneObject.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 #include <QDebug>
 #include <QVariant>
 #include <QVector3D>

@@ -2,7 +2,7 @@
 #include "ModManagerQmlBridge.h"
 #include "ModCollection.h"
 #include "ConflictResolutionDialog.h"
-#include "engine/archive/SevenZipLibrary.h"
+#include "sdk/kseditor/engine/archive/SevenZipLibrary.h"
 #include "workshop/WorkshopManager.h"
 #include "workshop/WorkshopItem.h"
 #include <QDir>

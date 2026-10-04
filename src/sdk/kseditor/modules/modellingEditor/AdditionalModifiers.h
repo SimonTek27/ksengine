@@ -1,6 +1,6 @@
 #pragma once
-#include "engine/mesh/ModifierSystem.h"
-#include "engine/mesh/SkeletonSystem.h"
+#include "sdk/kseditor/engine/mesh/ModifierSystem.h"
+#include "sdk/kseditor/engine/mesh/SkeletonSystem.h"
 
 namespace ks {
 

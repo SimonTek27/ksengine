@@ -3,7 +3,7 @@
 #include <QVector>
 #include <QPointF>
 #include <QString>
-#include "engine/physics/VehiclePhysics.h"
+#include "engine/physics/PhysicsCoreTypes.h"
 
 namespace ks {
 

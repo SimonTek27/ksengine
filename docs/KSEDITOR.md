@@ -1236,7 +1236,7 @@ A: Yes. Python, Lua, and JavaScript (QJSEngine) are all supported. See the [Plug
 
 ## Testing
 
-**22 Qt Test suites** (`tests/unit/`):
+**22 Qt Test suites** (`tests/kseditor/`):
 ```
 test_AutoSave, test_BackupSystem, test_CacheManager, test_CommandPalette,
 test_NotificationSystem, test_RecentFilesManager, test_SettingsSystem,

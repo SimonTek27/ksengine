@@ -1,6 +1,6 @@
 #include "CharacterEditor.h"
-#include "engine/mesh/WeightPainting.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/mesh/WeightPainting.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 #include "sdk/kseditor/modules/modellingEditor/3DModelingQmlBridge.h"
 #include <QDebug>
 #include <QtMath>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "editor/ModuleGuiBase.h"
-#include "engine/animation/AnimationSystem.h"
+#include "sdk/kseditor/engine/animation/AnimationSystem.h"
 
 #include <QTreeWidget>
 #include <QTableWidget>

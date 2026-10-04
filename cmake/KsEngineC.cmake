@@ -12,8 +12,9 @@ set(KSENGINE_C_SOURCES
   ${CMAKE_SOURCE_DIR}/src/engine/api/ksengine_c.cpp
 )
 
-# Prefer existing VehicleSimulator if present; otherwise compile-only stubs
-if(EXISTS "${CMAKE_SOURCE_DIR}/src/engine/physics/VehicleSimulator.cpp")
+# Prefer standalone VehicleSimulator; inside the full project the ksengine
+# target already provides it (link below) to avoid duplicate objects/ODR issues.
+if(EXISTS "${CMAKE_SOURCE_DIR}/src/engine/physics/VehicleSimulator.cpp" AND NOT TARGET ksengine)
   list(APPEND KSENGINE_C_SOURCES
     ${CMAKE_SOURCE_DIR}/src/engine/physics/VehicleSimulator.cpp
   )
@@ -27,6 +28,10 @@ target_include_directories(ksengine_c PUBLIC
 )
 target_compile_definitions(ksengine_c PUBLIC KSENGINE_QT_FREE=1)
 target_compile_features(ksengine_c PUBLIC cxx_std_17)
+
+if(TARGET ksengine)
+  target_link_libraries(ksengine_c PUBLIC ksengine)
+endif()
 
 if(MSVC)
   target_compile_definitions(ksengine_c PRIVATE NOMINMAX)

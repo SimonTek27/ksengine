@@ -1,7 +1,7 @@
 #include "ModPackager.h"
 #include "Package.h"
 #include "../sys/LogManager.h"
-#include "engine/FileFormat/INIParser.h"
+#include "sdk/kseditor/engine/FileFormat/INIParser.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>

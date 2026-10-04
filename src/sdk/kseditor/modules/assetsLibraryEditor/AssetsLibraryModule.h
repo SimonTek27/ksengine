@@ -1,9 +1,9 @@
 #pragma once
 
 #include "../editor/EditorModule.h"
-#include "engine/assets/AssetPreviewWidget.h"
-#include "engine/assets/AssetManager.h"
-#include "engine/assets/CloudSyncManager.h"
+#include "sdk/kseditor/engine/assets/AssetPreviewWidget.h"
+#include "sdk/kseditor/engine/assets/AssetManager.h"
+#include "sdk/kseditor/engine/assets/CloudSyncManager.h"
 #include <QListWidget>
 #include <QLineEdit>
 #include <QComboBox>

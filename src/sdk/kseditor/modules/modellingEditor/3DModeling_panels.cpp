@@ -1,5 +1,5 @@
 #include "3DModeling_panels.h"
-#include "engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
 #include <QDebug>
 #include <QListWidgetItem>
 #include <QGroupBox>

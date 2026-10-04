@@ -10,8 +10,8 @@
 #include <QVector3D>
 #include <QList>
 #include <QMap>
-#include "engine/Graphics/SceneData.h"
-#include "engine/Graphics/SceneGraph.h"
+#include "sdk/kseditor/engine/Graphics/SceneData.h"
+#include "sdk/kseditor/engine/Graphics/SceneGraph.h"
 #include "engine/sys/UndoStack.h"
 
 namespace Ks {

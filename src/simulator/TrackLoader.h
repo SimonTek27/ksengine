@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MathTypes.h"
+#include <map>
 #include <string>
 #include <memory>
 
@@ -21,6 +22,11 @@ struct TrackData {
     vec3 pitLaneEntry;
     vec3 pitLaneExit;
     vec3 startFinishLine;
+
+    // surfaces.ini: UPPER-case surface key -> friction multiplier.
+    std::map<std::string, float> surfaceFriction;
+    float baseGrip = 1.0f;
+    bool surfacesLoaded = false;
 
     std::shared_ptr<ks::ai::AiSpline> aiSpline;
 

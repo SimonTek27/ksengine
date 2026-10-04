@@ -8,6 +8,7 @@
 #include <QJSEngine>
 #include <QQuickStyle>
 #include <QQuickWidget>
+#include <QQuickItem>
 #include <QMainWindow>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -28,13 +29,13 @@
 
 #include "MainWindow.h"
 #include "../resources/ui/CustomTitleBar.h"
-#include "core/sys/ModuleManager.h"
-#include "core/sys/PluginManager.h"
+#include "modules/moduleManager/ModuleManager.h"
+#include "sdk/kseditor/engine/sys/PluginManager.h"
 #include "../resources/ui/SplashScreen.h"
 #include "../resources/ui/WelcomeScreenQmlBridge.h"
-#include "core/sys/HangMonitor.h"
+#include "sdk/kseditor/engine/sys/HangMonitor.h"
 #include "../resources/ui/FontEditorDialog.h"
-#include "core/help/HelpSystem.h"
+#include "modules/help/HelpSystem.h"
 #include "../resources/ui/ribbontheme.h"
 
 // QML Bridge registrations
@@ -46,13 +47,13 @@
 #include "modules/PhysicsEditor/PhysicsQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/Audio/AudioQMLBridge.h"
 #include "plugins/simulators/kunos/assettocorsa/audio/AudioEngineQML.h"
-#include "core/Audio/AudioModuleBridge.h"
-#include "core/editor/AIEditor/AIEditorQmlBridge.h"
-#include "core/tools/FormatToolsQmlBridge.h"
-#include "core/modmanager/ModManagerQmlBridge.h"
-#include "core/editor/ppfiltersEditor/PPFiltersQmlBridge.h"
-#include "core/devices/3dprint/ThreeDPrintQmlBridge.h"
-#include "core/editor/FfbEditor/FfbEditorQmlBridge.h"
+#include "sdk/kseditor/engine/Audio/AudioModuleBridge.h"
+#include "modules/editor/AIEditor/AIEditorQmlBridge.h"
+#include "modules/tools/FormatToolsQmlBridge.h"
+#include "modules/modmanager/ModManagerQmlBridge.h"
+#include "modules/editor/ppfiltersEditor/PPFiltersQmlBridge.h"
+#include "sdk/kseditor/engine/devices/3dprint/ThreeDPrintQmlBridge.h"
+#include "modules/editor/FfbEditor/FfbEditorQmlBridge.h"
 #include "modules/cockpitInstruments/CockpitInstrumentsQmlBridge.h"
 #include "modules/LicensePlatesEditor/LicensePlatesQmlBridge.h"
 #include "modules/fontEditor/FontCreatorQmlBridge.h"
@@ -66,8 +67,8 @@
 #include "modules/PhysicsEditor/telemetry/LapTimeValidation.h"
 #include "modules/modellingEditor/TrackBuilder/TerrainEditorQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/assets/AssetsLibraryQmlBridge.h"
-#include "core/mesh/MeshDataBridge.h"
-#include "core/material/TexturePaintQmlBridge.h"
+#include "sdk/kseditor/engine/mesh/MeshDataBridge.h"
+#include "sdk/kseditor/engine/material/TexturePaintQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/mesh/MeshLoaderQML.h"
 #include "modules/modellingEditor/SceneMeshGeometry.h"
 #include "modules/modellingEditor/ParticlePointsGeometry.h"
@@ -75,19 +76,19 @@
 #include "sdk/kseditor/qmlbridges/Scripting/CspConfigQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/Scripting/ContentQMLBridge.h"
 #include "modules/modellingEditor/CharacterBuilder/CharacterEditorQmlBridge.h"
-#include "core/network/CollabEditorQmlBridge.h"
-#include "core/kschat/ChatQmlBridge.h"
+#include "sdk/kseditor/engine/network/CollabEditorQmlBridge.h"
+#include "sdk/kseditor/engine/network/ChatQmlBridge.h"
 #include "modules/ksOffice/OfficeQmlBridge.h"
 #include "modules/ksOffice/OfficeDocumentBridge.h"
 #include "sdk/kseditor/qmlbridges/Audio/AudioWaveformBridge.h"
-#include "core/Audio/KsACSndEventBridge.h"
-#include "core/Audio/AudioStudioTypes.h"
+#include "sdk/kseditor/engine/Audio/KsACSndEventBridge.h"
+#include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
 #include "sdk/kseditor/qmlbridges/Scripting/ACEContentQMLBridge.h"
-#include "core/Audio/AIAudioStemSeparator.h"
-#include "core/devices/scanners/photogrammetry/PhotogrammetryCapture.h"
-#include "core/devices/scanners/turntable_scanner/TurntableScanner.h"
-#include "core/devices/scanners/structured_light/StructuredLightScanner.h"
-#include "core/devices/scanners/stereo_vision/StereoVisionScanner.h"
+#include "sdk/kseditor/engine/Audio/AIAudioStemSeparator.h"
+#include "engine/devices/scanners/photogrammetry/PhotogrammetryCapture.h"
+#include "engine/devices/scanners/turntable_scanner/TurntableScanner.h"
+#include "engine/devices/scanners/structured_light/StructuredLightScanner.h"
+#include "engine/devices/scanners/stereo_vision/StereoVisionScanner.h"
 
 
 static int runMainWindow(QApplication& app, const QString& projectPath)

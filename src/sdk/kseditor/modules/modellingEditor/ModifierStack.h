@@ -6,7 +6,7 @@
 #include <QMap>
 #include <QVariant>
 #include <QJsonObject>
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 
 namespace ks {
 

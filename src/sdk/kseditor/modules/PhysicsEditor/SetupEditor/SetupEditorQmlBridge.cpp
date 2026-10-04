@@ -1,6 +1,6 @@
 #include "SetupEditorQmlBridge.h"
 #include "CarSetupEditor.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QGroupBox>
 #include <QFormLayout>
 #include <cmath>

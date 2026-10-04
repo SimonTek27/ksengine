@@ -7,6 +7,7 @@
 
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QBuffer>
 #include <QDebug>
 #include <cmath>
 

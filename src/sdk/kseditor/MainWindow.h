@@ -22,11 +22,11 @@
 #include "../resources/ui/TerminalWidget.h"
 #include "vcs/GitStatusWidget.h"
 #include "modules/moduleManager/ModuleManager.h"
-#include "../../engine/sys/SettingsManager.h"
+#include "sys/SettingsManager.h"
 #include "../resources/ui/RibbonUI.h"
 #include "tools/TemplateManager.h"
 #include "tools/FileDiffEngine.h"
-#include "tools/AutoSave.h"
+#include "tools/CrashRecovery.h"
 #include "help/HelpSystem.h"
 #include "help/HelpBrowser.h"
 

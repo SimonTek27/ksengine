@@ -7,7 +7,7 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 
-#include "engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
 #include "CarEditor.h"
 
 namespace ks {

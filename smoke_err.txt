@@ -1,0 +1,6 @@
+[PluginManager] Found 0 plugins in "C:/Users/simon/AppData/Roaming/ksEditor/ksEditor/plugins"
+[KsAcPluginHost] loaded "E:/Users/Simon/source/repos/kseditor/build/bin/Debug/plugins/ksassettocorsa.dll" version "0.9.0"
+[ksAssettoCorsa] Plugin initializing...
+[ksAssettoCorsa] Failed to initialize KsPlugin
+[AC plugin] loaded but initialize failed
+Showing WelcomeScreen (QML)...

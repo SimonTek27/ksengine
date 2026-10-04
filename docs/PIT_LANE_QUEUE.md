@@ -1,31 +1,31 @@
 # Pit lane queue
 
-## Ruoli
+## Roles
 
-| Role | Significato |
-|------|-------------|
-| **Leaving** | dal box verso pista |
-| **Entering** | dalla pista verso il box |
-| **Holding** | fermo in servizio |
+| Role | Meaning |
+|------|---------|
+| **Leaving** | from the garage toward the track |
+| **Entering** | from the track toward the garage |
+| **Holding** | stopped for service |
 
-## Stati
+## States
 
-| Status | Significato |
-|--------|-------------|
-| **Waiting** | in coda, non può muoversi |
-| **ClearedToMove** | gap libero, può partire |
-| **Moving** | in movimento sulla pit |
-| **Done** | uscito dalla coda |
+| Status | Meaning |
+|--------|---------|
+| **Waiting** | queued, cannot move |
+| **ClearedToMove** | gap free, may go |
+| **Moving** | moving along the pit |
+| **Done** | left the queue |
 
-## Regole
+## Rules
 
-1. **Uscita garage**: `requestLeave` → solo il primo con gap ≥ `releaseGapM` (default 12 m) è **Cleared**.
-2. **Spaziatura**: minimo `minSpacingM` (8 m) sull’asse pit.
-3. **Priorità**: player boost + garage index più basso preferito in leave.
-4. **Ingresso**: FIFO lungo l’asse; bloccato se qualcuno è entro min spacing.
-5. **Garage exit**: `shouldBlockGarageExit` → `pathBlocked` finché non Cleared.
+1. **Garage exit**: `requestLeave` → only the first with gap ≥ `releaseGapM` (default 12 m) is **Cleared**.
+2. **Spacing**: minimum `minSpacingM` (8 m) along the pit axis.
+3. **Priority**: player boost + lower garage index preferred on leave.
+4. **Entry**: FIFO along the axis; blocked if someone is within min spacing.
+5. **Garage exit**: `shouldBlockGarageExit` → `pathBlocked` until Cleared.
 
-## Flusso con GarageExit
+## Flow with GarageExit
 
 ```text
 requestLeave(carId)
@@ -34,19 +34,19 @@ GarageExit: Preparing / BoxClear
     ▼  pathBlocked = queue.shouldBlockGarageExit()
 ClearedToMove
     ▼
-RollingOut / PitLane → markMoving, limiter da suggestedMaxSpeedMs
+RollingOut / PitLane → markMoving, limiter from suggestedMaxSpeedMs
     ▼
 OnTrack → markDone
 ```
 
-## Codice
+## Code
 
 ```cpp
 PitLaneQueue queue;
 queue.setAxis({ pitOriginX, pitOriginZ, pitHeading });
 queue.setConfig(cfg);
 
-// player vuole uscire
+// player wants to leave
 queue.requestLeave(playerId, raceNum, garageIdx, true, x, z);
 
 queue.setSimTime(t);

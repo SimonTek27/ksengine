@@ -22,8 +22,15 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 sunDirection;      // xyz, w unused
     vec4 sunColor;          // rgb, a = intensity
     mat4 cascadeViewProj[3];
-    vec4 cascadeSplits;     // view-space far distance of each cascade (xyz)
+    vec4 cascadeSplits;     // view-space far distance of each cascade
     vec4 cameraPos;         // xyz, w unused
+    mat4 viewProj;          // unjittered, current frame
+    mat4 prevViewProj;      // unjittered, previous frame
+    vec4 taaParams;         // x = history feedback (0 disables TAA)
+    vec4 fogColor;          // rgb = atmosphere tint, a unused
+    vec4 fogParams;         // x = density, y = height falloff, z = start distance, w = max opacity
+    vec4 aoParams;          // x = radius, y = bias, z = strength, w = 1 when enabled
+    vec4 ssrParams;         // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
@@ -31,13 +38,11 @@ layout(set = 0, binding = 2) uniform sampler2D gbufAlbedo;
 layout(set = 0, binding = 3) uniform sampler2D gbufNormal;
 layout(set = 0, binding = 4) uniform sampler2D gbufWorldPos;
 
-const vec3 SKY_COLOR = vec3(0.35, 0.55, 0.75);
 const float PI = 3.14159265;
 
-const float FOG_DENSITY = 0.0028;
-const float FOG_HEIGHT_FALLOFF = 0.018;
+// In-scatter shaping only — density/falloff/opacity come from the UBO so the
+// weather system can drive them (see NativeRenderer::setFog).
 const float FOG_ANISOTROPY = 0.55;
-const float FOG_MAX = 0.9;
 const float VOL_STRENGTH = 4.0;
 const int FOG_STEPS = 12;
 
@@ -64,11 +69,11 @@ float sampleShadow(vec3 worldPos, int cascadeIndex) {
 // camPos -> worldPos. Degenerates to the uniform-fog case as dy -> 0.
 float heightFogAmount(vec3 camPos, vec3 worldPos) {
     vec3 d = worldPos - camPos;
-    float dist = length(d);
+    float dist = max(length(d) - frame.fogParams.z, 0.0);
     float dy = d.y;
-    float k = FOG_DENSITY * exp(-camPos.y * FOG_HEIGHT_FALLOFF);
+    float k = frame.fogParams.x * exp(-camPos.y * frame.fogParams.y);
     if (abs(dy) < 1e-3) return k * dist;
-    return k * dist * (1.0 - exp(-FOG_HEIGHT_FALLOFF * dy)) / (FOG_HEIGHT_FALLOFF * dy);
+    return k * dist * (1.0 - exp(-frame.fogParams.y * dy)) / (frame.fogParams.y * dy);
 }
 
 // Transmittance of sunlight through the shadow cascades averaged along the
@@ -97,10 +102,109 @@ vec3 volumetricInscatter(vec3 camPos, vec3 worldPos, vec3 sunRad) {
     return sunRad * phase * lit * VOL_STRENGTH;
 }
 
+// Screen-space ambient occlusion (roadmap ksengine-vs-cryengine P0, KS_SSAO).
+// Runs inline in this pass and reuses the two GBuffer bindings the shader
+// already has (world position + the normal computed above), so it costs no
+// extra image, no extra pass and no descriptor change - the AO that a
+// compute pass would have written is folded straight into the ambient term.
+// Samples are pushed out along the normal on a golden-angle hemisphere and
+// tested against the scene by radial distance from the camera: both points
+// of a test sit on nearly the same view ray, so the perspective warp of the
+// radial metric cancels in the comparison.
+const int AO_SAMPLES = 16;
+const float AO_GOLDEN_ANGLE = 2.39996323;
+
+float aoHash(vec2 p) {
+    return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+float ssao(vec3 worldPos, vec3 N) {
+    if (frame.aoParams.w < 0.5) return 1.0;
+    float radius = frame.aoParams.x;
+    float bias = frame.aoParams.y;
+    float strength = frame.aoParams.z;
+
+    vec3 up = abs(N.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 tangent = normalize(cross(up, N));
+    vec3 bitangent = cross(N, tangent);
+    float rot = aoHash(gl_FragCoord.xy) * 6.2831853;
+    vec3 camPos = frame.cameraPos.xyz;
+
+    float occluded = 0.0;
+    for (int i = 0; i < AO_SAMPLES; ++i) {
+        float t = (float(i) + 0.5) / float(AO_SAMPLES);
+        float phi = float(i) * AO_GOLDEN_ANGLE + rot;
+        float cosT = 1.0 - t;                       // dense near the normal
+        float sinT = sqrt(max(0.0, 1.0 - cosT * cosT));
+        vec3 dir = tangent * (cos(phi) * sinT) + bitangent * (sin(phi) * sinT) + N * cosT;
+        vec3 sp = worldPos + dir * radius;
+
+        vec4 clip = frame.viewProj * vec4(sp, 1.0);
+        if (clip.w <= 0.0) continue;
+        vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
+
+        vec4 scene = texture(gbufWorldPos, uv);
+        if (scene.w < 0.5) continue;                // sky: never occludes
+        float sceneDist = length(scene.xyz - camPos);
+        float sampleDist = length(sp - camPos);
+        // Occluded when the scene at that pixel is closer to the camera than
+        // the sample point, and not so much further that the difference is
+        // outside the occlusion radius.
+        if (sceneDist + bias < sampleDist && (sampleDist - sceneDist) < radius) {
+            occluded += 1.0;
+        }
+    }
+    float ao = 1.0 - occluded / float(AO_SAMPLES);
+    return mix(1.0, ao, strength);
+}
+
+// Screen-space reflections (roadmap ksengine-vs-cryengine P0, KS_SSR).
+// `ssr.comp` on disk needs an `r32f` depth storage image this GBuffer does
+// not expose, so the march lives here instead and uses `gbufWorldPos` as the
+// scene-depth oracle - the same trick the SSAO above uses, and it keeps the
+// feature inside the pass that is already bound to every texture it needs.
+// The hit is shaded from the GBuffer's own albedo/normal with the sun, which
+// is an approximation (no separate lit scene copy, no roughness mip chain),
+// attenuated by the caller's fresnel and roughness terms.
+const int SSR_STEPS = 16;
+
+vec3 ssr(vec3 worldPos, vec3 N, vec3 V, vec3 L, float roughness) {
+    if (frame.ssrParams.w < 0.5) return vec3(0.0);
+    if (roughness > frame.ssrParams.z) return vec3(0.0);
+
+    vec3 R = reflect(-V, N);
+    float maxDist = frame.ssrParams.x;
+    float stepLen = maxDist / float(SSR_STEPS);
+    float thickness = stepLen * 0.75;   // strict enough that the ray never
+                                        // "hits" the surface it starts from
+
+    vec2 hitUV = vec2(0.0);
+    bool hit = false;
+    for (int i = 1; i <= SSR_STEPS; ++i) {
+        vec3 p = worldPos + R * (stepLen * float(i));
+        vec4 clip = frame.viewProj * vec4(p, 1.0);
+        if (clip.w <= 0.0) break;
+        vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
+        vec4 scene = texture(gbufWorldPos, uv);
+        if (scene.w < 0.5) continue;    // sky: nothing to reflect off
+        if (distance(scene.xyz, p) < thickness) { hitUV = uv; hit = true; break; }
+    }
+    if (!hit) return vec3(0.0);
+
+    vec3 hitAlbedo = texture(gbufAlbedo, hitUV).rgb;
+    vec3 hitN = normalize(texture(gbufNormal, hitUV).xyz);
+    float hitNdotL = max(dot(hitN, L), 0.0);
+    vec3 hitSun = frame.sunColor.rgb * frame.sunColor.a;
+    vec3 hitColor = hitAlbedo * (hitSun * hitNdotL + hitSun * 0.05);
+    return hitColor * frame.ssrParams.y;
+}
+
 void main() {
     vec4 coverage = texture(gbufWorldPos, vUV);
     if (coverage.w < 0.5) {
-        outColor = vec4(SKY_COLOR, 1.0);
+        outColor = vec4(frame.fogColor.rgb, 1.0);
         return;
     }
 
@@ -122,7 +226,7 @@ void main() {
     float NdotL = max(dot(N, L), 0.0);
     float shadow = sampleShadow(worldPos, cascadeFor(viewDist));
 
-    vec3 ambient = albedo * 0.25 * ao;
+    vec3 ambient = albedo * 0.25 * ao * ssao(worldPos, N);
     vec3 diffuse = albedo * sunRad * NdotL * shadow;
 
     float a = roughness * roughness;
@@ -139,9 +243,17 @@ void main() {
 
     vec3 lit = ambient + diffuse + specular;
 
-    float fogT = clamp(1.0 - exp(-heightFogAmount(camPos, worldPos)), 0.0, FOG_MAX);
+    // Screen-space reflections on top of the specular term: fresnel-weighted
+    // (metals are the only strong reflectors this GBuffer can express, and it
+    // has no metallic channel, so roughness gates it instead) and faded out
+    // as roughness rises because there is no mip chain to blur with.
+    vec3 refl = ssr(worldPos, N, V, L, roughness);
+    float fres = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+    lit += refl * fres * (1.0 - roughness);
+
+    float fogT = clamp(1.0 - exp(-heightFogAmount(camPos, worldPos)), 0.0, frame.fogParams.w);
     vec3 inscatter = volumetricInscatter(camPos, worldPos, sunRad);
-    vec3 fogColor = SKY_COLOR + inscatter;
+    vec3 fogColor = frame.fogColor.rgb + inscatter;
 
     outColor = vec4(mix(lit, fogColor, fogT), 1.0);
 }

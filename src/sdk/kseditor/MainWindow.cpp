@@ -1,13 +1,13 @@
 #include "MainWindow.h"
 #include "engine/sys/ModuleManager.h"
-#include "engine/sys/SettingsManager.h"
-#include "engine/sys/PluginManager.h"
+#include "sys/SettingsManager.h"
+#include "sdk/kseditor/engine/sys/PluginManager.h"
 #include "tools/TemplateManager.h"
 #include "tools/FileDiffEngine.h"
-#include "tools/AutoSave.h"
+#include "tools/CrashRecovery.h"
 #include "help/HelpSystem.h"
 #include "help/HelpBrowser.h"
-#include "engine/assets/ProjectBuilder.h"
+#include "sdk/kseditor/engine/assets/ProjectBuilder.h"
 #include "vcs/GitStatusWidget.h"
 #include "../resources/ui/CustomTitleBar.h"
 #include "../resources/ui/FileTreeWidget.h"
@@ -57,6 +57,8 @@ MainWindow::MainWindow(const QString& projectPath, QWidget* parent)
     m_diffEngine = ks::FileComparisonEngine::instance();
     m_helpBrowser = new ks::HelpBrowser(this);
     m_crashRecovery = new ks::CrashRecovery(this);
+    connect(m_crashRecovery, &ks::CrashRecovery::recoveryNeeded,
+            this, &MainWindow::showRecoveryDialog);
 
     m_autoSaveTimer = new QTimer(this);
     m_autoSaveTimer->setInterval(5 * 60 * 1000);

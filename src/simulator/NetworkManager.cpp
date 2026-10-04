@@ -1,5 +1,6 @@
 #include "NetworkManager.h"
 #include <cstdio>
+#include <cstring>
 #include <chrono>
 
 #if HAS_KSNET
@@ -39,12 +40,14 @@ NetworkManager::~NetworkManager() {
 void NetworkManager::setupClientSignals() {
     m_client->onConnected = [this](uint32_t clientId) {
         m_connected = true;
+        m_localClientId = clientId;
         printf("NetworkManager: Connected as client, id=%u\n", clientId);
         if (onClientConnectedToServer) onClientConnectedToServer(m_hosting ? "localhost" : "", m_port);
     };
 
     m_client->onDisconnected = [this](const std::string& reason) {
         m_connected = false;
+        m_localClientId = 0;
         printf("NetworkManager: Disconnected - %s\n", reason.c_str());
         if (onDisconnectedFromServer) onDisconnectedFromServer(reason);
     };
@@ -90,6 +93,8 @@ bool NetworkManager::hostServer(uint16_t port, int maxClients,
     m_serverName = serverName;
     m_trackName = trackName;
     m_port = port;
+    m_driverName = "Host";
+    m_carName = "gte3";
 
     if (!m_server->start(port, serverName, trackName)) {
         if (onConnectionFailed) onConnectionFailed("Failed to start server");
@@ -176,9 +181,25 @@ std::string NetworkManager::clientName(int index) const {
 }
 
 void NetworkManager::sendChatMessage(const std::string& message) {
-    if (!m_connected) return;
-    // Stub: send chat via ksnet
-    (void)message;
+    if (!m_connected || !m_client) return;
+    auto* chat = (net::ChatMessage*)m_client->createMessage(net::MSG_CHAT);
+    if (!chat) return;
+    chat->senderId = 0;
+    strncpy(chat->senderName, m_driverName.c_str(), sizeof(chat->senderName) - 1);
+    strncpy(chat->message, message.c_str(), sizeof(chat->message) - 1);
+    m_client->sendMessage(net::CHANNEL_RELIABLE, chat);
+}
+
+void NetworkManager::update(double dt) {
+    if (m_server) m_server->update(dt);
+    if (m_client) m_client->update(dt);
+
+    auto now = std::chrono::steady_clock::now();
+    if (m_connected &&
+        std::chrono::duration<double>(now - m_lastStatsPoll).count() >= STATS_POLL_INTERVAL) {
+        m_lastStatsPoll = now;
+        onStatsTimer();
+    }
 }
 
 void NetworkManager::onStatsTimer() {

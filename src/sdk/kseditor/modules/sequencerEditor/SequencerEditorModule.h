@@ -15,6 +15,7 @@
 #include <QTimer>
 #include <QColor>
 #include <QUuid>
+#include <QVector3D>
 
 namespace ks {
 

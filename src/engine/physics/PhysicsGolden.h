@@ -78,6 +78,33 @@ public:
 
     void pushSim(const GoldenSample& s) { m_sim.push_back(s); }
 
+    void clearRef() { m_ref.clear(); }
+    void pushRef(const GoldenSample& s) { m_ref.push_back(s); }
+    size_t refCount() const { return m_ref.size(); }
+
+    /** Export the reference set as a golden CSV (loadCsv-compatible format). */
+    bool saveCsv(const std::string& path) const {
+        if (m_ref.empty()) return false;
+        std::ofstream out(path);
+        if (!out) {
+            std::fprintf(stderr, "PhysicsGolden: cannot write %s\n", path.c_str());
+            return false;
+        }
+        out << "# ksengine golden lap export\n";
+        out << "# time_s,speed_ms,rpm,x,y,z,throttle,brake,steer\n";
+        out << "time_s,speed_ms,rpm,x,y,z,throttle,brake,steer\n";
+        char buf[256];
+        for (const auto& s : m_ref) {
+            std::snprintf(buf, sizeof(buf),
+                          "%.3f,%.3f,%.1f,%.4f,%.4f,%.4f,%.3f,%.3f,%.3f\n",
+                          s.time, double(s.speedMs), double(s.rpm),
+                          double(s.x), double(s.y), double(s.z),
+                          double(s.throttle), double(s.brake), double(s.steer));
+            out << buf;
+        }
+        return true;
+    }
+
     const std::vector<GoldenSample>& reference() const { return m_ref; }
     const std::vector<GoldenSample>& simulated() const { return m_sim; }
 

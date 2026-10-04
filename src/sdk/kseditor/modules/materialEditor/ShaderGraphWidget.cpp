@@ -1,5 +1,5 @@
-﻿#include "ShaderGraphWidget.h"
-#include "../../../resources/ui/NodeGraphScene.h"
+#include "ShaderGraphWidget.h"
+#include "resources/ui/NodeGraphScene.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 
@@ -42,7 +42,7 @@ static ShaderPortType stringToPortType(const QString& s)
     return ShaderPortType::Float;
 }
 
-// ÔöÇÔöÇÔöÇ Conversion helpers ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── Conversion helpers ─────────────────────────────────────────────────
 
 static void storePortsInProperties(const QVector<ShaderPort>& ports, bool isInput, QMap<QString, QVariant>& props)
 {
@@ -105,7 +105,7 @@ static ShaderConnection loadConnectionFromProperties(const QMap<QString, QVarian
     return sc;
 }
 
-// ÔöÇÔöÇÔöÇ ShaderGraph ÔåÆ Widget ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── ShaderGraph → Widget ────────────────────────────────────────────────
 
 void ShaderGraphWidget::syncGraphToWidget()
 {
@@ -159,7 +159,7 @@ void ShaderGraphWidget::syncGraphToWidget()
     }
 }
 
-// ÔöÇÔöÇÔöÇ Widget ÔåÆ ShaderGraph ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── Widget → ShaderGraph ────────────────────────────────────────────────
 
 void ShaderGraphWidget::syncWidgetToGraph()
 {
@@ -224,7 +224,7 @@ void ShaderGraphWidget::syncWidgetToGraph()
     graph->modified = QDateTime::currentDateTime();
 }
 
-// ÔöÇÔöÇÔöÇ Constructor / Setup ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── Constructor / Setup ─────────────────────────────────────────────────
 
 ShaderGraphWidget::ShaderGraphWidget(QWidget* parent)
     : QWidget(parent)
@@ -263,7 +263,7 @@ void ShaderGraphWidget::setGraph(const QUuid& graphId)
     syncGraphToWidget();
 }
 
-// ÔöÇÔöÇÔöÇ Slots ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── Slots ───────────────────────────────────────────────────────────────
 
 void ShaderGraphWidget::onNodeSelected(const QUuid& nodeId)
 {
@@ -287,7 +287,7 @@ void ShaderGraphWidget::onCompile()
 
     auto result = m_mgr->validateGraph(m_graphId);
     if (!result.valid) {
-        emit statusMessage("Validation failed ÔÇö fix errors before compiling");
+        emit statusMessage("Validation failed — fix errors before compiling");
         return;
     }
 

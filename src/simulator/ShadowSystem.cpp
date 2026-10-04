@@ -430,8 +430,10 @@ void CascadedShadowMap::update(const mat4& camView, const mat4& camProj, float c
 
     mat4 invViewProj = (camProj * camView).inverse();
 
-    // Unproject the full frustum's near/far corner rings once.
-    vec3 ndcNear[4] = { {-1,-1,-1}, {1,-1,-1}, {1,1,-1}, {-1,1,-1} };
+    // Unproject the full frustum's near/far corner rings once. Depth is
+    // Vulkan clip space (z in [0,1]), matching mat4::perspective/ortho — the
+    // near ring sits at z=0, not the OpenGL z=-1.
+    vec3 ndcNear[4] = { {-1,-1, 0}, {1,-1, 0}, {1,1, 0}, {-1,1, 0} };
     vec3 ndcFar[4]  = { {-1,-1, 1}, {1,-1, 1}, {1,1, 1}, {-1,1, 1} };
     vec3 worldNear[4], worldFar[4];
     for (int i = 0; i < 4; ++i) {

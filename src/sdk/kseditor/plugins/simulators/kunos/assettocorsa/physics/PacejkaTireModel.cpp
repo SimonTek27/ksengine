@@ -335,12 +335,6 @@ bool PacejkaTireModel::validateCoefficients(const TireCoefficients& coeffs, QStr
     return true;
 }
 
-void PacejkaTireModel::loadFromIni(const QString& iniPath) {
-    TireModelManager mgr;
-    mgr.loadFromIni(iniPath);
-    setCoefficients(mgr.getModel(0).getCoefficients());
-}
-
 // ============================================================================
 // TireModelManager implementation
 // ============================================================================

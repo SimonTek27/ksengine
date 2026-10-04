@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/editor/ModuleGuiBase.h"
+#include "modules/editor/ModuleGuiBase.h"
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QTableWidget>

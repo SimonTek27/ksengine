@@ -1,10 +1,72 @@
 #include "PacejkaTireModel.h"
+#include "../../Config/IniFile.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace ks {
 namespace physics {
+
+namespace {
+
+// Applies A1..A13 / B1..B8 / C1..C13 entries of an INI group onto c.
+// Missing keys leave the current value untouched.
+void applyCoeffGroup(const ks::config::IniFile& ini, const std::string& group,
+                     PacejkaTireModel::TireCoefficients& c) {
+    float* a[13] = {&c.a1, &c.a2, &c.a3, &c.a4, &c.a5, &c.a6, &c.a7,
+                    &c.a8, &c.a9, &c.a10, &c.a11, &c.a12, &c.a13};
+    float* b[8] = {&c.b1, &c.b2, &c.b3, &c.b4, &c.b5, &c.b6, &c.b7, &c.b8};
+    float* cc[13] = {&c.c1, &c.c2, &c.c3, &c.c4, &c.c5, &c.c6, &c.c7,
+                     &c.c8, &c.c9, &c.c10, &c.c11, &c.c12, &c.c13};
+    char key[8];
+    for (int i = 0; i < 13; ++i) {
+        std::snprintf(key, sizeof(key), "A%d", i + 1);
+        if (ini.contains(group, key)) *a[i] = static_cast<float>(ini.getDouble(group, key, *a[i]));
+    }
+    for (int i = 0; i < 8; ++i) {
+        std::snprintf(key, sizeof(key), "B%d", i + 1);
+        if (ini.contains(group, key)) *b[i] = static_cast<float>(ini.getDouble(group, key, *b[i]));
+    }
+    for (int i = 0; i < 13; ++i) {
+        std::snprintf(key, sizeof(key), "C%d", i + 1);
+        if (ini.contains(group, key)) *cc[i] = static_cast<float>(ini.getDouble(group, key, *cc[i]));
+    }
+}
+
+void saveCoeffGroup(ks::config::IniFile& ini, const std::string& group,
+                    const PacejkaTireModel::TireCoefficients& c) {
+    const float* a[13] = {&c.a1, &c.a2, &c.a3, &c.a4, &c.a5, &c.a6, &c.a7,
+                          &c.a8, &c.a9, &c.a10, &c.a11, &c.a12, &c.a13};
+    const float* b[8] = {&c.b1, &c.b2, &c.b3, &c.b4, &c.b5, &c.b6, &c.b7, &c.b8};
+    const float* cc[13] = {&c.c1, &c.c2, &c.c3, &c.c4, &c.c5, &c.c6, &c.c7,
+                           &c.c8, &c.c9, &c.c10, &c.c11, &c.c12, &c.c13};
+    char key[8];
+    for (int i = 0; i < 13; ++i) {
+        std::snprintf(key, sizeof(key), "A%d", i + 1);
+        ini.setNumber(group, key, *a[i]);
+    }
+    for (int i = 0; i < 8; ++i) {
+        std::snprintf(key, sizeof(key), "B%d", i + 1);
+        ini.setNumber(group, key, *b[i]);
+    }
+    for (int i = 0; i < 13; ++i) {
+        std::snprintf(key, sizeof(key), "C%d", i + 1);
+        ini.setNumber(group, key, *cc[i]);
+    }
+}
+
+// Flat keys first, then optional legacy wrapper groups.
+void applyFlatAndFallbacks(const ks::config::IniFile& ini,
+                           PacejkaTireModel::TireCoefficients& c) {
+    applyCoeffGroup(ini, "", c);
+    if (ini.contains("PACEJKA", "A1") || ini.contains("PACEJKA", "B2"))
+        applyCoeffGroup(ini, "PACEJKA", c);
+    if (ini.contains("TYRE", "A1") || ini.contains("TYRE", "B2"))
+        applyCoeffGroup(ini, "TYRE", c);
+}
+
+} // namespace
 
 PacejkaTireModel::PacejkaTireModel()
     : m_coefficients(getSlickTireCoefficients()) {}
@@ -43,13 +105,21 @@ PacejkaTireModel::TireForces PacejkaTireModel::calculateForces(const TireState& 
     float E_x = a.b6 * Fz_kN + a.b7;
     float Fx = magicFormula(kappa, B_x, C_x, D_x, E_x);
 
-    const float sx = kappa / 0.15f;
-    const float sy = (alpha / 0.12f);
-    const float comb = std::sqrt(sx * sx + sy * sy);
-    float scale = 1.0f;
-    if (comb > 1.0f) scale = 1.0f / comb;
-    Fx *= scale;
-    Fy *= scale;
+    // Combined slip: friction-circle normalization on the FORCES, not on
+    // the raw slips. The previous proxy (sx = kappa/0.15, sy = alpha/0.12)
+    // divided the lateral force by alpha/0.12 beyond 6.9 deg of slip, which
+    // capped every tyre at ~slope*0.12 = ~140 N instead of the ~3 kN peak of
+    // its own MF curve — the car could not build lateral force to corner at
+    // all (AI racing, roadmap 3.5). Normalising by the peak forces keeps
+    // pure-axis behaviour at the full MF curve and still limits the
+    // combined case to the friction circle.
+    const float nx = Fx / (D_x + 1e-3f);
+    const float ny = Fy / (D_y + 1e-3f);
+    const float comb = std::sqrt(nx * nx + ny * ny);
+    if (comb > 1.0f) {
+        Fx /= comb;
+        Fy /= comb;
+    }
 
     Fx *= calculateTemperatureEffect(state.tireTemp) * calculatePressureEffect(state.tirePressure);
     Fy *= calculateTemperatureEffect(state.tireTemp) * calculatePressureEffect(state.tirePressure);
@@ -176,7 +246,13 @@ bool PacejkaTireModel::validateCoefficients(const TireCoefficients& coeffs, std:
     return true;
 }
 
-void PacejkaTireModel::loadFromIni(const std::string& /*iniPath*/) {}
+void PacejkaTireModel::loadFromIni(const std::string& iniPath) {
+    ks::config::IniFile ini;
+    if (!ini.load(iniPath)) return;
+    TireCoefficients c = m_coefficients;
+    applyFlatAndFallbacks(ini, c);
+    if (validateCoefficients(c, nullptr)) m_coefficients = c;
+}
 
 TireModelManager::TireModelManager() {
     auto slick = PacejkaTireModel::getSlickTireCoefficients();
@@ -199,8 +275,34 @@ void TireModelManager::setTirePressure(float frontPressure, float rearPressure) 
     m_rearPressure = rearPressure;
 }
 
-void TireModelManager::loadFromIni(const std::string& /*path*/) {}
-void TireModelManager::saveToIni(const std::string& /*path*/) const {}
+void TireModelManager::loadFromIni(const std::string& path) {
+    ks::config::IniFile ini;
+    if (!ini.load(path)) return;
+
+    const char* wheelGroups[4] = {"FL", "FR", "RL", "RR"};
+    for (int w = 0; w < 4; ++w) {
+        PacejkaTireModel::TireCoefficients c = m_models[w].getCoefficients();
+        applyFlatAndFallbacks(ini, c);
+        // Axle group, then wheel-specific override.
+        applyCoeffGroup(ini, (w < 2) ? "FRONT" : "REAR", c);
+        if (ini.contains(wheelGroups[w], "A1") || ini.contains(wheelGroups[w], "B2"))
+            applyCoeffGroup(ini, wheelGroups[w], c);
+        if (PacejkaTireModel::validateCoefficients(c, nullptr))
+            m_models[w].setCoefficients(c);
+    }
+    m_frontPressure = static_cast<float>(ini.getDouble("FRONT", "PRESSURE", m_frontPressure));
+    m_rearPressure = static_cast<float>(ini.getDouble("REAR", "PRESSURE", m_rearPressure));
+}
+
+void TireModelManager::saveToIni(const std::string& path) const {
+    ks::config::IniFile ini;
+    const char* wheelGroups[4] = {"FL", "FR", "RL", "RR"};
+    for (int w = 0; w < 4; ++w)
+        saveCoeffGroup(ini, wheelGroups[w], m_models[w].getCoefficients());
+    ini.setNumber("FRONT", "PRESSURE", m_frontPressure);
+    ini.setNumber("REAR", "PRESSURE", m_rearPressure);
+    ini.save(path);
+}
 
 std::vector<float> TireModelManager::calculateGripCircle(int wheel, float normalForce) const {
     std::vector<float> r;

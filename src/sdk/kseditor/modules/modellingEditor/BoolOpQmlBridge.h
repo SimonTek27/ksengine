@@ -2,7 +2,7 @@
 
 #include <QObject>
 #include <QString>
-#include "mesh/BooleanOps.h"
+#include "sdk/kseditor/engine/mesh/BooleanOps.h"
 
 namespace ks {
 class SceneGraph;

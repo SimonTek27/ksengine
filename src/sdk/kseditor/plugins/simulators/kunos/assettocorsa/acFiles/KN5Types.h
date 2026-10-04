@@ -14,9 +14,15 @@ namespace KN5Parser {
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-static constexpr quint32 KN5_MAGIC   = 0x346E6B73; // "skn4"
-static constexpr quint32 KN5_VERSION = 5;
-static constexpr quint32 KN5_VERSION_MIN = 4; // minimum supported
+// Real Assetto Corsa KN5 magic: the 6 ASCII bytes "sc6969". KN5_MAGIC is the
+// first four of those bytes read as a little-endian uint32 ('s','c','6','9'),
+// i.e. what quint32-based checks see at offset 0. Verified against ~2770 real
+// AC .kn5 files and actools' reference implementation (Kn5Writer.cs).
+static constexpr quint32 KN5_MAGIC        = 0x39366373;
+static constexpr char    KN5_MAGIC_BYTES[7] = "sc6969";
+static constexpr quint32 KN5_VERSION      = 5; // version emitted by write()
+static constexpr quint32 KN5_VERSION_MIN  = 4; // minimum supported (axis.kn5)
+static constexpr quint32 KN5_VERSION_MAX  = 6; // latest seen in the wild
 
 // AC node naming convention prefixes (for validation)
 static const QStringList AC_LOD_PREFIXES   = {"LOD_A","LOD_B","LOD_C","LOD_D"};
@@ -33,7 +39,8 @@ enum class AttributeType : quint32 {
     TexCoord1  = 3,  // vec2 — UV2 (lightmap / damage)
     Tangent    = 4,  // vec3
     Bitangent  = 5,  // vec3
-    BoneIndex  = 6,  // uvec4 (as 4×uint8)
+    BoneIndex  = 6,  // vec4 — bone indices stored as FLOATS in real kn5 files
+                     // (actools Kn5Basic.cs: "Yes! Those are floats!")
     BoneWeight = 7,  // vec4
     Color      = 8,  // vec4 (RGBA)
 };
@@ -68,6 +75,30 @@ struct SubMesh {
 };
 
 // ---------------------------------------------------------------------------
+// Bone (for skinned meshes) — declared before Mesh, which stores per-node
+// bones (the real format keeps a bone list on every SkinnedMesh node).
+// ---------------------------------------------------------------------------
+struct Bone {
+    QString name;
+    int     parentIndex = -1; // not part of the real format; -1 when parsed
+    float   matrix[16] = {};  // bind pose matrix (row-major, row-vector)
+};
+
+// ---------------------------------------------------------------------------
+// World matrix (row-vector convention: p' = p * M, translation at [12..14])
+// ---------------------------------------------------------------------------
+struct Matrix4x4 {
+    float m[4][4] = {};
+    Matrix4x4() { m[0][0]=m[1][1]=m[2][2]=m[3][3]=1.0f; }
+    QMatrix4x4 toQMatrix() const {
+        return QMatrix4x4(m[0][0],m[0][1],m[0][2],m[0][3],
+                          m[1][0],m[1][1],m[1][2],m[1][3],
+                          m[2][0],m[2][1],m[2][2],m[2][3],
+                          m[3][0],m[3][1],m[3][2],m[3][3]);
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Mesh node
 // ---------------------------------------------------------------------------
 struct Mesh {
@@ -93,6 +124,17 @@ struct Mesh {
     QByteArray           vertexData;
     QByteArray           indexData;
     QVector<SubMesh>     subMeshes;
+
+    // --- Real-format fields (round-trip fidelity; defaults match files we
+    // --- construct in-editor). See src/engine/FileFormat/Kn5Reader.h.
+    quint32 materialIndex = 0;   // mesh tail "materialId" -> materials[]
+    quint32 layer         = 0;
+    float   lodIn         = 0.0f;
+    float   lodOut        = 1000.0f;
+    bool    isRenderable  = true;
+    bool    nodeActive    = true;   // node "active" byte (hierarchy, != isVisible)
+    Matrix4x4 worldMatrix;          // accumulated world transform (incl. root)
+    QVector<Bone> bones;            // skinned: per-node bone list (real format)
 
     // Decoded vertex helpers
     QVector<QVector3D>   positions;
@@ -141,8 +183,21 @@ struct Material {
         Invisible  = 4,
     } type = Type::Normal;
 
-    QMap<QString, QString> properties;        // raw shader property strings
-    QMap<QString, QString> textureMapping;    // slot → texture name
+    QMap<QString, QString> properties;        // prop name → QString::number(ValueA)
+    QMap<QString, QString> textureMapping;    // mapping name → texture name
+
+    // --- Real-format fidelity (40-byte ValueA/B/C/D blobs and mapping slots
+    // --- cannot be represented by the QMaps above). Populated by parse();
+    // --- write() merges them with the QMaps (QMap wins for presence/value).
+    struct RawProperty { QString name; QByteArray value; }; // value = 40 bytes
+    QVector<RawProperty> rawProperties;
+    struct RawMapping { QString name; qint32 slot = 0; QString texture; };
+    QVector<RawMapping> rawMappings;
+
+    // Real blend/depth bytes: -1 = not parsed (write() derives blendMode from
+    // type/alphaBlending and uses depthMode 0).
+    qint32 blendMode = -1;   // 0 Opaque | 1 AlphaBlend | 2 AlphaToCoverage
+    qint32 depthMode = -1;   // 0 Normal | 1 NoWrite | 2 Off
 
     // Parsed shader parameters (for editor display)
     QVector<ShaderParam>   shaderParams;
@@ -166,15 +221,6 @@ struct Texture {
     quint32    format = 0;   // DDS format
     quint32    mipmapCount = 0;
     QByteArray data;        // raw DDS data
-};
-
-// ---------------------------------------------------------------------------
-// Bone (for skinned meshes)
-// ---------------------------------------------------------------------------
-struct Bone {
-    QString name;
-    int     parentIndex = -1;
-    float   matrix[16] = {};     // bind pose world matrix (row-major)
 };
 
 // ---------------------------------------------------------------------------
@@ -203,20 +249,6 @@ struct FileHeader {
     quint32 indexBufferOffset  = 0;
     quint32 vertexBufferSize   = 0;
     quint32 indexBufferSize    = 0;
-};
-
-// ---------------------------------------------------------------------------
-// World matrix
-// ---------------------------------------------------------------------------
-struct Matrix4x4 {
-    float m[4][4] = {};
-    Matrix4x4() { m[0][0]=m[1][1]=m[2][2]=m[3][3]=1.0f; }
-    QMatrix4x4 toQMatrix() const {
-        return QMatrix4x4(m[0][0],m[0][1],m[0][2],m[0][3],
-                          m[1][0],m[1][1],m[1][2],m[1][3],
-                          m[2][0],m[2][1],m[2][2],m[2][3],
-                          m[3][0],m[3][1],m[3][2],m[3][3]);
-    }
 };
 
 // ---------------------------------------------------------------------------
@@ -302,7 +334,7 @@ inline void KN5File::extractLODGroups() {
 inline void Mesh::decodeVertices() {
     if (vertexData.isEmpty()) return;
     quint32 stride = vertexLayout.vertexSize > 0 ? vertexLayout.vertexSize
-                    : (isSkinnedMesh ? 60u : 44u);
+                    : (isSkinnedMesh ? 76u : 44u); // real kn5 vertex sizes
     quint32 count  = (quint32)vertexData.size() / stride;
 
     positions.resize(count);
@@ -324,8 +356,6 @@ inline void Mesh::decodeVertices() {
     for (quint32 i = 0; i < count; ++i) {
         const char* v = vertexData.constData() + i * stride;
         auto rf = [&](int o) { float f; memcpy(&f, v+o, 4); return f; };
-        auto ru = [&](int o) { quint8 b[4]; memcpy(b, v+o, 4); 
-                                return (quint32)(b[0]|(b[1]<<8)|(b[2]<<16)|(b[3]<<24)); };
 
         int pOff  = off(AttributeType::Position);
         if (pOff >= 0) positions[i] = {rf(pOff), rf(pOff+4), rf(pOff+8)};
@@ -352,7 +382,8 @@ inline void Mesh::decodeVertices() {
             int wOff = off(AttributeType::BoneWeight);
             int iOff = off(AttributeType::BoneIndex);
             if (wOff >= 0) boneWeights[i] = {rf(wOff), rf(wOff+4), rf(wOff+8), rf(wOff+12)};
-            if (iOff >= 0) boneIndices[i] = ru(iOff);
+            // Real kn5 stores bone indices as floats ("Yes! Those are floats!")
+            if (iOff >= 0) boneIndices[i] = (quint32)lroundf(rf(iOff));
         }
     }
 }
@@ -447,8 +478,9 @@ inline void Mesh::encodeVertices() {
                 wf(base + wOff + 12, boneWeights[i].w());
             }
             int iOff = off(AT::BoneIndex);
+            // Bone indices are floats in the real kn5 format (see decodeVertices)
             if (iOff >= 0 && i < (quint32)boneIndices.size()) {
-                wub(base + iOff, boneIndices[i]);
+                wf(base + iOff, (float)boneIndices[i]);
             }
         }
     }
@@ -488,9 +520,6 @@ public:
 
 private:
     static QString  m_lastError;
-    static void parseTexture(KN5File& out, QDataStream& stream);
-    static void parseMaterial(KN5File& out, QDataStream& stream);
-    static void parseMesh(KN5File& out, QDataStream& stream);
 };
 
 } // namespace KN5Parser

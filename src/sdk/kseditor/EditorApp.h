@@ -9,8 +9,7 @@
 #include <QTimer>
 #include <QSettings>
 
-#include "engine/Audio/AudioStudioTypes.h"
-#include "engine/physics/WeatherPhysics.h"
+#include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
 #include "sdk/kseditor/modules/modellingEditor/TrackBuilder/TrackSurfaceEditorModule.h"
 #include "sdk/kseditor/modules/modellingEditor/CarBuilder/cameracarEditor/CameraEditorModule.h"
 #include "sdk/kseditor/modules/modellingEditor/TrackBuilder/TrackMapEditorModule.h"
@@ -25,7 +24,7 @@
 #include "sdk/kseditor/modules/editor/eventEditor/careerEditor/CareerEditorModule.h"
 #include "sdk/kseditor/modules/PaintEditor/GUISkinEditorModule.h"
 #include "sdk/kseditor/modules/luaScriptEditor/LuaScriptEditorModule.h"
-#include "engine/Scripting/python/PythonScriptEngine.h"
+#include "Scripting/python/PythonScriptEngine.h"
 #include "sdk/kseditor/modules/vrEditor/VREditorModule.h"
 
 namespace ks {

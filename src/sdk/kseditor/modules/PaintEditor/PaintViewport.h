@@ -4,10 +4,10 @@
 #include <QImage>
 #include <QVector3D>
 
-#include "engine/mesh/Viewport3DSystem.h"
-#include "engine/mesh/MeshRenderer.h"
-#include "engine/Graphics/SceneMesh.h"
-#include "engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/mesh/MeshRenderer.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
 #include "PaintEditorModule.h"
 
 namespace ks {
@@ -35,7 +35,7 @@ private:
 
     ks::PaintEditor* m_paintEditor;
     Viewport3DWidget* m_viewport = nullptr;
-    ks::MeshRenderer* m_meshRenderer = nullptr;
+    ::MeshRenderer* m_meshRenderer = nullptr;
     SceneObject* m_sceneRoot = nullptr;
 
     QString m_carPath;

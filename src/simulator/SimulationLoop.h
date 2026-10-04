@@ -8,16 +8,20 @@
 #include "engine/physics/PhysicsCoreTypes.h"
 #include "engine/physics/TrackSurface.h"
 #include "engine/physics/LapSectorTimer.h"
+#include "engine/physics/PhysicsGolden.h"
 #include "engine/scene/Registry.h"
 #include "ui/NativeUiHub.h"
 #include "CameraController.h"
 #include "NativeRenderer.h"
+#include "engine/Graphics/ParticleSystem.h"
+#include "RaceSessionManager.h"
 
 #include <memory>
 #include <chrono>
 #include <cstdint>
 #include <string>
 #include <functional>
+#include <unordered_map>
 #include <vector>
 #include <array>
 #include <cmath>
@@ -118,6 +122,13 @@ public:
     void tick();
 
     bool handleUiKey(int virtualKey);
+    // WM_CHAR / mouse routing into the native UI (roadmap 3.1): text input
+    // needs the translated character, not the virtual key, and the menus/
+    // server browser are click-driven.
+    bool handleUiChar(int character);
+    bool handleUiMouseMove(float x, float y);
+    bool handleUiMouseButton(ui::MouseButton button, bool down, float x, float y);
+    bool handleUiMouseWheel(float delta, float x, float y);
 
     InputManager* inputManager() { return m_input.get(); }
     CameraController* camera() { return m_camera.get(); }
@@ -164,7 +175,17 @@ public:
     bool ffbEnabled() const { return m_ffbEnabled; }
 
     void setSharedMemoryEnabled(bool e) { m_shmEnabled = e; }
+
+    /** Race flag (yellow/SC): drives the AC SHM `flag` channel and the AI
+     *  speed limiter. GREEN/checkered are set by the session manager. */
+    void setRaceFlag(RaceFlag f) { m_raceSession.setFlag(f); }
+    RaceFlag raceFlag() const { return m_raceSession.flag(); }
     bool sharedMemoryEnabled() const { return m_shmEnabled; }
+
+    /** AI grid size for the next race session (roadmap 3.5). N AI cars
+     *  spawn on the track's ai/fast_lane.ai line; 0 = player only. */
+    void setAiCarCount(int n) { m_aiCarCount = n < 0 ? 0 : n; }
+    int aiCarCount() const { return m_aiCarCount; }
 
     void setUdpTelemetryEnabled(bool e) { m_udpEnabled = e; }
     bool udpTelemetryEnabled() const { return m_udpEnabled; }
@@ -187,7 +208,14 @@ public:
 
 private:
     void applyInput();
-    void render();
+    void render(float dt = 1.0f / 60.0f);
+    void updateCamera(float dt);
+    // Roadmap P1 (KS_PARTICLES=1): steps the CPU particle simulation and
+    // uploads this frame's billboard quads to the renderer. No-op otherwise.
+    void updateAndDrawParticles(float dt);
+    // Roadmap P2 (KS_TERRAIN=1): builds the trackside ground once from a
+    // generated heightmap and registers it as scene geometry. No-op otherwise.
+    void initTracksideTerrain();
     void updateWeather();
     void syncCarTransforms();
     void broadcastLocalCarState();
@@ -198,6 +226,8 @@ private:
     void publishUdpTelemetry();
     void publishTcpTelemetry();
     void updateLapAndSurface(double dt);
+    void beginRaceSession();
+    void finishGoldenExport();
     static std::string readFileText(const std::string& path);
 
     bool m_vulkanMode = true;
@@ -218,8 +248,21 @@ private:
     int m_viewW = 1280;
     int m_viewH = 720;
 
+    // Roadmap P1 particles: off unless KS_PARTICLES=1 (the default image
+    // must stay byte-identical), in which case a single dust emitter rides
+    // the car and its quads are handed to NativeRenderer every frame.
+    bool m_particlesWanted = false;
+    bool m_particlesInit = false;
+    ks::engine::graphics::ParticleSystem m_particles;
+    std::vector<float> m_particleQuads;
+
+    // Roadmap P2 terrain: off unless KS_TERRAIN=1 (default image unchanged).
+    bool m_terrainWanted = false;
+    bool m_terrainInit = false;
+
     SimTrackData m_trackData;
     ks::physics::LapSectorTimer m_lapTimer;
+    RaceSessionManager m_raceSession;
     float m_lapDistance = 0.f;
     float m_normalizedSpline = 0.f;
     bool m_shmEnabled = true;
@@ -249,10 +292,42 @@ private:
     int m_totalLaps = 0;
     double m_timeRemaining = 0.0;
 
+    // Opt-in telemetry export: set KS_GOLDEN_CSV=<path> to record the race
+    // session (sampled at 50 Hz while green) and write a golden CSV on end.
+    ks::physics::PhysicsGolden m_goldenRecorder;
+    bool m_goldenExportActive = false;
+    double m_goldenSampleAccum = 0.0;
+    double m_goldenTime = 0.0;
+    std::string m_goldenExportPath;
+
     std::string m_spawnedSceneDir;
     bool m_pipelineInitialized = false;
     uint32_t m_streamlineFrameIndex = 0;
     std::string m_carName;
+
+    // AI racing field (roadmap 3.5): requested size, spawned car ids for
+    // the current session, and the last lap count seen per car (lap events).
+    int m_aiCarCount = 0;
+    std::vector<int> m_aiCarIds;
+    std::vector<int> m_aiLastLaps;
+
+    // Multiplayer (roadmap 3.1): the host latches each server slot's latest
+    // controls and pushes them to that slot's car once per physics step,
+    // while a client maps the car ids the host relays onto the entries it
+    // spawned locally. kNoNetCarId means "our own car not announced yet".
+    static constexpr uint32_t kNoNetCarId = 0xFFFFFFFFu;
+    struct RemoteInput {
+        float throttle = 0.0f;
+        float brake = 0.0f;
+        float steering = 0.0f;
+    };
+    std::unordered_map<int, RemoteInput> m_remoteInputs;
+    std::unordered_map<uint32_t, int> m_remoteCarIds;
+    uint32_t m_ownNetCarId = kNoNetCarId;
+
+    // F2 server-browser row for our own hosted session (-1 = not hosting,
+    // so the static localhost row from SimulatorApp is left alone).
+    int m_mpServerClients = -1;
 };
 
 } // namespace ks::sim

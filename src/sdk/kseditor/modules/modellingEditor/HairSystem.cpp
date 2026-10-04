@@ -1,7 +1,7 @@
 #include "HairSystem.h"
 #include "CurveSystem.h"
-#include "engine/Graphics/SceneObject.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/Graphics/SceneObject.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 
 #include <QtGlobal>
 #include <cmath>

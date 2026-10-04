@@ -1,5 +1,5 @@
 #include "ShowroomPPEditorModule.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>

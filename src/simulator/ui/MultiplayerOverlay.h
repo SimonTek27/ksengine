@@ -25,6 +25,8 @@ public:
     void toggle() { m_visible = !m_visible; }
 
     void setServers(std::vector<MpServerRow> rows) { m_servers = std::move(rows); }
+    void setStatus(const std::string& s) { m_status = s; }
+    const std::string& status() const { return m_status; }
     void setSelected(int i) {
         if (i >= 0 && i < static_cast<int>(m_servers.size())) m_selected = i;
     }
@@ -40,8 +42,15 @@ public:
         dl.addRectFilled({x, y, panelW, panelH}, Color::rgba(0.07f, 0.08f, 0.11f, 0.96f));
         dl.addRect({x, y, panelW, panelH}, Color::rgb(100, 200, 140), 2.f);
         dl.addText(x + 16, y + 16, "Multiplayer", Color::rgb(200, 255, 220), 1.4f);
+        dl.addText(x + 16, y + 36, m_status.empty() ? "Offline" : m_status,
+                   Color::rgb(150, 175, 200), 0.9f);
 
         float rowY = y + 56;
+        if (m_servers.empty()) {
+            dl.addText(x + 16, rowY + 6, "No servers yet - host one from the menu",
+                       Color::rgb(130, 145, 155), 0.95f);
+            rowY += 50;
+        }
         for (int i = 0; i < static_cast<int>(m_servers.size()); ++i) {
             const auto& s = m_servers[static_cast<size_t>(i)];
             Rect rr{x + 12, rowY, panelW - 24, 44};
@@ -100,6 +109,7 @@ public:
 private:
     bool m_visible = false;
     int m_selected = 0;
+    std::string m_status;
     std::vector<MpServerRow> m_servers;
 };
 

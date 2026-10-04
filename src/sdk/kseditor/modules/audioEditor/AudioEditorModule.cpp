@@ -1,9 +1,10 @@
-﻿#include "AudioEditorModule.h"
-#include "WaveformEngine.h"
-#include "WaveProcessor.h"
-#include "AudioRecording.h"
-#include "TextToSpeech.h"
+#include "AudioEditorModule.h"
+#include "sdk/kseditor/engine/Audio/WaveformEngine.h"
+#include "sdk/kseditor/engine/Audio/WaveProcessor.h"
+#include "sdk/kseditor/engine/Audio/AudioRecording.h"
+#include "sdk/kseditor/engine/Audio/TextToSpeech.h"
 #include <QTcpSocket>
+#include <QAudioFormat>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGroupBox>

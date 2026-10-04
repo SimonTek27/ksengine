@@ -1,5 +1,5 @@
 #include "3DModeling_Module.h"
-#include "engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
 #include "CarBuilder/CarEditorWidget.h"
 #include "TrackBuilder/TrackEditorWidget.h"
 #include "CharacterBuilder/CharacterEditorWidget.h"

@@ -205,12 +205,51 @@ if(KS_QT_FREE_BUILD)
 	if(Vulkan_FOUND)
 		include_directories(${Vulkan_INCLUDE_DIRS})
 	endif()
+	# ksnet - multiplayer transport (roadmap 3.1). The full build has this
+	# gate after the qt-free return() above, so qt-free needs its own copy.
+	# Everything after this point (SimulatorApp, tests) compiles with
+	# HAS_KSNET=1 and links the ksnet target.
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/engine/Network/ksnet/CMakeLists.txt")
+		add_subdirectory(src/core/engine/Network/ksnet EXCLUDE_FROM_ALL)
+		add_compile_definitions(HAS_KSNET=1)
+	else()
+		add_compile_definitions(HAS_KSNET=0)
+	endif()
 	add_subdirectory(src/engine)
+	# Offline KN5 -> .nmsh baker: the Qt-free replacement for the editor's
+	# modules/kn5baker CLI, built on the real "sc6969" format reader.
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/kn5baker/main.cpp")
+		add_executable(kn5baker "${CMAKE_CURRENT_SOURCE_DIR}/tools/kn5baker/main.cpp")
+		target_link_libraries(kn5baker PRIVATE ksengine)
+		set_target_properties(kn5baker PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+	endif()
+	# Dedicated server binary on the headless C API (roadmap 3.2)
+	include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KsEngineC.cmake")
+	if(TARGET ksengine_c AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/ks_server/main.cpp")
+		add_executable(ks_server "${CMAKE_CURRENT_SOURCE_DIR}/tools/ks_server/main.cpp")
+		target_link_libraries(ks_server PRIVATE ksengine_c)
+		set_target_properties(ks_server PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+	endif()
+	# Track folder tooling (roadmap 3.3): scaffold/validate track folders.
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/tracktool/main.cpp")
+		add_executable(ks_tracktool
+			tools/tracktool/main.cpp
+			tools/tracktool/TrackToolCore.cpp
+			src/simulator/TrackLoader.cpp)
+		target_include_directories(ks_tracktool PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/tracktool"
+			"${CMAKE_CURRENT_SOURCE_DIR}/src/simulator")
+		target_link_libraries(ks_tracktool PRIVATE ksengine)
+		set_target_properties(ks_tracktool PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+	endif()
 	if(KSIMULATOR_QT_FREE)
 		include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeLists_ksimulator_QtFree.cmake")
 	endif()
 	enable_testing()
-	add_subdirectory(tests/qtfree)
+	add_subdirectory(tests/ksengine)
 	return()
 endif()
 
@@ -277,30 +316,28 @@ endif()
 # ============================================================================
 
 # Collect source files
+# Editor code now lives under src/sdk/kseditor (modules/, plugins/,
+# qmlbridges/, EditorApp, ...); physics moved to src/engine and arrives
+# transitively through ksengine.
 file(GLOB_RECURSE KSEDITOR_CORE_SOURCES
-	"src/core/*.h"
-	"src/core/*.cpp"
-	"src/core/**/*.h"
-	"src/core/**/*.cpp"
+	"src/sdk/kseditor/*.h"
+	"src/sdk/kseditor/*.cpp"
 )
 
-# Exclude broken weather editor files (use old WeatherConfig API that no longer exists)
+# Legacy duplicate whose header was replaced by a redirect to the engine
+# version; the .cpp implements a class that no longer exists anywhere.
+# MainWindow/main.cpp are the kslib-side duplicate of the exe's
+# src/MainWindow.{h,cpp}: keeping them here would moc the same
+# MainWindow metaobject twice and fail with LNK2005 at exe link.
 list(REMOVE_ITEM KSEDITOR_CORE_SOURCES
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core/physics/weather/WeatherEditor.h"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core/physics/weather/WeatherEditor.cpp"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core/physics/weather/WeatherModule.h"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core/physics/weather/WeatherModule.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/modules/PhysicsEditor/simulator/phys_LapTimer.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/MainWindow.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/MainWindow.h"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/main.cpp"
 )
 
-file(GLOB_RECURSE KSEDITOR_MODULES_SOURCES
-	"src/modules/*.h"
-	"src/modules/*.cpp"
-)
-
-file(GLOB_RECURSE KSEDITOR_PLUGINS_SOURCES
-	"src/plugins/*.h"
-	"src/plugins/*.cpp"
-)
+set(KSEDITOR_MODULES_SOURCES "")
+set(KSEDITOR_PLUGINS_SOURCES "")
 
 file(GLOB_RECURSE KSEDITOR_RESOURCES_UI_SOURCES
 	"resources/ui/*.h"
@@ -330,14 +367,14 @@ add_library(kslib STATIC
 	${KSEDITOR_MODULES_SOURCES}
 	${KSEDITOR_PLUGINS_SOURCES}
 	${KSEDITOR_RESOURCES_UI_SOURCES}
-	"src/EditorApp.cpp"
+	"src/sdk/kseditor/EditorApp.cpp"
 )
 
 target_include_directories(kslib PUBLIC
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/engine"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core/engine"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/plugins"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/modules"
 	"${CMAKE_CURRENT_SOURCE_DIR}/external/eigen"
 )
 
@@ -375,6 +412,7 @@ endif()
 target_compile_definitions(kslib PUBLIC
 	KSASSETTOCORSA_EXPORTS
 	KSASSETTOCORSAEVO_EXPORTS
+	KS_HAS_QT=1
 )
 
 if(Qt6Svg_FOUND)
@@ -394,7 +432,7 @@ if(Vulkan_FOUND)
 	target_link_libraries(kslib PUBLIC ${Vulkan_LIBRARIES})
 endif()
 
-if(HAS_LUA)
+if(HAS_LUA AND LUA_INCLUDE_DIR)
 	target_link_libraries(kslib PUBLIC ${LUA_LIBRARIES})
 	target_include_directories(kslib PUBLIC ${LUA_INCLUDE_DIR})
 endif()
@@ -410,7 +448,7 @@ if(HAS_IMGUI)
 endif()
 
 if(HAS_KSNET)
-	target_link_libraries(kslib PUBLIC Yojimbo::yojimbo)
+	target_link_libraries(kslib PUBLIC ksnet)
 endif()
 
 # Create main executable
@@ -426,9 +464,8 @@ target_link_libraries(kseditor PRIVATE
 )
 
 target_include_directories(kseditor PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/plugins"
 )
 
 target_compile_definitions(kseditor PRIVATE
@@ -439,10 +476,10 @@ target_compile_definitions(kseditor PRIVATE
 
 # Simulator application - standalone driving simulator
 add_executable(SimulatorApp
-	"src/SimulatorApp.cpp"
+	"src/simulator/SimulatorApp.cpp"
 	"src/simulator/InputManager.cpp"
 	"src/simulator/CameraController.cpp"
-	"src/simulator/DrivingRenderer.cpp"
+	"src/simulator/NativeRenderer.cpp"
 	"src/simulator/SimulationLoop.cpp"
 	"src/simulator/SimulatorAudio.cpp"
 	"src/simulator/AIController.cpp"
@@ -455,6 +492,14 @@ add_executable(SimulatorApp
 	"src/simulator/PostProcessing.cpp"
 	"src/simulator/ReplayRecorder.cpp"
 	"src/simulator/GameMenuOverlay.cpp"
+	"src/simulator/ShadowSystem.cpp"
+	"src/simulator/WASAPIOutput.cpp"
+	"src/simulator/AudioMixer.cpp"
+	"src/simulator/AudioBankManager.cpp"
+	"src/simulator/SoundsIniParser.cpp"
+	"src/simulator/NetworkManager.cpp"
+	"src/simulator/NetworkLowLevel.cpp"
+	"src/simulator/ui/FontTtfLoader.cpp"
 )
 
 set_target_properties(SimulatorApp PROPERTIES AUTOMOC ON)
@@ -479,7 +524,7 @@ target_include_directories(SimulatorApp PRIVATE
 )
 
 if(HAS_KSNET)
-	target_link_libraries(SimulatorApp PRIVATE Yojimbo::yojimbo)
+	target_link_libraries(SimulatorApp PRIVATE ksnet)
 endif()
 
 # Copy Qt DLLs to output directory and create platforms/ subfolder

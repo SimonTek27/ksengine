@@ -1,6 +1,6 @@
 #include "PaintEditorModule.h"
 #include "PaintEditorWidget.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QMainWindow>
 #include <QFileInfo>
 #include <QDebug>

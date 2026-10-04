@@ -4,7 +4,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QMatrix4x4>
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 #include "tools/LODSystem.h"
 
 namespace ks {

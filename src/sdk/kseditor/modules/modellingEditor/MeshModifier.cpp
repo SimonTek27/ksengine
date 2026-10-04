@@ -1,5 +1,5 @@
 #include "MeshModifierData.h"
-#include "engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
 #include "AdditionalModifiers.h"
 #include <algorithm>
 #include <QSharedPointer>

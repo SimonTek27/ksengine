@@ -40,8 +40,8 @@ void phys_LapTimer::completeLap(double lapTimeSec) {
     if (onLapCompleted) onLapCompleted(lapTimeSec);
 }
 
-LapTimeEstimate phys_LapTimer::estimateLapTime(const std::vector<double>& historicalLapTimes) const {
-    LapTimeEstimate e;
+LapTimerEstimate phys_LapTimer::estimateLapTime(const std::vector<double>& historicalLapTimes) const {
+    LapTimerEstimate e;
     const auto& src = historicalLapTimes.empty() ? m_history : historicalLapTimes;
     if (src.empty()) return e;
     double sum = std::accumulate(src.begin(), src.end(), 0.0);

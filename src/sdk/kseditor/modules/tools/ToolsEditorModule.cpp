@@ -25,8 +25,8 @@
 #include "CollisionMeshGenerator.h"
 #include "BackupSystem.h"
 #include "MacroSystem.h"
-#include "../mesh/MeshOperations.h"
-#include "../mesh/AdvancedMeshOps.h"
+#include "sdk/kseditor/engine/mesh/MeshOperations.h"
+#include "sdk/kseditor/engine/mesh/AdvancedMeshOps.h"
 
 namespace ks {
 namespace tools {

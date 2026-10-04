@@ -1,6 +1,6 @@
 #include "3DModeling_Viewport.h"
-#include "engine/mesh/Viewport3DSystem.h"
-#include "engine/Graphics/SceneMesh.h"
+#include "sdk/kseditor/engine/mesh/Viewport3DSystem.h"
+#include "sdk/kseditor/engine/Graphics/SceneMesh.h"
 #include <QDebug>
 #include <QGuiApplication>
 #include <QQmlEngine>

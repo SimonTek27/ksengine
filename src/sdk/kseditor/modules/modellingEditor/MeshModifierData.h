@@ -10,9 +10,16 @@
 #include <QJsonObject>
 #include <QMap>
 
-#include "mesh/MeshRenderer.h"
-
 namespace ks {
+
+struct MeshVertex {
+    QVector3D position;
+    QVector3D normal;
+    QVector2D uv;
+    QVector4D color;
+    QVector<int> boneIndices;
+    QVector<float> boneWeights;
+};
 
 struct MeshFace {
     int v1, v2, v3;

@@ -11,7 +11,7 @@
 #include <QVariant>
 #include <QMatrix4x4>
 
-#include "engine/physics/PhysicsEngine.h"
+#include "sdk/kseditor/engine/physics/PhysicsEngine.h"
 #include "../../../resources/ui/NodeGraphEditor.h"
 
 namespace ks {

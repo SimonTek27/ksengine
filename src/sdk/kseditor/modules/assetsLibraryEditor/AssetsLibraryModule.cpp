@@ -1,7 +1,7 @@
 #include "AssetsLibraryModule.h"
-#include "engine/assets/AssetManager.h"
-#include "engine/assets/AssetSearchEngine.h"
-#include "engine/sys/LogManager.h"
+#include "sdk/kseditor/engine/assets/AssetManager.h"
+#include "sdk/kseditor/engine/assets/AssetSearchEngine.h"
+#include "sdk/kseditor/engine/sys/LogManager.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>

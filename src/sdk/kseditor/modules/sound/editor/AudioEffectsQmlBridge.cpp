@@ -1,5 +1,5 @@
 #include "AudioEffectsQmlBridge.h"
-#include "engine/Audio/AudioEffects.h"
+#include "sdk/kseditor/engine/Audio/AudioEffects.h"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>

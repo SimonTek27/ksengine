@@ -31,4 +31,18 @@ bool ScriptHost::callFunction(const std::string& name, double arg) {
     return LuaScriptHost::instance().callFunction(name, arg);
 }
 
+bool ScriptHost::callFunction(const std::string& name, const std::vector<double>& args) {
+    return LuaScriptHost::instance().callFunction(name, args);
+}
+
+bool ScriptHost::emitEvent(const std::string& name,
+                           const std::vector<double>& numbers,
+                           const std::vector<std::string>& strings) {
+    return LuaScriptHost::instance().emitEvent(name, numbers, strings);
+}
+
+std::vector<std::string> ScriptHost::takeLog() {
+    return LuaScriptHost::instance().takeLog();
+}
+
 }} // namespace ks::scripting

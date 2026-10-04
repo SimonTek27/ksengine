@@ -6,9 +6,9 @@
 // ============================================================================
 
 #include "editor/EditorModule.h"
-#include "engine/Scripting/Blueprint/BlueprintTypes.h"
-#include "engine/Scripting/Blueprint/BlueprintExecutor.h"
-#include "engine/Scripting/Blueprint/BlueprintNodeLibrary.h"
+#include "sdk/kseditor/engine/Scripting/Blueprint/BlueprintTypes.h"
+#include "sdk/kseditor/engine/Scripting/Blueprint/BlueprintExecutor.h"
+#include "sdk/kseditor/engine/Scripting/Blueprint/BlueprintNodeLibrary.h"
 #include <QObject>
 #include <QWidget>
 #include <QDockWidget>
@@ -19,8 +19,10 @@
 #include <QTimer>
 #include <QUuid>
 
+namespace ks { namespace ui {
 class NodeGraphWidget;
 class NodeGraphView;
+}} // namespace ks::ui
 
 namespace ks {
 namespace blueprint {
@@ -71,7 +73,7 @@ public:
     // ---- Accessors ----------------------------------------------------------
     BlueprintExecutor* executor() { return m_executor; }
     BlueprintGraphData& graphData() { return m_graphData; }
-    NodeGraphWidget* graphWidget() { return m_graphWidget; }
+    ui::NodeGraphWidget* graphWidget() { return m_graphWidget; }
 
 signals:
     void blueprintChanged();
@@ -96,7 +98,7 @@ private:
     void refreshVariableList();
 
     // ---- UI Components ------------------------------------------------------
-    NodeGraphWidget* m_graphWidget = nullptr;
+    ui::NodeGraphWidget* m_graphWidget = nullptr;
     QTreeWidget* m_nodePalette = nullptr;
     QListWidget* m_variableList = nullptr;
     QWidget* m_detailsPanel = nullptr;

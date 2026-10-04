@@ -83,27 +83,37 @@ struct mat4 {
         return r;
     }
 
+    // Vulkan/D3D clip space: NDC z spans [0,1], and — unlike OpenGL — NDC
+    // y = -1 maps to the *top* of the framebuffer (the viewport transform
+    // sends y = +1 to y0 + height, i.e. downward). A GL-style projection is
+    // therefore rendered upside down here, which also mirrors screen-space
+    // winding and makes VK_FRONT_FACE_COUNTER_CLOCKWISE treat every front
+    // face as a back face (single-sided geometry such as ground quads
+    // disappears under VK_CULL_MODE_BACK_BIT). Negating the y scale fixes
+    // both: image orientation and winding.
     static mat4 perspective(float fovY, float aspect, float zNear, float zFar) {
         float tanHalf = std::tan(fovY * 0.5f);
         mat4 r;
         r(0,0) = 1.0f / (aspect * tanHalf);
-        r(1,1) = 1.0f / tanHalf;
-        r(2,2) = -(zFar + zNear) / (zFar - zNear);
-        r(2,3) = -(2.0f * zFar * zNear) / (zFar - zNear);
+        r(1,1) = -1.0f / tanHalf;
+        r(2,2) = -zFar / (zFar - zNear);
+        r(2,3) = -(zFar * zNear) / (zFar - zNear);
         r(3,2) = -1.0f;
         r(3,3) = 0;
         return r;
     }
 
+    // Same y convention as perspective(): top of the box must land on
+    // NDC y = -1, bottom on NDC y = +1 (both y coefficients negated).
     static mat4 ortho(float left, float right, float bottom, float top,
                       float zNear, float zFar) {
         mat4 r;
         r(0,0) = 2.0f / (right - left);
-        r(1,1) = 2.0f / (top - bottom);
-        r(2,2) = -2.0f / (zFar - zNear);
+        r(1,1) = -2.0f / (top - bottom);
+        r(2,2) = -1.0f / (zFar - zNear);
         r(0,3) = -(right + left) / (right - left);
-        r(1,3) = -(top + bottom) / (top - bottom);
-        r(2,3) = -(zFar + zNear) / (zFar - zNear);
+        r(1,3) = (top + bottom) / (top - bottom);
+        r(2,3) = -zNear / (zFar - zNear);
         r(3,3) = 1.0f;
         return r;
     }

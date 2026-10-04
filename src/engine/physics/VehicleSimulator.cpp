@@ -124,8 +124,21 @@ void VehicleSimulator::loadTyresFromIni(const std::string& path) {
 
 void VehicleSimulator::loadDrivetrainFromIni(const std::string& path) {
     auto m = parseIni(path);
-    float fd = getf(m, "FINAL", getf(m, "DRIVETRAIN/FINAL", static_cast<float>(m_finalDrive)));
+    float fd = getf(m, "FINAL",
+                    getf(m, "FINAL_DRIVE",
+                         getf(m, "DRIVETRAIN/FINAL",
+                              getf(m, "DRIVETRAIN/FINAL_DRIVE",
+                                   static_cast<float>(m_finalDrive)))));
     if (fd > 0.5f) m_finalDrive = fd;
+    // GEAR_1..GEAR_N (flat or [GEARS] section), contiguous from 1.
+    std::vector<double> gears;
+    for (int i = 1; i <= 10; ++i) {
+        const std::string k = "GEAR_" + std::to_string(i);
+        float g = getf(m, k, getf(m, "GEARS/" + k, -1.0f));
+        if (g > 0.01f) gears.push_back(g);
+        else break;
+    }
+    if (!gears.empty()) m_gearRatios = std::move(gears);
 }
 
 void VehicleSimulator::loadAeroFromIni(const std::string& path) {

@@ -1,10 +1,10 @@
 ﻿#include "MeshEditorModule.h"
-#include "AdvancedMeshOps.h"
-#include "UVUnwrap.h"
-#include "ModifierSystem.h"
-#include "WeightPainting.h"
-#include "SkeletonSystem.h"
-#include "SculptMode.h"
+#include "sdk/kseditor/engine/mesh/AdvancedMeshOps.h"
+#include "sdk/kseditor/engine/mesh/UVUnwrap.h"
+#include "sdk/kseditor/engine/mesh/ModifierSystem.h"
+#include "sdk/kseditor/engine/mesh/WeightPainting.h"
+#include "sdk/kseditor/engine/mesh/SkeletonSystem.h"
+#include "sdk/kseditor/engine/mesh/SculptMode.h"
 #include "tools/LODGenerator.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>

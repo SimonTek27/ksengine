@@ -1,0 +1,68 @@
+# ksengine — Roadmap Parity (multi-target)
+
+**Updated:** 2026-09-29
+
+Targets: **AC-like** | **rF2-like** | **GD-hosted** (library under external host).
+
+Product identity: **ksim** is independent; format interoperability is technical only.
+
+---
+
+## 0. Current status
+
+| Area | Status |
+| --- | --- |
+| Loop | Fixed **1 kHz**, render decoupled |
+| Physics | Pacejka, aero, diff, suspension, thermal, wear, damage, ERS/DRS, weather |
+| FFB | Fanatec / Logitech / Moza / Simucube / Thrustmaster |
+| Telemetry | CSV, UDP, HUD; **shared-memory publisher** (`adapters` / `AcSharedMemory*`) |
+| UI | Cinematic menu, Garage, Pit Lane, Race HUD |
+| Network | Yojimbo adapter scaffold; disabled until the optional `ksnet` provider is available |
+| Qt-free | Engine and CTest build on Linux without Qt/Vulkan; `ksimulator` requires Vulkan, and WASAPI capture is unavailable on POSIX |
+
+---
+
+## 1. Foundations (P0) — all targets
+
+| # | Milestone | Status |
+| --- | --- | --- |
+| 1.1 | Physics validation vs data (golden) | **Harness** `PhysicsGolden` + doc — needs a real dataset |
+| 1.2 | Shared-memory telemetry | **Done** (publisher layout + pages wired in `SimulationLoop::tick`; publisher cleanup on destruction) |
+| 1.3 | Headless / C API | **Done** standalone Qt/Vulkan-free target + telemetry and input mapping (clutch/gear) + C tests |
+| 1.4 | Determinism & replay | Replay v1 little-endian, legacy load, corruption and C API record/stop tested; `seed` reserved, not consumed by physics |
+
+### Operating sequence
+1. ~~Wire SM + LapSectorTimer into `SimulationLoop::tick`~~ **Done**
+2. Fill the golden CSV from a recorded lap
+3. Headless server using only `ksengine_c` (no Vulkan)
+
+---
+
+## 2. AC-like (P1)
+
+| # | Milestone | Gap |
+| --- | --- | --- |
+| 2.1 | Validated scene renderer | Screenshot / diff |
+| 2.2 | Content loaders | KN5 header and AI spline validated/selected deterministically; length derived from the spline; mesh import, INI and own format still open |
+| 2.3 | Track feel | Post-1.1 tuning + FFB kerb/rumble |
+| 2.4 | Sessions | Wire `RaceSessionManager` into the loop; qualifying→race transition, flags and DriveThrough/StopGo handling (timer/one-shot notice, splits, penalties, finisher and tie-break standings tested) |
+| 2.5 | Audio bank | FMOD reader beyond the stub |
+
+## 3. rF2-like (P2)
+
+Mature multiplayer, dedicated server (uses 1.3), track tooling, mod SDK, race AI.
+
+## 4. GD-hosted (P3)
+
+GDExtension on the C API (1.3), headless without Vulkan, scene tree bridge.
+
+---
+
+## Parity metrics
+
+| Target | Metric | Threshold |
+| --- | --- | --- |
+| AC-like | Lap correlation vs telemetry | > 0.95 |
+| AC-like | SM channels | speed, rpm, tyres, fuel, damage |
+| rF2-like | MP | 8+ clients, dedicated headless |
+| GD | Extension | vehicle driving without custom host code |

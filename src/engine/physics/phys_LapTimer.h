@@ -5,7 +5,9 @@
 namespace ks {
 namespace physics {
 
-struct LapTimeEstimate {
+// Distinct from ks::physics::LapTimeEstimate (PhysicsCoreTypes.h) — a name
+// clash here broke every TU that includes both headers.
+struct LapTimerEstimate {
     double estimatedLap = 0;
     double confidence = 0;
 };
@@ -25,7 +27,7 @@ public:
     const std::vector<double>& sectorTimes() const { return m_sectors; }
     const std::vector<double>& lapHistory() const { return m_history; }
 
-    LapTimeEstimate estimateLapTime(const std::vector<double>& historicalLapTimes) const;
+    LapTimerEstimate estimateLapTime(const std::vector<double>& historicalLapTimes) const;
 
     std::function<void(int sector, double time)> onSectorCompleted;
     std::function<void(double lapTime)> onLapCompleted;

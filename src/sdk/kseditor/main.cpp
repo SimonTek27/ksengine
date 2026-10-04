@@ -8,6 +8,7 @@
 #include <QJSEngine>
 #include <QQuickStyle>
 #include <QQuickWidget>
+#include <QQuickItem>
 #include <QMainWindow>
 #include <QVBoxLayout>
 #include <QWindow>
@@ -29,10 +30,10 @@
 #include "MainWindow.h"
 #include "../resources/ui/CustomTitleBar.h"
 #include "engine/sys/ModuleManager.h"
-#include "engine/sys/PluginManager.h"
+#include "sdk/kseditor/engine/sys/PluginManager.h"
 #include "../resources/ui/SplashScreen.h"
 #include "../resources/ui/WelcomeScreenQmlBridge.h"
-#include "engine/sys/HangMonitor.h"
+#include "sdk/kseditor/engine/sys/HangMonitor.h"
 #include "../resources/ui/FontEditorDialog.h"
 #include "help/HelpSystem.h"
 #include "../resources/ui/ribbontheme.h"
@@ -46,12 +47,12 @@
 #include "sdk/kseditor/modules/PhysicsEditor/PhysicsQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/Audio/AudioQMLBridge.h"
 #include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/audio/AudioEngineQML.h"
-#include "engine/Audio/AudioModuleBridge.h"
+#include "sdk/kseditor/engine/Audio/AudioModuleBridge.h"
 #include "editor/AIEditor/AIEditorQmlBridge.h"
 #include "tools/FormatToolsQmlBridge.h"
 #include "modmanager/ModManagerQmlBridge.h"
 #include "editor/ppfiltersEditor/PPFiltersQmlBridge.h"
-#include "engine/devices/3dprint/ThreeDPrintQmlBridge.h"
+#include "sdk/kseditor/engine/devices/3dprint/ThreeDPrintQmlBridge.h"
 #include "editor/FfbEditor/FfbEditorQmlBridge.h"
 #include "sdk/kseditor/modules/cockpitInstruments/CockpitInstrumentsQmlBridge.h"
 #include "sdk/kseditor/modules/LicensePlatesEditor/LicensePlatesQmlBridge.h"
@@ -66,8 +67,8 @@
 #include "sdk/kseditor/modules/PhysicsEditor/telemetry/LapTimeValidation.h"
 #include "sdk/kseditor/modules/modellingEditor/TrackBuilder/TerrainEditorQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/assets/AssetsLibraryQmlBridge.h"
-#include "engine/mesh/MeshDataBridge.h"
-#include "engine/material/TexturePaintQmlBridge.h"
+#include "sdk/kseditor/engine/mesh/MeshDataBridge.h"
+#include "sdk/kseditor/engine/material/TexturePaintQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/mesh/MeshLoaderQML.h"
 #include "sdk/kseditor/modules/modellingEditor/SceneMeshGeometry.h"
 #include "sdk/kseditor/modules/modellingEditor/ParticlePointsGeometry.h"
@@ -75,16 +76,16 @@
 #include "sdk/kseditor/qmlbridges/Scripting/CspConfigQmlBridge.h"
 #include "sdk/kseditor/qmlbridges/Scripting/ContentQMLBridge.h"
 #include "sdk/kseditor/modules/modellingEditor/CharacterBuilder/CharacterEditorQmlBridge.h"
-#include "engine/network/CollabEditorQmlBridge.h"
-#include "engine/network/ChatQmlBridge.h"
+#include "sdk/kseditor/engine/network/CollabEditorQmlBridge.h"
+#include "sdk/kseditor/engine/network/ChatQmlBridge.h"
 #include "sdk/kseditor/modules/ksOffice/OfficeQmlBridge.h"
 #include "sdk/kseditor/modules/ksOffice/OfficeDocumentBridge.h"
 #include "sdk/kseditor/qmlbridges/Audio/AudioWaveformBridge.h"
-#include "engine/Audio/KsACSndEventBridge.h"
-#include "engine/Audio/AudioStudioTypes.h"
+#include "sdk/kseditor/engine/Audio/KsACSndEventBridge.h"
+#include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
 #include "sdk/kseditor/qmlbridges/Scripting/ACEContentQMLBridge.h"
-#include "engine/Audio/AIAudioStemSeparator.h"
-#include "engine/FileFormat/PublishValidatorBridge.h"
+#include "sdk/kseditor/engine/Audio/AIAudioStemSeparator.h"
+#include "sdk/kseditor/engine/FileFormat/PublishValidatorBridge.h"
 #include "engine/devices/scanners/photogrammetry/PhotogrammetryCapture.h"
 #include "engine/devices/scanners/turntable_scanner/TurntableScanner.h"
 #include "engine/devices/scanners/structured_light/StructuredLightScanner.h"
@@ -297,8 +298,8 @@ static int appMain(int argc, char *argv[])
     qmlRegisterType<ks::audio::KSAudioModuleBridge>("ksEditor.AudioModule", 1, 0, "AudioModule");
     qmlRegisterSingletonType<ks::CollabEditorQmlBridge>("ksEditor.Collaboration", 1, 0, "CollabEditor",
         [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::CollabEditorQmlBridge::instance(); });
-    qmlRegisterSingletonType<ks::network::ChatQmlBridge>("ksEditor.KsChat", 1, 0, "KsChat",
-        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::network::ChatQmlBridge::instance(); });
+    qmlRegisterSingletonType<ks::chat::ChatQmlBridge>("ksEditor.KsChat", 1, 0, "KsChat",
+        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::chat::ChatQmlBridge::instance(); });
     qmlRegisterSingletonType<ks::office::OfficeQmlBridge>("ksEditor.KsOffice", 1, 0, "KsOffice",
         [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::office::OfficeQmlBridge::instance(); });
     qmlRegisterSingletonType<ks::office::OfficeDocumentBridge>("ksEditor.KsOffice", 1, 0, "OfficeDocument",
@@ -324,7 +325,7 @@ static int appMain(int argc, char *argv[])
         });
 
     // Register 3D Printing module
-    qmlRegisterType<ks::device::ThreeDPrintQmlBridge>("ksEditor.Printing", 1, 0, "PrintManager");
+    qmlRegisterType<ks::printing::ThreeDPrintQmlBridge>("ksEditor.Printing", 1, 0, "PrintManager");
 
     // Register ACE (Assetto Corsa EVO) bridge
     qmlRegisterSingletonType<ks::ACEContentQMLBridge>("ksEditor.ACEContent", 1, 0, "ACEContent",
