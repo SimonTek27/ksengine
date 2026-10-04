@@ -11,20 +11,19 @@
 | 7 | CarStateSync UDP ≥20 Hz | **Done** |
 | 8 | NetSync + pit strategy UI | **Done** |
 | 9 | Full ksnet remote car state | **Done** |
+| 9b | Session / countdown / penalty / lap bridge | **Done** |
 
-## ksnet path (Sprint 9)
+## ksnet complete path
 
 | Component | Role |
 |-----------|------|
-| `src/core/engine/Network/ksnet` | Reliable-UDP transport (yojimbo-shaped API) |
-| `NetworkConfig.h` | Messages: join/welcome/car state/spawn/input/chat/session |
-| `NetworkLowLevel.cpp` | Client/Server process + broadcast |
-| `NetworkManager` | Host 20 Hz car-state pump, late MultiCar rebind |
-| `SimulationLoop` | `broadcastLocalCarState` + remote apply (archive) |
-| `SimulationLoop_NetSync` | Dual path: ksnet **and** CarStateSync UDP |
-| Qt-free `SimulatorApp` | Links `ksnet` when target exists (`HAS_KSNET=1`) |
-
-CarStateSync UDP remains the zero-dependency fallback when `HAS_KSNET=0`.
+| `src/core/engine/Network/ksnet` | Reliable-UDP transport |
+| `NetworkConfig.h` | Messages: join/welcome/state/spawn/input/chat/session/penalty |
+| `NetworkLowLevel_*.inc` | Client handlers + server broadcasts + spawn grid replay |
+| `NetworkManager` | Host 20 Hz car-state, public broadcast API, client callbacks |
+| `SimulationLoop_FeatureTick.inl` | Host bridge: RaceSession → ksnet session/countdown/penalty |
+| `SimulationLoop_NetSync.cpp` | Dual path: ksnet + CarStateSync UDP |
+| Qt-free `SimulatorApp` | Links `ksnet` (`HAS_KSNET=1`) |
 
 ## Optional (P2+)
 
@@ -35,11 +34,9 @@ CarStateSync UDP remains the zero-dependency fallback when `HAS_KSNET=0`.
 
 ## Restore SimulationLoop
 
-Stub on clone → auto-expand from `cmake/simloop_z0.b64`…`z4.b64`:
-
 ```bash
 bash tools/restore_simloop.sh
 # or cmake -B build -DKSIMULATOR_QT_FREE=ON
 ```
 
-Vedi `docs/PARITY_STATUS.md` e `docs/RESTORE_SIMLOOP.md`.
+Vedi `docs/PARITY_STATUS.md`.

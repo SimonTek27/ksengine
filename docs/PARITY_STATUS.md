@@ -26,6 +26,7 @@ Last update: 2026-10-05
 | **NetSync in SimulationLoop** | Done |
 | **SimulationLoop full restore (cmake z0–z4)** | Done |
 | **Full ksnet remote car state** | Done (`HAS_KSNET=1`, host 20 Hz `MSG_CAR_STATE`, join/spawn/input/chat) |
+| **ksnet session/penalty/countdown bridge** | Done (FeatureTick host hooks + client handlers) |
 
 See `docs/SECURITY_HARDENING.md`.
 
@@ -48,7 +49,23 @@ bash tools/restore_simloop.sh
 ```bash
 cmake -B build -DKSENGINE_QT_FREE=ON -DKSIMULATOR_QT_FREE=ON
 cmake --build build --target SimulatorApp
-# HAS_KSNET=1 when src/core/engine/Network/ksnet is present (linked automatically)
+# HAS_KSNET=1 when src/core/engine/Network/ksnet is present
+```
+
+### Host API
+
+```cpp
+m_network->hostServer(40000, 8, "ksim", "monza");
+// car states @ 20 Hz automatic
+// session / countdown / penalty auto-bridged from RaceSessionManager
+m_network->broadcastLapTime(carId, lap, time, s1, s2, s3, true);
+```
+
+### Client API
+
+```cpp
+m_network->joinServer(host, 40000, "Player", "gte3");
+// onRemoteCarStateReceived / onSessionStateReceived / onPenaltyReceived
 ```
 
 ## Roadmap

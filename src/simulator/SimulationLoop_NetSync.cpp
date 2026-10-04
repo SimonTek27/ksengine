@@ -1,5 +1,5 @@
 /**
- * SimulationLoop — network sync (CarStateSync UDP + optional ksnet path).
+ * SimulationLoop — network sync (CarStateSync UDP + full ksnet path).
  * Compile as SimulationLoop_NetSync.cpp alongside SimulationLoop.cpp.
  */
 #include "SimulationLoop.h"
@@ -32,9 +32,9 @@ void SimulationLoop::stopCarStateSync() {
 }
 
 void SimulationLoop::updateNetworkSync(float dt) {
-    // Path A: full ksnet reliable-UDP (HAS_KSNET=1). NetworkManager owns
-    // host car-state broadcast at 20 Hz and client apply via callbacks wired
-    // in SimulationLoop::initialize (onRemoteCarStateReceived).
+    // Path A: full ksnet reliable-UDP (HAS_KSNET=1).
+    // NetworkManager owns host car-state @ 20 Hz; session/penalty/countdown
+    // are bridged from FeatureTick (RaceSession hooks).
 #if HAS_KSNET
     if (m_network) {
         m_network->update(static_cast<double>(dt));
