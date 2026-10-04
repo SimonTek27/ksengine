@@ -40,3 +40,42 @@ set(KSIM_SOURCES
 
 file(GLOB _ksim_ui_sources "${CMAKE_SOURCE_DIR}/src/simulator/ui/*.cpp")
 list(APPEND KSIM_SOURCES ${_ksim_ui_sources})
+
+add_executable(SimulatorApp ${KSIM_SOURCES})
+
+target_include_directories(SimulatorApp PRIVATE
+	${CMAKE_SOURCE_DIR}/src
+	${CMAKE_SOURCE_DIR}/src/simulator
+	${CMAKE_SOURCE_DIR}/src/core/engine/Network
+	${CMAKE_SOURCE_DIR}/src/core/engine/Network/ksnet
+	${Vulkan_INCLUDE_DIRS}
+)
+
+target_link_libraries(SimulatorApp PRIVATE
+	ksengine
+	${Vulkan_LIBRARIES}
+)
+
+# Full remote car-state path (roadmap 3.1). Root CMake already sets
+# HAS_KSNET=1 when the transport tree exists; link the static lib here.
+if(TARGET ksnet)
+	target_link_libraries(SimulatorApp PRIVATE ksnet)
+	target_compile_definitions(SimulatorApp PRIVATE HAS_KSNET=1)
+	message(STATUS "SimulatorApp: ksnet multiplayer linked (HAS_KSNET=1)")
+else()
+	target_compile_definitions(SimulatorApp PRIVATE HAS_KSNET=0)
+	message(STATUS "SimulatorApp: ksnet not available (HAS_KSNET=0)")
+endif()
+
+if(WIN32)
+	target_link_libraries(SimulatorApp PRIVATE ws2_32)
+endif()
+
+set_target_properties(SimulatorApp PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED ON
+	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+	AUTOMOC OFF
+	AUTOUIC OFF
+	AUTORCC OFF
+)

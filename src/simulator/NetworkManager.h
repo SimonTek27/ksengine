@@ -20,7 +20,9 @@ public:
     ~NetworkManager();
 
     // Pumps the transport (server + client) and the stats poller. Called once
-    // per frame from SimulationLoop::tick().
+    // per frame from SimulationLoop::tick(). Host also broadcasts car states
+    // at ~20 Hz so remote clients stay in sync without relying solely on
+    // SimulationLoop::broadcastLocalCarState.
     void update(double dt);
 
     bool hostServer(uint16_t port = 40000, int maxClients = 8,
@@ -79,6 +81,8 @@ private:
     void setupClientSignals();
     void setupServerSignals();
     void updatePlayerList();
+    void rebindMultiCar();
+    void hostBroadcastCarStates();
 
     SimulationLoop* m_simLoop = nullptr;
     std::unique_ptr<net::NetworkClient> m_client;
@@ -99,6 +103,9 @@ private:
     // Qt timer replacement (polling-based)
     std::chrono::steady_clock::time_point m_lastStatsPoll;
     static constexpr double STATS_POLL_INTERVAL = 0.5; // seconds
+
+    double m_stateAccum = 0.0;
+    static constexpr double STATE_SEND_HZ = 20.0;
 };
 
 #else // !HAS_KSNET
