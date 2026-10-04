@@ -1,5 +1,10 @@
 /**
- * STUB — auto-restored by cmake/restore_simloop.cmake or tools/restore_simloop.sh
- * Preferred: bash tools/restore_simloop.sh
+ * SimulationLoop.cpp — Qt-free full source (split includes).
+ * Parts: SimulationLoop_p0.inc … p4.inc
+ * cmake/restore_simloop.cmake can still expand the single-file archive if preferred.
  */
-#error "Run: bash tools/restore_simloop.sh  OR configure with cmake (includes cmake/restore_simloop.cmake)"
+#include "SimulationLoop_p0.inc"
+#include "SimulationLoop_p1.inc"
+#include "SimulationLoop_p2.inc"
+#include "SimulationLoop_p3.inc"
+#include "SimulationLoop_p4.inc"
