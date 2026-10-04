@@ -24,7 +24,7 @@
 | **P1.1 CarState sync ≥20Hz (UDP)** | Done |
 | **P1.8 Pit strategy UI** | Done |
 | **NetSync in SimulationLoop** | Done |
-| **SimulationLoop full restore** | Done (src text parts + z0–z4 fallback) |
+| **SimulationLoop full restore (cmake z0–z4)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 
@@ -32,7 +32,14 @@ See `docs/SECURITY_HARDENING.md`.
 
 | Item | Notes |
 |------|-------|
-| Full remote car state sync (ksnet) | optional; UDP CarStateSync available |
+| Full remote car state sync (ksnet) | optional; UDP CarStateSync available without HAS_KSNET |
+
+## Restore
+
+```bash
+bash tools/restore_simloop.sh
+# or: cmake configure with KSIMULATOR_QT_FREE=ON
+```
 
 ## Roadmap
 
