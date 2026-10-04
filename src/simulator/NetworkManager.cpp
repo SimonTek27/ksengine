@@ -20,11 +20,7 @@ NetworkManager::NetworkManager(SimulationLoop* simLoop)
 
     m_client->setSimulationLoop(simLoop);
     m_server->setSimulationLoop(simLoop);
-
-    if (simLoop && simLoop->multiCarManager()) {
-        m_client->setMultiCarManager(simLoop->multiCarManager());
-        m_server->setMultiCarManager(simLoop->multiCarManager());
-    }
+    rebindMultiCar();
 
     setupClientSignals();
     setupServerSignals();
@@ -35,6 +31,14 @@ NetworkManager::NetworkManager(SimulationLoop* simLoop)
 NetworkManager::~NetworkManager() {
     disconnectFromServer();
     stopServer();
+}
+
+void NetworkManager::rebindMultiCar() {
+    if (!m_simLoop) return;
+    MultiCarManager* mc = m_simLoop->multiCarManager();
+    if (!mc) return;
+    if (m_client) m_client->setMultiCarManager(mc);
+    if (m_server) m_server->setMultiCarManager(mc);
 }
 
 void NetworkManager::setupClientSignals() {
@@ -83,7 +87,7 @@ void NetworkManager::setupServerSignals() {
     };
 }
 
-bool NetworkManager::hostServer(uint16_t port, int maxClients,
+bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
                                  const std::string& serverName, const std::string& trackName) {
     if (m_hosting || m_connected) {
         printf("NetworkManager: Already connected/hosting\n");
@@ -96,6 +100,8 @@ bool NetworkManager::hostServer(uint16_t port, int maxClients,
     m_driverName = "Host";
     m_carName = "gte3";
 
+    rebindMultiCar();
+
     if (!m_server->start(port, serverName, trackName)) {
         if (onConnectionFailed) onConnectionFailed("Failed to start server");
         return false;
@@ -105,18 +111,18 @@ bool NetworkManager::hostServer(uint16_t port, int maxClients,
     m_connected = true;
 
     m_client->setSimulationLoop(m_simLoop);
-    if (m_simLoop && m_simLoop->multiCarManager()) {
-        m_client->setMultiCarManager(m_simLoop->multiCarManager());
-    }
+    rebindMultiCar();
 
+    // Host loopback client so the same MSG_* path is exercised locally.
     if (!m_client->connect("127.0.0.1", port, "Host", "gte3")) {
         printf("NetworkManager: Failed to connect as local client\n");
     }
 
     m_lastStatsPoll = std::chrono::steady_clock::now();
+    m_stateAccum = 0.0;
     if (onServerStarted) onServerStarted(port);
 
-    printf("NetworkManager: Server started on port %u\n", port);
+    printf("NetworkManager: Server started on port %u (car-state @ %.0f Hz)\n", port, STATE_SEND_HZ);
     updatePlayerList();
     return true;
 }
@@ -146,9 +152,7 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
     m_port = port;
 
     m_client->setSimulationLoop(m_simLoop);
-    if (m_simLoop && m_simLoop->multiCarManager()) {
-        m_client->setMultiCarManager(m_simLoop->multiCarManager());
-    }
+    rebindMultiCar();
 
     if (!m_client->connect(host, port, driverName, carName)) {
         if (onConnectionFailed) onConnectionFailed("Failed to connect to " + host);
@@ -161,6 +165,7 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
 
 void NetworkManager::disconnectFromServer() {
     if (!m_connected) return;
+    if (m_hosting) return; // stopServer handles host teardown
 
     m_client->disconnect();
     m_connected = false;
@@ -190,9 +195,51 @@ void NetworkManager::sendChatMessage(const std::string& message) {
     m_client->sendMessage(net::CHANNEL_RELIABLE, chat);
 }
 
+void NetworkManager::hostBroadcastCarStates() {
+    if (!m_hosting || !m_server || !m_simLoop) return;
+    MultiCarManager* mc = m_simLoop->multiCarManager();
+    if (!mc) return;
+    // Only the host's loopback client → nothing useful to send yet.
+    if (clientCount() <= 1) return;
+
+    net::CarStateData wire{};
+    for (const auto& entry : mc->cars()) {
+        if (!entry || !entry->isActive || !entry->vehicle) continue;
+        const auto s = entry->vehicle->getState();
+        wire.carId = static_cast<uint32_t>(entry->id);
+        wire.posX = static_cast<float>(s.position.x);
+        wire.posY = static_cast<float>(s.position.y);
+        wire.posZ = static_cast<float>(s.position.z);
+        wire.rotX = static_cast<float>(s.rotation.x);
+        wire.rotY = static_cast<float>(s.rotation.y);
+        wire.rotZ = static_cast<float>(s.rotation.z);
+        wire.velX = static_cast<float>(s.velocity.x);
+        wire.velY = static_cast<float>(s.velocity.y);
+        wire.velZ = static_cast<float>(s.velocity.z);
+        wire.speed = static_cast<float>(s.speed);
+        wire.rpm = static_cast<float>(s.rpm);
+        wire.gear = s.gear;
+        wire.throttle = s.throttle;
+        wire.brake = s.brake;
+        wire.steering = s.steering;
+        m_server->broadcastCarState(wire.carId, wire);
+    }
+}
+
 void NetworkManager::update(double dt) {
+    rebindMultiCar();
+
     if (m_server) m_server->update(dt);
     if (m_client) m_client->update(dt);
+
+    if (m_hosting) {
+        m_stateAccum += dt;
+        const double period = 1.0 / STATE_SEND_HZ;
+        if (m_stateAccum >= period) {
+            m_stateAccum = 0.0;
+            hostBroadcastCarStates();
+        }
+    }
 
     auto now = std::chrono::steady_clock::now();
     if (m_connected &&
@@ -203,8 +250,7 @@ void NetworkManager::update(double dt) {
 }
 
 void NetworkManager::onStatsTimer() {
-    // Called from tick via polling instead of Qt timer
-    if (m_connected) {
+    if (m_connected && m_client) {
         m_stats = m_client->getStats();
         if (onStatsUpdated) onStatsUpdated(m_stats);
     }

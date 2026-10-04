@@ -1,6 +1,6 @@
 /**
- * SimulationLoop — CarStateSync wiring (Sprint 7 residual / Sprint 8).
- * Merge into SimulationLoop.cpp or compile as SimulationLoop_NetSync.cpp.
+ * SimulationLoop — network sync (CarStateSync UDP + optional ksnet path).
+ * Compile as SimulationLoop_NetSync.cpp alongside SimulationLoop.cpp.
  */
 #include "SimulationLoop.h"
 #include <cstdio>
@@ -32,7 +32,16 @@ void SimulationLoop::stopCarStateSync() {
 }
 
 void SimulationLoop::updateNetworkSync(float dt) {
-    (void)dt;
+    // Path A: full ksnet reliable-UDP (HAS_KSNET=1). NetworkManager owns
+    // host car-state broadcast at 20 Hz and client apply via callbacks wired
+    // in SimulationLoop::initialize (onRemoteCarStateReceived).
+#if HAS_KSNET
+    if (m_network) {
+        m_network->update(static_cast<double>(dt));
+    }
+#endif
+
+    // Path B: lightweight CarStateSync UDP (works without ksnet).
     if (!m_carSync.active()) return;
     m_carSync.poll();
     if (m_multiCar) {
@@ -40,7 +49,6 @@ void SimulationLoop::updateNetworkSync(float dt) {
         carStateSyncPublishFromMultiCar(m_carSync, *m_multiCar, m_simTimeSec, playerId);
         carStateSyncApplyToMultiCar(m_carSync, *m_multiCar, playerId);
     } else if (m_vehicle) {
-        // single-car host/client: pack local vehicle
         auto st = m_vehicle->getState();
         std::vector<netsync::CarStatePacked> batch;
         batch.push_back(netsync::packFromSim(
