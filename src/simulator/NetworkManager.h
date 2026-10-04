@@ -19,14 +19,10 @@ public:
     explicit NetworkManager(SimulationLoop* simLoop);
     ~NetworkManager();
 
-    // Pumps the transport (server + client) and the stats poller. Called once
-    // per frame from SimulationLoop::tick(). Host also broadcasts car states
-    // at ~20 Hz so remote clients stay in sync without relying solely on
-    // SimulationLoop::broadcastLocalCarState.
     void update(double dt);
 
     bool hostServer(uint16_t port = 40000, int maxClients = 8,
-                    const std::string& serverName = "ksEditor Server",
+                    const std::string& serverName = "ksim Server",
                     const std::string& trackName = "Unknown");
     void stopServer();
     bool isHosting() const { return m_hosting; }
@@ -42,20 +38,22 @@ public:
 
     void sendChatMessage(const std::string& message);
 
+    /** Host: push session / countdown / lap / penalty to all clients. */
+    void broadcastSessionState(uint8_t type, uint8_t phase, int currentLap, int totalLaps, double timeRemaining);
+    void broadcastRaceCountdown(int seconds);
+    void broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid);
+    void broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason);
+
     std::string serverName() const { return m_serverName; }
     std::string trackName() const { return m_trackName; }
     std::string localDriverName() const { return m_driverName; }
     std::string localCarName() const { return m_carName; }
-    /** Server slot handed out in MSG_SERVER_WELCOME (0 for the host's own
-     *  loopback client). Lets the sim recognise its own car among the
-     *  spawn/state messages the server relays. */
     uint32_t localClientId() const { return m_localClientId; }
     net::NetworkStats stats() const { return m_stats; }
 
     net::NetworkClient* client() { return m_client.get(); }
     net::NetworkServer* server() { return m_server.get(); }
 
-    // Callbacks (replacing Qt signals)
     std::function<void(uint16_t)> onServerStarted;
     std::function<void()> onServerStopped;
     std::function<void(const std::string&, uint16_t)> onClientConnectedToServer;
@@ -71,13 +69,16 @@ public:
     std::function<void(uint32_t)> onRemoteCarDespawned;
     std::function<void(uint32_t, const net::CarStateData&)> onRemoteCarStateReceived;
 
+    std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateReceived;
+    std::function<void(int)> onRaceCountdownReceived;
+    std::function<void(uint32_t, uint32_t, double, double, double, double, bool)> onLapTimeReceived;
+    std::function<void(uint32_t, uint8_t, float, const std::string&)> onPenaltyReceived;
+
     std::function<void(const net::NetworkStats&)> onStatsUpdated;
     std::function<void(const std::vector<std::string>&)> onPlayerListUpdated;
 
 private:
     void onStatsTimer();
-    void onSessionStateChanged(uint8_t type, uint8_t phase, int currentLap, int totalLaps, double timeRemaining);
-
     void setupClientSignals();
     void setupServerSignals();
     void updatePlayerList();
@@ -100,9 +101,8 @@ private:
 
     net::NetworkStats m_stats;
 
-    // Qt timer replacement (polling-based)
     std::chrono::steady_clock::time_point m_lastStatsPoll;
-    static constexpr double STATS_POLL_INTERVAL = 0.5; // seconds
+    static constexpr double STATS_POLL_INTERVAL = 0.5;
 
     double m_stateAccum = 0.0;
     static constexpr double STATE_SEND_HZ = 20.0;
@@ -121,32 +121,29 @@ class NetworkManager {
 public:
     explicit NetworkManager(SimulationLoop*) {}
     ~NetworkManager() = default;
-
     void update(double) {}
-
     bool hostServer(uint16_t = 40000, int = 8, const std::string& = {}, const std::string& = {}) { return false; }
     void stopServer() {}
     bool isHosting() const { return false; }
     int clientCount() const { return 0; }
     std::string clientName(int) const { return {}; }
-
     bool joinServer(const std::string&, uint16_t, const std::string& = {}, const std::string& = {}) { return false; }
     void disconnectFromServer() {}
     bool isConnected() const { return false; }
     bool isClient() const { return false; }
-
     void sendChatMessage(const std::string&) {}
-
+    void broadcastSessionState(uint8_t, uint8_t, int, int, double) {}
+    void broadcastRaceCountdown(int) {}
+    void broadcastLapTime(uint32_t, int, double, double, double, double, bool) {}
+    void broadcastPenalty(uint32_t, uint8_t, float, const std::string&) {}
     std::string serverName() const { return {}; }
     std::string trackName() const { return {}; }
     std::string localDriverName() const { return {}; }
     std::string localCarName() const { return {}; }
     uint32_t localClientId() const { return 0; }
     net::NetworkStats stats() const { return {}; }
-
     net::NetworkClient* client() { return nullptr; }
     net::NetworkServer* server() { return nullptr; }
-
     std::function<void(uint16_t)> onServerStarted;
     std::function<void()> onServerStopped;
     std::function<void(const std::string&, uint16_t)> onClientConnectedToServer;
@@ -158,9 +155,12 @@ public:
     std::function<void(uint32_t, const std::string&, uint32_t)> onRemoteCarSpawned;
     std::function<void(uint32_t)> onRemoteCarDespawned;
     std::function<void(uint32_t, const net::CarStateData&)> onRemoteCarStateReceived;
+    std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateReceived;
+    std::function<void(int)> onRaceCountdownReceived;
+    std::function<void(uint32_t, uint32_t, double, double, double, double, bool)> onLapTimeReceived;
+    std::function<void(uint32_t, uint8_t, float, const std::string&)> onPenaltyReceived;
     std::function<void(const net::NetworkStats&)> onStatsUpdated;
     std::function<void(const std::vector<std::string>&)> onPlayerListUpdated;
-
 private:
     net::NetworkStats m_stats;
 };
