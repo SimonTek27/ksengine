@@ -1,233 +1,231 @@
 #include "AIController.h"
-#include <cmath>
-#include <limits>
 #include <cstdio>
-#include <algorithm>
+#include <limits>
+#include <filesystem>
+#include <cmath>
+
+namespace fs = std::filesystem;
 
 namespace ks::sim {
 
 AIController::AIController() = default;
 AIController::~AIController() = default;
 
-bool AIController::loadSpline(const std::string& trackDirectory)
-{
-    std::string splinePath = trackDirectory + "/ai/fast_lane.ai";
-    m_spline = ks::ai::AiFileReader::readSpline(splinePath);
-
-    if (!m_spline.isValid()) {
-        // try .txt companion
-        m_spline = ks::ai::AiFileReader::readSpline(splinePath + ".txt");
+bool AIController::loadSpline(const std::string& trackDirectory) {
+    m_splineLoaded = false;
+    m_spline = {};
+    m_cumulativeDistance.clear();
+    m_currentIdx = 0;
+    m_prevLap = 0;
+    const char* candidates[] = {
+        "/ai/fast_lane.ai", "/ai/fast_lane.txt",
+        "/data/ai/fast_lane.ai", "/fast_lane.ai", "/ai/ideal_line.ai"
+    };
+    std::string path;
+    for (auto c : candidates) {
+        fs::path p = fs::path(trackDirectory + c);
+        if (fs::exists(p)) { path = p.string(); break; }
     }
-
-    if (!m_spline.isValid()) {
-        std::printf("AIController: Failed to parse spline from: %s\n", splinePath.c_str());
+    if (path.empty()) {
+        std::fprintf(stderr, "AIController: no AI spline in %s\n", trackDirectory.c_str());
         return false;
     }
-
-    m_cumulativeDistance.resize(m_spline.points.size());
-    m_cumulativeDistance[0] = 0.0f;
-    for (size_t i = 1; i < m_spline.points.size(); ++i) {
-        float dx = m_spline.points[i].position.x - m_spline.points[i - 1].position.x;
-        float dy = m_spline.points[i].position.y - m_spline.points[i - 1].position.y;
-        float dz = m_spline.points[i].position.z - m_spline.points[i - 1].position.z;
-        m_cumulativeDistance[i] = m_cumulativeDistance[i - 1]
-                                  + std::sqrt(dx * dx + dy * dy + dz * dz);
+    m_spline = ks::ai::AiFileReader::readSpline(path);
+    if (!m_spline.isValid()) {
+        std::fprintf(stderr, "AIController: invalid spline %s\n", path.c_str());
+        return false;
     }
-
+    rebuildCumulative();
     m_splineLoaded = true;
-    m_currentIdx = 0;
-    m_lapCount = 0;
-    m_prevProgress = 0.0f;
-    m_traveledSinceLap = 0.0f;
-    m_hasProgress = false;
-
-    std::printf("AIController: Loaded spline with %d points\n", (int)m_spline.points.size());
-    if (onSplineLoaded) onSplineLoaded(static_cast<int>(m_spline.points.size()));
+    std::fprintf(stderr, "AIController: loaded %zu points from %s (%.0fm)\n",
+                 m_spline.points.size(), path.c_str(), m_spline.totalDistance);
+    if (onSplineLoaded) onSplineLoaded((int)m_spline.points.size());
     return true;
 }
 
+void AIController::rebuildCumulative() {
+    m_cumulativeDistance.assign(m_spline.points.size(), 0.f);
+    float acc = 0.f;
+    for (size_t i = 0; i < m_spline.points.size(); ++i) {
+        m_cumulativeDistance[i] = acc;
+        if (i + 1 < m_spline.points.size()) {
+            const auto& a = m_spline.points[i].position;
+            const auto& b = m_spline.points[i + 1].position;
+            float dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+            acc += std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+    }
+    m_spline.totalDistance = acc;
+}
+
+vec3 AIController::pointAt(int idx) const {
+    const auto& p = m_spline.points[(size_t)idx].position;
+    return vec3(p.x, p.y, p.z);
+}
+
+void AIController::tangentAt(int idx, float& tx, float& tz) const {
+    const int n = (int)m_spline.points.size();
+    if (n < 2) { tx = 0; tz = 1; return; }
+    int i0 = std::clamp(idx, 0, n - 1);
+    int i1 = std::min(i0 + 1, n - 1);
+    const auto& a = m_spline.points[(size_t)i0].position;
+    const auto& b = m_spline.points[(size_t)i1].position;
+    tx = b.x - a.x; tz = b.z - a.z;
+    float len = std::sqrt(tx * tx + tz * tz);
+    if (len > 1e-4f) { tx /= len; tz /= len; } else { tx = 0; tz = 1; }
+}
+
 void AIController::update(const vec3& carPosition, float carHeading,
-                          float speed, int /*gear*/, float dt)
-{
+                          float speed, int gear, float dt) {
+    static const std::vector<AiTrafficCar> empty;
+    update(carPosition, carHeading, speed, gear, dt, empty, -1);
+}
+
+void AIController::update(const vec3& carPosition, float carHeading,
+                          float speed, int gear, float dt,
+                          const std::vector<AiTrafficCar>& traffic, int selfId) {
+    (void)gear;
     if (!m_splineLoaded || m_spline.points.empty()) {
-        m_throttle = 0; m_brake = 1.0f; m_steering = 0;
+        m_throttle = 0; m_brake = 1.f; m_steering = 0;
         return;
     }
-
     int nearest = findNearestPoint(carPosition);
     m_currentIdx = nearest;
-    detectLap(nearest);
-
-    // Speed-scheduled lookahead: a fixed 30 m adds >2 s of phase lag at
-    // racing speeds and let the heading loop run away (growing sideslip).
-    const float lookaheadDist = std::clamp(8.0f + 1.2f * speed, 12.0f, 40.0f);
-    int lookahead = findLookaheadPoint(nearest, lookaheadDist);
-    const auto& targetPoint = m_spline.points[static_cast<size_t>(lookahead)];
-    vec3 targetPos(targetPoint.position.x, targetPoint.position.y, targetPoint.position.z);
-
-    m_steering = calculateSteering(carPosition, carHeading, targetPos);
-
-    // Curvature feedforward: pure heading-error feedback must first build a
-    // cross-track error before it can hold the wheel, which hunted around
-    // the line in a ~12 s limit cycle (3.5). The spline tangent tells us
-    // the needed yaw direction (+steer yaws towards -heading in this
-    // engine); scale by speed^2 since the slip angles that realise the
-    // geometric radius grow with v^2.
-    float w = tangentHeading(lookahead) - tangentHeading(nearest);
-    // Wrap: tangentHeading is an atan2, so the difference jumps by 2*pi
-    // when the lookahead straddles the +-pi boundary (w=5.76 flipped the
-    // feedforward sign and full-locked the wrong way, hunting the line).
-    while (w > 3.14159f) w -= 6.28318f;
-    while (w < -3.14159f) w += 6.28318f;
-    // Normalised by Ld so the term is signed curvature (w/Ld = 1/R),
-    // independent of the lookahead distance itself.
-    const float ff = -(w / lookaheadDist) * (speed * speed) * 0.09f;
-    m_steering = std::clamp(m_steering + ff, -1.0f, 1.0f);
-
-    // Derivative damping: with only P+FF the cross-track loop hunted in a
-    // ~16 s limit cycle (plant lag ~4 s). Double low-pass (err, then dErr)
-    // keeps the nearest-index quantisation out of the derivative.
-    {
-        float dx = targetPos.x - carPosition.x;
-        float dz = targetPos.z - carPosition.z;
-        float err = std::atan2(dx, dz) - carHeading;
-        while (err > 3.14159f) err -= 6.28318f;
-        while (err < -3.14159f) err += 6.28318f;
-        const float ad = std::clamp(dt / 0.25f, 0.0f, 1.0f);
-        m_errLP += (err - m_errLP) * ad;
-        if (!m_errInit) { m_errLPPrev = m_errLP; m_errInit = true; }
-        const float dErr = (m_errLP - m_errLPPrev) / std::max(dt, 1e-4f);
-        m_errLPPrev = m_errLP;
-        m_dErrLP += (dErr - m_dErrLP) * std::clamp(dt / 0.30f, 0.0f, 1.0f);
-        m_steering = std::clamp(
-            m_steering - std::clamp(m_dErrLP * 1.0f, -0.4f, 0.4f),
-            -1.0f, 1.0f);
+    if (nearest < 5 && m_prevLap >= (int)m_spline.points.size() / 2) {
+        m_prevLap = 0;
+        if (onLapCompleted) onLapCompleted(1);
+    } else {
+        m_prevLap = nearest;
     }
-
-    float targetSpeed = targetPoint.speed * m_speedFactor;
-    float curvature = std::abs(targetPoint.curvature);
+    float lookDist = m_lookaheadDist * (0.7f + 0.3f * m_skill);
+    lookDist += std::clamp(speed * 0.4f, 0.f, 40.f);
+    int lookahead = findLookaheadPoint(nearest, lookDist);
+    float targetSpeed = m_spline.points[(size_t)lookahead].speed;
+    if (targetSpeed < 1.f) {
+        float curv = std::abs(m_spline.points[(size_t)lookahead].curvature);
+        targetSpeed = std::clamp(55.f / (1.f + curv * 40.f), 8.f, 70.f);
+    }
+    targetSpeed *= m_speedFactor * (0.85f + 0.15f * m_skill);
+    float curvature = std::abs(m_spline.points[(size_t)lookahead].curvature);
     if (curvature > 0.01f)
         targetSpeed *= (1.0f - curvature * m_aggression * 0.5f);
-
+    evaluateTraffic(carPosition, carHeading, speed, nearest, traffic, selfId, targetSpeed);
+    const float latRate = 2.5f * dt;
+    if (m_lateralOffset < m_lateralTarget)
+        m_lateralOffset = std::min(m_lateralTarget, m_lateralOffset + latRate);
+    else
+        m_lateralOffset = std::max(m_lateralTarget, m_lateralOffset - latRate);
+    vec3 targetPos = pointAt(lookahead);
+    float tx, tz; tangentAt(lookahead, tx, tz);
+    targetPos.x += -tz * m_lateralOffset;
+    targetPos.z += tx * m_lateralOffset;
+    float desiredSteer = calculateSteering(carPosition, carHeading, targetPos);
+    float maxDelta = m_maxSteerRate * dt * (0.5f + 0.5f * m_skill);
+    m_steering = std::clamp(m_steering + std::clamp(desiredSteer - m_steering, -maxDelta, maxDelta), -1.f, 1.f);
     m_throttle = calculateThrottle(speed, targetSpeed, curvature, dt);
     m_brake = calculateBrake(speed, targetSpeed, curvature, dt);
     m_targetGear = calculateGear(speed);
 }
 
-// Lap counting for static splines: AiFileReader never fills AiSplinePoint::
-// lap (it stays 0 on disk data), so derive crossings from the spline wrap.
-// A crossing only counts as a completed lap when the car actually covered
-// most of the track since the previous one — a car spawned behind the
-// start line must not score a "lap" the moment it drives over it.
-void AIController::detectLap(int nearestIdx)
-{
-    if (!m_spline.closed || m_spline.totalDistance <= 0.0f) return;
-    const float total = m_spline.totalDistance;
-    const float prog = m_cumulativeDistance[static_cast<size_t>(nearestIdx)];
-
-    if (m_hasProgress) {
-        const bool crossedLine = m_prevProgress >= total * 0.5f &&
-                                 prog <= total * 0.25f;
-        if (crossedLine) {
-            if (m_traveledSinceLap >= total * 0.5f) {
-                ++m_lapCount;
-                if (onLapCompleted) onLapCompleted(m_lapCount);
-            }
-            m_traveledSinceLap = 0.0f;
-        } else if (prog > m_prevProgress) {
-            m_traveledSinceLap += prog - m_prevProgress;
+void AIController::evaluateTraffic(const vec3& carPos, float carHeading, float speed,
+                                   int nearestIdx, const std::vector<AiTrafficCar>& traffic,
+                                   int selfId, float& targetSpeedInOut) {
+    (void)carHeading;
+    if (!m_overtakeEnabled || traffic.empty()) { m_lateralTarget = 0.f; return; }
+    float tx, tz; tangentAt(nearestIdx, tx, tz);
+    const float nx = -tz, nz = tx;
+    float closestAhead = 1e9f; float sideBias = 0.f; bool blocked = false;
+    for (const auto& o : traffic) {
+        if (o.id == selfId) continue;
+        float dx = o.x - carPos.x, dz = o.z - carPos.z;
+        float along = dx * tx + dz * tz;
+        float lat = dx * nx + dz * nz;
+        if (along > 2.f && along < 45.f && std::abs(lat) < 6.f) {
+            if (along < closestAhead) { closestAhead = along; sideBias = lat; }
+            if (along < 25.f && speed - o.speed > -5.f) blocked = true;
+            if (along < 12.f && o.speed < speed)
+                targetSpeedInOut = std::min(targetSpeedInOut, o.speed * 0.95f);
         }
     }
-    m_prevProgress = prog;
-    m_hasProgress = true;
+    if (blocked && closestAhead < 35.f) {
+        if (std::abs(sideBias) > 0.5f) m_overtakeSide = (sideBias > 0.f) ? -1.f : 1.f;
+        m_lateralTarget = m_overtakeSide * (2.0f + 1.5f * m_aggression);
+        if (m_aggression > 0.4f && closestAhead > 8.f)
+            targetSpeedInOut *= 1.0f + 0.08f * m_aggression;
+    } else {
+        m_lateralTarget = 0.f;
+    }
 }
 
-int AIController::findNearestPoint(const vec3& pos) const
-{
+int AIController::findNearestPoint(const vec3& pos) const {
     if (m_spline.points.empty()) return 0;
-
-    int bestIdx = 0;
-    float bestDist = std::numeric_limits<float>::max();
-    for (size_t i = 0; i < m_spline.points.size(); ++i) {
-        float dx = m_spline.points[i].position.x - pos.x;
-        float dy = m_spline.points[i].position.y - pos.y;
-        float dz = m_spline.points[i].position.z - pos.z;
-        float d = dx*dx + dy*dy + dz*dz;
-        if (d < bestDist) {
-            bestDist = d;
-            bestIdx = static_cast<int>(i);
-        }
-    }
+    const int n = (int)m_spline.points.size();
+    int start = std::max(0, m_currentIdx - 30);
+    int end = std::min(n, m_currentIdx + 80);
+    int bestIdx = m_currentIdx; float bestDist = 1e30f;
+    auto consider = [&](int i) {
+        float dx = m_spline.points[(size_t)i].position.x - pos.x;
+        float dz = m_spline.points[(size_t)i].position.z - pos.z;
+        float d = dx * dx + dz * dz;
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+    };
+    for (int i = start; i < end; ++i) consider(i);
+    if (bestDist > 40.f * 40.f) for (int i = 0; i < n; i += 3) consider(i);
     return bestIdx;
 }
 
-int AIController::findLookaheadPoint(int nearestIdx, float dist) const
-{
+int AIController::findLookaheadPoint(int nearestIdx, float dist) const {
     if (m_spline.points.empty()) return 0;
-    float base = m_cumulativeDistance[static_cast<size_t>(nearestIdx)];
+    float base = m_cumulativeDistance[(size_t)nearestIdx];
     float target = base + dist;
-    for (size_t i = static_cast<size_t>(nearestIdx); i < m_spline.points.size(); ++i) {
-        if (m_cumulativeDistance[i] >= target)
-            return static_cast<int>(i);
+    const size_t n = m_spline.points.size();
+    for (size_t i = (size_t)nearestIdx; i < n; ++i)
+        if (m_cumulativeDistance[i] >= target) return (int)i;
+    if (m_spline.closed || n > 10) {
+        float wrapTarget = target - m_spline.totalDistance;
+        if (wrapTarget > 0.f)
+            for (size_t i = 0; i < n; ++i)
+                if (m_cumulativeDistance[i] >= wrapTarget) return (int)i;
     }
-    return static_cast<int>(m_spline.points.size()) - 1;
-}
-
-float AIController::tangentHeading(int idx) const
-{
-    const auto& pts = m_spline.points;
-    if (pts.empty()) return 0.0f;
-    const std::size_t i = static_cast<std::size_t>(idx) % pts.size();
-    const std::size_t j = (i + 1) % pts.size();
-    return std::atan2(pts[j].position.x - pts[i].position.x,
-                      pts[j].position.z - pts[i].position.z);
+    return (int)n - 1;
 }
 
 float AIController::calculateSteering(const vec3& carPos, float carHeading,
-                                      const vec3& targetPos) const
-{
-    float dx = targetPos.x - carPos.x;
-    float dz = targetPos.z - carPos.z;
+                                      const vec3& targetPos) const {
+    float dx = targetPos.x - carPos.x, dz = targetPos.z - carPos.z;
     float targetHeading = std::atan2(dx, dz);
     float err = targetHeading - carHeading;
     while (err > 3.14159f) err -= 6.28318f;
     while (err < -3.14159f) err += 6.28318f;
-    // Negated: VehicleSimulator's yaw response is net opposite to the
-    // steering input (the tire slip chain dominates the kinematic nudge in
-    // updatePhysics), so closing the loop on err needs the flipped sign —
-    // positive err (target towards +heading) must yield negative steering.
-    return -std::clamp(err * 0.6f, -1.0f, 1.0f);
+    return std::clamp(err * 1.35f, -1.0f, 1.0f);
 }
 
 float AIController::calculateThrottle(float currentSpeed, float targetSpeed,
-                                      float /*curvature*/, float /*dt*/) const
-{
+                                      float curvature, float dt) const {
+    (void)dt; (void)curvature;
     float err = targetSpeed - currentSpeed;
-    // Stepped hold (probe-validated): a weak P gain hunted the speed by
-    // +/-2 m/s at the grip limit, which re-excited the sideslip cycle.
-    // A strong floor holds speed against corner scrub instead.
-    if (err > 2.0f) return 1.0f;
-    if (err > 0.5f) return 0.45f;
-    if (err > -0.5f) return 0.1f;
-    return 0.0f;
+    if (err > 2.f) return std::clamp(0.4f + err * 0.04f, 0.f, 1.f);
+    if (err > 0.f) return 0.35f;
+    return 0.f;
 }
 
 float AIController::calculateBrake(float currentSpeed, float targetSpeed,
-                                   float /*curvature*/, float /*dt*/) const
-{
+                                   float curvature, float dt) const {
+    (void)dt;
     float err = currentSpeed - targetSpeed;
-    if (err <= 1.0f) return 0.0f;
-    return std::clamp(err * 0.1f, 0.0f, 1.0f);
+    float b = 0.f;
+    if (err > 3.f) b = std::clamp(err * 0.05f, 0.f, 1.f);
+    if (curvature > 0.05f && currentSpeed > targetSpeed * 0.9f)
+        b = std::max(b, std::clamp(curvature * 2.f, 0.f, 0.6f));
+    return b;
 }
 
-int AIController::calculateGear(float speed) const
-{
-    // speed m/s rough gear map
-    if (speed < 10) return 1;
-    if (speed < 20) return 2;
-    if (speed < 30) return 3;
-    if (speed < 40) return 4;
-    if (speed < 50) return 5;
+int AIController::calculateGear(float speed) const {
+    if (speed < 8.f) return 1;
+    if (speed < 16.f) return 2;
+    if (speed < 25.f) return 3;
+    if (speed < 35.f) return 4;
+    if (speed < 45.f) return 5;
     return 6;
 }
 
