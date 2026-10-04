@@ -1,22 +1,21 @@
-# SimulationLoop.cpp tick inject
+# SimulationLoop tick parity
 
-`SimulationLoop.h` already exposes FeatureHub + CarStateSync.
-Method bodies live in `src/simulator/SimulationLoop_NetSync.cpp`.
+## Header (done on master)
 
-Inside `void SimulationLoop::tick()`, after `m_multiCar->update(...)`:
+`FeatureHub m_features`, `netsync::CarStateSync m_carSync`, `m_simTimeSec`, public API.
+
+## NetSync methods (done)
+
+`SimulationLoop_NetSync.cpp` — compile into simulator target.
+
+## Physics step (one-line include)
+
+After `m_multiCar->update(m_physicsDt);` add:
 
 ```cpp
-m_simTimeSec += m_physicsDt;
-updateNetworkSync(static_cast<float>(m_physicsDt));
-{
-    vec3 pos{};
-    bool onTrack = true;
-    if (m_vehicle) {
-        const auto st = m_vehicle->getState();
-        pos = { (float)st.position.x, (float)st.position.y, (float)st.position.z };
-    }
-    m_features.tick(static_cast<float>(m_physicsDt), &m_raceSession, 0, pos, onTrack);
-}
+#include "SimulationLoop_FeatureTick.inl"
 ```
 
-Add `SimulationLoop_NetSync.cpp` to the simulator CMake target if not already listed.
+File: `src/simulator/SimulationLoop_FeatureTick.inl` (on master).
+
+Or expand the `.inl` contents inline.
