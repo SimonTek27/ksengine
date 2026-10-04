@@ -98,3 +98,49 @@ ksengine/
 | AIController | Spline + overtake |
 | GarageExit / PitLane* | Ops stack |
 | PersonalBestStore | File PB + leaderboard |
+| ExternalControlApi | TCP + optional AUTH |
+
+---
+
+## Network defaults
+
+| Service | Port |
+|---------|------|
+| Game (ksnet) | 40000 |
+| CarStateSync | 40001 |
+| Discovery | 20779 |
+| Control API | 20780 |
+
+---
+
+## SimulationLoop restore
+
+On a fresh clone, `src/simulator/SimulationLoop.cpp` is a stub. Full source is
+embedded in `cmake/simloop_z0.b64`…`z4.b64` and expanded automatically:
+
+```bash
+bash tools/restore_simloop.sh
+# or: cmake -B build -DKSIMULATOR_QT_FREE=ON
+```
+
+Docs: [RESTORE_SIMLOOP](docs/RESTORE_SIMLOOP.md) · [PARITY_STATUS](docs/PARITY_STATUS.md)
+
+---
+
+## Build
+
+```bash
+cmake --preset default
+cmake --build --preset default
+./tools/check_no_qt.ps1   # engine Qt-free check
+```
+
+- **Vulkan SDK** — SimulatorApp  
+- **Qt 6.11+** — ksEditor only  
+- **Windows 10/11 x64** primary
+
+---
+
+## License
+
+GPL-3.0 — [LICENSE.txt](LICENSE.txt)
