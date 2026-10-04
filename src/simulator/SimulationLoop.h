@@ -3,6 +3,7 @@
 /**
  * SimulationLoop — fixed-timestep sim + NativeUiHub + GPU UI pass.
  * LapSectorTimer + shared-memory + UDP/TCP telemetry + TrackSurface.
+ * FeatureHub + CarStateSync parity hooks (restored).
  */
 
 #include "engine/physics/PhysicsCoreTypes.h"
@@ -15,6 +16,9 @@
 #include "NativeRenderer.h"
 #include "engine/Graphics/ParticleSystem.h"
 #include "RaceSessionManager.h"
+#include "FeatureHub.h"
+#include "CarStateSync.h"
+#include "CarStateSyncBridge.h"
 
 #include <memory>
 #include <chrono>
@@ -122,9 +126,6 @@ public:
     void tick();
 
     bool handleUiKey(int virtualKey);
-    // WM_CHAR / mouse routing into the native UI (roadmap 3.1): text input
-    // needs the translated character, not the virtual key, and the menus/
-    // server browser are click-driven.
     bool handleUiChar(int character);
     bool handleUiMouseMove(float x, float y);
     bool handleUiMouseButton(ui::MouseButton button, bool down, float x, float y);
@@ -140,6 +141,17 @@ public:
     ks::physics::VehicleSimulator* vehicle() { return m_vehicle.get(); }
     MultiCarManager* multiCarManager() { return m_multiCar.get(); }
     NetworkManager* networkManager() { return m_network.get(); }
+
+    FeatureHub& features() { return m_features; }
+    const FeatureHub& features() const { return m_features; }
+    void startFeatureServices(bool hostAnnounce = false) { m_features.startServices(hostAnnounce); }
+    bool startCarStateHost(uint16_t port = netsync::kDefaultSyncPort);
+    bool startCarStateClient(const std::string& host, uint16_t port = netsync::kDefaultSyncPort);
+    void stopCarStateSync();
+    void updateNetworkSync(float dt);
+    netsync::CarStateSync& carStateSync() { return m_carSync; }
+    const netsync::CarStateSync& carStateSync() const { return m_carSync; }
+
     ks::physics::LapSectorTimer& lapTimer() { return m_lapTimer; }
     UdpTelemetryBridge* udpBridge() { return m_udp.get(); }
     TcpTelemetryBridge* tcpBridge() { return m_tcp.get(); }
@@ -176,14 +188,10 @@ public:
 
     void setSharedMemoryEnabled(bool e) { m_shmEnabled = e; }
 
-    /** Race flag (yellow/SC): drives the AC SHM `flag` channel and the AI
-     *  speed limiter. GREEN/checkered are set by the session manager. */
     void setRaceFlag(RaceFlag f) { m_raceSession.setFlag(f); }
     RaceFlag raceFlag() const { return m_raceSession.flag(); }
     bool sharedMemoryEnabled() const { return m_shmEnabled; }
 
-    /** AI grid size for the next race session (roadmap 3.5). N AI cars
-     *  spawn on the track's ai/fast_lane.ai line; 0 = player only. */
     void setAiCarCount(int n) { m_aiCarCount = n < 0 ? 0 : n; }
     int aiCarCount() const { return m_aiCarCount; }
 
@@ -210,11 +218,7 @@ private:
     void applyInput();
     void render(float dt = 1.0f / 60.0f);
     void updateCamera(float dt);
-    // Roadmap P1 (KS_PARTICLES=1): steps the CPU particle simulation and
-    // uploads this frame's billboard quads to the renderer. No-op otherwise.
     void updateAndDrawParticles(float dt);
-    // Roadmap P2 (KS_TERRAIN=1): builds the trackside ground once from a
-    // generated heightmap and registers it as scene geometry. No-op otherwise.
     void initTracksideTerrain();
     void updateWeather();
     void syncCarTransforms();
@@ -236,6 +240,9 @@ private:
     std::unique_ptr<CameraController> m_camera;
     std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;
     std::unique_ptr<MultiCarManager> m_multiCar;
+    FeatureHub m_features;
+    netsync::CarStateSync m_carSync;
+    double m_simTimeSec = 0.0;
     std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<SimulatorAudio> m_audio;
     std::unique_ptr<SetupGarage> m_setupGarage;
@@ -248,15 +255,11 @@ private:
     int m_viewW = 1280;
     int m_viewH = 720;
 
-    // Roadmap P1 particles: off unless KS_PARTICLES=1 (the default image
-    // must stay byte-identical), in which case a single dust emitter rides
-    // the car and its quads are handed to NativeRenderer every frame.
     bool m_particlesWanted = false;
     bool m_particlesInit = false;
     ks::engine::graphics::ParticleSystem m_particles;
     std::vector<float> m_particleQuads;
 
-    // Roadmap P2 terrain: off unless KS_TERRAIN=1 (default image unchanged).
     bool m_terrainWanted = false;
     bool m_terrainInit = false;
 
@@ -292,8 +295,6 @@ private:
     int m_totalLaps = 0;
     double m_timeRemaining = 0.0;
 
-    // Opt-in telemetry export: set KS_GOLDEN_CSV=<path> to record the race
-    // session (sampled at 50 Hz while green) and write a golden CSV on end.
     ks::physics::PhysicsGolden m_goldenRecorder;
     bool m_goldenExportActive = false;
     double m_goldenSampleAccum = 0.0;
@@ -305,16 +306,10 @@ private:
     uint32_t m_streamlineFrameIndex = 0;
     std::string m_carName;
 
-    // AI racing field (roadmap 3.5): requested size, spawned car ids for
-    // the current session, and the last lap count seen per car (lap events).
     int m_aiCarCount = 0;
     std::vector<int> m_aiCarIds;
     std::vector<int> m_aiLastLaps;
 
-    // Multiplayer (roadmap 3.1): the host latches each server slot's latest
-    // controls and pushes them to that slot's car once per physics step,
-    // while a client maps the car ids the host relays onto the entries it
-    // spawned locally. kNoNetCarId means "our own car not announced yet".
     static constexpr uint32_t kNoNetCarId = 0xFFFFFFFFu;
     struct RemoteInput {
         float throttle = 0.0f;
@@ -325,8 +320,6 @@ private:
     std::unordered_map<uint32_t, int> m_remoteCarIds;
     uint32_t m_ownNetCarId = kNoNetCarId;
 
-    // F2 server-browser row for our own hosted session (-1 = not hosting,
-    // so the static localhost row from SimulatorApp is left alone).
     int m_mpServerClients = -1;
 };
 
