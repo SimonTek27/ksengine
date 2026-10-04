@@ -1,6 +1,4 @@
-# Matrice gap prioritaria — ksim / ksengine
-
-**Data:** 2026-10-05 (parity P0–P1 complete)
+# Gap Matrix — prioritised parity roadmap
 
 ## Sprint status
 
@@ -12,13 +10,28 @@
 | 6 | AI line + overtake | **Done** |
 | 7 | CarStateSync UDP ≥20 Hz | **Done** |
 | 8 | NetSync + pit strategy UI | **Done** |
+| 9 | Full ksnet remote car state | **Done** |
+
+## ksnet path (Sprint 9)
+
+| Component | Role |
+|-----------|------|
+| `src/core/engine/Network/ksnet` | Reliable-UDP transport (yojimbo-shaped API) |
+| `NetworkConfig.h` | Messages: join/welcome/car state/spawn/input/chat/session |
+| `NetworkLowLevel.cpp` | Client/Server process + broadcast |
+| `NetworkManager` | Host 20 Hz car-state pump, late MultiCar rebind |
+| `SimulationLoop` | `broadcastLocalCarState` + remote apply (archive) |
+| `SimulationLoop_NetSync` | Dual path: ksnet **and** CarStateSync UDP |
+| Qt-free `SimulatorApp` | Links `ksnet` when target exists (`HAS_KSNET=1`) |
+
+CarStateSync UDP remains the zero-dependency fallback when `HAS_KSNET=0`.
 
 ## Optional (P2+)
 
 | Item | Notes |
 |------|-------|
-| Full ksnet remote car state | Optional; UDP CarStateSync works without `HAS_KSNET` |
-| Advanced multiplayer (yojimbo path) | Optional compile flag |
+| Wire encryption / token auth | Today: LAN `InsecureConnect` |
+| Cloud matchmaking | LAN discovery port 20779 |
 
 ## Restore SimulationLoop
 
