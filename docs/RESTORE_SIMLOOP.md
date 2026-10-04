@@ -1,28 +1,17 @@
-# SimulationLoop.cpp restore
+# Restore SimulationLoop.cpp
 
-The large `.cpp` cannot be pushed in one API call from the agent. Two automatic paths:
-
-## 1. CMake (recommended — zero manual steps)
-
-On configure, `cmake/restore_simloop.cmake` (included by Qt-free simulator CMake):
-
-1. Detects the stub `#error`
-2. Downloads the last good file from commit `c78b0a9a`
-3. Injects `#include "SimulationLoop_FeatureTick.inl"`
-
-Just run your normal cmake configure/build.
-
-## 2. Script
+If `src/simulator/SimulationLoop.cpp` is a stub (`#error`), expand the embedded archive:
 
 ```bash
 bash tools/restore_simloop.sh
-git add src/simulator/SimulationLoop.cpp
-git commit -m "fix: restore SimulationLoop.cpp with FeatureTick"
+# or: cmake configure (cmake/restore_simloop.cmake runs automatically)
 ```
 
-## Already complete on master
+Archive: `cmake/simloop_z0.b64` … `simloop_z4.b64` (zlib + base64 of full source with FeatureTick inject).
 
-- SimulationLoop.h (FeatureHub + CarStateSync)
-- SimulationLoop_NetSync.cpp + CMake entry
-- SimulationLoop_FeatureTick.inl
-- MultiCar traffic, AI overtake, FeatureHub stack, README
+After restore the file is ~52 KB / 1203 lines and includes:
+
+- `#include "SimulationLoop_FeatureTick.inl"` after `m_multiCar->update`
+- FeatureHub / CarStateSync hooks via NetSync
+
+Do not commit a stub without the z*.b64 parts.

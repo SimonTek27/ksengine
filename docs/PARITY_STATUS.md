@@ -1,20 +1,40 @@
 # Parity status — 2026-10-04
 
-## Complete on master
+## Wired + hardened
 
-| Item | Status |
-|------|--------|
-| README | OK |
-| FeatureHub stack | OK |
-| CarStateSync + NetSync | OK |
-| SimulationLoop.h API | OK |
-| FeatureTick.inl | OK |
-| AI + MultiCar traffic | OK |
-| cmake/restore_simloop.cmake | **auto-restores .cpp on configure** |
-| tools/restore_simloop.sh | OK |
+| Feature | Status |
+|---------|--------|
+| FeatureHub / pit / garage / AI / telemetry | Done |
+| Vehicle setFrozen + NaN recovery | Done |
+| Path guards (`..`, length) | Done |
+| SimulatorServer CLI sanitize | Done |
+| Telemetry `fin()` | Done |
+| **P0.3 Setup → VehicleSimulator** | Done |
+| **P0.4 FFB sample → hardware** | Done (FfbOutput) |
+| **P0.1 Tyre INI load sensitivity** | Done |
+| **P0.2 Surface grip** | Done |
+| **P0.5 Replay play** | Done |
+| **P1.7 Session flow** | Done |
+| **P1.2 Control AUTH** | Done |
+| **P1.3 Track limits penalties** | Done |
+| **P1.5 PB store** | Done |
+| **P1.9 Server browser UI** | Done |
+| **P1.4 Weather/time UI** | Done |
+| **P0.6 AI racing line + overtake** | Done |
+| **P1.1 CarState sync ≥20Hz (UDP)** | Done |
+| **P1.8 Pit strategy UI** | Done |
+| **NetSync in SimulationLoop** | Done |
+| **SimulationLoop full restore (cmake z0–z4)** | Done |
 
-## SimulationLoop.cpp
+See `docs/SECURITY_HARDENING.md`.
 
-Stub on master is intentional (API size limit). **CMake configure restores the full file + FeatureTick automatically.**
+## Still open (optional)
 
-Or: `bash tools/restore_simloop.sh`
+| Item | Notes |
+|------|-------|
+| Full remote car state sync (ksnet) | optional; UDP CarStateSync available |
+| Auth on control TCP API | optional token |
+
+## Roadmap
+
+Vedi **GAP_MATRIX.md** (P0–P3 prioritizzata).

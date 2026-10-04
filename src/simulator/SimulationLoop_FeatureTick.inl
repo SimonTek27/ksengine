@@ -1,4 +1,4 @@
-// Parity tick body: FeatureHub + CarStateSync (include inside SimulationLoop::tick physics loop)
+// Auto-included parity tick (FeatureHub + CarStateSync)
 m_simTimeSec += m_physicsDt;
 updateNetworkSync(static_cast<float>(m_physicsDt));
 {
