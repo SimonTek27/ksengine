@@ -15,7 +15,7 @@
 | **P0.2 Surface grip** | Done |
 | **P0.5 Replay play** | Done |
 | **P1.7 Session flow** | Done |
-| **P1.2 Control AUTH** | Done |
+| **P1.2 Control AUTH** | Done (`setControlAuthToken` / `AUTH <token>`) |
 | **P1.3 Track limits penalties** | Done |
 | **P1.5 PB store** | Done |
 | **P1.9 Server browser UI** | Done |
@@ -24,7 +24,7 @@
 | **P1.1 CarState sync ≥20Hz (UDP)** | Done |
 | **P1.8 Pit strategy UI** | Done |
 | **NetSync in SimulationLoop** | Done |
-| **SimulationLoop full restore (cmake z0–z4)** | Done |
+| **SimulationLoop full restore** | Done (src text parts + z0–z4 fallback) |
 
 See `docs/SECURITY_HARDENING.md`.
 
@@ -33,7 +33,6 @@ See `docs/SECURITY_HARDENING.md`.
 | Item | Notes |
 |------|-------|
 | Full remote car state sync (ksnet) | optional; UDP CarStateSync available |
-| Auth on control TCP API | optional token |
 
 ## Roadmap
 

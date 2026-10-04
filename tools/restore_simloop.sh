@@ -1,21 +1,29 @@
 #!/bin/bash
-# Restore SimulationLoop.cpp from embedded cmake/simloop_z*.b64 (zlib+b64)
-set -e
-ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Restore src/simulator/SimulationLoop.cpp from embedded sources.
+# Prefer cmake/simloop_src_*.txt; fallback cmake/simloop_z*.b64.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+OUT="$ROOT/src/simulator/SimulationLoop.cpp"
 cd "$ROOT"
-B64=""
-for i in 0 1 2 3 4; do
-  f="cmake/simloop_z${i}.b64"
-  if [ ! -f "$f" ]; then
-    echo "Missing $f" >&2
-    exit 1
-  fi
-  B64="${B64}$(tr -d ' \n\r\t' < "$f")"
-done
-python3 -c "
-import zlib, base64, sys
-b = '''${B64}'''
-open('src/simulator/SimulationLoop.cpp','wb').write(zlib.decompress(base64.b64decode(b)))
-print('Restored src/simulator/SimulationLoop.cpp from embedded archive')
-"
-grep -q 'SimulationLoop_FeatureTick.inl' src/simulator/SimulationLoop.cpp && echo "FeatureTick inject present OK"
+
+if [[ -f cmake/simloop_src_0.txt ]]; then
+  cat cmake/simloop_src_0.txt cmake/simloop_src_1.txt cmake/simloop_src_2.txt \
+      cmake/simloop_src_3.txt cmake/simloop_src_4.txt > "$OUT"
+  echo "OK: restored $OUT from simloop_src_*.txt ($(wc -c < "$OUT") bytes)"
+elif [[ -f cmake/simloop_z0.b64 ]]; then
+  python3 - <<'PY'
+import pathlib, zlib, base64
+root = pathlib.Path(".")
+raw = b""
+for i in range(5):
+    raw += root.joinpath(f"cmake/simloop_z{i}.b64").read_bytes()
+out = root / "src/simulator/SimulationLoop.cpp"
+data = zlib.decompress(base64.b64decode(raw))
+out.write_bytes(data)
+print(f"OK: restored {out} from simloop_z*.b64 ({len(data)} bytes)")
+PY
+else
+  echo "error: no embedded SimulationLoop sources found" >&2
+  exit 1
+fi
+grep -q 'SimulationLoop_FeatureTick.inl' "$OUT" && echo "FeatureTick inject present OK"
