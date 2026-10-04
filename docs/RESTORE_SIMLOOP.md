@@ -1,30 +1,29 @@
 # Restore SimulationLoop.cpp
 
-## What happened
-
-A tool error replaced `src/simulator/SimulationLoop.cpp` with a placeholder.
-The last known-good full file is in git history.
-
-## Fix (required)
+## One command
 
 ```bash
-git fetch origin
+bash tools/restore_simloop.sh
+git add src/simulator/SimulationLoop.cpp
+git commit -m "fix: restore SimulationLoop.cpp with FeatureTick"
+```
+
+## Manual
+
+```bash
 git checkout c78b0a9a0f7a58ac439525b32ba54b239e664f72 -- src/simulator/SimulationLoop.cpp
 ```
 
-## Optional parity inject
-
-After:
-
-```cpp
-if (m_multiCar && !m_raceSession.isCountingDown())
-    m_multiCar->update(m_physicsDt);
-```
-
-add:
+Then after `m_multiCar->update(m_physicsDt);` add:
 
 ```cpp
 #include "SimulationLoop_FeatureTick.inl"
 ```
 
-Ensure `SimulationLoop_NetSync.cpp` is linked (Qt-free CMake already lists it).
+## Already on master (do not revert)
+
+- SimulationLoop.h — FeatureHub + CarStateSync
+- SimulationLoop_NetSync.cpp + CMake Qt-free entry
+- SimulationLoop_FeatureTick.inl
+- MultiCarManager traffic / AI overtake
+- FeatureHub stack, README, CarStateSync
