@@ -4,23 +4,17 @@
 
 | Item | Status |
 |------|--------|
-| README architecture | OK |
-| FeatureHub + discovery + control AUTH + limits + PB | OK |
-| CarStateSync + bridge + NetSync.cpp | OK |
-| SimulationLoop.h (FeatureHub/CarState API) | OK |
-| SimulationLoop_FeatureTick.inl | OK |
-| AI overtake + MultiCar traffic | OK |
-| CMake Qt-free lists NetSync | OK |
+| README | OK |
+| FeatureHub stack | OK |
+| CarStateSync + NetSync | OK |
+| SimulationLoop.h API | OK |
+| FeatureTick.inl | OK |
+| AI + MultiCar traffic | OK |
+| cmake/restore_simloop.cmake | **auto-restores .cpp on configure** |
 | tools/restore_simloop.sh | OK |
 
-## Required local step (SimulationLoop.cpp)
+## SimulationLoop.cpp
 
-The large `.cpp` was corrupted by an API size limit; recover with:
+Stub on master is intentional (API size limit). **CMake configure restores the full file + FeatureTick automatically.**
 
-```bash
-bash tools/restore_simloop.sh
-git add src/simulator/SimulationLoop.cpp
-git commit -m "fix: restore SimulationLoop.cpp with FeatureTick"
-```
-
-Good history blob: `c78b0a9a0f7a58ac439525b32ba54b239e664f72`.
+Or: `bash tools/restore_simloop.sh`
