@@ -1,6 +1,6 @@
 /**
- * SimulationLoop — CarStateSync wiring (Sprint 7/8).
- * Compile with SimulationLoop or merge methods into SimulationLoop.cpp.
+ * SimulationLoop — CarStateSync wiring (Sprint 7 residual / Sprint 8).
+ * Merge into SimulationLoop.cpp or compile as SimulationLoop_NetSync.cpp.
  */
 #include "SimulationLoop.h"
 #include <cstdio>
@@ -40,6 +40,7 @@ void SimulationLoop::updateNetworkSync(float dt) {
         carStateSyncPublishFromMultiCar(m_carSync, *m_multiCar, m_simTimeSec, playerId);
         carStateSyncApplyToMultiCar(m_carSync, *m_multiCar, playerId);
     } else if (m_vehicle) {
+        // single-car host/client: pack local vehicle
         auto st = m_vehicle->getState();
         std::vector<netsync::CarStatePacked> batch;
         batch.push_back(netsync::packFromSim(
