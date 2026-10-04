@@ -1,31 +1,18 @@
-# GitHub restore audit — 2026-10-04
+# GitHub restore audit — 2026-10-04 (updated)
 
-## Context
+## Done on master
 
-Latest master commit: user **Upload changes** diverged from Sprint 1–8 incremental work.
-Several parity modules are missing from the current tree.
+SessionController, TrackLayout, TrackLimitsMonitor, WeatherControl, ApplySetup,
+PersonalBestStore, ExternalControlApi (AUTH), ServerDiscovery, FeatureHub,
+MenuFeatureBridge, PitStrategyBridge, CarStateSyncBridge, SimulationLoop_NetSync.cpp,
+AIController.h (traffic API), GAP_MATRIX.
 
-## Missing (restoring)
+## Still in artifacts only (copy/merge next)
 
-- FeatureHub + SessionController, WeatherControl, ServerDiscovery, TrackLayout, ApplySetup
-- TrackLimitsMonitor (P1.3), PersonalBestStore (P1.5), ExternalControlApi AUTH (P1.2)
-- CarStateSync UDP (P1.1), MenuFeatureBridge, PitStrategyBridge
-- AI overtake (Sprint 6)
-- docs: GAP_MATRIX, SPRINT*, PARITY_STATUS
+- `CarStateSync.h` (~11 KB UDP protocol)
+- `AIController.cpp` (evaluateTraffic overtake)
+- Surgical SimulationLoop + GameMenuOverlay + MultiCarManager traffic feed
 
-## Present but incomplete
+## Do not overwrite whole SimulationLoop.cpp from artifacts
 
-- SimulationLoop: no FeatureHub/pit hooks/CarStateSync (user upload has stronger telemetry — merge surgically)
-- AIController: line follow only, no traffic
-- GameMenuOverlay: no PitStrategy/Weather/ServerBrowser states
-
-## Still good on master
-
-GarageExit, PitLaneQueue/Collision, RaceSessionManager, ReplayRecorder, NetworkManager, telemetry SM/UDP/TCP, MechanicalDamage.
-
-## Fix order
-
-1. Restore headers (this series of commits)
-2. AI overtake merge
-3. Surgical SimulationLoop + GameMenu wiring
-4. CMake if needed
+User upload has stronger telemetry/render — merge hooks only.
