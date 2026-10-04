@@ -1,32 +1,25 @@
 # Parity status — 2026-10-04
 
-## Restored on master (this session)
+## Restored on master
 
-| Module | Notes |
+| Module | Status |
 |--------|--------|
-| TrackLimitsMonitor | P1.3 escalation |
-| WeatherControl | presets + TOD |
-| ApplySetup | SetupParams |
-| SessionController | modes |
-| TrackLayout | catalog |
-| PersonalBestStore | P1.5 + leaderboard |
-| ExternalControlApi | AUTH P1.2 |
-| ServerDiscovery | LAN UDP |
-| FeatureHub | bundle |
-| MenuFeatureBridge | menu glue |
-| PitStrategyBridge | P1.8 |
-| CarStateSyncBridge | needs CarStateSync.h |
-| SimulationLoop_NetSync.cpp | needs m_carSync in SimulationLoop |
-| AIController.h | traffic API |
+| FeatureHub + SessionController + ServerDiscovery + TrackLayout | OK |
+| TrackLimitsMonitor / PersonalBestStore / ExternalControlApi AUTH | OK |
+| WeatherControl / ApplySetup | OK |
+| CarStateSync + CarStateSyncBridge + SimulationLoop_NetSync | OK |
+| AIController.h/.cpp traffic overtake | OK |
+| MenuFeatureBridge / PitStrategyBridge | OK |
+| README architecture | OK |
 
-## Still open
+## Local merge still needed
 
-| Item | Action |
-|------|--------|
-| `CarStateSync.h` | Copy from artifacts (UDP 20 Hz) |
-| `AIController.cpp` | Overtake implementation (artifacts) |
-| `SimulationLoop` merge | Add FeatureHub + pit + net sync surgically |
-| `GameMenuOverlay` | ServerBrowser / Weather / PitStrategy states |
-| `MultiCarManager` | Feed AiTrafficCar |
+| Item | Note |
+|------|------|
+| SimulationLoop members | See `SimulationLoop_ParityHooks.h` |
+| MultiCarManager::update | Use traffic body from artifacts / `_TrafficUpdate.inl` |
+| GameMenuOverlay states | ServerBrowser / Weather / PitStrategy in artifacts |
 
-See `docs/GITHUB_RESTORE_AUDIT.md`.
+## Docs
+
+README.md, GAP_MATRIX, GITHUB_RESTORE_AUDIT, SPRINT notes where present.
