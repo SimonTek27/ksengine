@@ -32,10 +32,6 @@ int MultiCarManager::addCar(const std::string& carName, const std::string& drive
         }
     }
 
-    // Grid/network spawns must land at their start position and the vehicle
-    // must actually simulate: updatePhysics() is a no-op until the run flag
-    // is set, so without startSimulation() every non-player car stayed frozen
-    // at the origin (roadmap 3.5).
     entry->vehicle->startSimulation();
     auto& st = entry->vehicle->state();
     st.position = {startPosition.x, startPosition.y, startPosition.z};
@@ -78,9 +74,6 @@ bool MultiCarManager::setCarExternallyDriven(int carId)
 {
     CarEntry* car = getCar(carId);
     if (!car) return false;
-    // A remote driver, not the spline, decides what this car does; without
-    // dropping it MultiCarManager::update() would keep overwriting the
-    // networked controls with the AI's own every step.
     car->ai.reset();
     return true;
 }
@@ -100,29 +93,42 @@ void MultiCarManager::clearAllCars()
 
 void MultiCarManager::update(float dt)
 {
+    std::vector<AiTrafficCar> traffic;
+    traffic.reserve(m_cars.size());
+    for (const auto& car : m_cars) {
+        if (!car || !car->isActive || !car->vehicle) continue;
+        auto st = car->vehicle->getState();
+        AiTrafficCar t;
+        t.id = car->id;
+        t.x = st.position.x;
+        t.z = st.position.z;
+        t.heading = st.heading;
+        t.speed = st.speed;
+        traffic.push_back(t);
+    }
+
     for (auto& car : m_cars) {
-        if (!car->isActive) continue;
+        if (!car || !car->isActive) continue;
 
         if (!car->isPlayer && car->ai && car->ai->isReady()) {
             auto state = car->vehicle->getState();
-            // Real heading: steering error is target-minus-car heading, so
-            // feeding a constant 0 left every AI on a fixed lock (3.5).
-            car->ai->update(vec3(state.position.x, state.position.y, state.position.z),
-                            state.heading, state.speed, state.gear, dt);
+            car->ai->update(
+                vec3(state.position.x, state.position.y, state.position.z),
+                state.heading, state.speed, state.gear, dt,
+                traffic, car->id);
             car->vehicle->setThrottle(car->ai->throttle());
             car->vehicle->setBrake(car->ai->brake());
             car->vehicle->setSteering(car->ai->steering());
         }
 
-        car->vehicle->updatePhysics(dt);
-
-        auto state = car->vehicle->getState();
-        // Build transform matrix from simulation state
-        car->transform = mat4();
-        // Translate
-        car->transform(0,3) = state.position.x;
-        car->transform(1,3) = state.position.y;
-        car->transform(2,3) = state.position.z;
+        if (car->vehicle) {
+            car->vehicle->updatePhysics(dt);
+            auto state = car->vehicle->getState();
+            car->transform = mat4();
+            car->transform(0, 3) = state.position.x;
+            car->transform(1, 3) = state.position.y;
+            car->transform(2, 3) = state.position.z;
+        }
     }
 
     if (m_collisionEnabled) {
@@ -162,8 +168,6 @@ CarEntry* MultiCarManager::playerCar()
 void MultiCarManager::loadAiSpline(const std::string& trackDirectory)
 {
     m_aiSplinePath = trackDirectory;
-    // Keep our own copy of the line for grid placement (spawnGrid); each
-    // car's AIController loads the same file independently.
     m_gridSpline = ks::ai::AiFileReader::readSpline(trackDirectory + "/ai/fast_lane.ai");
     if (!m_gridSpline.isValid())
         m_gridSpline = ks::ai::AiFileReader::readSpline(trackDirectory + "/ai/fast_lane.ai.txt");
@@ -184,8 +188,6 @@ std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carNam
     const auto& pts = m_gridSpline.points;
     const float total = m_gridSpline.totalDistance;
     for (int i = 0; i < count; ++i) {
-        // Two-wide stagger: row i/2 sits row*spacing meters from the start
-        // line (behind it on a closed loop, ahead of it on an open one).
         const float back = static_cast<float>(i / 2) * spacing;
         float d;
         if (m_gridSpline.closed) {
@@ -195,14 +197,13 @@ std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carNam
             d = std::min(back, total * 0.999f);
         }
 
-        // Segment containing d: first point at/after d is the segment end.
         auto it = std::lower_bound(pts.begin(), pts.end(), d,
                                    [](const ks::ai::AiSplinePoint& p, float v) {
                                        return p.distance < v;
                                    });
         size_t hi = static_cast<size_t>(it - pts.begin());
         if (hi >= pts.size()) hi = pts.size() - 1;
-        if (hi == 0) hi = 1; // d sits at/before the first point: segment 0->1
+        if (hi == 0) hi = 1;
         const size_t lo = hi - 1;
         const float segLen = pts[hi].distance - pts[lo].distance;
         const float t = segLen > 1e-4f
@@ -212,12 +213,9 @@ std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carNam
         const auto& b = pts[hi].position;
         vec3 pos{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
 
-        // Heading = direction of travel (atan2 convention matches
-        // AIController::calculateSteering: forward = (sin h, 0, cos h)).
         const float dx = b.x - a.x, dz = b.z - a.z;
         const float heading = (std::fabs(dx) + std::fabs(dz) > 1e-5f)
                                 ? std::atan2(dx, dz) : 0.0f;
-        // Lateral offset: right vector for heading h is (-cos h, 0, sin h).
         const float lateral = (i % 2 == 0) ? 1.5f : -1.5f;
         pos.x += -std::cos(heading) * lateral;
         pos.z += std::sin(heading) * lateral;
