@@ -1,7 +1,7 @@
-# Restores SimulationLoop.cpp if the repo has the recovery stub
+# Restores SimulationLoop.cpp if stubbed; applies FeatureTick inject
 set(_ks_sl "${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp")
 if(EXISTS "${_ks_sl}")
-  file(READ "${_ks_sl}" _ks_sl_head LIMIT 300)
+  file(READ "${_ks_sl}" _ks_sl_head LIMIT 400)
   if(_ks_sl_head MATCHES "restore_simloop|#error")
     message(STATUS "ksengine: restoring SimulationLoop.cpp from commit c78b0a9a...")
     set(_ks_url "https://raw.githubusercontent.com/SimonTek27/ksengine/c78b0a9a0f7a58ac439525b32ba54b239e664f72/src/simulator/SimulationLoop.cpp")
@@ -9,11 +9,18 @@ if(EXISTS "${_ks_sl}")
     file(DOWNLOAD "${_ks_url}" "${_ks_tmp}" STATUS _ks_st TLS_VERIFY ON)
     list(GET _ks_st 0 _ks_code)
     if(_ks_code EQUAL 0)
-      file(COPY "${_ks_tmp}" DESTINATION "${CMAKE_SOURCE_DIR}/src/simulator/")
-      file(RENAME "${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp.restore" "${_ks_sl}")
-      message(STATUS "ksengine: SimulationLoop.cpp restored from history — run tools/restore_simloop.sh for FeatureTick inject")
+      file(READ "${_ks_tmp}" _ks_body)
+      string(FIND "${_ks_body}" "SimulationLoop_FeatureTick.inl" _ks_has_tick)
+      if(_ks_has_tick EQUAL -1)
+        string(REPLACE
+          "m_multiCar->update(m_physicsDt);\n        if (m_sessionPhase == PHASE_GREEN_FLAG)"
+          "m_multiCar->update(m_physicsDt);\n#include \"SimulationLoop_FeatureTick.inl\"\n        if (m_sessionPhase == PHASE_GREEN_FLAG)"
+          _ks_body "${_ks_body}")
+      endif()
+      file(WRITE "${_ks_sl}" "${_ks_body}")
+      message(STATUS "ksengine: SimulationLoop.cpp restored + FeatureTick")
     else()
-      message(WARNING "ksengine: download failed code ${_ks_code} — run tools/restore_simloop.sh")
+      message(WARNING "ksengine: download failed (${_ks_code}) — run tools/restore_simloop.sh")
     endif()
   endif()
 endif()

@@ -1,3 +1,4 @@
+include(${CMAKE_SOURCE_DIR}/cmake/restore_simloop.cmake)
 # Qt-free SimulatorApp executable — sources under src/simulator + engine natives.
 # Included from the root CMakeLists.txt only when KSIMULATOR_QT_FREE is ON,
 # after src/engine (ksengine) has been added.
