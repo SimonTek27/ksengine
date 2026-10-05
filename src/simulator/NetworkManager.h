@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NetworkLowLevel.h"
+#include "RemoteCarInterpolator.h"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -38,11 +39,16 @@ public:
 
     void sendChatMessage(const std::string& message);
 
-    /** Host: push session / countdown / lap / penalty to all clients. */
     void broadcastSessionState(uint8_t type, uint8_t phase, int currentLap, int totalLaps, double timeRemaining);
     void broadcastRaceCountdown(int seconds);
     void broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid);
     void broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason);
+
+    /** Client interpolation delay (seconds). Default 0.10. */
+    void setInterpolationDelay(double sec);
+    double interpolationDelay() const;
+    RemoteCarInterpolator& interpolator() { return m_interp; }
+    const RemoteCarInterpolator& interpolator() const { return m_interp; }
 
     std::string serverName() const { return m_serverName; }
     std::string trackName() const { return m_trackName; }
@@ -67,6 +73,7 @@ public:
 
     std::function<void(uint32_t, const std::string&, uint32_t)> onRemoteCarSpawned;
     std::function<void(uint32_t)> onRemoteCarDespawned;
+    /** Delivered each frame with *interpolated* state (not raw network ticks). */
     std::function<void(uint32_t, const net::CarStateData&)> onRemoteCarStateReceived;
 
     std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateReceived;
@@ -84,6 +91,7 @@ private:
     void updatePlayerList();
     void rebindMultiCar();
     void hostBroadcastCarStates();
+    void deliverInterpolatedStates();
 
     SimulationLoop* m_simLoop = nullptr;
     std::unique_ptr<net::NetworkClient> m_client;
@@ -106,6 +114,9 @@ private:
 
     double m_stateAccum = 0.0;
     static constexpr double STATE_SEND_HZ = 20.0;
+
+    RemoteCarInterpolator m_interp;
+    double m_clock = 0.0; // local monotonic seconds for interp
 };
 
 #else // !HAS_KSNET
@@ -136,6 +147,8 @@ public:
     void broadcastRaceCountdown(int) {}
     void broadcastLapTime(uint32_t, int, double, double, double, double, bool) {}
     void broadcastPenalty(uint32_t, uint8_t, float, const std::string&) {}
+    void setInterpolationDelay(double) {}
+    double interpolationDelay() const { return 0.1; }
     std::string serverName() const { return {}; }
     std::string trackName() const { return {}; }
     std::string localDriverName() const { return {}; }
