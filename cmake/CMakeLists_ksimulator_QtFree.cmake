@@ -11,6 +11,7 @@ find_package(Vulkan REQUIRED)
 set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorApp.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_NetSync.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/InputManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/CameraController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp

@@ -144,7 +144,13 @@ public:
 
     FeatureHub& features() { return m_features; }
     const FeatureHub& features() const { return m_features; }
-    void startFeatureServices(bool hostAnnounce = false) { m_features.startServices(hostAnnounce); }
+    // Starts discovery + the external control API and wires the FeatureHub
+    // callbacks back into this loop (see SimulationLoop.cpp).
+    void startFeatureServices(bool hostAnnounce = false);
+    // FeatureHub pump (discovery, control API, track limits, weather).
+    // withSession=false freezes track limits - used while the world is
+    // paused or the session has not started yet.
+    void pumpFeatureHub(float dt, bool withSession);
     bool startCarStateHost(uint16_t port = netsync::kDefaultSyncPort);
     bool startCarStateClient(const std::string& host, uint16_t port = netsync::kDefaultSyncPort);
     void stopCarStateSync();

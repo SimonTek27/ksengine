@@ -8,6 +8,7 @@
 #include "MultiCarManager.h"
 #include "NetworkManager.h"
 #include "SetupGarage.h"
+#include "SetupFile.h"
 #include "SimulatorAudio.h"
 #include "ui/UiGpuPass.h"
 #include "ui/RaceTelemetryHud.h"
@@ -427,6 +428,110 @@ void SimulationLoop::reset() {
     if (m_running) m_lapTimer.start();
 }
 
+namespace {
+// Paths handed to the control API come from the network: reject traversal
+// and NULs before they ever reach the filesystem.
+bool isSafeControlPath(const std::string& path) {
+    if (path.empty() || path.size() > 4096) return false;
+    if (path.find('\0') != std::string::npos) return false;
+    std::string norm = path;
+    for (char& c : norm)
+        if (c == '\\') c = '/';
+    return !(norm.find("/../") != std::string::npos || norm.rfind("../", 0) == 0 ||
+             norm == "..");
+}
+} // namespace
+
+// FeatureHub glue. FeatureHub::startServices() already routes the TCP verbs
+// (SESSION / WEATHER / TIME / LIMITS / PB / REPLAY / RESULT) to its own
+// handlers; these callbacks are the road from those handlers into the loop -
+// without them the hub runs but does nothing. Discovery itself is driven by
+// the apps (announceHost / queryLan), exactly as before.
+void SimulationLoop::startFeatureServices(bool hostAnnounce) {
+    m_features.startServices(hostAnnounce);
+
+    m_features.onBeginSession = [this](GameSessionMode mode,
+                                       const SessionStartParams& p) {
+        if (!m_running) start(); // start() forces a 5-lap race; overridden below
+        m_sessionType = toNetSessionType(mode);
+        // 0 = no lap limit (RaceSessionManager treats totalLaps <= 0 as an
+        // open session: practice, qualifying, time attack).
+        m_totalLaps = p.totalLaps > 0 ? std::min(p.totalLaps, 200) : 0;
+        m_currentLap = 0;
+        reset(); // re-staggers the grid and reconfigures RaceSessionManager
+        std::fprintf(stderr, "SimulationLoop: %s session requested (%d laps)\n",
+                     sessionModeName(mode), m_totalLaps);
+    };
+
+    m_features.onSetTimeOfDay = [this](float hours) { setTimeOfDay(hours); };
+
+    m_features.onSetWeather = [this](const std::string& name) {
+        m_features.weatherCtrl.applyPreset(name);
+        const WeatherPreset& wp = m_features.weatherCtrl.weather();
+        ks::physics::WeatherState ws = m_weather;
+        ws.ambientTemp = wp.ambientC;
+        ws.trackTemp = wp.trackC;
+        ws.trackWetness = wp.wetness;
+        ws.rainIntensity = wp.rain;
+        ws.windSpeed = wp.windMs;
+        ws.windDirection = wp.windDirDeg;
+        ws.cloudCover = wp.cloud;
+        setWeatherPreset(ws);
+        std::fprintf(stderr, "SimulationLoop: weather -> %s\n", name.c_str());
+    };
+
+    m_features.onPenalty = [this](int car, int kind, float value,
+                                  const std::string& reason) {
+        Penalty::Type ty = Penalty::Type::TimeAdded;
+        if (kind == 1) ty = Penalty::Type::DriveThrough;
+        else if (kind == 2) ty = Penalty::Type::StopGo;
+        m_raceSession.addPenalty(car, ty, value, reason);
+        std::fprintf(stderr, "SimulationLoop: penalty car %d (%s)\n", car,
+                     reason.c_str());
+    };
+
+    m_features.onSetupLoad = [this](const std::string& path) {
+        if (!m_setupGarage || !isSafeControlPath(path)) return;
+        SetupData s = m_setupGarage->setup();
+        if (loadSetupFromFile(s, path)) {
+            m_setupGarage->setSetup(s);
+            std::fprintf(stderr, "SimulationLoop: setup loaded from %s\n", path.c_str());
+        }
+    };
+
+    m_features.onSetupSave = [this](const std::string& path) {
+        if (!m_setupGarage || !isSafeControlPath(path)) return;
+        if (saveSetupToFile(m_setupGarage->setup(), path))
+            std::fprintf(stderr, "SimulationLoop: setup saved to %s\n", path.c_str());
+    };
+
+    m_features.onRequestResults = [this]() {
+        for (const auto& d : m_raceSession.standings()) {
+            char line[192];
+            std::snprintf(line, sizeof(line),
+                          "RESULT pos=%d car=%s driver=%s lap=%d best=%.3f%s",
+                          d.position, d.carName.c_str(), d.driverName.c_str(),
+                          d.currentLap, d.bestLapTime,
+                          d.finished ? " finished" : "");
+            m_features.control.emitEvent(line);
+        }
+    };
+}
+
+void SimulationLoop::pumpFeatureHub(float dt, bool withSession) {
+    vec3 pos{};
+#if HAS_VEHICLE_SIM
+    if (m_vehicle) {
+        const auto st = m_vehicle->getState();
+        pos = {static_cast<float>(st.position.x),
+               static_cast<float>(st.position.y),
+               static_cast<float>(st.position.z)};
+    }
+#endif
+    m_features.tick(dt, withSession ? &m_raceSession : nullptr, 0, pos,
+                    m_sessionPhase == PHASE_GREEN_FLAG);
+}
+
 bool SimulationLoop::handleUiKey(int vk) { return m_ui.handleKey(vk); }
 bool SimulationLoop::handleUiChar(int c) { return m_ui.handleChar(c); }
 bool SimulationLoop::handleUiMouseMove(float x, float y) { return m_ui.handleMouseMove(x, y); }
@@ -484,6 +589,11 @@ void SimulationLoop::updateLapAndSurface(double dt) {
     m_lapTimer.update(dt, m_normalizedSpline);
     if (m_lapTimer.completedLaps() > lapsBefore) {
         m_currentLap = m_lapTimer.completedLaps();
+        // FeatureHub: personal-best store + LAP/PB events on the control API.
+        const float lapSec = static_cast<float>(m_lapTimer.lastTimeMs()) * 0.001f;
+        const std::string& trackKey =
+            m_trackData.name.empty() ? m_trackData.directory : m_trackData.name;
+        m_features.onLapCompleted(trackKey, m_carName, "PLAYER", lapSec, nullptr);
         if (onSessionStateChanged)
             onSessionStateChanged(m_sessionType, m_sessionPhase, m_currentLap, m_totalLaps, m_timeRemaining);
     }
@@ -864,6 +974,11 @@ void SimulationLoop::tick() {
         publishSharedMemory();
         publishUdpTelemetry();
         publishTcpTelemetry();
+        // The control API and LAN discovery keep answering while the session
+        // is idle - otherwise a stopped sim could never be started again
+        // through the external API.
+        updateNetworkSync(1.0f / 60.0f);
+        pumpFeatureHub(1.0f / 60.0f, false);
         render();
         return;
     }
@@ -895,7 +1010,16 @@ void SimulationLoop::tick() {
         if (m_sessionPhase == PHASE_GREEN_FLAG) updateLapAndSurface(m_physicsDt);
         m_simTime += m_physicsDt;
         m_simAccumulator -= m_physicsDt;
+        // Parity hooks (SimulationLoop_ParityHooks.h): ksnet / CarStateSync
+        // pump, stamped with the physics clock.
+        m_simTimeSec = m_simTime;
+        updateNetworkSync(static_cast<float>(m_physicsDt));
     }
+    // FeatureHub is pumped once per frame (not per physics step): discovery,
+    // the external control API's command poll and weather keep running even
+    // when a modal overlay pauses the world, while track limits only see the
+    // session while physics actually steps.
+    pumpFeatureHub(static_cast<float>(elapsed), !paused);
     Engine::instance().tick(elapsed);
 #if HAS_FFB
     if (m_ffbEnabled && m_vehicle && !m_ui.blocksDrivingInput()) {

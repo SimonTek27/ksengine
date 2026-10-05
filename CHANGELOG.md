@@ -19,6 +19,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `lateralOffset()`, `setSkill()`, `setOvertakeEnabled()`)
 - `ksnet::Server::DisconnectClient()` implemented (declared but never defined;
   used by the auth-time kick)
+- **FeatureHub actually wired to the simulation**: `SimulationLoop::startFeatureServices()`
+  now starts discovery + the external control API (:20780) *and* installs the
+  callbacks (`SESSION` -> mode/laps + session restart, `WEATHER` -> physics
+  `WeatherState`, `TIME`, `RESULT` -> standings events, setup load/save behind a
+  path-traversal check, `LIMITS` penalties), the loop pumps the hub every frame
+  (`pumpFeatureHub()`, live even while paused or idle) and feeds the
+  personal-best store on every completed lap; `SimulatorApp` starts the
+  services, announces the host and queries the LAN from the menu
+- `SimulationLoop_NetSync.cpp` (CarStateSync host/client + the ksnet XOR
+  policy) is back in the qt-free source list instead of compiling as dead code
 
 ### Changed
 - **Version unified to 0.90** across the root `project()`, the engine
@@ -36,11 +46,23 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `SimulatorServerApp.cpp`
 - `FeatureHub.h` called `ReplayRecorder::load()` (the API is `loadReplay()`)
 - `ServerDiscovery.h` passed the address of a temporary to `sendto()`
+- The `NetworkManager` pump would have run twice per frame once
+  `updateNetworkSync()` was hooked up: `SimulationLoop::tick()` keeps owning it
+  and `updateNetworkSync()` only applies the ksnet/CarStateSync XOR policy
+- Root `CMakeLists_ksimulator_QtFree.cmake` still listed
+  `SimulationLoop_FeatureMethods.cpp` (the incoming split variant that cannot
+  compile against this `SimulationLoop`); it is now a shim to the single
+  definition in `cmake/`, like `CMakeLists_SimulatorServer.cmake`
 
 ### Verified
 - Qt-free Release build: 0 errors
 - `ctest`: 40/40 passed
 - `tools/check_no_qt.ps1`: 0 of 884 files still touch Qt
+- End-to-end control-API run against headless `SimulatorApp`: greeting,
+  `PING`, `SESSION RACE 3`, `SESSION PRACTICE`, `SESSION QUALIFYING 2`,
+  `WEATHER`, `TIME`, `LIMITS`, `PB LIST`, `RESULT` and an unknown verb all
+  answered correctly, with the live session reconfiguring underneath
+  (`Session started Laps:5` -> `Laps:3` / `Laps:0` / `Laps:2`)
 
 ---
 

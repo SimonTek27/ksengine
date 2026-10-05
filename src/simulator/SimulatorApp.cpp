@@ -483,6 +483,9 @@ static void initSimulation() {
     g_simulation = std::make_unique<ks::sim::SimulationLoop>();
     g_simulation->setVulkanRenderer(g_nativeRenderer);
     g_simulation->initialize();
+    // Discovery + external control API (port 20780). The FeatureHub callbacks
+    // are wired inside startFeatureServices(), see SimulationLoop.cpp.
+    g_simulation->startFeatureServices(false);
 
     if (!g_headless) {
     const int bakedMeshes = g_simulation->loadBakedScene("content/baked");
@@ -540,6 +543,8 @@ static void initSimulation() {
         std::string track = g_simulation->ui().menu().trackName();
         if (track.empty()) track = "Unknown";
         if (net->hostServer(40000, 8, "ksEditor Server", track)) {
+            g_simulation->features().announceHost("ksEditor Server", track, 40000, 1, 8);
+            g_simulation->startFeatureServices(true);
             g_simulation->ui().menu().setVisible(false);
             printf("Hosting on port 40000\n");
         } else {
@@ -547,6 +552,10 @@ static void initSimulation() {
         }
     };
     uiMenu->onOpenServerBrowserRequested = []() {
+        if (!g_simulation) return;
+        if (!g_simulation->features().discoveryStarted)
+            g_simulation->startFeatureServices(false);
+        g_simulation->features().discovery.queryLan();
         g_simulation->ui().menu().setVisible(false);
         g_simulation->ui().multiplayer().setVisible(true);
     };
@@ -680,6 +689,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     // as CRT static destructors instead, Engine::instance() (constructed
     // later than g_simulation, hence destroyed earlier) would already be
     // gone when ~SimulationLoop touched m_modules -> access violation.
+    // Close the discovery socket + control API before the loop goes away.
+    if (g_simulation) g_simulation->features().stopServices();
     g_simulation.reset();
     g_shadowMap.shutdown();
     delete g_nativeRenderer;

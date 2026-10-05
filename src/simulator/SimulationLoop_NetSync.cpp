@@ -4,6 +4,7 @@
  * state (XOR CarStateSync). CarStateSync UDP is the zero-dep fallback.
  */
 #include "SimulationLoop.h"
+#include "NetworkManager.h"
 #include <cstdio>
 
 namespace ks {
@@ -45,9 +46,12 @@ void SimulationLoop::stopCarStateSync() {
 }
 
 void SimulationLoop::updateNetworkSync(float dt) {
+    (void)dt;
 #if HAS_KSNET
     if (m_network) {
-        m_network->update(static_cast<double>(dt));
+        // SimulationLoop::tick() owns the NetworkManager pump (one update()
+        // per frame): driving it from here too would advance every network
+        // clock twice per frame - broadcasts at 2x, timeouts at half time.
         // Single-path: ksnet owns the wire while in session.
         if (m_network->isHosting() || m_network->isConnected()) {
             if (m_carSync.active())
