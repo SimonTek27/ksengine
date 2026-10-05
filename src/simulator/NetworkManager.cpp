@@ -33,6 +33,14 @@ NetworkManager::~NetworkManager() {
     stopServer();
 }
 
+void NetworkManager::setInterpolationDelay(double sec) {
+    m_interp.setDelay(sec);
+}
+
+double NetworkManager::interpolationDelay() const {
+    return m_interp.delay();
+}
+
 void NetworkManager::rebindMultiCar() {
     if (!m_simLoop) return;
     MultiCarManager* mc = m_simLoop->multiCarManager();
@@ -52,6 +60,7 @@ void NetworkManager::setupClientSignals() {
     m_client->onDisconnected = [this](const std::string& reason) {
         m_connected = false;
         m_localClientId = 0;
+        m_interp.clear();
         printf("NetworkManager: Disconnected - %s\n", reason.c_str());
         if (onDisconnectedFromServer) onDisconnectedFromServer(reason);
     };
@@ -65,11 +74,13 @@ void NetworkManager::setupClientSignals() {
     };
 
     m_client->onCarDespawned = [this](uint32_t carId) {
+        m_interp.remove(carId);
         if (onRemoteCarDespawned) onRemoteCarDespawned(carId);
     };
 
+    // Raw network ticks → snapshot buffer (delivery is interpolated in update).
     m_client->onCarStateReceived = [this](uint32_t carId, const net::CarStateData& state) {
-        if (onRemoteCarStateReceived) onRemoteCarStateReceived(carId, state);
+        m_interp.push(carId, state, m_clock);
     };
 
     m_client->onSessionState = [this](uint8_t type, uint8_t phase, int cur, int total, double rem) {
@@ -140,9 +151,11 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 
     m_lastStatsPoll = std::chrono::steady_clock::now();
     m_stateAccum = 0.0;
+    m_interp.clear();
     if (onServerStarted) onServerStarted(port);
 
-    printf("NetworkManager: Server started on port %u (car-state @ %.0f Hz)\n", port, STATE_SEND_HZ);
+    printf("NetworkManager: Server started on port %u (car-state @ %.0f Hz, interp delay %.0f ms)\n",
+           port, STATE_SEND_HZ, m_interp.delay() * 1000.0);
     updatePlayerList();
     return true;
 }
@@ -153,6 +166,7 @@ void NetworkManager::stopServer() {
     m_server->stop();
     m_hosting = false;
     m_connected = false;
+    m_interp.clear();
     if (onServerStopped) onServerStopped();
     printf("NetworkManager: Server stopped\n");
 }
@@ -170,13 +184,15 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
 
     m_client->setSimulationLoop(m_simLoop);
     rebindMultiCar();
+    m_interp.clear();
 
     if (!m_client->connect(host, port, driverName, carName)) {
         if (onConnectionFailed) onConnectionFailed("Failed to connect to " + host);
         return false;
     }
 
-    printf("NetworkManager: Connecting to %s:%u\n", host.c_str(), port);
+    printf("NetworkManager: Connecting to %s:%u (interp delay %.0f ms)\n",
+           host.c_str(), port, m_interp.delay() * 1000.0);
     return true;
 }
 
@@ -185,6 +201,7 @@ void NetworkManager::disconnectFromServer() {
     if (m_hosting) return;
     m_client->disconnect();
     m_connected = false;
+    m_interp.clear();
     if (onDisconnectedFromServer) onDisconnectedFromServer("Disconnected");
     printf("NetworkManager: Disconnected\n");
 }
@@ -260,8 +277,19 @@ void NetworkManager::hostBroadcastCarStates() {
     }
 }
 
+void NetworkManager::deliverInterpolatedStates() {
+    if (!onRemoteCarStateReceived) return;
+    // Clients always sample; host loopback also samples remote cars so the
+    // same apply path (handleRemoteCarState) stays consistent.
+    if (!m_connected) return;
+    m_interp.sampleAll(m_clock, [this](uint32_t carId, const net::CarStateData& state) {
+        onRemoteCarStateReceived(carId, state);
+    });
+}
+
 void NetworkManager::update(double dt) {
     rebindMultiCar();
+    m_clock += dt;
 
     if (m_server) m_server->update(dt);
     if (m_client) m_client->update(dt);
@@ -274,6 +302,8 @@ void NetworkManager::update(double dt) {
             hostBroadcastCarStates();
         }
     }
+
+    deliverInterpolatedStates();
 
     auto now = std::chrono::steady_clock::now();
     if (m_connected &&

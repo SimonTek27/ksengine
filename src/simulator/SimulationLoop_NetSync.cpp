@@ -1,6 +1,7 @@
 /**
- * SimulationLoop — network sync (CarStateSync UDP + full ksnet path).
- * Compile as SimulationLoop_NetSync.cpp alongside SimulationLoop.cpp.
+ * SimulationLoop — network sync.
+ * Policy: when ksnet is actively hosting or connected, it owns multiplayer
+ * state (XOR CarStateSync). CarStateSync UDP is the zero-dep fallback.
  */
 #include "SimulationLoop.h"
 #include <cstdio>
@@ -9,6 +10,12 @@ namespace ks {
 namespace sim {
 
 bool SimulationLoop::startCarStateHost(uint16_t port) {
+#if HAS_KSNET
+    if (m_network && (m_network->isHosting() || m_network->isConnected())) {
+        std::fprintf(stderr, "SimulationLoop: CarStateSync host skipped (ksnet active)\n");
+        return false;
+    }
+#endif
     if (!m_carSync.startHost(port)) {
         std::fprintf(stderr, "SimulationLoop: CarState host failed on %u\n", (unsigned)port);
         return false;
@@ -18,6 +25,12 @@ bool SimulationLoop::startCarStateHost(uint16_t port) {
 }
 
 bool SimulationLoop::startCarStateClient(const std::string& host, uint16_t port) {
+#if HAS_KSNET
+    if (m_network && (m_network->isHosting() || m_network->isConnected())) {
+        std::fprintf(stderr, "SimulationLoop: CarStateSync client skipped (ksnet active)\n");
+        return false;
+    }
+#endif
     if (!m_carSync.startClient(host, port)) {
         std::fprintf(stderr, "SimulationLoop: CarState client failed → %s:%u\n",
                      host.c_str(), (unsigned)port);
@@ -32,16 +45,19 @@ void SimulationLoop::stopCarStateSync() {
 }
 
 void SimulationLoop::updateNetworkSync(float dt) {
-    // Path A: full ksnet reliable-UDP (HAS_KSNET=1).
-    // NetworkManager owns host car-state @ 20 Hz; session/penalty/countdown
-    // are bridged from FeatureTick (RaceSession hooks).
 #if HAS_KSNET
     if (m_network) {
         m_network->update(static_cast<double>(dt));
+        // Single-path: ksnet owns the wire while in session.
+        if (m_network->isHosting() || m_network->isConnected()) {
+            if (m_carSync.active())
+                m_carSync.stop();
+            return;
+        }
     }
 #endif
 
-    // Path B: lightweight CarStateSync UDP (works without ksnet).
+    // Fallback: CarStateSync UDP (no ksnet / offline).
     if (!m_carSync.active()) return;
     m_carSync.poll();
     if (m_multiCar) {
