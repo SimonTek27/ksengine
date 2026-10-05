@@ -29,15 +29,23 @@
 | **ksnet CAR_DAMAGE / CAR_SETUP / CAR_COLLISION wire** | Done |
 | **DamageWireBridge + NetworkDamageSetupBridge** | Done |
 | **Host damage publish (FeatureTick ~5Hz on change)** | Done |
+| **ksnet auth token (ClientJoin + constant-time)** | Done |
+| **Matchmaking (LAN discovery + optional HTTP lobby)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 
-## Still open (P2 optional)
+## Notes on P2 crypto
+
+- **Application auth:** host `setAuthToken`, client `setJoinToken`; empty = open LAN.
+- **Transport:** ksnet/yojimbo still uses `InsecureConnect` by default. For full packet encryption, supply a private key to the yojimbo secure connect path (optional; same PROTOCOL_ID).
+- **Matchmaking:** `Matchmaking.h` merges LAN (`ServerDiscovery`) with optional `lobbyBaseUrl` HTTP registry (`GET/POST /servers`). Soft-fails if URL empty or unreachable.
+
+## Still open (optional)
 
 | Item | Notes |
 |------|-------|
-| Wire encryption / auth token on ksnet | optional |
-| Cloud matchmaking | optional |
+| yojimbo secure connect private-key plumbing | optional production hardening |
+| Hosted lobby server binary | optional; any JSON HTTP endpoint works |
 
 ## Roadmap
 
