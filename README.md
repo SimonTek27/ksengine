@@ -1,14 +1,10 @@
 # ksengine
 
-**ksengine** is the Qt-free core engine framework of this project: a static C++17
-library (`src/engine/`) with math, physics, devices/force-feedback, file formats,
-config, networking, materials and terrain. It builds without Qt (progress tracked
-by `tools/check_no_qt.ps1`) and optionally links Vulkan, Bullet, Eigen, Lua and
-mikktspace.
+Qt-free / optional-Qt simulation engine (physics, AI, multiplayer, telemetry).
 
----
+## Status
 
-# SimulatorApp
+See [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/GAP_MATRIX.md](docs/GAP_MATRIX.md).
 
 **SimulatorApp** is the standalone runtime executable (`src/simulator/`) that links
 *only* ksengine. It is a native Win32 window with a raw Vulkan renderer (`NativeRenderer`, precompiled `.spv` shaders), driving `SimulationLoop`: KN5 track/car loading, vehicle physics, FFB and sim-racing device input, audio, dashboard/telemetry overlays, setup garage and multiplayer networking. `examples/MinimalSimulator` shows the minimal way to run it.
@@ -195,9 +191,27 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the expanded tree and modul
 
 ---
 
-## Building
+Highlights:
+- FeatureHub, pit/garage, AI overtake, setup/FFB, surface grip, tyre load, replay, track limits, PB, session, weather/browser UI
+- CarStateSync UDP ≥20 Hz (no ksnet required)
+- **ksnet** multiplayer transport (reliable UDP): car-state 20 Hz, damage/setup/collision, auth token, matchmaking
 
-### Requirements
+## Build
+
+```bash
+cmake -B build -DKSENGINE_QT_FREE=ON
+cmake --build build -j
+```
+
+`HAS_KSNET` is enabled when the in-tree `ksnet` target is present (default).
+
+## Multiplayer (ksnet)
+
+- Transport: `src/core/engine/Network/ksnet` — official name **ksnet**
+- Macros: `KSNET_*` (`YOJIMBO_*` deprecated aliases)
+- CMake target: `ksnet` (`Yojimbo::yojimbo` ALIAS for older links)
+- Auth: host `setAuthToken`, client `setJoinToken` (constant-time)
+- Matchmaking: LAN discovery + optional HTTP lobby via `NetworkManager::setLobbyBaseUrl` / `startMatchmaking`
 
 - **Qt 6.11+** — required only for **ksEditor**
 - **CMake 3.16+**
@@ -211,6 +225,19 @@ cmake --preset default
 cmake --build --preset default
 # Qt-free path: CMakeLists_ksengine_QtFree.txt / tools/check_no_qt.ps1
 ```
+
+---
+
+## Design notes
+
+1. ksengine is a generic open-source sim engine (not a single-title clone).
+2. Brand-specific formats stay under `adapters/`; UI stays product-neutral.
+3. FeatureHub owns session, discovery `:20779`, control `:20780`, limits, weather, PB.
+4. Pit/garage is a state machine separate from vehicle integrate.
+5. CarStateSync UDP works without `HAS_KSNET`; ksnet path remains the preferred multiplayer transport.
+
+Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [PARITY_STATUS](docs/PARITY_STATUS.md) ·
+[GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md)
 
 ---
 
