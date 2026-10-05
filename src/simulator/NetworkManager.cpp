@@ -25,10 +25,15 @@ NetworkManager::NetworkManager(SimulationLoop* simLoop)
     setupClientSignals();
     setupServerSignals();
 
+    m_matchmaking.onServerListUpdated = [this](const std::vector<ServerListEntry>& list) {
+        if (onServerListUpdated) onServerListUpdated(list);
+    };
+
     m_lastStatsPoll = std::chrono::steady_clock::now();
 }
 
 NetworkManager::~NetworkManager() {
+    stopMatchmaking();
     disconnectFromServer();
     stopServer();
 }
@@ -165,6 +170,12 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
         printf("NetworkManager: Failed to connect as local client\n");
     }
 
+    // Announce on LAN (+ optional lobby) so browsers can find this host.
+    m_matchmaking.setHostInfo(serverName, trackName, port,
+                              clientCount(), 16, 0);
+    m_matchmaking.setAuthRequired(authRequired());
+    startMatchmaking(/*announceAsHost=*/true);
+
     m_lastStatsPoll = std::chrono::steady_clock::now();
     m_stateAccum = 0.0;
     m_interp.clear();
@@ -178,6 +189,7 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 
 void NetworkManager::stopServer() {
     if (!m_hosting) return;
+    stopMatchmaking();
     m_client->disconnect();
     m_server->stop();
     m_hosting = false;
@@ -275,6 +287,63 @@ void NetworkManager::setJoinToken(const std::string& token) {
     if (m_client) m_client->setJoinToken(token);
 }
 
+void NetworkManager::setLobbyBaseUrl(const std::string& url) {
+    MatchmakingConfig cfg = m_matchmaking.config();
+    cfg.lobbyBaseUrl = url;
+    m_matchmaking.setConfig(cfg);
+}
+
+const std::string& NetworkManager::lobbyBaseUrl() const {
+    return m_matchmaking.config().lobbyBaseUrl;
+}
+
+bool NetworkManager::startMatchmaking(bool announceAsHost) {
+    MatchmakingConfig cfg = m_matchmaking.config();
+    cfg.announceAsHost = announceAsHost;
+    m_matchmaking.setConfig(cfg);
+    if (announceAsHost && m_hosting) {
+        m_matchmaking.setHostInfo(m_serverName, m_trackName, m_port,
+                                  clientCount(), 16, 0);
+        m_matchmaking.setAuthRequired(authRequired());
+    }
+    if (!m_matchmaking.start()) {
+        printf("NetworkManager: Matchmaking start failed\n");
+        return false;
+    }
+    m_matchmakingStarted = true;
+    printf("NetworkManager: Matchmaking started (announce=%d, lobby=%s)\n",
+           announceAsHost ? 1 : 0,
+           cfg.lobbyBaseUrl.empty() ? "off" : cfg.lobbyBaseUrl.c_str());
+    return true;
+}
+
+void NetworkManager::stopMatchmaking() {
+    if (!m_matchmakingStarted) return;
+    m_matchmaking.stop();
+    m_matchmakingStarted = false;
+    printf("NetworkManager: Matchmaking stopped\n");
+}
+
+bool NetworkManager::isMatchmakingRunning() const {
+    return m_matchmakingStarted;
+}
+
+void NetworkManager::refreshServerList() {
+    if (!m_matchmakingStarted) {
+        startMatchmaking(/*announceAsHost=*/false);
+    }
+    // Force immediate LAN refresh by resetting timers via update with large dt nudge
+    m_matchmaking.update(m_matchmaking.config().lanRefreshSec + 0.1);
+}
+
+const std::vector<ServerListEntry>& NetworkManager::matchmakingServers() const {
+    return m_matchmaking.servers();
+}
+
+std::vector<std::string> NetworkManager::matchmakingBrowserRows() const {
+    return m_matchmaking.browserRows();
+}
+
 void NetworkManager::broadcastCarDamage(const net::CarDamageMessage& msg) {
     if (m_hosting && m_server)
         m_server->broadcastCarDamage(msg);
@@ -348,6 +417,15 @@ void NetworkManager::update(double dt) {
 
     if (m_server) m_server->update(dt);
     if (m_client) m_client->update(dt);
+
+    if (m_matchmakingStarted) {
+        if (m_hosting) {
+            m_matchmaking.setHostInfo(m_serverName, m_trackName, m_port,
+                                      clientCount(), 16, 0);
+            m_matchmaking.setAuthRequired(authRequired());
+        }
+        m_matchmaking.update(dt);
+    }
 
     if (m_hosting) {
         m_stateAccum += dt;
