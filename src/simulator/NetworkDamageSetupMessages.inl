@@ -26,7 +26,7 @@ struct CarDamageMessage : public ksnet::Message {
         serialize_bits(stream, flags, 16);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct CarSetupMessage : public ksnet::Message {
@@ -62,7 +62,7 @@ struct CarSetupMessage : public ksnet::Message {
         serialize_int(stream, absLevel, 0, 12);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct CarCollisionMessage : public ksnet::Message {
@@ -78,5 +78,5 @@ struct CarCollisionMessage : public ksnet::Message {
         serialize_compressed_float(stream, posZ, -10000.0f, 10000.0f, 0.01f);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
