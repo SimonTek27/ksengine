@@ -169,7 +169,7 @@ static int appMain(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     app.setApplicationName("ksEditor");
-    app.setApplicationVersion("1.16.4");
+    app.setApplicationVersion("0.90");
     app.setOrganizationName("ksEditor");
 
     // Detect when the GUI thread stops responding and offer the user a native

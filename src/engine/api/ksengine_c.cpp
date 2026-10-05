@@ -91,7 +91,7 @@ void fillNode(ks::ecs::Registry& reg, ks::ecs::Entity e,
 extern "C" {
 
 KSAPI const char* ks_engine_version(void) {
-    return "0.1.0";
+    return "0.90";
 }
 
 KSAPI KsEngine* ks_engine_create(uint32_t seed) {

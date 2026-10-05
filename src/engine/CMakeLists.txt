@@ -1,6 +1,6 @@
 # KSEngine — generic open-source sim core (Qt-free)
 cmake_minimum_required(VERSION 3.16)
-project(ksengine VERSION 2.1.0 LANGUAGES C CXX)
+project(ksengine VERSION 0.90 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

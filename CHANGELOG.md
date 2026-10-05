@@ -6,6 +6,44 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.90] - 2026-10-05 - Version unification + merge of origin/master
+
+### Added
+- **Merge of `origin/master` (74dd224)**: Sprint 6-8 work — AI racing-line
+  follow + traffic overtake, UDP CarStateSync, pit-strategy menu, the
+  FeatureHub/session/discovery/external-control header set, NetworkAuth token
+  handshake and the damage/setup sync messages
+- `AIController` now exposes both APIs: the tuned line-following controller
+  (robust lap detection, P+FF with derivative damping) and the incoming
+  traffic pass (`AiTrafficCar`, the 7-argument `update()`, `evaluateTraffic()`,
+  `lateralOffset()`, `setSkill()`, `setOvertakeEnabled()`)
+- `ksnet::Server::DisconnectClient()` implemented (declared but never defined;
+  used by the auth-time kick)
+
+### Changed
+- **Version unified to 0.90** across the root `project()`, the engine
+  `project()`, `ks_engine_version()` (C API), `QApplication` version, the
+  README badge and this file
+- `NetworkLowLevel` split into `NetworkLowLevel_{Client,ServerA,ServerB}.inc`,
+  with the include/guard/namespace wrapper in `NetworkLowLevel.cpp`
+
+### Fixed
+- The seven merge conflicts (`SimulationLoop.cpp`, `AIController.{h,cpp}`,
+  `SimulatorApp.cpp`, `GameMenuOverlay.h`, both qt-free CMake files) resolved
+  to the complete sources
+- Restored four incoming files whose content had been dropped silently because
+  base == ours: `PacejkaTireModel.h`, `TrackSurface.h`, `ReplayRecorder.h`,
+  `SimulatorServerApp.cpp`
+- `FeatureHub.h` called `ReplayRecorder::load()` (the API is `loadReplay()`)
+- `ServerDiscovery.h` passed the address of a temporary to `sendto()`
+
+### Verified
+- Qt-free Release build: 0 errors
+- `ctest`: 40/40 passed
+- `tools/check_no_qt.ps1`: 0 of 884 files still touch Qt
+
+---
+
 ## [1.19.0] – 2026-08-23 — Gap-Closure FINAL
 
 ### Added

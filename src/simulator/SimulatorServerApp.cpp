@@ -12,13 +12,37 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
-#include <csignal>
 #include <cctype>
 #include <algorithm>
 
+// NB: the public include path contains src/engine/sys, whose Signal.h
+// shadows the CRT's <signal.h> on a case-insensitive FS (same hazard already
+// documented for vendored Lua in src/engine/CMakeLists.txt and handled in
+// tools/ks_server/main.cpp). Use the Win32 console handler on Windows and
+// <csignal> everywhere else.
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
+#include <csignal>
+#endif
+
 namespace {
 std::atomic<bool> g_run{true};
+#ifdef _WIN32
+BOOL WINAPI onConsoleCtrl(DWORD type) {
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT ||
+        type == CTRL_CLOSE_EVENT) {
+        g_run.store(false);
+        return TRUE;
+    }
+    return FALSE;
+}
+#else
 void onSig(int) { g_run.store(false); }
+#endif
 
 bool validPort(int p) { return p > 0 && p <= 65535; }
 
@@ -92,9 +116,11 @@ int main(int argc, char** argv) {
 
     hostName = sanitizeName(hostName);
 
+#ifdef _WIN32
+    SetConsoleCtrlHandler(onConsoleCtrl, TRUE);
+#else
     std::signal(SIGINT, onSig);
     std::signal(SIGTERM, onSig);
-#ifndef _WIN32
     std::signal(SIGPIPE, SIG_IGN);
 #endif
 
@@ -124,7 +150,9 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "SimulatorServer: game host unavailable (build without HAS_KSNET?)\n");
     }
 
-    loop.beginSession(ks::sim::GameSessionMode::Practice);
+    // Our SimulationLoop opens the session from start(): it resets the
+    // session state, staggers the AI grid (m_aiCarCount) and configures
+    // RaceSessionManager. The incoming branch had a separate beginSession().
     loop.start();
 
     std::fprintf(stderr, "SimulatorServer: running (disc :20779, ctrl :20780%s)\n",

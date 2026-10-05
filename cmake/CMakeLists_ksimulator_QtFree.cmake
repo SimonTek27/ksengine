@@ -90,3 +90,9 @@ if(TARGET ks_shaders)
 endif()
 
 message(STATUS "SimulatorApp: Qt-free runtime (src/simulator, render=src/engine)")
+
+# ---------------------------------------------------------------------------
+# Headless host (merged from 74dd224): SimulatorServer reuses the runtime
+# source list above with its own entry point.
+# ---------------------------------------------------------------------------
+include("${CMAKE_CURRENT_LIST_DIR}/CMakeLists_SimulatorServer.cmake" OPTIONAL)

@@ -15,7 +15,7 @@ mikktspace.
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-GPL3-blue.svg)](LICENSE.txt)
-[![Version](https://img.shields.io/badge/version-1.16.4-orange)]()
+[![Version](https://img.shields.io/badge/version-0.90-orange)]()
 [![C++](https://img.shields.io/badge/C++-17-blue)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)]()
 
@@ -27,7 +27,7 @@ A comprehensive, professional-grade modding toolkit for racing-game content. ksE
 
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![License](https://img.shields.io/badge/license-GPL3-blue.svg)](LICENSE.txt)
-[![Version](https://img.shields.io/badge/version-1.16.4-orange)]()
+[![Version](https://img.shields.io/badge/version-0.90-orange)]()
 [![Qt](https://img.shields.io/badge/Qt-6.11-green)]()
 [![C++](https://img.shields.io/badge/C++-17-blue)]()
 [![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)]()
