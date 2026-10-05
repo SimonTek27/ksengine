@@ -2,7 +2,7 @@
 
 /**
  * @file TrackSurface.h
- * @brief Spatial grip / wet / rubber / marbles grid — Qt-free
+ * @brief Spatial grip / wet / rubber / marbles grid — Qt-free (Sprint 2)
  */
 
 #include "PhysicsCoreTypes.h"
@@ -11,6 +11,9 @@
 #include <cmath>
 #include <functional>
 #include <vector>
+#include <string>
+#include <map>
+#include <cctype>
 
 namespace ks {
 namespace physics {
@@ -51,6 +54,22 @@ public:
         std::fill(m_temp.begin(), m_temp.end(), t);
     }
 
+    void setMaterialGrip(const std::string& key, float friction) {
+        std::string k = key;
+        for (char& c : k) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        m_materials[k] = std::clamp(friction, 0.05f, 2.0f);
+    }
+    float materialGrip(const std::string& key) const {
+        std::string k = key;
+        for (char& c : k) if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 32);
+        auto it = m_materials.find(k);
+        return it != m_materials.end() ? it->second : m_baseGrip;
+    }
+    void setOffTrackGrip(float g) { m_offTrackGrip = std::clamp(g, 0.05f, 1.0f); }
+    void setKerbGrip(float g) { m_kerbGrip = std::clamp(g, 0.2f, 1.5f); }
+    float offTrackGrip() const { return m_offTrackGrip; }
+    float kerbGrip() const { return m_kerbGrip; }
+
     SurfaceSample sample(const PhysVec3& worldPos) const {
         SurfaceSample s;
         const int idx = cellIndex(worldPos);
@@ -62,8 +81,12 @@ public:
         s.wetness = wet;
         s.marbles = marbles;
         s.temperature = temp;
-        s.grip = m_baseGrip * (1.0f - wet * 0.45f) * (1.0f + s.rubber * 0.12f) *
+        float base = m_baseGrip;
+        if (idx < 0)
+            base = m_offTrackGrip;
+        s.grip = base * (1.0f - wet * 0.45f) * (1.0f + s.rubber * 0.12f) *
                  (1.0f - marbles * 0.15f);
+        s.grip = std::clamp(s.grip, 0.05f, 2.0f);
         return s;
     }
 
@@ -132,6 +155,9 @@ private:
     float m_globalWet = 0.0f;
     float m_globalRubber = 0.0f;
     float m_baseTemp = 25.0f;
+    float m_offTrackGrip = 0.55f;
+    float m_kerbGrip = 0.85f;
+    std::map<std::string, float> m_materials;
     std::vector<float> m_rubber, m_wet, m_marbles, m_temp;
 };
 

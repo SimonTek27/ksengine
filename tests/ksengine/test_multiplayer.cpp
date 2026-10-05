@@ -47,6 +47,8 @@ int MultiCarManager::addCar(const std::string&, const std::string&, const vec3&,
 
 void MultiCarManager::removeCar(int) {}
 
+bool MultiCarManager::setCarClientIndex(int, int) { return true; }
+
 int main()
 {
     NetworkManager host(nullptr);

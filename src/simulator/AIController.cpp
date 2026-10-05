@@ -40,6 +40,8 @@ bool AIController::loadSpline(const std::string& trackDirectory)
     m_prevProgress = 0.0f;
     m_traveledSinceLap = 0.0f;
     m_hasProgress = false;
+    m_lateralOffset = 0.0f;
+    m_lateralTarget = 0.0f;
 
     std::printf("AIController: Loaded spline with %d points\n", (int)m_spline.points.size());
     if (onSplineLoaded) onSplineLoaded(static_cast<int>(m_spline.points.size()));
@@ -47,7 +49,15 @@ bool AIController::loadSpline(const std::string& trackDirectory)
 }
 
 void AIController::update(const vec3& carPosition, float carHeading,
-                          float speed, int /*gear*/, float dt)
+                          float speed, int gear, float dt)
+{
+    static const std::vector<AiTrafficCar> emptyTraffic;
+    update(carPosition, carHeading, speed, gear, dt, emptyTraffic, -1);
+}
+
+void AIController::update(const vec3& carPosition, float carHeading,
+                          float speed, int /*gear*/, float dt,
+                          const std::vector<AiTrafficCar>& traffic, int selfId)
 {
     if (!m_splineLoaded || m_spline.points.empty()) {
         m_throttle = 0; m_brake = 1.0f; m_steering = 0;
@@ -64,6 +74,27 @@ void AIController::update(const vec3& carPosition, float carHeading,
     int lookahead = findLookaheadPoint(nearest, lookaheadDist);
     const auto& targetPoint = m_spline.points[static_cast<size_t>(lookahead)];
     vec3 targetPos(targetPoint.position.x, targetPoint.position.y, targetPoint.position.z);
+
+    float targetSpeed = targetPoint.speed * m_speedFactor;
+    float curvature = std::abs(targetPoint.curvature);
+    if (curvature > 0.01f)
+        targetSpeed *= (1.0f - curvature * m_aggression * 0.5f);
+
+    // Traffic / overtaking: slow down behind a slower car, then step off the
+    // racing line laterally so the overtake can happen (parity with kseditor).
+    evaluateTraffic(carPosition, carHeading, speed, nearest, traffic, selfId, targetSpeed);
+
+    const float latRate = 2.5f * dt;
+    if (m_lateralOffset < m_lateralTarget)
+        m_lateralOffset = std::min(m_lateralTarget, m_lateralOffset + latRate);
+    else
+        m_lateralOffset = std::max(m_lateralTarget, m_lateralOffset - latRate);
+    if (std::abs(m_lateralOffset) > 1e-4f) {
+        float tx = 0.f, tz = 1.f;
+        tangentAt(lookahead, tx, tz);
+        targetPos.x += -tz * m_lateralOffset;
+        targetPos.z += tx * m_lateralOffset;
+    }
 
     m_steering = calculateSteering(carPosition, carHeading, targetPos);
 
@@ -104,11 +135,6 @@ void AIController::update(const vec3& carPosition, float carHeading,
             -1.0f, 1.0f);
     }
 
-    float targetSpeed = targetPoint.speed * m_speedFactor;
-    float curvature = std::abs(targetPoint.curvature);
-    if (curvature > 0.01f)
-        targetSpeed *= (1.0f - curvature * m_aggression * 0.5f);
-
     m_throttle = calculateThrottle(speed, targetSpeed, curvature, dt);
     m_brake = calculateBrake(speed, targetSpeed, curvature, dt);
     m_targetGear = calculateGear(speed);
@@ -140,6 +166,57 @@ void AIController::detectLap(int nearestIdx)
     }
     m_prevProgress = prog;
     m_hasProgress = true;
+}
+
+void AIController::tangentAt(int idx, float& tx, float& tz) const
+{
+    const int n = static_cast<int>(m_spline.points.size());
+    if (n < 2) { tx = 0; tz = 1; return; }
+    const int i0 = std::clamp(idx, 0, n - 1);
+    const int i1 = std::min(i0 + 1, n - 1);
+    const auto& a = m_spline.points[static_cast<size_t>(i0)].position;
+    const auto& b = m_spline.points[static_cast<size_t>(i1)].position;
+    tx = b.x - a.x;
+    tz = b.z - a.z;
+    const float len = std::sqrt(tx * tx + tz * tz);
+    if (len > 1e-4f) { tx /= len; tz /= len; } else { tx = 0; tz = 1; }
+}
+
+// Overtake/traffic (Sprint 6): a car close ahead and not pulling away means
+// we are blocked, so pick a side (biased by whatever side it is already
+// leaving us), step off the racing line and cap the target speed to its own.
+void AIController::evaluateTraffic(const vec3& carPos, float carHeading, float speed,
+                                   int nearestIdx, const std::vector<AiTrafficCar>& traffic,
+                                   int selfId, float& targetSpeedInOut)
+{
+    (void)carHeading;
+    if (!m_overtakeEnabled || traffic.empty()) { m_lateralTarget = 0.f; return; }
+    float tx = 0.f, tz = 1.f;
+    tangentAt(nearestIdx, tx, tz);
+    const float nx = -tz, nz = tx;
+    float closestAhead = 1e9f;
+    float sideBias = 0.f;
+    bool blocked = false;
+    for (const auto& o : traffic) {
+        if (o.id == selfId) continue;
+        const float dx = o.x - carPos.x, dz = o.z - carPos.z;
+        const float along = dx * tx + dz * tz;
+        const float lat = dx * nx + dz * nz;
+        if (along > 2.f && along < 45.f && std::abs(lat) < 6.f) {
+            if (along < closestAhead) { closestAhead = along; sideBias = lat; }
+            if (along < 25.f && speed - o.speed > -5.f) blocked = true;
+            if (along < 12.f && o.speed < speed)
+                targetSpeedInOut = std::min(targetSpeedInOut, o.speed * 0.95f);
+        }
+    }
+    if (blocked && closestAhead < 35.f) {
+        if (std::abs(sideBias) > 0.5f) m_overtakeSide = (sideBias > 0.f) ? -1.f : 1.f;
+        m_lateralTarget = m_overtakeSide * (2.0f + 1.5f * m_aggression);
+        if (m_aggression > 0.4f && closestAhead > 8.f)
+            targetSpeedInOut *= 1.0f + 0.08f * m_aggression;
+    } else {
+        m_lateralTarget = 0.f;
+    }
 }
 
 int AIController::findNearestPoint(const vec3& pos) const

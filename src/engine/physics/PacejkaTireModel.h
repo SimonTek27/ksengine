@@ -46,6 +46,13 @@ public:
         float c11 = 0.945f;
         float c12 = 0.030f;
         float c13 = 0.070f;
+
+        float nominalLoadN = 4000.f;
+        float loadSensExp = 0.9f;
+        float loadSensMin = 0.55f;
+        float loadSensMax = 1.25f;
+        float optPressurePsi = 26.f;
+        float optTempC = 80.f;
     };
 
     struct TireState {
@@ -78,6 +85,10 @@ public:
 
     TireForces calculateCombinedSlip(float slipAngle, float slipRatio,
                                       float normalForce, float camber) const;
+    TireForces calculateCombinedSlip(float slipAngle, float slipRatio,
+                                      float normalForce, float camber,
+                                      float frictionMu, float pressurePsi = 26.f,
+                                      float tempC = 80.f) const;
 
     float calculateLoadSensitivity(float normalForce) const;
 

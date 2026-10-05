@@ -11,27 +11,15 @@
 
 namespace ks::sim::net {
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 constexpr uint64_t PROTOCOL_ID = 0x11223344556677ULL;
-constexpr uint32_t PROTOCOL_VERSION = 1;
+constexpr uint32_t PROTOCOL_VERSION = 2;
 constexpr int MAX_CLIENTS = 32;
-
-// ============================================================================
-// Channel Types
-// ============================================================================
 
 enum ChannelId {
     CHANNEL_UNRELIABLE = 0,
     CHANNEL_RELIABLE = 1,
     NUM_CHANNELS = 2
 };
-
-// ============================================================================
-// Message Types
-// ============================================================================
 
 enum MessageType {
     MSG_CLIENT_JOIN = 0,
@@ -51,12 +39,9 @@ enum MessageType {
     MSG_PENALTY,
     MSG_CHAT,
     MSG_CAR_SETUP,
+    MSG_AUTH_FAILED,
     NUM_MESSAGE_TYPES
 };
-
-// ============================================================================
-// Session Types
-// ============================================================================
 
 enum SessionType : uint8_t {
     SESSION_PRACTICE = 0,
@@ -75,10 +60,6 @@ enum SessionPhase : uint8_t {
     PHASE_FINISHED
 };
 
-// ============================================================================
-// Input Data
-// ============================================================================
-
 struct InputData {
     uint32_t frameNumber = 0;
     double timestamp = 0.0;
@@ -90,10 +71,6 @@ struct InputData {
     bool drs = false;
     int gearShift = 0;
 };
-
-// ============================================================================
-// Car State Data
-// ============================================================================
 
 struct CarStateData {
     uint32_t carId = 0;
@@ -109,10 +86,6 @@ struct CarStateData {
     float steering = 0;
 };
 
-// ============================================================================
-// Network Stats
-// ============================================================================
-
 struct NetworkStats {
     float rtt = 0;
     float packetLoss = 0;
@@ -120,22 +93,28 @@ struct NetworkStats {
     float recvBandwidth = 0;
 };
 
-// ============================================================================
-// Messages
-// ============================================================================
-
 struct ClientJoinMessage : public ksnet::Message {
     char driverName[64] = {0};
     char carName[64] = {0};
     uint32_t clientVersion = PROTOCOL_VERSION;
-
+    char authToken[64] = {0};
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_string(stream, driverName, sizeof(driverName));
         serialize_string(stream, carName, sizeof(carName));
         serialize_uint32(stream, clientVersion);
+        serialize_string(stream, authToken, sizeof(authToken));
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
+};
+
+struct AuthFailedMessage : public ksnet::Message {
+    char reason[64] = {0};
+    template <typename Stream> bool Serialize(Stream & stream) {
+        serialize_string(stream, reason, sizeof(reason));
+        return true;
+    }
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct ServerWelcomeMessage : public ksnet::Message {
@@ -143,7 +122,6 @@ struct ServerWelcomeMessage : public ksnet::Message {
     char serverName[64] = {0};
     char trackName[64] = {0};
     uint8_t sessionType = SESSION_PRACTICE;
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, clientId);
         serialize_string(stream, serverName, sizeof(serverName));
@@ -151,12 +129,12 @@ struct ServerWelcomeMessage : public ksnet::Message {
         serialize_bits(stream, sessionType, 8);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct ServerFullMessage : public ksnet::Message {
     template <typename Stream> bool Serialize(Stream &) { return true; }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct ProtocolMismatchMessage : public ksnet::Message {
@@ -165,7 +143,7 @@ struct ProtocolMismatchMessage : public ksnet::Message {
         serialize_uint32(stream, serverVersion);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct SessionStateMessage : public ksnet::Message {
@@ -174,7 +152,6 @@ struct SessionStateMessage : public ksnet::Message {
     int currentLap = 0;
     int totalLaps = 0;
     double timeRemaining = 0;
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_bits(stream, type, 8);
         serialize_bits(stream, phase, 8);
@@ -183,7 +160,7 @@ struct SessionStateMessage : public ksnet::Message {
         serialize_double(stream, timeRemaining);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct RaceCountdownMessage : public ksnet::Message {
@@ -192,12 +169,11 @@ struct RaceCountdownMessage : public ksnet::Message {
         serialize_int(stream, value, 0, 10);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct CarStateMessage : public ksnet::Message {
     CarStateData data;
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, data.carId);
         serialize_uint32(stream, data.frameNumber);
@@ -218,7 +194,7 @@ struct CarStateMessage : public ksnet::Message {
         serialize_compressed_float(stream, data.steering, -1.0f, 1.0f, 0.001f);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct CarSpawnMessage : public ksnet::Message {
@@ -227,7 +203,6 @@ struct CarSpawnMessage : public ksnet::Message {
     char driverName[64] = {0};
     char carName[64] = {0};
     float posX = 0, posY = 0, posZ = 0;
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, carId);
         serialize_uint32(stream, clientId);
@@ -238,7 +213,7 @@ struct CarSpawnMessage : public ksnet::Message {
         serialize_compressed_float(stream, posZ, -10000.0f, 10000.0f, 0.01f);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct CarDespawnMessage : public ksnet::Message {
@@ -247,7 +222,7 @@ struct CarDespawnMessage : public ksnet::Message {
         serialize_uint32(stream, carId);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct PlayerInputMessage : public ksnet::Message {
@@ -264,7 +239,7 @@ struct PlayerInputMessage : public ksnet::Message {
         serialize_int(stream, data.gearShift, -1, 1);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct LapTimeMessage : public ksnet::Message {
@@ -273,7 +248,6 @@ struct LapTimeMessage : public ksnet::Message {
     double lapTime = 0;
     double sector1 = 0, sector2 = 0, sector3 = 0;
     bool isValid = true;
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, carId);
         serialize_uint32(stream, lapNumber);
@@ -284,29 +258,27 @@ struct LapTimeMessage : public ksnet::Message {
         serialize_bool(stream, isValid);
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct ChatMessage : public ksnet::Message {
     uint32_t senderId = 0;
     char senderName[64] = {0};
     char message[256] = {0};
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, senderId);
         serialize_string(stream, senderName, sizeof(senderName));
         serialize_string(stream, message, sizeof(message));
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
 struct PenaltyMessage : public ksnet::Message {
     uint32_t carId = 0;
-    uint8_t penaltyType = 0;    // 0=DriveThrough, 1=StopGo, 2=TimeAdded, 3=Disqualification
-    float value = 0;            // seconds for TimeAdded
+    uint8_t penaltyType = 0;
+    float value = 0;
     char reason[128] = {0};
-
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, carId);
         serialize_bits(stream, penaltyType, 8);
@@ -314,37 +286,35 @@ struct PenaltyMessage : public ksnet::Message {
         serialize_string(stream, reason, sizeof(reason));
         return true;
     }
-    YOJIMBO_VIRTUAL_SERIALIZE_FUNCTIONS()
+    KSNET_VIRTUAL_SERIALIZE_FUNCTIONS()
 };
 
-// ============================================================================
-// Message Factory
-// ============================================================================
+#include "NetworkDamageSetupMessages.inl"
 
-YOJIMBO_MESSAGE_FACTORY_START(GameMessageFactory, NUM_MESSAGE_TYPES);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_CLIENT_JOIN, ClientJoinMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_SERVER_WELCOME, ServerWelcomeMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_SERVER_FULL, ServerFullMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_PROTOCOL_MISMATCH, ProtocolMismatchMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_SESSION_STATE, SessionStateMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_RACE_COUNTDOWN, RaceCountdownMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_CAR_STATE, CarStateMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_CAR_SPAWN, CarSpawnMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_CAR_DESPAWN, CarDespawnMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_PLAYER_INPUT, PlayerInputMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_LAP_TIME, LapTimeMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_CHAT, ChatMessage);
-YOJIMBO_DECLARE_MESSAGE_TYPE(MSG_PENALTY, PenaltyMessage);
-YOJIMBO_MESSAGE_FACTORY_FINISH();
-
-// ============================================================================
-// Adapter
-// ============================================================================
+KSNET_MESSAGE_FACTORY_START(GameMessageFactory, NUM_MESSAGE_TYPES);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CLIENT_JOIN, ClientJoinMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_SERVER_WELCOME, ServerWelcomeMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_SERVER_FULL, ServerFullMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_PROTOCOL_MISMATCH, ProtocolMismatchMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_SESSION_STATE, SessionStateMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_RACE_COUNTDOWN, RaceCountdownMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_STATE, CarStateMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_SPAWN, CarSpawnMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_DESPAWN, CarDespawnMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_COLLISION, CarCollisionMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_DAMAGE, CarDamageMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_PLAYER_INPUT, PlayerInputMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_LAP_TIME, LapTimeMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CHAT, ChatMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_PENALTY, PenaltyMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_CAR_SETUP, CarSetupMessage);
+KSNET_DECLARE_MESSAGE_TYPE(MSG_AUTH_FAILED, AuthFailedMessage);
+KSNET_MESSAGE_FACTORY_FINISH();
 
 class GameAdapter : public ksnet::Adapter {
 public:
     ksnet::MessageFactory * CreateMessageFactory(ksnet::Allocator & allocator) override {
-        return YOJIMBO_NEW(allocator, GameMessageFactory, allocator);
+        return KSNET_NEW(allocator, GameMessageFactory, allocator);
     }
 };
 

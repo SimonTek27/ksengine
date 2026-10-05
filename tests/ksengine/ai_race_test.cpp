@@ -146,6 +146,11 @@ int main()
     int lapsSeen = 0;
     for (int id : ids)
         mc.getCar(id)->ai->onLapCompleted = [&](int) { ++lapsSeen; };
+    // "Hold the line" is the behaviour under test here; the traffic/overtake
+    // pass deliberately steps ~2.75 m off the racing line to go around, which
+    // would invalidate the tight 12 m bound below.
+    for (int id : ids)
+        mc.getCar(id)->ai->setOvertakeEnabled(false);
 
     for (int i = 0; i < 2000; ++i) mc.update(kDt); // 2 s off the line
     const auto mid = mc.getCar(ids[0])->vehicle->getState();

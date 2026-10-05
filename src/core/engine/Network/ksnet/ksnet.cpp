@@ -1069,4 +1069,20 @@ bool Server::IsClientConnected(int clientIndex) const
     return m_impl->slots[static_cast<size_t>(clientIndex)].used;
 }
 
+// Kick one client: tell it we are dropping the connection, then free the slot
+// so the index can be reused by the next join (auth failure, kick, timeout).
+void Server::DisconnectClient(int clientIndex)
+{
+    if (!m_impl || clientIndex < 0 || clientIndex >= static_cast<int>(m_impl->slots.size()))
+        return;
+    auto& slot = m_impl->slots[static_cast<size_t>(clientIndex)];
+    if (!slot.used) return;
+    if (m_impl->sock != kInvalidSocket) {
+        std::vector<uint8_t> pkt = makeHeader(m_impl->config.protocolId, PKT_DISCONNECT, slot.nonce);
+        sendDatagram(m_impl->sock, slot.addr, pkt);
+        m_impl->bytesSent += pkt.size();
+    }
+    m_impl->freeSlot(slot);
+}
+
 } // namespace ksnet

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 #include <functional>
+#include <algorithm>
 
 namespace ks::sim {
 
@@ -36,10 +37,16 @@ public:
     bool saveReplay(const std::string& filePath);
     void startPlayback();
     void stopPlayback();
-    void setPlaybackSpeed(float speed) { m_playbackSpeed = speed; }
+    void setPlaybackSpeed(float speed) { m_playbackSpeed = std::clamp(speed, 0.f, 8.f); }
     bool isPlaying() const { return m_playing; }
 
+    void seekTo(float timeSec);
+    void seekProgress(float t01);
+    void updatePlayback(float dt);
+    bool isFinished() const;
+
     ReplayFrame getPlaybackFrame() const;
+    const std::vector<ReplayFrame>& frames() const { return m_frames; }
 
     int frameCount() const { return static_cast<int>(m_frames.size()); }
     float duration() const;
