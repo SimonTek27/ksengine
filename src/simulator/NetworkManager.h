@@ -11,6 +11,7 @@
 #if HAS_KSNET
 #include "RemoteCarInterpolator.h"
 #include "NetworkDamageSetupBridge.h"
+#include "Matchmaking.h"
 #endif
 
 namespace ks::sim {
@@ -29,14 +30,13 @@ public:
     bool hostServer(uint16_t port = 40000, int maxClients = 8,
                     const std::string& serverName = "ksim Server",
                     const std::string& trackName = "Unknown");
+    /** Host: empty = open LAN; non-empty required on join (constant-time). */
+    void setAuthToken(const std::string& token);
+    bool authRequired() const;
     void stopServer();
     bool isHosting() const { return m_hosting; }
     int clientCount() const;
     std::string clientName(int index) const;
-
-    /** Host: empty = open LAN; non-empty required on join (constant-time). */
-    void setAuthToken(const std::string& token);
-    bool authRequired() const;
 
     bool joinServer(const std::string& host, uint16_t port,
                     const std::string& driverName = "Player",
@@ -46,6 +46,21 @@ public:
     void disconnectFromServer();
     bool isConnected() const { return m_connected; }
     bool isClient() const { return m_connected && !m_hosting; }
+
+    // --- Matchmaking (LAN ServerDiscovery + optional HTTP lobby) ---
+    /** Optional lobby base URL (e.g. "http://lobby.example.com/api/v1"); empty = LAN only. */
+    void setLobbyBaseUrl(const std::string& url);
+    const std::string& lobbyBaseUrl() const;
+    /** Start browser/discovery (client) or announce (host). Safe to call before/after hostServer. */
+    bool startMatchmaking(bool announceAsHost = false);
+    void stopMatchmaking();
+    bool isMatchmakingRunning() const;
+    /** Force LAN query + optional lobby GET. */
+    void refreshServerList();
+    const std::vector<ServerListEntry>& matchmakingServers() const;
+    std::vector<std::string> matchmakingBrowserRows() const;
+    Matchmaking& matchmaking() { return m_matchmaking; }
+    const Matchmaking& matchmaking() const { return m_matchmaking; }
 
     void sendChatMessage(const std::string& message);
 
@@ -100,6 +115,7 @@ public:
 
     std::function<void(const net::NetworkStats&)> onStatsUpdated;
     std::function<void(const std::vector<std::string>&)> onPlayerListUpdated;
+    std::function<void(const std::vector<ServerListEntry>&)> onServerListUpdated;
 
 private:
     void onStatsTimer();
@@ -134,6 +150,9 @@ private:
 
     RemoteCarInterpolator m_interp;
     double m_clock = 0.0;
+
+    Matchmaking m_matchmaking;
+    bool m_matchmakingStarted = false;
 };
 
 #else // !HAS_KSNET
@@ -155,10 +174,7 @@ public:
     bool isHosting() const { return false; }
     int clientCount() const { return 0; }
     std::string clientName(int) const { return {}; }
-    void setAuthToken(const std::string&) {}
-    bool authRequired() const { return false; }
     bool joinServer(const std::string&, uint16_t, const std::string& = {}, const std::string& = {}) { return false; }
-    void setJoinToken(const std::string&) {}
     void disconnectFromServer() {}
     bool isConnected() const { return false; }
     bool isClient() const { return false; }
@@ -177,6 +193,12 @@ public:
     net::NetworkStats stats() const { return {}; }
     net::NetworkClient* client() { return nullptr; }
     net::NetworkServer* server() { return nullptr; }
+    void setLobbyBaseUrl(const std::string&) {}
+    const std::string& lobbyBaseUrl() const { static std::string empty; return empty; }
+    bool startMatchmaking(bool = false) { return false; }
+    void stopMatchmaking() {}
+    bool isMatchmakingRunning() const { return false; }
+    void refreshServerList() {}
     std::function<void(uint16_t)> onServerStarted;
     std::function<void()> onServerStopped;
     std::function<void(const std::string&, uint16_t)> onClientConnectedToServer;

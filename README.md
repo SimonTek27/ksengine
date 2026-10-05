@@ -1,146 +1,42 @@
 # ksengine
 
-**ksengine** is the Qt-free core engine framework: a static C++17 library
-(`src/engine/`) with math, physics, devices/FFB, file formats, config, networking,
-materials and terrain. Builds without Qt (`tools/check_no_qt.ps1`). Optional:
-Vulkan, Bullet, Eigen, Lua, mikktspace.
+Qt-free / optional-Qt simulation engine (physics, AI, multiplayer, telemetry).
 
----
+## Status
 
-# SimulatorApp (ksim)
+See [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/GAP_MATRIX.md](docs/GAP_MATRIX.md).
 
-Standalone **Qt-free** race runtime (`src/simulator/`) linking only ksengine.
-Win32 + Vulkan (`NativeRenderer`) + `SimulationLoop`:
-
-- KN5 track/car load, vehicle physics, FFB & devices
-- Garage / pit (exit, queue, collision, repair)
-- FeatureHub: session, LAN discovery, control TCP, track limits, weather, PB
-- AI racing line + traffic overtake
+Highlights:
+- FeatureHub, pit/garage, AI overtake, setup/FFB, surface grip, tyre load, replay, track limits, PB, session, weather/browser UI
 - CarStateSync UDP ≥20 Hz (no ksnet required)
-- Shared memory / UDP / TCP telemetry
+- **ksnet** multiplayer transport (reliable UDP): car-state 20 Hz, damage/setup/collision, auth token, matchmaking
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![License](https://img.shields.io/badge/license-GPL3-blue.svg)](LICENSE.txt)
-[![Version](https://img.shields.io/badge/version-1.16.4-orange)]()
-[![C++](https://img.shields.io/badge/C++-17-blue)]()
-[![ksengine](https://img.shields.io/badge/ksengine-Qt--free-success)]()
-[![Platform](https://img.shields.io/badge/platform-Windows-lightgrey)]()
+## Build
 
-```
-SimulatorApp  (open race runtime; format-compatible content)
-       │
-       ├── ksengine           generic engine
-       ├── adapters/          content-format bridges
-       └── network            discovery · CarState · control API
+```bash
+cmake -B build -DKSENGINE_QT_FREE=ON
+cmake --build build -j
 ```
 
----
+`HAS_KSNET` is enabled when the in-tree `ksnet` target is present (default).
 
-# ksEditor
+## Multiplayer (ksnet)
 
-Optional **Qt6** modding UI (audio, 3D, physics, liveries, events, server config).
-Links `kslib` → `ksengine`; Qt is UI only.
+- Transport: `src/core/engine/Network/ksnet` — official name **ksnet**
+- Macros: `KSNET_*` (`YOJIMBO_*` deprecated aliases)
+- CMake target: `ksnet` (`Yojimbo::yojimbo` ALIAS for older links)
+- Auth: host `setAuthToken`, client `setJoinToken` (constant-time)
+- Matchmaking: LAN discovery + optional HTTP lobby via `NetworkManager::setLobbyBaseUrl` / `startMatchmaking`
 
-[![Qt](https://img.shields.io/badge/Qt-6.11-green)]()
-[![License](https://img.shields.io/badge/license-GPL3-blue.svg)](LICENSE.txt)
-
----
-
-## Architecture
-
-| Layer | Path | Qt | Role |
-|-------|------|----|------|
-| **ksengine** | `src/engine/` | No | Core library |
-| **SimulatorApp** | `src/simulator/` | No | Race runtime |
-| **Adapters** | `src/adapters/` | No | Formats |
-| **ksEditor** | modules / MainWindow | Yes | Modding UI |
-
-**Principles**
+## Design notes
 
 1. ksengine is a generic open-source sim engine (not a single-title clone).
 2. Brand-specific formats stay under `adapters/`; UI stays product-neutral.
 3. FeatureHub owns session, discovery `:20779`, control `:20780`, limits, weather, PB.
 4. Pit/garage is a state machine separate from vehicle integrate.
-5. CarStateSync UDP works without `HAS_KSNET`; yojimbo path remains optional.
+5. CarStateSync UDP works without `HAS_KSNET`; ksnet path remains the preferred multiplayer transport.
 
 Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [PARITY_STATUS](docs/PARITY_STATUS.md) ·
 [GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md)
 
 ---
-
-## Project structure
-
-```
-ksengine/
-├── CMakeLists.txt
-├── docs/
-├── examples/MinimalSimulator/
-├── src/
-│   ├── engine/          # Qt-free core
-│   ├── simulator/       # Qt-free SimulatorApp
-│   │   ├── SimulationLoop.*
-│   │   ├── FeatureHub.h · CarStateSync.h
-│   │   ├── AIController.* · MultiCarManager.*
-│   │   ├── GameMenuOverlay.* · GarageExit / PitLane*
-│   │   └── …
-│   ├── adapters/
-│   └── sdk/             # editor (Qt)
-└── tools/check_no_qt.ps1
-```
-
-### Key simulator modules
-
-| Module | Role |
-|--------|------|
-| FeatureHub | Discovery, control, limits, weather, PB, session |
-| TrackLimitsMonitor | Warnings → time / DT / SG / DQ |
-| CarStateSync | UDP state ≥20 Hz |
-| AIController | Spline + overtake |
-| GarageExit / PitLane* | Ops stack |
-| PersonalBestStore | File PB + leaderboard |
-| ExternalControlApi | TCP + optional AUTH |
-
----
-
-## Network defaults
-
-| Service | Port |
-|---------|------|
-| Game (ksnet) | 40000 |
-| CarStateSync | 40001 |
-| Discovery | 20779 |
-| Control API | 20780 |
-
----
-
-## SimulationLoop restore
-
-On a fresh clone, `src/simulator/SimulationLoop.cpp` is a stub. Full source is
-embedded in `cmake/simloop_z0.b64`…`z4.b64` and expanded automatically:
-
-```bash
-bash tools/restore_simloop.sh
-# or: cmake -B build -DKSIMULATOR_QT_FREE=ON
-```
-
-Docs: [RESTORE_SIMLOOP](docs/RESTORE_SIMLOOP.md) · [PARITY_STATUS](docs/PARITY_STATUS.md)
-
----
-
-## Build
-
-```bash
-cmake --preset default
-cmake --build --preset default
-./tools/check_no_qt.ps1   # engine Qt-free check
-```
-
-- **Vulkan SDK** — SimulatorApp  
-- **Qt 6.11+** — ksEditor only  
-- **Windows 10/11 x64** primary
-
----
-
-## License
-
-GPL-3.0 — [LICENSE.txt](LICENSE.txt)
