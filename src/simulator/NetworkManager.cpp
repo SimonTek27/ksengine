@@ -78,7 +78,6 @@ void NetworkManager::setupClientSignals() {
         if (onRemoteCarDespawned) onRemoteCarDespawned(carId);
     };
 
-    // Raw network ticks → snapshot buffer (delivery is interpolated in update).
     m_client->onCarStateReceived = [this](uint32_t carId, const net::CarStateData& state) {
         m_interp.push(carId, state, m_clock);
     };
@@ -102,6 +101,16 @@ void NetworkManager::setupClientSignals() {
         if (onPenaltyReceived) onPenaltyReceived(carId, type, value, reason);
         printf("NetworkManager: penalty car=%u type=%u value=%.1f (%s)\n",
                carId, (unsigned)type, value, reason.c_str());
+    };
+
+    m_client->onCarDamage = [this](const net::CarDamageMessage& msg) {
+        if (onCarDamageReceived) onCarDamageReceived(msg);
+    };
+    m_client->onCarSetup = [this](const net::CarSetupMessage& msg) {
+        if (onCarSetupReceived) onCarSetupReceived(msg);
+    };
+    m_client->onCarCollision = [this](const net::CarCollisionMessage& msg) {
+        if (onCarCollisionReceived) onCarCollisionReceived(msg);
     };
 }
 
@@ -247,6 +256,35 @@ void NetworkManager::broadcastPenalty(uint32_t carId, uint8_t penaltyType, float
         m_server->broadcastPenalty(carId, penaltyType, value, reason);
 }
 
+void NetworkManager::broadcastCarDamage(const net::CarDamageMessage& msg) {
+    if (m_hosting && m_server)
+        m_server->broadcastCarDamage(msg);
+}
+
+void NetworkManager::broadcastCarSetup(const net::CarSetupMessage& msg) {
+    if (m_hosting && m_server)
+        m_server->broadcastCarSetup(msg);
+}
+
+void NetworkManager::broadcastCarCollision(const net::CarCollisionMessage& msg) {
+    if (m_hosting && m_server)
+        m_server->broadcastCarCollision(msg);
+}
+
+void NetworkManager::publishDamage(uint32_t carId, const ks::physics::DamageSystem& dmg) {
+    if (!m_hosting || !m_server) return;
+    net::CarDamageMessage msg;
+    fillCarDamageMessage(msg, carId, dmg);
+    m_server->broadcastCarDamage(msg);
+}
+
+void NetworkManager::publishSetup(uint32_t carId, const SetupData& setup) {
+    if (!m_hosting || !m_server) return;
+    net::CarSetupMessage msg;
+    fillCarSetupMessage(msg, carId, setup);
+    m_server->broadcastCarSetup(msg);
+}
+
 void NetworkManager::hostBroadcastCarStates() {
     if (!m_hosting || !m_server || !m_simLoop) return;
     MultiCarManager* mc = m_simLoop->multiCarManager();
@@ -279,8 +317,6 @@ void NetworkManager::hostBroadcastCarStates() {
 
 void NetworkManager::deliverInterpolatedStates() {
     if (!onRemoteCarStateReceived) return;
-    // Clients always sample; host loopback also samples remote cars so the
-    // same apply path (handleRemoteCarState) stays consistent.
     if (!m_connected) return;
     m_interp.sampleAll(m_clock, [this](uint32_t carId, const net::CarStateData& state) {
         onRemoteCarStateReceived(carId, state);
