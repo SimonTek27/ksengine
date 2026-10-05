@@ -112,6 +112,13 @@ void NetworkManager::setupClientSignals() {
     m_client->onCarCollision = [this](const net::CarCollisionMessage& msg) {
         if (onCarCollisionReceived) onCarCollisionReceived(msg);
     };
+
+    m_client->onAuthFailed = [this](const std::string& reason) {
+        m_connected = false;
+        printf("NetworkManager: AUTH FAILED — %s\n", reason.c_str());
+        if (onAuthFailed) onAuthFailed(reason);
+        if (onConnectionFailed) onConnectionFailed(std::string("Auth failed: ") + reason);
+    };
 }
 
 void NetworkManager::setupServerSignals() {
@@ -254,6 +261,18 @@ void NetworkManager::broadcastLapTime(uint32_t carId, int lapNumber, double lapT
 void NetworkManager::broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason) {
     if (m_hosting && m_server)
         m_server->broadcastPenalty(carId, penaltyType, value, reason);
+}
+
+void NetworkManager::setAuthToken(const std::string& token) {
+    if (m_server) m_server->setAuthToken(token);
+}
+
+bool NetworkManager::authRequired() const {
+    return m_server ? m_server->authRequired() : false;
+}
+
+void NetworkManager::setJoinToken(const std::string& token) {
+    if (m_client) m_client->setJoinToken(token);
 }
 
 void NetworkManager::broadcastCarDamage(const net::CarDamageMessage& msg) {
