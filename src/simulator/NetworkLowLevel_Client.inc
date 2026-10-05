@@ -92,6 +92,7 @@ void NetworkClient::update(double dt) {
             strncpy(join->driverName, m_driverName.c_str(), sizeof(join->driverName) - 1);
             strncpy(join->carName, m_carName.c_str(), sizeof(join->carName) - 1);
             join->clientVersion = PROTOCOL_VERSION;
+            strncpy(join->authToken, m_joinToken.c_str(), sizeof(join->authToken) - 1);
             m_client->SendMessage(CHANNEL_RELIABLE, join);
         }
     }
@@ -202,6 +203,12 @@ void NetworkClient::processMessages() {
                     if (onCarCollision) onCarCollision(*col);
                     break;
                 }
+                case MSG_AUTH_FAILED: {
+                    auto* af = (AuthFailedMessage*)msg;
+                    if (onAuthFailed) onAuthFailed(std::string(af->reason));
+                    m_connected = false;
+                    break;
+                }
                 default: break;
             }
 
@@ -228,10 +235,6 @@ ksnet::Message* NetworkClient::createMessage(int type) {
     if (!m_client) return nullptr;
     return m_client->CreateMessage(type);
 }
-
-// ============================================================================
-// NetworkServer (ctor/dtor live in ServerA)
-// ============================================================================
 
 } // namespace ks::sim::net
 
