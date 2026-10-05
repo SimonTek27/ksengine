@@ -34,9 +34,15 @@ public:
     int clientCount() const;
     std::string clientName(int index) const;
 
+    /** Host: empty = open LAN; non-empty required on join (constant-time). */
+    void setAuthToken(const std::string& token);
+    bool authRequired() const;
+
     bool joinServer(const std::string& host, uint16_t port,
                     const std::string& driverName = "Player",
                     const std::string& carName = "gte3");
+    /** Client: token sent in ClientJoinMessage. */
+    void setJoinToken(const std::string& token);
     void disconnectFromServer();
     bool isConnected() const { return m_connected; }
     bool isClient() const { return m_connected && !m_hosting; }
@@ -73,6 +79,7 @@ public:
     std::function<void(const std::string&, uint16_t)> onClientConnectedToServer;
     std::function<void(const std::string&)> onDisconnectedFromServer;
     std::function<void(const std::string&)> onConnectionFailed;
+    std::function<void(const std::string&)> onAuthFailed;
 
     std::function<void(int, uint32_t, const std::string&)> onRemoteClientJoined;
     std::function<void(int, const std::string&)> onRemoteClientLeft;
@@ -148,7 +155,10 @@ public:
     bool isHosting() const { return false; }
     int clientCount() const { return 0; }
     std::string clientName(int) const { return {}; }
+    void setAuthToken(const std::string&) {}
+    bool authRequired() const { return false; }
     bool joinServer(const std::string&, uint16_t, const std::string& = {}, const std::string& = {}) { return false; }
+    void setJoinToken(const std::string&) {}
     void disconnectFromServer() {}
     bool isConnected() const { return false; }
     bool isClient() const { return false; }
@@ -172,6 +182,7 @@ public:
     std::function<void(const std::string&, uint16_t)> onClientConnectedToServer;
     std::function<void(const std::string&)> onDisconnectedFromServer;
     std::function<void(const std::string&)> onConnectionFailed;
+    std::function<void(const std::string&)> onAuthFailed;
     std::function<void(int, uint32_t, const std::string&)> onRemoteClientJoined;
     std::function<void(int, const std::string&)> onRemoteClientLeft;
     std::function<void(uint32_t, const std::string&, const std::string&)> onChatMessageReceived;
