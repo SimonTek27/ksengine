@@ -12,31 +12,38 @@
 | 8 | NetSync + pit strategy UI | **Done** |
 | 9 | Full ksnet remote car state | **Done** |
 | 9b | Session / countdown / penalty / lap bridge | **Done** |
+| 10 | Client interpolation + single-path policy | **Done** |
 
-## ksnet complete path
+## Multiplayer stack
 
 | Component | Role |
 |-----------|------|
-| `src/core/engine/Network/ksnet` | Reliable-UDP transport |
-| `NetworkConfig.h` | Messages: join/welcome/state/spawn/input/chat/session/penalty |
-| `NetworkLowLevel_*.inc` | Client handlers + server broadcasts + spawn grid replay |
-| `NetworkManager` | Host 20 Hz car-state, public broadcast API, client callbacks |
-| `SimulationLoop_FeatureTick.inl` | Host bridge: RaceSession → ksnet session/countdown/penalty |
-| `SimulationLoop_NetSync.cpp` | Dual path: ksnet + CarStateSync UDP |
-| Qt-free `SimulatorApp` | Links `ksnet` (`HAS_KSNET=1`) |
+| `ksnet` | Reliable-UDP transport |
+| `NetworkLowLevel_*` | Join/spawn/state/chat/session handlers |
+| `NetworkManager` | Host 20 Hz + **RemoteCarInterpolator** (100 ms delay) |
+| `RemoteCarInterpolator.h` | Snapshot ring buffer, lerp pos/rot/controls, limited extrapolate |
+| `SimulationLoop_NetSync` | **XOR**: ksnet active ⇒ stop CarStateSync; else UDP fallback |
+| `FeatureTick` | Host session/penalty/countdown/lap → ksnet |
 
-## Optional (P2+)
+### Tuning
+
+```cpp
+m_network->setInterpolationDelay(0.10); // seconds behind latest snapshot
+```
+
+## Optional (P1–P2)
 
 | Item | Notes |
 |------|-------|
-| Wire encryption / token auth | Today: LAN `InsecureConnect` |
-| Cloud matchmaking | LAN discovery port 20779 |
+| `MSG_CAR_DAMAGE` / `MSG_CAR_SETUP` on wire | Enum present, handlers TBD |
+| Client prediction + reconciliation | Own car only |
+| Wire encryption / token auth | LAN `InsecureConnect` today |
+| Multiplayer UI widget | Discovery exists; dedicated UI optional |
+| Dedicated server + reconnect | `tools/ks_server` scaffold |
 
 ## Restore SimulationLoop
 
 ```bash
 bash tools/restore_simloop.sh
-# or cmake -B build -DKSIMULATOR_QT_FREE=ON
+cmake -B build -DKSENGINE_QT_FREE=ON -DKSIMULATOR_QT_FREE=ON
 ```
-
-Vedi `docs/PARITY_STATUS.md`.

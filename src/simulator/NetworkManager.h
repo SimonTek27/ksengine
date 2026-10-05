@@ -1,13 +1,16 @@
 #pragma once
 
 #include "NetworkLowLevel.h"
-#include "RemoteCarInterpolator.h"
 #include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 #include <functional>
+
+#if HAS_KSNET
+#include "RemoteCarInterpolator.h"
+#endif
 
 namespace ks::sim {
 
@@ -44,7 +47,6 @@ public:
     void broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid);
     void broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason);
 
-    /** Client interpolation delay (seconds). Default 0.10. */
     void setInterpolationDelay(double sec);
     double interpolationDelay() const;
     RemoteCarInterpolator& interpolator() { return m_interp; }
@@ -116,7 +118,7 @@ private:
     static constexpr double STATE_SEND_HZ = 20.0;
 
     RemoteCarInterpolator m_interp;
-    double m_clock = 0.0; // local monotonic seconds for interp
+    double m_clock = 0.0;
 };
 
 #else // !HAS_KSNET
