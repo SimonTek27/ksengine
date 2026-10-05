@@ -1,3 +1,5 @@
+#include "NetworkAuth.h"
+
 NetworkServer::NetworkServer() {}
 
 NetworkServer::~NetworkServer() {
@@ -92,6 +94,16 @@ void NetworkServer::processMessages() {
                                 auto* reply = (ProtocolMismatchMessage*)m_server->CreateMessage(ci, MSG_PROTOCOL_MISMATCH);
                                 if (reply) m_server->SendMessage(ci, CHANNEL_RELIABLE, reply);
                             }
+                        } else if (m_authRequired &&
+                                   !tokenEquals(join->authToken, m_authToken.c_str())) {
+                            if (m_server->CanSendMessage(ci, CHANNEL_RELIABLE)) {
+                                auto* fail = (AuthFailedMessage*)m_server->CreateMessage(ci, MSG_AUTH_FAILED);
+                                if (fail) {
+                                    strncpy(fail->reason, "Invalid auth token", sizeof(fail->reason) - 1);
+                                    m_server->SendMessage(ci, CHANNEL_RELIABLE, fail);
+                                }
+                            }
+                            m_server->DisconnectClient(ci);
                         } else {
                             m_clients[ci].connected = true;
                             m_clients[ci].driverName = std::string(join->driverName);
@@ -155,4 +167,3 @@ void NetworkServer::processMessages() {
         }
     }
 }
-
