@@ -1,6 +1,5 @@
-# ksnet — minimal reliable-UDP multiplayer transport (roadmap 3.1).
-# Provides the yojimbo-compatible API surface used by src/simulator
-# (NetworkConfig.h / NetworkLowLevel.cpp) via the public header ksnet.h.
+# ksnet — KS Engine reliable-UDP multiplayer transport.
+# Public header ksnet.h is consumed by src/simulator (NetworkConfig / NetworkLowLevel).
 cmake_minimum_required(VERSION 3.16)
 
 add_library(ksnet STATIC
@@ -22,3 +21,8 @@ if(WIN32)
 endif()
 
 set_target_properties(ksnet PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+# Compatibility alias for older CMake that still link Yojimbo::yojimbo
+if(NOT TARGET Yojimbo::yojimbo)
+    add_library(Yojimbo::yojimbo ALIAS ksnet)
+endif()
