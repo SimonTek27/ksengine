@@ -10,6 +10,7 @@
 
 #if HAS_KSNET
 #include "RemoteCarInterpolator.h"
+#include "NetworkDamageSetupBridge.h"
 #endif
 
 namespace ks::sim {
@@ -46,6 +47,11 @@ public:
     void broadcastRaceCountdown(int seconds);
     void broadcastLapTime(uint32_t carId, int lapNumber, double lapTime, double s1, double s2, double s3, bool valid);
     void broadcastPenalty(uint32_t carId, uint8_t penaltyType, float value, const std::string& reason);
+    void broadcastCarDamage(const net::CarDamageMessage& msg);
+    void broadcastCarSetup(const net::CarSetupMessage& msg);
+    void broadcastCarCollision(const net::CarCollisionMessage& msg);
+    void publishDamage(uint32_t carId, const ks::physics::DamageSystem& dmg);
+    void publishSetup(uint32_t carId, const SetupData& setup);
 
     void setInterpolationDelay(double sec);
     double interpolationDelay() const;
@@ -75,13 +81,15 @@ public:
 
     std::function<void(uint32_t, const std::string&, uint32_t)> onRemoteCarSpawned;
     std::function<void(uint32_t)> onRemoteCarDespawned;
-    /** Delivered each frame with *interpolated* state (not raw network ticks). */
     std::function<void(uint32_t, const net::CarStateData&)> onRemoteCarStateReceived;
 
     std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateReceived;
     std::function<void(int)> onRaceCountdownReceived;
     std::function<void(uint32_t, uint32_t, double, double, double, double, bool)> onLapTimeReceived;
     std::function<void(uint32_t, uint8_t, float, const std::string&)> onPenaltyReceived;
+    std::function<void(const net::CarDamageMessage&)> onCarDamageReceived;
+    std::function<void(const net::CarSetupMessage&)> onCarSetupReceived;
+    std::function<void(const net::CarCollisionMessage&)> onCarCollisionReceived;
 
     std::function<void(const net::NetworkStats&)> onStatsUpdated;
     std::function<void(const std::vector<std::string>&)> onPlayerListUpdated;
