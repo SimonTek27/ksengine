@@ -1111,20 +1111,40 @@ void SimulationLoop::tick() {
     broadcastLocalCarState();
     if (m_network) m_network->update(elapsed);
 #if HAS_VEHICLE_SIM
-    // Roadmap 2.5: hand the mixer the same vehicle snapshot the HUD reads.
-    // Signals the vehicle does not model yet (slip, brake temperature, boost)
-    // are passed as zero instead of being faked, so skid/brake/turbo layers
-    // simply stay quiet until real telemetry reaches them.
+    // Roadmap 1.1: hand the mixer the same vehicle snapshot the HUD reads.
+    // The per-wheel telemetry the mixer needs exists since the milliken
+    // G-package: slip ratio/angle drive the skid layer, the hottest brake
+    // disc scales the squeal layer, cosmetic damage feeds the bodywork
+    // rattle. Boost stays zero (VehicleSimulator does not step the
+    // EngineModel instance), so the turbo layer remains silent until a
+    // real boost signal exists — signals are never faked.
     if (m_audio && m_vehicle) {
         const auto ast = m_vehicle->getState();
         const float wetness = m_weather.trackWetness;
+        float slipRatio = 0.f, brakeTemp = 0.f;
+        for (int w = 0; w < 4; ++w) {
+            slipRatio = std::max(
+                slipRatio, std::abs(static_cast<float>(m_vehicle->slipRatio(w))));
+            brakeTemp = std::max(brakeTemp, m_vehicle->brakes().discTemp(w));
+        }
+        const auto& ffb = m_vehicle->ffbSample();
+        const float slipAngle = std::max(
+            {std::abs(ffb.slipAngleFL), std::abs(ffb.slipAngleFR),
+             std::abs(ast.sideslipBeta)});
+        const float bodyDamage = m_vehicle->damage().cosmeticDamage();
+        // Surface: wet wins; otherwise a large grip deficit means the car
+        // left the racing surface (TrackSurface has no per-position
+        // material id, but tires already consume its mu as effectiveMu).
+        SimulatorAudio::SurfaceType surf = SimulatorAudio::SurfaceType::Asphalt;
+        if (wetness > 0.6f)
+            surf = SimulatorAudio::SurfaceType::Wet;
+        else if (ast.effectiveMu < 0.8f)
+            surf = SimulatorAudio::SurfaceType::Grass;
         m_audio->updatePhysics(
             static_cast<float>(m_vehicle->rpm()), ast.throttle, ast.brake,
             static_cast<float>(ast.speed), ast.steering, m_vehicle->currentGear(),
-            false, 0.0f, 0.0f,
-            wetness > 0.6f ? SimulatorAudio::SurfaceType::Wet
-                           : SimulatorAudio::SurfaceType::Asphalt,
-            0.0f, 0.0f, 0.0f, static_cast<float>(ast.speed), wetness,
+            false, slipRatio, slipAngle, surf, bodyDamage, brakeTemp,
+            0.0f, static_cast<float>(ast.speed), wetness,
             m_weather.rainIntensity, static_cast<float>(elapsed));
     }
 #endif

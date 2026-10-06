@@ -55,8 +55,22 @@ public:
     SimulatorAudio();
     ~SimulatorAudio();
 
-    bool initialize();
+    /**
+     * withOutput=true (default) opens the WASAPI render device and starts the
+     * callback thread; a failed device open returns false (headless runs stay
+     * silent). withOutput=false initializes headless: the mixer and the synth
+     * fully work through renderOffline() without touching any device — used
+     * by tests and machines without an output device.
+     */
+    bool initialize(bool withOutput = true);
     void shutdown();
+
+    /**
+     * Render one block on the caller's thread through the same path the
+     * WASAPI callback uses (also the headless entry point).
+     */
+    void renderOffline(float* output, int frames, int channels = 2,
+                       int sampleRate = 44100);
 
     bool loadCarAudio(const std::string& carDirectory);
     bool loadBank(const std::string& bankPath);

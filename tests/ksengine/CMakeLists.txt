@@ -257,3 +257,22 @@ if(TARGET ks_tracktool)
     add_test(NAME track_tool_usage COMMAND ks_tracktool)
     set_tests_properties(track_tool_usage PROPERTIES WILL_FAIL TRUE)
 endif()
+
+# Roadmap 1.1 "audio base": offline render test for SimulatorAudio. Runs
+# headless through initialize(false) + renderOffline(), so no WASAPI device
+# is needed; the synth fallback covers a missing car audio pack.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
+    add_executable(test_audio_render
+        test_audio_render.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
+    target_include_directories(test_audio_render PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(test_audio_render PRIVATE ksengine)
+    add_test(NAME test_audio_render COMMAND test_audio_render)
+endif()

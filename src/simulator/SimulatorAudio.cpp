@@ -86,15 +86,17 @@ static WavFile loadWav(const std::string& path)
 SimulatorAudio::SimulatorAudio() = default;
 SimulatorAudio::~SimulatorAudio() { shutdown(); }
 
-bool SimulatorAudio::initialize()
+bool SimulatorAudio::initialize(bool withOutput)
 {
     if (m_initialized) return true;
 
-    m_wasapi = std::make_unique<WASAPIOutput>();
-    if (!m_wasapi->initialize(0, 2, MIX_BUFFER_MS)) {
-        printf("SimulatorAudio: WASAPIOutput initialize failed\n");
-        m_wasapi.reset();
-        return false;
+    if (withOutput) {
+        m_wasapi = std::make_unique<WASAPIOutput>();
+        if (!m_wasapi->initialize(0, 2, MIX_BUFFER_MS)) {
+            printf("SimulatorAudio: WASAPIOutput initialize failed\n");
+            m_wasapi.reset();
+            return false;
+        }
     }
 
     m_mixer = std::make_unique<AudioMixer>();
@@ -115,17 +117,27 @@ bool SimulatorAudio::initialize()
     m_mixer->addChannel("wiper");
     m_mixer->addChannel("csp_skid");
 
-    m_wasapi->setRenderCallback([this](float* output, int frames, const AudioFormat& fmt) {
-        std::lock_guard<std::mutex> lock(m_stateMutex);
-        renderAudio(output, frames, fmt.channels, fmt.sampleRate);
-    });
+    if (withOutput) {
+        m_wasapi->setRenderCallback([this](float* output, int frames, const AudioFormat& fmt) {
+            std::lock_guard<std::mutex> lock(m_stateMutex);
+            renderAudio(output, frames, fmt.channels, fmt.sampleRate);
+        });
 
-    m_wasapi->start();
+        m_wasapi->start();
+    }
 
     m_initialized = true;
-    printf("SimulatorAudio: Initialized with WASAPIOutput + AudioMixer (%d channels)\n",
+    printf("SimulatorAudio: Initialized with %s + AudioMixer (%d channels)\n",
+           withOutput ? "WASAPIOutput" : "headless render",
            m_mixer->channelCount());
     return true;
+}
+
+void SimulatorAudio::renderOffline(float* output, int frames, int channels, int sampleRate)
+{
+    if (!m_initialized || !m_mixer || !output || frames <= 0) return;
+    std::lock_guard<std::mutex> lock(m_stateMutex);
+    renderAudio(output, frames, channels, sampleRate);
 }
 
 void SimulatorAudio::shutdown()
@@ -421,6 +433,45 @@ void SimulatorAudio::generateSynthSfx(SfxSample& sfx, SoundCategory cat, int sam
             sig = (std::fmod(t * 800.0f, 1.0f) * 2.0f - 1.0f) * 0.02f * (0.5f + 0.5f * std::sin(t * 0.5f * 6.2831853f));
             break;
         }
+        // Skid categories (roadmap 1.1): without them the skid layer stays
+        // completely silent whenever the car has no sound bank — the most
+        // important driving feedback after the engine. Frequencies are
+        // generated at half the target because the loop writes interleaved
+        // stereo with t = i / sampleRate (content plays back 2x).
+        case SoundCategory::SkidAsphalt: {
+            // Screech: bright broadband noise with a slow warble.
+            float n1 = std::fmod(t * 675.0f + std::sin(t * 11.0f) * 17.0f, 1.0f) * 2.0f - 1.0f;
+            float n2 = std::fmod(t * 890.0f + std::sin(t * 7.0f) * 23.0f, 1.0f) * 2.0f - 1.0f;
+            sig = (n1 * 0.6f + n2 * 0.4f) * 0.18f * (0.6f + 0.4f * std::sin(t * 4.5f * 6.2831853f));
+            break;
+        }
+        case SoundCategory::SkidWet: {
+            // Hiss: flat high-frequency wash over water.
+            float n1 = std::fmod(t * 1000.0f + std::sin(t * 13.0f) * 31.0f, 1.0f) * 2.0f - 1.0f;
+            float n2 = std::fmod(t * 1375.0f, 1.0f) * 2.0f - 1.0f;
+            sig = (n1 + n2) * 0.5f * 0.12f * (0.7f + 0.3f * std::sin(t * 2.5f * 6.2831853f));
+            break;
+        }
+        case SoundCategory::SkidGrass: {
+            // Soft swish: mid-band noise, gentle amplitude.
+            float n1 = std::fmod(t * 325.0f + std::sin(t * 6.0f) * 13.0f, 1.0f) * 2.0f - 1.0f;
+            sig = n1 * 0.12f * (0.5f + 0.5f * std::sin(t * 1.5f * 6.2831853f));
+            break;
+        }
+        case SoundCategory::SkidGravel: {
+            // Crunch: mid noise plus granular impacts.
+            float n1 = std::fmod(t * 425.0f + std::sin(t * 9.0f) * 19.0f, 1.0f) * 2.0f - 1.0f;
+            float grain = std::fmod(t * 18.5f, 1.0f);
+            float impact = grain < 0.15f ? (1.0f - grain * 6.0f) : 0.0f;
+            sig = n1 * 0.10f + impact * 0.12f * std::sin(t * 110.0f * 6.2831853f);
+            break;
+        }
+        case SoundCategory::SkidKerb: {
+            // Kerb ripple: strong periodic bumps.
+            float bump = std::fmod(t * 12.0f, 1.0f);
+            sig = (bump * 2.0f - 1.0f) * 0.2f * (0.5f + 0.5f * std::sin(t * 1.0f * 6.2831853f));
+            break;
+        }
         default:
             break;
         }
@@ -707,11 +758,16 @@ void SimulatorAudio::renderGearShift(float* output, int frames, int channels, in
     if (sfx.samples.empty()) return;
 
     float env = std::min(1.0f, m_gearShiftTimer * 4.0f);
-    float t = m_time.load();
+    // One-shot: play from the start of the sample on every shift. Indexing
+    // by the global clock (m_time) landed on an arbitrary — often silent —
+    // part of the loop, so most shift ticks were inaudible.
+    const float start = 0.5f - m_gearShiftTimer;
+    const int totalFrames = static_cast<int>(sfx.samples.size()) / sfx.channels;
+    if (totalFrames <= 0) return;
 
     for (int i = 0; i < frames; ++i) {
-        float time = t + (float)i / (float)sampleRate;
-        int pos = static_cast<int>(time * sfx.sampleRate) % (static_cast<int>(sfx.samples.size()) / sfx.channels);
+        const float sampleTime = start + (float)i / (float)sampleRate;
+        int pos = static_cast<int>(sampleTime * (float)sfx.sampleRate) % totalFrames;
         for (int ch = 0; ch < channels; ++ch) {
             int idx = (pos * sfx.channels + ch) % static_cast<int>(sfx.samples.size());
             output[i * channels + ch] = sfx.samples[idx] * env;
