@@ -38,6 +38,7 @@ function(_ks_add_lobby_tool _name _file)
   endif()
   set_target_properties(${_name} PROPERTIES
     OUTPUT_NAME "${_name}"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     CXX_STANDARD 17
     CXX_STANDARD_REQUIRED ON)
   message(STATUS "${_name} configured: ${_src}")

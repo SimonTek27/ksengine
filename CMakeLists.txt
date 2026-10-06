@@ -257,6 +257,11 @@ if(KS_QT_FREE_BUILD)
 				RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 		endif()
 	endforeach()
+	# Hosted matchmaking lobby (PARITY_STATUS "Still open"): kslobby server +
+	# kslobby-cli client, Qt-free sockets only. The fragment defines
+	# _ks_add_lobby_tool() and creates both targets (skips gracefully if the
+	# sources are absent).
+	include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeLists_LobbyServer.cmake")
 	if(KSIMULATOR_QT_FREE)
 		include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeLists_ksimulator_QtFree.cmake")
 	endif()

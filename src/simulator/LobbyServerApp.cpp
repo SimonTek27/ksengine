@@ -410,6 +410,13 @@ void handleClient(Sock sock, Registry& reg)
         if (host.empty()) host = extractJsonString(body, "host");
         if (portStr.empty()) portStr = std::to_string(extractJsonInt(body, "port", 0));
         uint16_t port = static_cast<uint16_t>(std::atoi(portStr.c_str()));
+        if (host.empty()) {
+            // --host is optional on kslobby-cli: identify the registrant by
+            // its TCP peer address, exactly like POST does when "host" is
+            // omitted. (An explicit public --host still needs to be passed.)
+            const std::string peer = peerIp(sock);
+            if (!peer.empty()) host = peer;
+        }
         if (host.empty() || port == 0) {
             response = httpResponse(400, "Bad Request", "{\"ok\":false,\"error\":\"host and port required\"}");
         } else {
