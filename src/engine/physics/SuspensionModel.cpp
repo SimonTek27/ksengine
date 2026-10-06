@@ -35,6 +35,7 @@ float SuspensionModel::lut(const std::vector<std::pair<float, float>>& c, float 
 }
 
 float SuspensionModel::springForceAt(float compression) const {
+    // compression > 0: spring pushes up
     return m_spring.rate * (compression + m_spring.preload) * m_geom.motionRatio;
 }
 
@@ -46,10 +47,13 @@ float SuspensionModel::damperForceAt(float velocity) const {
         return rate * velocity;
     }
     float rate = ((-velocity) > m_damper.reboundThreshold) ? m_damper.fastReboundRate : m_damper.reboundRate;
-    return rate * velocity;
+    return rate * velocity; // velocity negative on rebound
 }
 
 float SuspensionModel::bumpStopAt(float compression) const {
+    float gap = m_damper.bumpThreshold; // misuse gap from spring
+    float excess = compression - (m_spring.staticRideHeight - m_spring.bumpStopGap);
+    // better: travel into bump stop
     float into = compression - m_spring.bumpStopGap;
     if (into <= 0.0f) return 0.0f;
     return m_spring.bumpStopRate * into;
@@ -63,15 +67,19 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
     const float halfTf = m_geom.frontTrackWidth * 0.5f;
     const float halfTr = m_geom.rearTrackWidth * 0.5f;
 
+    // Static + aero + weight transfer targets (desired normal loads)
     float W = mass * g;
-    float Fzf = 0.5f * W * 0.5f + aeroDownforceFront * 0.5f;
+    float Fzf = 0.5f * W * 0.5f + aeroDownforceFront * 0.5f; // per front wheel base
     float Fzr = 0.5f * W * 0.5f + aeroDownforceRear * 0.5f;
+    // long transfer: ax positive accel -> load to rear
     float longT = (mass * longAccel * halfWb) / std::max(m_geom.wheelBase, 0.1f);
     Fzf -= longT * 0.5f;
     Fzr += longT * 0.5f;
+    // lat transfer
     float latTf = (mass * lateralAccel * halfTf) / std::max(m_geom.frontTrackWidth, 0.1f);
     float latTr = (mass * lateralAccel * halfTr) / std::max(m_geom.rearTrackWidth, 0.1f);
 
+    // Target loads FL FR RL RR
     float targets[4] = {
         std::max(200.0f, Fzf - latTf),
         std::max(200.0f, Fzf + latTf),
@@ -79,6 +87,7 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
         std::max(200.0f, Fzr + latTr)
     };
 
+    // ARB
     float frontARB = 0.0f, rearARB = 0.0f;
     if (m_damper.antiRollBarEnabled) {
         frontARB = (m_corners[1].compression - m_corners[0].compression) * m_damper.antiRollBarStiffness * 0.5f;
@@ -87,6 +96,7 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
 
     for (int i = 0; i < 4; ++i) {
         auto& c = m_corners[i];
+        // Simple mass-spring: force deficit drives compression
         float arb = 0.0f;
         if (i == 0) arb = -frontARB;
         if (i == 1) arb = frontARB;
@@ -98,11 +108,13 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
         float bumpF = bumpStopAt(c.compression);
         float totalUp = springF + dampF + bumpF + arb;
 
+        // Unbalanced force on corner sprung mass ~ mass/4
         float mCorner = mass * 0.25f;
         float net = targets[i] - totalUp - mCorner * chassisAccZ;
+        // integrate compression (positive when loaded more)
         float acc = net / std::max(mCorner, 1.0f);
         c.velocity += acc * dt;
-        c.velocity *= (1.0f - 0.05f * dt);
+        c.velocity *= (1.0f - 0.05f * dt); // light numerical damping
         c.compression += c.velocity * dt;
         c.compression = std::clamp(c.compression, -0.05f, 0.15f);
 
@@ -115,7 +127,7 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
         if (!m_damper.camberCurve.empty())
             c.camberDeg = lut(m_damper.camberCurve, c.compression);
         else
-            c.camberDeg = -1.0f - c.compression * 20.0f;
+            c.camberDeg = -1.0f - c.compression * 20.0f; // gain rough
     }
 }
 

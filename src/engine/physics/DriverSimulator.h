@@ -1,5 +1,10 @@
 #pragma once
 
+/**
+ * @file DriverSimulator.h
+ * @brief Driver behavior simulation and input processing — Qt-free
+ */
+
 #include "PhysicsCoreTypes.h"
 #include <algorithm>
 #include <cmath>
@@ -29,10 +34,11 @@ struct ProcessedDriverInput {
     float errorMagnitude = 0.0f;
 };
 
+/** Lightweight driver quality model (was in VehiclePhysicsModels). */
 class DriverModel {
 public:
     DriverState getDriverState() const { return m_state; }
-    float calculateReactionDelay(float) const {
+    float calculateReactionDelay(float /*load*/) const {
         return 0.15f + (1.0f - m_state.focusLevel) * 0.2f + m_state.fatigueLevel * 0.15f;
     }
     float getDriverQuality() const {
@@ -50,17 +56,21 @@ private:
 class DriverSimulator {
 public:
     DriverSimulator() = default;
+    ~DriverSimulator() = default;
+
     void setDriverConfig(const DriverConfig& config) { m_driverConfig = config; }
     DriverState driverState() const { return m_driverModel.getDriverState(); }
 
-    void update(double dt, double, double lateralAccel, double, double) {
+    void update(double dt, double /*speed*/, double lateralAccel,
+                double /*brakingForce*/, double /*corneringLoad*/) {
         m_driverModel.update(static_cast<float>(dt), static_cast<float>(std::abs(lateralAccel) / 10.0));
     }
 
-    ProcessedDriverInput processInput(float rawThrottle, float rawBrake, float rawSteer, double, double) {
+    ProcessedDriverInput processInput(float rawThrottle, float rawBrake, float rawSteer,
+                                      double /*speed*/, double /*targetSpeed*/) {
         ProcessedDriverInput out;
         float err = (1.0f - m_driverConfig.consistency) * 0.05f;
-        out.throttle = std::clamp(rawThrottle, 0.0f, 1.0f);
+        out.throttle = std::clamp(rawThrottle + err * (rawThrottle > 0 ? 1.f : 0.f), 0.0f, 1.0f);
         out.brake = std::clamp(rawBrake, 0.0f, 1.0f);
         out.steer = std::clamp(rawSteer, -1.0f, 1.0f);
         out.reactionDelay = m_driverModel.calculateReactionDelay(0.0f);
@@ -73,11 +83,18 @@ public:
     float fatigueLevel() const { return m_driverModel.getDriverState().fatigueLevel; }
     float focusLevel() const { return m_driverModel.getDriverState().focusLevel; }
     float driverQuality() const { return m_driverModel.getDriverQuality(); }
-    void reset() { m_driverModel.reset(); }
+
+    void reset() {
+        m_driverModel.reset();
+        m_throttleDelay = m_brakeDelay = m_steerDelay = 0.0f;
+    }
 
 private:
     DriverConfig m_driverConfig;
     DriverModel m_driverModel;
+    float m_throttleDelay = 0.0f;
+    float m_brakeDelay = 0.0f;
+    float m_steerDelay = 0.0f;
 };
 
 } // namespace physics

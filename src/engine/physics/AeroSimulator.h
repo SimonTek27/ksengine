@@ -12,11 +12,15 @@
 namespace ks {
 namespace physics {
 
+/**
+ * Per-vehicle aero simulator used by VehiclePhysics / phys_Simulator.
+ * Owns an AeroModelManager and applies forces each physics tick.
+ */
 class AeroSimulator {
 public:
     AeroSimulator() = default;
 
-    void setConfigPreset(const std::string& preset);
+    void setConfigPreset(const std::string& preset); // "sedan"|"gt3"|"formula"|"road"
     void loadFromCarPath(const std::string& carPath);
 
     AeroModelManager& manager() { return m_mgr; }
@@ -34,13 +38,14 @@ public:
 
     struct Output {
         AeroModel::AeroForces forces;
-        PhysVec3 forceWorld;
+        PhysVec3 forceWorld;   // drag + downforce in world
         float frontLoadN = 0.0f;
         float rearLoadN = 0.0f;
     };
 
     Output step(const Input& in) const;
 
+    /** Apply aero forces onto a free body (optional helper). */
     static void applyToBodyForces(PhysVec3& forceAccum, PhysVec3& torqueAccum,
                                   const Output& out, const PhysVec3& cog,
                                   float wheelbase);

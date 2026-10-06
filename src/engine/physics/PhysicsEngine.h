@@ -2,7 +2,10 @@
 
 /**
  * @file PhysicsEngine.h
- * @brief Core physics engine — Qt-free
+ * @brief Core physics engine with rigid body, soft body, and cloth simulation
+ * @copyright KS Physics Engine
+ *
+ * Qt-free. Uses PhysVec3 from PhysicsCoreTypes.h and std::vector / std::function.
  */
 
 #include "PhysicsCoreTypes.h"
@@ -14,6 +17,8 @@
 
 namespace ks {
 namespace physics {
+
+// PhysVec3, Constants, SimulationState: PhysicsCoreTypes.h
 
 struct PhysMat4 {
     float m[16] = {
@@ -32,18 +37,40 @@ struct PhysMat4 {
     void setTranslation(const PhysVec3& t) { m[12] = t.x; m[13] = t.y; m[14] = t.z; }
 };
 
+/// Transform a point by a 4x4 matrix (column-vector convention, translation in m[12..14]).
+inline PhysVec3 operator*(const PhysMat4& mat, const PhysVec3& v) {
+    return {
+        mat.m[0] * v.x + mat.m[4] * v.y + mat.m[8]  * v.z + mat.m[12],
+        mat.m[1] * v.x + mat.m[5] * v.y + mat.m[9]  * v.z + mat.m[13],
+        mat.m[2] * v.x + mat.m[6] * v.y + mat.m[10] * v.z + mat.m[14]
+    };
+}
+
 struct PhysVec4 {
     float x = 0.0f, y = 0.0f, z = 0.0f, w = 1.0f;
     PhysVec4() = default;
     PhysVec4(float x_, float y_, float z_, float w_) : x(x_), y(y_), z(z_), w(w_) {}
 };
 
+// ============================================================================
+// Forward Declarations
+// ============================================================================
+
 class RigidBody;
 class PhysicsWorld;
 class CollisionShape;
 
+// ============================================================================
+// Rigid Body Data
+// ============================================================================
+
 struct RigidBodyData {
-    enum class Type { Static, Dynamic, Kinematic };
+    enum class Type {
+        Static,
+        Dynamic,
+        Kinematic
+    };
+
     Type bodyType = Type::Dynamic;
     float mass = 1.0f;
     float friction = 0.5f;
@@ -52,15 +79,22 @@ struct RigidBodyData {
     float angularDamping = 0.01f;
     bool collisionEnabled = true;
     bool deformationsEnabled = true;
+
     struct CollisionShapeDesc {
-        int shapeType = 1;
+        int shapeType = 1; // Sphere default (see CollisionShape::ShapeType)
         PhysVec3 dimensions{1.0f, 1.0f, 1.0f};
         float radius = 0.5f;
     } collisionShape;
+
     PhysVec3 linearVelocity;
     PhysVec3 angularVelocity;
+
     bool isActive() const { return bodyType != Type::Static; }
 };
+
+// ============================================================================
+// Soft Body / Cloth / Particles
+// ============================================================================
 
 struct SoftBodyConfig {
     float mass = 1.0f;
@@ -83,12 +117,14 @@ struct ClothConfig {
         float mass = 1.0f;
         bool pinned = false;
     };
+
     struct Constraint {
         int vertex1 = 0;
         int vertex2 = 0;
         float restLength = 0.0f;
         float stiffness = 1.0f;
     };
+
     std::vector<Vertex> vertices;
     std::vector<Constraint> constraints;
     float gravity[3] = {0.0f, -9.81f, 0.0f};
@@ -114,8 +150,10 @@ struct ParticleSystemConfig {
         float mass = 1.0f;
         float size = 0.1f;
         PhysVec4 color{1.0f, 1.0f, 1.0f, 1.0f};
+
         bool isAlive() const { return age < lifetime; }
     };
+
     struct Emitter {
         PhysVec3 position;
         PhysVec3 direction;
@@ -125,6 +163,7 @@ struct ParticleSystemConfig {
         enum class Shape { Point, Circle, Sphere, Plane };
         Shape shape = Shape::Point;
     };
+
     struct Physics {
         float gravity[3] = {0.0f, -9.81f, 0.0f};
         float damping = 0.0f;
@@ -132,11 +171,13 @@ struct ParticleSystemConfig {
         bool useWind = false;
         float wind[3] = {0.0f, 0.0f, 0.0f};
     };
+
     std::vector<Particle> particles;
     Emitter emitter;
     Physics physics;
     int maxCount = 1000;
     int lifetime = 100;
+
     void emitParticles(int count);
     void update(float deltaTime);
     void clear();
@@ -162,34 +203,68 @@ struct HairStrandData {
     float clumpFactor = 0.0f;
 };
 
+// ============================================================================
+// Collision Shape
+// ============================================================================
+
 class CollisionShape {
 public:
-    enum ShapeType { Box, Sphere, Capsule, Cylinder, Cone, ConvexHull, Compound };
-    CollisionShape() = default;
-    ~CollisionShape() = default;
+    enum ShapeType {
+        Box,
+        Sphere,
+        Capsule,
+        Cylinder,
+        Cone,
+        ConvexHull,
+        Compound
+    };
+
+    CollisionShape();
+    ~CollisionShape();
+
     CollisionShape(const CollisionShape&) = delete;
     CollisionShape& operator=(const CollisionShape&) = delete;
 
     void setType(ShapeType type) { m_type = type; }
     ShapeType type() const { return m_type; }
+
     void setDimensions(const PhysVec3& dims) { m_dimensions = dims; }
     PhysVec3 dimensions() const { return m_dimensions; }
+
     void setMargin(float margin) { m_margin = margin; }
     float margin() const { return m_margin; }
+
     void setOffset(const PhysVec3& offset) { m_offset = offset; }
     PhysVec3 offset() const { return m_offset; }
+
     void setRadius(float radius) { m_radius = radius; }
     float radius() const { return m_radius; }
+
     void setHeight(float height) { m_height = height; }
     float height() const { return m_height; }
+
     void setLocalScaling(const PhysVec3& scale) { m_localScaling = scale; }
     PhysVec3 localScaling() const { return m_localScaling; }
+
     void setConvexHullPoints(const std::vector<PhysVec3>& points) { m_hullPoints = points; }
     const std::vector<PhysVec3>& convexHullPoints() const { return m_hullPoints; }
+
     float computeVolume() const;
     PhysVec3 computeInertia() const;
 
+    /// Broad/narrow-phase overlap test between two transformed shapes.
+    bool intersects(const CollisionShape& other,
+                    const PhysMat4& transformA,
+                    const PhysMat4& transformB) const;
+
 private:
+    bool intersectsBox(const CollisionShape& other,
+                       const PhysMat4& transformA,
+                       const PhysMat4& transformB) const;
+    bool intersectsSphere(const CollisionShape& other,
+                          const PhysMat4& transformA,
+                          const PhysMat4& transformB) const;
+
     ShapeType m_type = Sphere;
     PhysVec3 m_dimensions{1.0f, 1.0f, 1.0f};
     PhysVec3 m_offset;
@@ -200,38 +275,51 @@ private:
     std::vector<PhysVec3> m_hullPoints;
 };
 
+// ============================================================================
+// Rigid Body
+// ============================================================================
+
 class RigidBody {
 public:
-    RigidBody() = default;
-    ~RigidBody() = default;
+    RigidBody();
+    ~RigidBody();
+
     RigidBody(const RigidBody&) = delete;
     RigidBody& operator=(const RigidBody&) = delete;
 
     void setMass(float mass) { m_mass = mass; }
     float mass() const { return m_mass; }
+
     void setInertia(const PhysVec3& inertia) { m_inertia = inertia; }
     PhysVec3 inertia() const { return m_inertia; }
+
     void setPosition(const PhysVec3& pos) {
         m_position = pos;
         if (onPositionChanged) onPositionChanged();
     }
     PhysVec3 position() const { return m_position; }
+
     void setRotation(const PhysVec3& euler) { m_rotation = euler; }
     PhysVec3 rotation() const { return m_rotation; }
+
     void setTransform(const PhysMat4& transform);
     PhysMat4 transform() const;
+
     void setVelocity(const PhysVec3& vel) {
         m_velocity = vel;
         if (onVelocityChanged) onVelocityChanged();
     }
     PhysVec3 velocity() const { return m_velocity; }
+
     void setAngularVelocity(const PhysVec3& angVel) { m_angularVelocity = angVel; }
     PhysVec3 angularVelocity() const { return m_angularVelocity; }
 
     void applyForce(const PhysVec3& force, const PhysVec3& point = PhysVec3{});
     void applyImpulse(const PhysVec3& impulse, const PhysVec3& point = PhysVec3{});
     void applyTorque(const PhysVec3& torque);
+
     void clearForces();
+
     void integrate(float dt);
     void integratePosition(float dt);
     void integrateVelocity(float dt);
@@ -242,17 +330,23 @@ public:
 
     void setCollisionShape(CollisionShape* shape) { m_collisionShape = shape; }
     CollisionShape* collisionShape() const { return m_collisionShape; }
+
     void setRestitution(float restitution) { m_restitution = restitution; }
     float restitution() const { return m_restitution; }
+
     void setFriction(float friction) { m_friction = friction; }
     float friction() const { return m_friction; }
+
     void setStatic(bool isStatic) { m_isStatic = isStatic; }
     bool isStatic() const { return m_isStatic; }
+
     void setKinematic(bool isKinematic) { m_isKinematic = isKinematic; }
     bool isKinematic() const { return m_isKinematic; }
+
     void setActive(bool active) { m_isActive = active; }
     bool isActive() const { return m_isActive; }
 
+    // Callbacks (replace Qt signals)
     std::function<void()> onPositionChanged;
     std::function<void()> onVelocityChanged;
     std::function<void(RigidBody* other, const PhysVec3& point, const PhysVec3& normal)> onCollisionDetected;
@@ -274,20 +368,33 @@ private:
     CollisionShape* m_collisionShape = nullptr;
 };
 
+// ============================================================================
+// Physics World
+// ============================================================================
+
 class PhysicsWorld {
 public:
-    enum class BroadphaseType { Simple, SAP, DBVT };
-    PhysicsWorld() = default;
+    enum class BroadphaseType {
+        Simple,
+        SAP,
+        DBVT
+    };
+
+    PhysicsWorld();
     ~PhysicsWorld();
+
     PhysicsWorld(const PhysicsWorld&) = delete;
     PhysicsWorld& operator=(const PhysicsWorld&) = delete;
 
     void setGravity(const PhysVec3& gravity) { m_gravity = gravity; }
     PhysVec3 gravity() const { return m_gravity; }
+
     void setSolverIterations(int iterations) { m_solverIterations = iterations; }
     int solverIterations() const { return m_solverIterations; }
+
     void setFixedTimeStep(float dt) { m_fixedTimeStep = dt; }
     float fixedTimeStep() const { return m_fixedTimeStep; }
+
     void setBroadphase(BroadphaseType type) { m_broadphaseType = type; }
     BroadphaseType broadphase() const { return m_broadphaseType; }
 
@@ -318,6 +425,7 @@ public:
     void setDebugMode(bool enabled) { m_debugMode = enabled; }
     bool debugMode() const { return m_debugMode; }
 
+    // Callbacks (replace Qt signals)
     std::function<void()> onStepCompleted;
     std::function<void(RigidBody* bodyA, RigidBody* bodyB, const PhysVec3& point, const PhysVec3& normal)> onCollisionDetected;
     std::function<void(RigidBody* body)> onBodyAdded;
@@ -346,10 +454,15 @@ private:
     std::vector<BodyBounds> m_bounds;
 };
 
+// ============================================================================
+// ISimulator Interface
+// ============================================================================
+
 class ISimulator {
 public:
     ISimulator() = default;
     virtual ~ISimulator() = default;
+
     ISimulator(const ISimulator&) = delete;
     ISimulator& operator=(const ISimulator&) = delete;
 
@@ -362,9 +475,11 @@ public:
 
     virtual void setTimeMultiplier(float multiplier) { m_timeMultiplier = multiplier; }
     virtual float timeMultiplier() const { return m_timeMultiplier; }
+
     virtual void setDebugMode(bool enabled) { m_debugMode = enabled; }
     virtual bool debugMode() const { return m_debugMode; }
 
+    // Callbacks (replace Qt signals)
     std::function<void(const SimulationState& state)> onStateUpdated;
     std::function<void()> onSimulationStarted;
     std::function<void()> onSimulationStopped;

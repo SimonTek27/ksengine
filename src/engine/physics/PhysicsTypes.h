@@ -2,7 +2,10 @@
 
 /**
  * @file PhysicsTypes.h
- * @brief Additional physics types beyond core types — Qt-free
+ * @brief Additional physics types beyond core types
+ * @copyright KS Physics Engine
+ *
+ * Qt-free. Depends on PhysicsCoreTypes.h (PhysVec3, etc.).
  */
 
 #include "PhysicsCoreTypes.h"
@@ -13,6 +16,23 @@
 
 namespace ks {
 namespace physics {
+
+// ============================================================================
+// Additional Physics Types (beyond core types)
+// ============================================================================
+
+// Note: Core types (WeatherState, SimulationState, WheelState, TireForceData,
+// DamageState, LapTimeEstimate, ValidationMetrics, DriveLayout, TireModelType,
+// TireSlipCurve, IntegrationMethod, DrivingCondition) are defined in
+// PhysicsCoreTypes.h. This file contains additional types that are used by
+// specific physics modules but are not fundamental enough to be in the core
+// types header.
+
+// BrakeConfig is defined in VehiclePhysics.h
+
+// ============================================================================
+// Brake State (extended)
+// ============================================================================
 
 struct BrakeStateExtended {
     float frontBrakeTorque = 0.0f;
@@ -26,6 +46,13 @@ struct BrakeStateExtended {
     float slipRatioFront = 0.0f;
     float slipRatioRear = 0.0f;
 };
+
+// AeroForcesAdvanced, WingConfig, DiffuserConfig, SuspensionGeometry, WeightTransferResult
+// are defined in VehiclePhysics.h
+
+// ============================================================================
+// Track Layout
+// ============================================================================
 
 struct TrackSector {
     std::string name;
@@ -81,6 +108,10 @@ struct TrackLayout {
     };
     std::vector<SurfaceSection> surfaceSections;
 };
+
+// ============================================================================
+// Track Session State
+// ============================================================================
 
 struct TrackSessionState {
     enum class SessionType { Practice, Qualifying, Race, TimeAttack, Test, Hotlap };

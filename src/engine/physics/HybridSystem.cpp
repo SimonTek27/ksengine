@@ -1,7 +1,7 @@
 #include "HybridSystem.h"
 
-// HybridSystem is header-only (Qt-free). This TU replaces the legacy
-// Qt HybridSystem.cpp so CMake GLOB does not pull QString/QtMath.
+// HybridSystem is header-only (Qt-free). This TU exists so CMake GLOB links
+// a non-Qt translation unit instead of any legacy Qt HybridSystem.cpp.
 namespace ks {
 namespace physics {
 // intentionally empty

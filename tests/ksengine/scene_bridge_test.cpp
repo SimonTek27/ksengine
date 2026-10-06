@@ -129,7 +129,10 @@ int main() {
     // --- ks_engine_get_state completion (declared fields now filled) -----
     KS_CHECK(std::isfinite(st.yaw));
     KS_CHECK_NEAR(st.fuel_l, 100.0f, 1.0f);
-    KS_CHECK_NEAR(st.tyre_temp_fl, 30.0f, 1.0f);
+    // Tyre temps are filled from the vehicle state (init 30 degC); G12's
+    // thermal model evolves them while driving, so assert the field carries a
+    // physically plausible value rather than the exact init constant.
+    KS_CHECK(st.tyre_temp_fl >= 15.0f && st.tyre_temp_fl <= 140.0f);
 
     ks_engine_destroy(eng);
     return KS_TEST_RESULT("scene_bridge");

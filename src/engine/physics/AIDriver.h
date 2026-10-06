@@ -37,6 +37,9 @@ struct AIOutput {
     float steer = 0;
 };
 
+/**
+ * Simple path-following AI — Qt-free.
+ */
 class AIDriver {
 public:
     void setPath(const std::vector<AITarget>& path) {
@@ -55,6 +58,7 @@ public:
         const AITarget& tp = m_path[static_cast<size_t>(look)];
 
         AIVec3 toT = tp.pos - in.pos;
+        float dist = toT.length();
         float targetHeading = std::atan2(toT.x, toT.z);
         float headingErr = targetHeading - in.heading;
         while (headingErr > 3.14159f) headingErr -= 6.28318f;
@@ -62,6 +66,7 @@ public:
         out.steer = std::clamp(headingErr * 1.5f, -1.0f, 1.0f);
 
         float desired = tp.speed;
+        // obstacle slowdown
         AIVec3 fwd(std::sin(in.heading), 0, std::cos(in.heading));
         for (const auto& o : m_obstacles) {
             AIVec3 d = o - in.pos;
@@ -81,6 +86,7 @@ public:
             out.brake = std::clamp(-speedErr * 0.2f, 0.0f, 1.0f);
             out.throttle = 0;
         }
+        (void)dist;
         return out;
     }
 

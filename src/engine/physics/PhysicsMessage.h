@@ -1,9 +1,13 @@
 #pragma once
+/**
+ * Physics message bus — Qt-free (std::string / PhysVec3).
+ */
 #include "PhysicsCoreTypes.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <cstdint>
 
 namespace ks {
 namespace physics {
@@ -44,6 +48,7 @@ using MessageHandler = std::function<void(const PhysicsMessage&)>;
 class PhysicsMessageBus {
 public:
     static PhysicsMessageBus& instance();
+
     void subscribe(const std::string& messageType, MessageHandler handler);
     void subscribe(MessageType type, MessageHandler handler);
     void publish(const PhysicsMessage& message);

@@ -3,6 +3,9 @@
 /**
  * @file phys_Simulator.h
  * @brief High-level vehicle physics facade — Qt-free
+ *
+ * Integrates AeroSimulator and a simplified longitudinal model.
+ * VehicleSimulator (VehiclePhysics) can be wired later when that module is Qt-free.
  */
 
 #include "PhysicsCoreTypes.h"
@@ -26,6 +29,10 @@
 
 namespace ks {
 
+/**
+ * Singleton-style simulator used by tools / editor / runtime.
+ * Not a QObject: use std::function callbacks instead of signals.
+ */
 class phys_Simulator {
 public:
     static phys_Simulator* instance();
@@ -36,6 +43,7 @@ public:
     void startSimulation();
     void stopSimulation();
     void reset();
+    /** Advance physics by dt seconds (call from your tick). */
     void update(double dt);
 
     void setThrottle(double value);
@@ -147,6 +155,7 @@ public:
         const std::vector<double>& refBrake,
         const std::vector<double>& refSteering) const;
 
+    /** Access integrated aero stack. */
     physics::AeroSimulator& aero() { return m_aero; }
     const physics::AeroSimulator& aero() const { return m_aero; }
 
@@ -180,8 +189,10 @@ public:
     const physics::ChassisSimulator& chassis() const { return m_chassis; }
     physics::TrackSurface& trackSurface() { return physics::TrackSurface::instance(); }
 
+    /** Optional leader position for draft (nullptr = none). */
     void setDraftLeader(const physics::PhysVec3* leaderWorldPos) { m_draftLeader = leaderWorldPos; }
 
+    // Callbacks (replace Qt signals)
     std::function<void(const physics::SimulationState&)> onStateUpdated;
     std::function<void()> onSimulationStarted;
     std::function<void()> onSimulationReset;
@@ -231,7 +242,7 @@ private:
     double m_drsZoneEnd = 0.0;
     double m_drsDragReduction = 0.15;
 
-    physics::DamageState m_damage;
+    physics::DamageState m_damage; // lightweight mirror for API
     physics::DamageSystem m_damageSystem;
     bool m_damageEnabled = true;
     physics::WeatherState m_weather;

@@ -92,11 +92,12 @@ void BrakeWearSystem::updateDiscWear(int wheel, float brakeTorque, float wheelSp
 }
 
 float BrakeWearSystem::calculateBrakeTorque(float pressure, int wheel) const {
+    (void)wheel;
     return pressure * 80.0f * effectiveFriction(wheel);
 }
 
 float BrakeWearSystem::calculateHeatGeneration(float torque, float angularVelocity) const {
-    return std::abs(torque * angularVelocity);
+    return std::abs(torque * angularVelocity); // Watts
 }
 
 float BrakeWearSystem::calculateCooling(int wheel, float speed) const {

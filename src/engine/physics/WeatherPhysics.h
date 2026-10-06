@@ -24,6 +24,10 @@ struct WeatherEffects {
     float airDensity = Constants::DEFAULT_AIR_DENSITY;
 };
 
+/**
+ * Lightweight weather simulator: evolves WeatherState over time and
+ * exposes grip / wind / density for the vehicle loop.
+ */
 class WeatherSimulator {
 public:
     WeatherSimulator() = default;
@@ -41,8 +45,10 @@ public:
     void reset();
     bool isRunning() const { return m_running; }
 
+    /** Advance weather (rain accumulation, track drying, wind). */
     void update(float dt);
 
+    // Presets
     void applyDry();
     void applyLightRain();
     void applyHeavyRain();

@@ -54,6 +54,7 @@ private:
     std::ofstream m_file;
 };
 
+// Compatibility macros (no Qt)
 #define PHYSICS_LOG(level, cat, msg) \
     ::ks::physics::PhysicsLogger::instance().log(::ks::physics::PhysicsLogger::Level::level, cat, msg)
 #define PHYSICS_INFO(cat, msg) PHYSICS_LOG(Info, cat, msg)

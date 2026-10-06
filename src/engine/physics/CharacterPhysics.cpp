@@ -1,4 +1,5 @@
 #include "CharacterPhysics.h"
+#include <cstdio>
 
 namespace ks {
 namespace physics {
@@ -57,6 +58,7 @@ void CharacterSimulator::updatePhysics(double dt) {
 
     m_state.position += m_state.velocity * fdt;
 
+    // Simple ground plane at y=0
     if (m_state.position.y <= 0.0f) {
         m_state.position.y = 0.0f;
         m_state.velocity.y = 0.0f;

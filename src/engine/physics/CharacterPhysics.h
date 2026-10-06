@@ -1,5 +1,9 @@
 #pragma once
 
+/**
+ * Character / driver body kinematics for garage / trackside — Qt-free.
+ */
+
 #include <cmath>
 #include <algorithm>
 #include <functional>

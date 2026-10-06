@@ -36,9 +36,11 @@ void AeroSimulator::applyToBodyForces(PhysVec3& forceAccum, PhysVec3& torqueAccu
                                       float wheelbase) {
     forceAccum += out.forceWorld;
 
+    // Pitch moment from front/rear aero imbalance about CoG (z forward, y up)
     const float halfWb = wheelbase * 0.5f;
-    const float fzFront = -out.frontLoadN;
+    const float fzFront = -out.frontLoadN; // downforce negative Y
     const float fzRear = -out.rearLoadN;
+    // Moment about X (pitch): rear downforce positive nose-up if z+ forward... simplified
     torqueAccum.x += (fzRear - fzFront) * halfWb;
 }
 

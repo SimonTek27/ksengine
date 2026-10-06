@@ -15,6 +15,7 @@ void WeatherSimulator::recomputeEffects() {
     m_effects.aquaplaningRisk = m_weather.aquaplaningRisk();
     m_effects.trackGripReduction = m_weather.gripReduction();
     m_effects.airDensity = m_weather.airDensity;
+    // Wind force direction from windDirection degrees (0 = North = -Z)
     float rad = m_weather.windDirection * Constants::DEG_TO_RAD;
     float w = m_weather.windSpeed;
     m_effects.windForceX = std::sin(rad) * w;
@@ -27,6 +28,7 @@ void WeatherSimulator::update(float dt) {
     dt *= m_timeMultiplier;
     dt = std::clamp(dt, 1e-4f, 1.0f);
 
+    // Rain adds wetness; dry slowly
     if (m_weather.rainIntensity > 0.05f) {
         m_weather.trackWetness = std::clamp(
             m_weather.trackWetness + m_weather.rainIntensity * 0.00015f * dt, 0.0f, 1.0f);
@@ -34,8 +36,10 @@ void WeatherSimulator::update(float dt) {
         m_weather.trackWetness = std::max(0.0f, m_weather.trackWetness - 0.002f * dt);
     }
 
+    // Ambient influences track temp slowly
     m_weather.trackTemp += (m_weather.ambientTemp + 5.0f - m_weather.trackTemp) * 0.01f * dt;
 
+    // Density vs temp (ideal gas rough around ISA)
     m_weather.airDensity = Constants::DEFAULT_AIR_DENSITY *
         (288.15f / (273.15f + m_weather.ambientTemp));
 

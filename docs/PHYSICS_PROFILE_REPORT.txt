@@ -1,0 +1,28 @@
+ksphprofile  cars=16  steps=50000  warmup=500
+budget @ 1 kHz: 1000 us/frame total; tire share target << 200 us/car
+
+-- Microbenchmarks --
+  KsTire.calculateForces (warm cache)   iters=  50000  total=    3.58 ms  avg=   0.072 us  min=  67.00 ns  max=27147.00 ns
+  KsTire.calculateForces (cold Fz)      iters=  50000  total=    5.28 ms  avg=   0.106 us  min=  90.00 ns  max=32628.00 ns
+  KsTire.calculateCombinedSlipBatch×4  iters=  50000  total=    9.55 ms  avg=   0.191 us  min= 172.00 ns  max=326850.00 ns
+  TireSimulator::update ×1 cars        iters=  50000  total=   16.64 ms  avg=   0.333 us  min= 313.00 ns  max=44615.00 ns
+  TireSimulator::update ×16 cars       iters=  50000  total=  223.50 ms  avg=   4.470 us  min=4076.00 ns  max=1132145.00 ns
+
+-- 1 kHz budget analysis --
+  TireSimulator::update ×1 cars        avg 0.333 us/step  → 0.0% of 1 ms frame
+  TireSimulator::update ×16 cars       avg 4.470 us/step  → 0.4% of 1 ms frame
+  tire MF batch×4 only             avg 0.191 us  (excl. slip/chassis)
+
+=== PhysicsProfiler report ===
+frames=50000  last=0.001 ms  avg=0.001 ms  fps~0
+
+-- Subsystems --
+name                   total_ms       avg_us     hits
+Tires                    25.562        0.511    50000
+Total                    29.330        0.587    50000
+
+-- Sections --
+name                             total_ms       avg_us     hits
+TireSimulator.update               18.603        0.372    50000
+==============================
+CSV written: /home/workdir/artifacts/physics_hotpath_profile.csv

@@ -2,7 +2,7 @@
 
 /**
  * @file TrackSurface.h
- * @brief Spatial grip / wet / rubber / marbles grid — Qt-free (Sprint 2)
+ * @brief Spatial grip / wet / rubber / marbles grid — Qt-free
  */
 
 #include "PhysicsCoreTypes.h"
@@ -54,6 +54,7 @@ public:
         std::fill(m_temp.begin(), m_temp.end(), t);
     }
 
+    /** Register named surface material grip (ROAD, KERB, GRASS, …). */
     void setMaterialGrip(const std::string& key, float friction) {
         std::string k = key;
         for (char& c : k) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -83,7 +84,7 @@ public:
         s.temperature = temp;
         float base = m_baseGrip;
         if (idx < 0)
-            base = m_offTrackGrip;
+            base = m_offTrackGrip; // outside configured world → grass/off
         s.grip = base * (1.0f - wet * 0.45f) * (1.0f + s.rubber * 0.12f) *
                  (1.0f - marbles * 0.15f);
         s.grip = std::clamp(s.grip, 0.05f, 2.0f);
@@ -106,6 +107,7 @@ public:
         });
     }
 
+    /** Sync global wetness from weather module. */
     void syncFromWeather(float trackWetness, float trackTemp) {
         setWetness(trackWetness);
         setTemperature(trackTemp);
@@ -156,7 +158,7 @@ private:
     float m_globalRubber = 0.0f;
     float m_baseTemp = 25.0f;
     float m_offTrackGrip = 0.55f;
-    float m_kerbGrip = 0.85f;
+    float m_kerbGrip = 0.95f;
     std::map<std::string, float> m_materials;
     std::vector<float> m_rubber, m_wet, m_marbles, m_temp;
 };

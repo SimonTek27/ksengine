@@ -1,4 +1,7 @@
 #pragma once
+/**
+ * Race strategy and pit stop planning — Qt-free.
+ */
 #include "PhysicsCoreTypes.h"
 #include <vector>
 #include <string>

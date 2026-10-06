@@ -9,7 +9,7 @@ TireSimulator::TireSimulator() {
     TireConfig cfg;
     for (int i = 0; i < 4; ++i) {
         m_configs[i] = cfg;
-        m_pacejka[i].setCoefficients(PacejkaTireModel::getSlickTireCoefficients());
+        m_ksTire[static_cast<size_t>(i)].setCoefficients(KsTireModel::getSlickTireCoefficients());
         m_wheelStates[i].pressure = (i < 2) ? 2.2 : 2.0;
     }
 }
@@ -69,7 +69,7 @@ void TireSimulator::update(float dt, float speed, float yawRate, float steerAngl
 
         float torque = 0.0f;
         if (!front && throttle > 0.01f)
-            torque = driveTorqueNm * 0.5f;
+            torque = driveTorqueNm * 0.5f; // RWD split
 
         float brakeT = brakeTorqueNm * 0.25f;
         float omegaFree = vwx / radius;
@@ -88,7 +88,7 @@ void TireSimulator::update(float dt, float speed, float yawRate, float steerAngl
         m_filtSlipAngle[i] += aA * (slipAngleRad - m_filtSlipAngle[i]);
         m_filtSlipRatio[i] += aR * (slipRatio - m_filtSlipRatio[i]);
 
-        PacejkaTireModel::TireState ts;
+        KsTireModel::TireState ts;
         ts.slipAngle = m_filtSlipAngle[i];
         ts.slipRatio = m_filtSlipRatio[i];
         ts.normalForce = load;
@@ -96,9 +96,9 @@ void TireSimulator::update(float dt, float speed, float yawRate, float steerAngl
         ts.tirePressure = static_cast<float>(st.pressure * 14.5038f);
         ts.frictionCoefficient = trackGrip;
 
-        auto forces = m_pacejka[i].calculateForces(ts);
+        auto forces = m_ksTire[static_cast<size_t>(i)].calculateForces(ts);
 
-        float tempEff = m_pacejka[i].calculateTemperatureEffect(ts.tireTemp);
+        float tempEff = m_ksTire[static_cast<size_t>(i)].calculateTemperatureEffect(ts.tireTemp);
         float wearEff = 1.0f - static_cast<float>(st.wear) * static_cast<float>(cfg.wearFactor);
         wearEff = std::clamp(wearEff, 0.4f, 1.0f);
 
@@ -109,7 +109,7 @@ void TireSimulator::update(float dt, float speed, float yawRate, float steerAngl
         float scale = tempEff * wearEff * flatPen * trackGrip;
         st.lateralForce = forces.lateralForce * scale;
         st.longitudinalForce = forces.longitudinalForce * scale;
-        st.slipAngle = PacejkaTireModel::radToDeg(m_filtSlipAngle[i]);
+        st.slipAngle = KsTireModel::radToDeg(m_filtSlipAngle[i]);
         st.slipRatio = m_filtSlipRatio[i];
         st.flatSpotSeverity = m_flatSpot[i].state.severity;
 

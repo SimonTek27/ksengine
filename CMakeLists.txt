@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 
 project(kseditor
 	VERSION 0.90
@@ -209,8 +209,8 @@ if(KS_QT_FREE_BUILD)
 	# gate after the qt-free return() above, so qt-free needs its own copy.
 	# Everything after this point (SimulatorApp, tests) compiles with
 	# HAS_KSNET=1 and links the ksnet target.
-	if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/engine/Network/ksnet/CMakeLists.txt")
-		add_subdirectory(src/engine/Network/ksnet EXCLUDE_FROM_ALL)
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/network/ksnet/CMakeLists.txt")
+		add_subdirectory(src/engine/network/ksnet EXCLUDE_FROM_ALL)
 		add_compile_definitions(HAS_KSNET=1)
 	else()
 		add_compile_definitions(HAS_KSNET=0)
@@ -261,8 +261,8 @@ endif()
 # Built on netcode + reliable + serialize (all vendored)
 # ============================================================================
 
-if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/engine/Network/ksnet/CMakeLists.txt")
-    add_subdirectory(src/engine/Network/ksnet EXCLUDE_FROM_ALL)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/network/ksnet/CMakeLists.txt")
+    add_subdirectory(src/engine/network/ksnet EXCLUDE_FROM_ALL)
     set(HAS_KSNET TRUE)
     message(STATUS "ksnet multiplayer networking enabled")
     add_compile_definitions(HAS_KSNET=1)
@@ -351,8 +351,8 @@ file(GLOB KSEDITOR_MAIN_SOURCES
 )
 
 # Enforce: src/engine/ui must stay in resources/ui (single source of truth)
-if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui")
-	file(GLOB _core_ui_headers "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui/*.h")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui")
+	file(GLOB _core_ui_headers "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui/*.h")
 	foreach(_hdr IN LISTS _core_ui_headers)
 		get_filename_component(_name "${_hdr}" NAME)
 		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui/${_name}")
@@ -539,7 +539,7 @@ add_custom_command(TARGET SimulatorApp POST_BUILD
 
 target_include_directories(SimulatorApp PRIVATE
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
-	"\${CMAKE_CURRENT_SOURCE_DIR}/src/engine"
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/engine"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/plugins"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/simulator"
 )

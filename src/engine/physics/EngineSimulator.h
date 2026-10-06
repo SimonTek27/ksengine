@@ -1,5 +1,9 @@
 #pragma once
 
+/**
+ * Engine, drivetrain, and fuel management simulation — Qt-free.
+ */
+
 #include "PhysicsCoreTypes.h"
 #include <vector>
 #include <memory>
@@ -8,6 +12,8 @@
 
 namespace ks {
 namespace physics {
+
+struct FuelManagementModel;
 
 struct EngineConfig {
     double maxPowerKw = 350.0;

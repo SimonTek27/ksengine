@@ -23,7 +23,7 @@ public:
         float chord = 1.0f;
         float span = 1.5f;
         float angle = 0.0f;
-        float position[3] = {0, 0, 0};
+        float position[3] = {0, 0, 0}; // x,y,z relative to CoG (z+ = forward)
 
         std::vector<std::pair<float, float>> aoaClLut;
         std::vector<std::pair<float, float>> aoaCdLut;
@@ -42,7 +42,7 @@ public:
         std::vector<Wing> wings;
         float frontalArea = 2.0f;
         float dragCoefficient = 0.35f;
-        float liftCoefficient = -0.1f;
+        float liftCoefficient = -0.1f; // negative = downforce
         float groundEffectFactor = 1.0f;
         float rideHeightSensitivity = 1.0f;
     };
@@ -55,8 +55,9 @@ public:
         float rollAngle = 0.0f;
         float pitchAngle = 0.0f;
         float airDensity = Constants::DEFAULT_AIR_DENSITY;
-        float draftDragScale = 1.0f;
-        float draftDownforceScale = 1.0f;
+        // Optional draft (from nearby car)
+        float draftDragScale = 1.0f;      // 1 - dragReduction
+        float draftDownforceScale = 1.0f; // 1 - downforceLoss
     };
 
     struct AeroForces {
@@ -68,10 +69,12 @@ public:
         float aeroBalance = 0.5f;
         float ldRatio = 0.0f;
 
+        /** World-ish force vector: drag opposes velocity (+X forward), downforce -Y. */
         PhysVec3 asForceVector(const PhysVec3& forwardDir) const {
             PhysVec3 f = forwardDir.normalized();
+            // drag opposite to forward, downforce downward
             return f * (-drag) + PhysVec3{0.0f, -downforce, 0.0f} +
-                   PhysVec3{-f.z, 0.0f, f.x} * lateralForce;
+                   PhysVec3{-f.z, 0.0f, f.x} * lateralForce; // crude lateral
         }
     };
 
@@ -111,6 +114,9 @@ private:
     float interpolateLut(const std::vector<std::pair<float, float>>& lut, float x) const;
 };
 
+/**
+ * High-level aero + optional drafting for vehicle integration.
+ */
 class AeroModelManager {
 public:
     AeroModelManager();
@@ -124,6 +130,9 @@ public:
     AeroModel::AeroForces calculateForces(float speed, float rideHeightFront, float rideHeightRear,
                                           float airDensity = Constants::DEFAULT_AIR_DENSITY) const;
 
+    /**
+     * Full step: base aero + draft from leader car, returns forces ready for RigidBody.
+     */
     AeroModel::AeroForces calculateIntegrated(
         float speed,
         float rideHeightFront,

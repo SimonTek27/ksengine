@@ -2,11 +2,12 @@
 
 /**
  * @file TireSimulator.h
- * @brief Per-wheel tire forces (Pacejka), temp, wear, flat-spot — Qt-free
+ * @brief Per-wheel tire forces (KsTireModel / Magic Formula), temp, wear, flat-spot — Qt-free
+ * Unified runtime path used by VehicleSimulator and optional VehiclePhysics bridge.
  */
 
 #include "PhysicsCoreTypes.h"
-#include "PacejkaTireModel.h"
+#include "KsTireModel.h"
 #include "TireFlatSpot.h"
 
 #include <array>
@@ -51,8 +52,11 @@ public:
     TireWheelState wheelState(int wheel) const;
     std::array<TireWheelState, 4> allWheelStates() const { return m_wheelStates; }
 
-    PacejkaTireModel& pacejka(int wheel) { return m_pacejka[wheel]; }
-    const PacejkaTireModel& pacejka(int wheel) const { return m_pacejka[wheel]; }
+    KsTireModel& ksTire(int wheel) { return m_ksTire[static_cast<size_t>(wheel & 3)]; }
+    const KsTireModel& ksTire(int wheel) const { return m_ksTire[static_cast<size_t>(wheel & 3)]; }
+    /** @deprecated Prefer ksTire() */
+    KsTireModel& pacejka(int wheel) { return ksTire(wheel); }
+    const KsTireModel& pacejka(int wheel) const { return ksTire(wheel); }
 
     void update(float dt, float speed, float yawRate, float steerAngle,
                 float throttle, float brake,
@@ -68,7 +72,7 @@ public:
 private:
     std::array<TireConfig, 4> m_configs{};
     std::array<TireWheelState, 4> m_wheelStates{};
-    std::array<PacejkaTireModel, 4> m_pacejka{};
+    std::array<KsTireModel, 4> m_ksTire{};
     std::array<TireFlatSpot, 4> m_flatSpot{};
     float m_filtSlipAngle[4] = {};
     float m_filtSlipRatio[4] = {};

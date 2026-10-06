@@ -9,7 +9,7 @@
 #include <string>
 #include <unordered_map>
 
-class PacejkaTireModel;
+class KsTireModel;
 class EngineModel;
 class AeroModel;
 class DifferentialModel;
@@ -31,7 +31,7 @@ public:
     ACModelManager(ACModelManager&&) = default;
     ACModelManager& operator=(ACModelManager&&) = default;
 
-    PacejkaTireModel* tireModel();
+    KsTireModel* tireModel();
     EngineModel* engineModel();
     AeroModel* aeroModel();
     DifferentialModel* differentialModel();
@@ -39,7 +39,7 @@ public:
     BrakeThermalModel* brakeModel();
     HybridSystem* hybridSystem();
 
-    const PacejkaTireModel* tireModel() const;
+    const KsTireModel* tireModel() const;
     const EngineModel* engineModel() const;
     const AeroModel* aeroModel() const;
     const DifferentialModel* differentialModel() const;
@@ -48,12 +48,15 @@ public:
     const HybridSystem* hybridSystem() const;
 
     bool areModelsLoaded() const { return m_modelsLoaded; }
+
+    /** Resolve optional *.ini under basePath; returns true if at least one file was found. */
     bool loadModels(const std::string& basePath);
+
     void reset();
     void clear();
 
 private:
-    std::unique_ptr<PacejkaTireModel> m_tireModel;
+    std::unique_ptr<KsTireModel> m_tireModel;
     std::unique_ptr<EngineModel> m_engineModel;
     std::unique_ptr<AeroModel> m_aeroModel;
     std::unique_ptr<DifferentialModel> m_differentialModel;
@@ -66,6 +69,7 @@ private:
 class ACModelRegistry {
 public:
     static ACModelRegistry& instance();
+
     void registerManager(const std::string& name, ACModelManager* manager);
     void unregisterManager(const std::string& name);
     ACModelManager* getManager(const std::string& name);

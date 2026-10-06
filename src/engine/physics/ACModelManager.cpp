@@ -1,5 +1,5 @@
 #include "ACModelManager.h"
-#include "PacejkaTireModel.h"
+#include "KsTireModel.h"
 #include "EngineModel.h"
 #include "AeroModel.h"
 #include "DifferentialModel.h"
@@ -8,6 +8,7 @@
 #include "HybridSystem.h"
 
 #include <cstdio>
+#include <fstream>
 #include <sys/stat.h>
 
 namespace ks {
@@ -26,7 +27,7 @@ std::string joinPath(const std::string& base, const char* file) {
 } // namespace
 
 ACModelManager::ACModelManager() {
-    m_tireModel = std::make_unique<PacejkaTireModel>();
+    m_tireModel = std::make_unique<KsTireModel>();
     m_engineModel = std::make_unique<EngineModel>();
     m_aeroModel = std::make_unique<AeroModel>();
     m_differentialModel = std::make_unique<DifferentialModel>();
@@ -37,7 +38,7 @@ ACModelManager::ACModelManager() {
 
 ACModelManager::~ACModelManager() = default;
 
-PacejkaTireModel* ACModelManager::tireModel() { return m_tireModel.get(); }
+KsTireModel* ACModelManager::tireModel() { return m_tireModel.get(); }
 EngineModel* ACModelManager::engineModel() { return m_engineModel.get(); }
 AeroModel* ACModelManager::aeroModel() { return m_aeroModel.get(); }
 DifferentialModel* ACModelManager::differentialModel() { return m_differentialModel.get(); }
@@ -45,7 +46,7 @@ SuspensionModel* ACModelManager::suspensionModel() { return m_suspensionModel.ge
 BrakeThermalModel* ACModelManager::brakeModel() { return m_brakeModel.get(); }
 HybridSystem* ACModelManager::hybridSystem() { return m_hybridSystem.get(); }
 
-const PacejkaTireModel* ACModelManager::tireModel() const { return m_tireModel.get(); }
+const KsTireModel* ACModelManager::tireModel() const { return m_tireModel.get(); }
 const EngineModel* ACModelManager::engineModel() const { return m_engineModel.get(); }
 const AeroModel* ACModelManager::aeroModel() const { return m_aeroModel.get(); }
 const DifferentialModel* ACModelManager::differentialModel() const { return m_differentialModel.get(); }
@@ -69,6 +70,7 @@ bool ACModelManager::loadModels(const std::string& basePath) {
 }
 
 void ACModelManager::reset() {
+    // Models keep defaults; hybrid energy full
     if (m_hybridSystem) m_hybridSystem->reset();
     m_modelsLoaded = false;
 }

@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <cmath>
 
+/**
+ * Suspension kinematics LUTs — Qt-free (std::vector).
+ */
 class SuspensionKinematics {
 public:
     struct DamperCurvePoint { float velocity; float force; };

@@ -2,7 +2,11 @@
 
 namespace ks {
 namespace physics {
-class PacejkaTireModel;
+class KsTireModel;
+// Deprecated alias of KsTireModel (PacejkaTireModel.h); redeclared here so
+// this header can forward-declare the parameter type without pulling in the
+// full tire model.
+using PacejkaTireModel = KsTireModel;
 } // namespace physics
 } // namespace ks
 

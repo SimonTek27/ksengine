@@ -1,6 +1,5 @@
 #include "phys_Simulator.h"
 #include "PhysicsLogger.h"
-#include "../../Config/IniFile.h"
 
 #include <algorithm>
 #include <array>
@@ -83,6 +82,7 @@ void phys_Simulator::update(double dt) {
     PROFILE_FRAME();
     dt = std::clamp(dt, 1e-4, 0.05);
 
+    // DRS auto
     if (m_drsEnabled && m_drsAuto) {
         const double speedKmh = m_state.speed * 3.6;
         const bool inZone = (m_state.currentLapDistance >= m_drsZoneStart &&
@@ -90,6 +90,7 @@ void phys_Simulator::update(double dt) {
         m_drsActive = inZone && speedKmh >= m_drsSpeedKmh && m_throttle > 0.9;
     }
 
+    // Weather
     m_weatherSim.update(static_cast<float>(dt));
     m_weather = m_weatherSim.state();
     physics::TrackSurface::instance().syncFromWeather(
@@ -97,10 +98,11 @@ void phys_Simulator::update(double dt) {
 
     updateAero(dt);
 
+    // Engine + gearbox + differential
     {
         float ratio = m_gearbox.currentRatio();
         float loadTq = static_cast<float>(m_state.speed * 15.0);
-        if (ratio > 0.1f) loadTq = loadTq / ratio;
+        if (ratio > 0.1f) loadTq = loadTq / ratio; // reflected load
         m_engine.update(static_cast<float>(dt), static_cast<float>(m_throttle), loadTq);
         m_state.rpm = m_engine.getState().rpm;
         m_state.gear = m_gearbox.gear();
@@ -115,6 +117,7 @@ void phys_Simulator::update(double dt) {
         }
     }
 
+    // Aero re-query for downforce split (also feeds suspension)
     float aeroDfFront = 0.0f, aeroDfRear = 0.0f;
     {
         physics::AeroSimulator::Input in;
@@ -134,11 +137,12 @@ void phys_Simulator::update(double dt) {
         }
     }
 
+    // Suspension: weight transfer + spring/damper -> tire normal loads
     m_suspension.update(
         static_cast<float>(dt),
         m_state.acceleration.y,
-        m_state.acceleration.z,
-        m_state.acceleration.x,
+        m_state.acceleration.z,  // lateral approx
+        m_state.acceleration.x,  // long
         static_cast<float>(getEffectiveMass()),
         aeroDfFront, aeroDfRear);
     m_rideHeightFront = m_suspension.rideHeightFront();
@@ -149,6 +153,7 @@ void phys_Simulator::update(double dt) {
     if (m_damageEnabled) engineTq *= m_damage.powerMultiplier;
     float axleTorque = m_gearbox.wheelTorqueFromEngine(engineTq);
 
+    // Diff: split axle torque using rear wheel speeds (from tire omega * r)
     float rWheel = 0.33f;
     float wL = static_cast<float>(m_tires.wheelState(2).angularVelocity);
     float wR = static_cast<float>(m_tires.wheelState(3).angularVelocity);
@@ -159,6 +164,7 @@ void phys_Simulator::update(double dt) {
                                         m_state.speed);
     float driveTorque = m_diff.getLeftTorque() + m_diff.getRightTorque() + hybridTq;
     float brakeTorqueCmd = static_cast<float>(m_brake * getEffectiveMass() * physics::Constants::GRAVITY * 1.2 * 0.33);
+    // Per-wheel thermal update + fade
     float brakeTorqueEff = 0.0f;
     for (int i = 0; i < 4; ++i) {
         float tq = brakeTorqueCmd * 0.25f;
@@ -178,8 +184,10 @@ void phys_Simulator::update(double dt) {
                        static_cast<float>(1.0 - getTrackGripReduction()),
                    driveTorque, brakeTorqueEff);
 
+    // Override longitudinal with tire forces + aero drag
     stepLongitudinal(dt);
 
+    // Tire telemetry
     auto fl = m_tires.wheelState(0);
     if (onTireDataUpdated) {
         onTireDataUpdated(fl.slipAngle, fl.lateralForce, fl.slipRatio, fl.longitudinalForce);
@@ -191,6 +199,7 @@ void phys_Simulator::update(double dt) {
         m_state.tyrePressure[i] = w.pressure;
     }
 
+    // Chassis planar
     {
         float fx = m_tires.totalLongitudinalForce();
         float fy = m_tires.totalLateralForce();
@@ -202,8 +211,8 @@ void phys_Simulator::update(double dt) {
         m_state.acceleration.x = m_chassis.state().longitudinalAccel;
     }
     {
-        auto fl2 = m_tires.wheelState(0);
-        if (std::abs(fl2.slipAngle) > 4.0 || std::abs(fl2.slipRatio) > 0.08)
+        auto fl = m_tires.wheelState(0);
+        if (std::abs(fl.slipAngle) > 4.0 || std::abs(fl.slipRatio) > 0.08)
             physics::TrackSurface::instance().depositRubber(m_state.position, 0.002f * static_cast<float>(dt));
     }
 
@@ -219,6 +228,7 @@ void phys_Simulator::updateAero(double /*dt*/) {
     in.rideHeightRear = static_cast<float>(m_rideHeightRear);
     in.airDensity = m_weather.airDensity;
     in.position = m_state.position;
+    // Forward from heading (xz plane)
     in.forward = physics::PhysVec3{
         std::sin(m_state.heading),
         0.0f,
@@ -228,10 +238,12 @@ void phys_Simulator::updateAero(double /*dt*/) {
 
     auto out = m_aero.step(in);
 
+    // Apply DRS drag reduction on top of model drag
     float drag = out.forces.drag;
     if (m_drsActive) {
         drag *= static_cast<float>(1.0 - m_drsDragReduction);
     }
+    // Damage aero penalty
     if (m_damageEnabled) {
         drag *= m_damage.dragMultiplier;
         out.forces.downforce *= m_damage.downforceMultiplier;
@@ -239,7 +251,10 @@ void phys_Simulator::updateAero(double /*dt*/) {
         out.rearLoadN *= m_damage.downforceMultiplier;
     }
 
-    m_state.acceleration.x = -drag;
+    // Store last aero loads in unused-ish fields via speed energy path later
+    // Longitudinal resistance from aero drag (N) -> acceleration in stepLongitudinal via state
+    m_state.acceleration.x = -drag; // stash drag force in accel.x temporarily for step
+    // Front/rear vertical load contribution (for tires later)
     (void)out;
 }
 
@@ -247,24 +262,35 @@ void phys_Simulator::stepLongitudinal(double dt) {
     const double mass = getEffectiveMass();
     if (mass < 1.0) return;
 
+    // Engine force (very simplified)
     double throttle = std::clamp(m_throttle, 0.0, 1.0);
     double brake = std::clamp(m_brake, 0.0, 1.0);
 
-    if (m_tcEnabled && throttle > 0.5) throttle = std::min(throttle, 0.95);
-    if (m_absEnabled && brake > 0.5) brake = std::min(brake, 0.92);
+    if (m_tcEnabled && throttle > 0.5) {
+        // soft TC: limit throttle growth (placeholder)
+        throttle = std::min(throttle, 0.95);
+    }
+    if (m_absEnabled && brake > 0.5) {
+        brake = std::min(brake, 0.92);
+    }
 
     const double powerW = m_enginePowerKw * 1000.0;
     const double v = std::max(static_cast<double>(m_state.speed), 1.0);
     double driveForce = (powerW * throttle) / v;
+    // Cap by friction budget (mu * mass * g * grip)
     const double grip = 1.0 - getTrackGripReduction();
     const double maxFx = 1.5 * mass * physics::Constants::GRAVITY * grip;
     driveForce = std::clamp(driveForce, 0.0, maxFx);
 
     double brakeForce = brake * maxFx * (m_damageEnabled ? m_damage.brakingMultiplier : 1.0);
-    if (m_damageEnabled) driveForce *= m_damage.powerMultiplier;
+    if (m_damageEnabled) {
+        driveForce *= m_damage.powerMultiplier;
+    }
 
+    // Aero drag force was stored in acceleration.x as negative Newtons
     double aeroDrag = -static_cast<double>(m_state.acceleration.x);
     if (aeroDrag < 0.0) aeroDrag = 0.0;
+    // Fallback body Cd if aero returned 0
     if (aeroDrag < 1.0 && v > 1.0) {
         const double q = 0.5 * m_weather.airDensity * v * v;
         aeroDrag = q * m_frontalArea * m_dragCd;
@@ -275,8 +301,10 @@ void phys_Simulator::stepLongitudinal(double dt) {
     const double net = driveForce - brakeForce - aeroDrag - rolling;
     const double ax = net / mass;
 
-    m_state.velocity.x += static_cast<float>(ax * dt);
+    m_state.velocity.x += static_cast<float>(ax * dt); // use x as longitudinal in body frame simplified
+    // Keep speed scalar aligned
     float spd = std::abs(m_state.velocity.x);
+    // integrate along heading
     m_state.position.x += std::sin(m_state.heading) * spd * static_cast<float>(dt);
     m_state.position.z += std::cos(m_state.heading) * spd * static_cast<float>(dt);
     m_state.speed = spd;
@@ -290,14 +318,20 @@ void phys_Simulator::stepLongitudinal(double dt) {
     m_state.lapTime += static_cast<float>(dt);
 
     if (m_fuelEnabled && throttle > 0.05) {
+        // ~0.15 kg/s at full throttle rough
         m_fuelKg = std::max(0.0, m_fuelKg - 0.15 * throttle * dt);
     }
     m_state.fuel = static_cast<float>(m_fuelKg);
 
+    // Brake temps (crude)
     for (int i = 0; i < 4; ++i) {
         m_brakeDiscTemp[i] += static_cast<float>(brake * 40.0 * dt);
         m_brakeDiscTemp[i] -= static_cast<float>(0.5 * dt * (m_brakeDiscTemp[i] - 40.0));
         m_brakeFade[i] = std::clamp((m_brakeDiscTemp[i] - 400.0f) / 400.0f, 0.0f, 1.0f);
+    }
+
+    if (onTireDataUpdated) {
+        onTireDataUpdated(0.0, 0.0, 0.0, static_cast<float>(driveForce));
     }
 }
 
@@ -315,6 +349,7 @@ void phys_Simulator::setThrottle(double value) { m_throttle = std::clamp(value, 
 void phys_Simulator::setBrake(double value) { m_brake = std::clamp(value, 0.0, 1.0); }
 void phys_Simulator::setSteering(double value) {
     m_steering = std::clamp(value, -1.0, 1.0);
+    // yaw rate simplified
     m_state.heading += static_cast<float>(m_steering * m_state.speed * 0.02f);
 }
 
@@ -375,11 +410,13 @@ float phys_Simulator::getBrakeFade(int wheel) const {
 void phys_Simulator::applyCollisionDamage(double impactForce) {
     if (!m_damageEnabled) return;
     m_damage.applyImpact(static_cast<float>(impactForce));
+    // Zone impact from the front (simplified contact)
     physics::CollisionEvent ev;
     ev.contactPoint = m_state.position;
     ev.contactNormal = physics::PhysVec3{0, 0, 1};
     ev.impactEnergy = static_cast<float>(impactForce);
     m_damageSystem.processCollision(ev);
+    // Mirror multipliers into DamageState for aero/longitudinal
     m_damage.powerMultiplier = m_damageSystem.powerMultiplier();
     m_damage.handlingMultiplier = m_damageSystem.handlingMultiplier();
     m_damage.brakingMultiplier = m_damageSystem.brakingMultiplier();
@@ -400,38 +437,14 @@ void phys_Simulator::setWeatherState(const physics::WeatherState& weather) {
 void phys_Simulator::loadVehicleParams(const std::string& carPath) {
     loadAeroFromIni(carPath);
 }
-void phys_Simulator::loadEngineFromIni(const std::string& path) {
-    m_engine.loadFromIni(path);
-    m_maxRpm = m_engine.getConfig().maxRPM;
-    m_enginePowerKw = m_engine.getConfig().peakPower;
-}
-void phys_Simulator::loadTyresFromIni(const std::string& path) {
-    ks::config::IniFile ini;
-    if (!ini.load(path)) return;
-    // Slip-curve summary keys (same names the Qt loader probes).
-    physics::TireSlipCurve c = m_tireCurve;
-    if (ini.contains("", "LATERAL_STIFFNESS"))
-        c.stiffnessLateral = ini.getDouble("", "LATERAL_STIFFNESS", c.stiffnessLateral);
-    if (ini.contains("", "LONGITUDINAL_STIFFNESS"))
-        c.stiffnessLongitudinal = ini.getDouble("", "LONGITUDINAL_STIFFNESS", c.stiffnessLongitudinal);
-    if (ini.contains("", "FRICTION"))
-        c.peakLateralMu = ini.getDouble("", "FRICTION", c.peakLateralMu);
-    else if (ini.contains("", "GRIP"))
-        c.peakLateralMu = ini.getDouble("", "GRIP", c.peakLateralMu);
-    if (ini.contains("", "FRICTION") || ini.contains("", "GRIP"))
-        c.peakLongitudinalMu = c.peakLateralMu;
-    if (ini.contains("", "PEAK_SLIP_ANGLE"))
-        c.peakSlipAngle = ini.getDouble("", "PEAK_SLIP_ANGLE", c.peakSlipAngle);
-    if (ini.contains("", "PEAK_SLIP_RATIO"))
-        c.peakSlipRatio = ini.getDouble("", "PEAK_SLIP_RATIO", c.peakSlipRatio);
-    setTireModel(c);
-    // Full A/B/C coefficient sets straight onto the per-wheel Pacejka models.
-    for (int w = 0; w < 4; ++w) m_tires.pacejka(w).loadFromIni(path);
-}
+void phys_Simulator::loadEngineFromIni(const std::string& path) { m_engine.loadFromIni(path); m_maxRpm = m_engine.getConfig().maxRPM; m_enginePowerKw = m_engine.getConfig().peakPower; }
+void phys_Simulator::loadTyresFromIni(const std::string& /*path*/) {}
 void phys_Simulator::loadDrivetrainFromIni(const std::string& path) {
     m_diff.loadFromIni(path);
+    // Optional: parse gear ratios from same file later
 }
 void phys_Simulator::loadAeroFromIni(const std::string& aeroIniPath) {
+    // Accept either directory or full path to aero.ini
     if (aeroIniPath.size() >= 8 && aeroIniPath.substr(aeroIniPath.size() - 8) == "aero.ini") {
         auto cfg = physics::AeroModel::loadFromIni(aeroIniPath);
         m_aero.manager().model().setConfig(cfg);

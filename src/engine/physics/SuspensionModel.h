@@ -19,26 +19,26 @@ namespace physics {
 class SuspensionModel {
 public:
     struct SpringConfig {
-        float rate = 15000.0f;
-        float preload = 0.0f;
+        float rate = 15000.0f;          // N/m
+        float preload = 0.0f;           // m equivalent
         float minLength = 0.3f;
         float maxLength = 0.5f;
         float bumpStopRate = 50000.0f;
-        float bumpStopGap = 0.02f;
-        float staticRideHeight = 0.08f;
+        float bumpStopGap = 0.02f;      // travel before bump stop
+        float staticRideHeight = 0.08f; // m
     };
 
     struct DamperConfig {
-        float bumpRate = 2000.0f;
+        float bumpRate = 2000.0f;       // Ns/m
         float reboundRate = 4000.0f;
         float fastBumpRate = 1500.0f;
         float fastReboundRate = 3000.0f;
-        float bumpThreshold = 0.05f;
+        float bumpThreshold = 0.05f;    // m/s
         float reboundThreshold = 0.05f;
-        float antiRollBarStiffness = 15000.0f;
+        float antiRollBarStiffness = 15000.0f; // N/m effective
         bool antiRollBarEnabled = true;
-        std::vector<std::pair<float, float>> damperCurve;
-        std::vector<std::pair<float, float>> camberCurve;
+        std::vector<std::pair<float, float>> damperCurve; // vel -> force
+        std::vector<std::pair<float, float>> camberCurve; // travel -> camber deg
     };
 
     struct GeometryConfig {
@@ -51,15 +51,15 @@ public:
     };
 
     struct CornerState {
-        float compression = 0.0f;
-        float velocity = 0.0f;
+        float compression = 0.0f;  // m positive compressed from static
+        float velocity = 0.0f;     // m/s
         float springForce = 0.0f;
         float damperForce = 0.0f;
         float bumpStopForce = 0.0f;
-        float totalForce = 0.0f;
+        float totalForce = 0.0f;   // upward on chassis
         float rideHeight = 0.08f;
         float camberDeg = -1.0f;
-        float normalLoad = 0.0f;
+        float normalLoad = 0.0f;   // on tire
     };
 
     SuspensionModel();
@@ -71,6 +71,14 @@ public:
     const DamperConfig& damperConfig() const { return m_damper; }
     const GeometryConfig& geometryConfig() const { return m_geom; }
 
+    /**
+     * Update 4 corners.
+     * @param chassisAccZ vertical accel of chassis (m/s^2, +up)
+     * @param lateralAccel for weight transfer (m/s^2)
+     * @param longAccel for weight transfer
+     * @param mass vehicle mass kg
+     * @param aeroDownforceFront / Rear N
+     */
     void update(float dt, float chassisAccZ, float lateralAccel, float longAccel,
                 float mass, float aeroDownforceFront, float aeroDownforceRear);
 

@@ -48,15 +48,19 @@ void DifferentialModel::update(float dt, float inputTorque, float leftSpeed, flo
     m_state.lockingTorque = lock;
     m_state.isLocking = lock > m_config.preload * 1.1f;
 
+    // Base open split 50/50
     float half = inputTorque * 0.5f;
+    // Locking transfers torque toward the slower wheel when driving
     float transfer = 0.0f;
     if (m_config.type != DiffType::Open) {
         transfer = std::copysign(std::min(lock, std::abs(inputTorque) * 0.5f), -slip);
+        // if left faster (slip>0), transfer torque to right (negative to left)
     }
 
     m_state.leftTorque = half - transfer;
     m_state.rightTorque = half + transfer;
 
+    // Thermal
     m_state.temperature += (std::abs(lock) * 0.001f - (m_state.temperature - 40.0f) * 0.02f) * dt;
     m_state.temperature = std::clamp(m_state.temperature, 40.0f, 180.0f);
 }
@@ -107,6 +111,7 @@ std::string DifferentialModel::getDiffTypeName(DiffType type) {
     return "Unknown";
 }
 
+// --- GearboxModel ---
 void GearboxModel::setRatios(const std::vector<float>& ratios, float finalDrive) {
     if (!ratios.empty()) m_ratios = ratios;
     m_finalDrive = finalDrive;
