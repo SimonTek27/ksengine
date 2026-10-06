@@ -245,6 +245,18 @@ if(KS_QT_FREE_BUILD)
 		set_target_properties(ks_tracktool PROPERTIES
 			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 	endif()
+	# Milliken offline analysis tools (G-work): constrained moment-method
+	# chart (ksmmm), tire-coefficient normalizer (kstirenorm), tire-model
+	# hot-path profiler (ksphprofile), vehicle-sim step profiler (ksvsprofile).
+	foreach(_kstool ksmmm kstirenorm ksphprofile ksvsprofile)
+		file(GLOB _kstool_src "${CMAKE_CURRENT_SOURCE_DIR}/tools/${_kstool}/*.cpp")
+		if(_kstool_src)
+			add_executable(${_kstool} ${_kstool_src})
+			target_link_libraries(${_kstool} PRIVATE ksengine)
+			set_target_properties(${_kstool} PROPERTIES
+				RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+		endif()
+	endforeach()
 	if(KSIMULATOR_QT_FREE)
 		include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeLists_ksimulator_QtFree.cmake")
 	endif()
