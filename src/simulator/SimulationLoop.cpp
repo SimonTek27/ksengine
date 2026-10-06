@@ -1,5 +1,5 @@
-/**
- * SimulationLoop.cpp — std-only / Qt-free
+﻿/**
+ * SimulationLoop.cpp â€” std-only / Qt-free
  * 1 kHz physics + LapSectorTimer + SM + UDP + TCP telemetry
  */
 
@@ -104,29 +104,7 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
     // everything that reaches the simulation is wired here.
     m_network->onRemoteClientJoined = [this](int slot, uint32_t, const std::string&) {
         if (!m_multiCar || !m_network->server()) return;
-        const uint32_t carId = m_network->server()->getClientCarId(slot);
-        if (carId == 0) return;
-        // Without this the entry keeps its spline AI, and MultiCarManager::
-        // update() would overwrite the networked controls with the AI's own
-        // on every physics step.
-        m_multiCar->setCarClientIndex(static_cast<int>(carId), slot);
-#if HAS_VEHICLE_SIM
-        // The transport spawns our own wire avatar at the origin while the
-        // local player drives m_vehicle elsewhere: seed it from the real car
-        // so the state broadcast back to the guests matches what we see.
-        if (m_vehicle && slot == static_cast<int>(m_network->localClientId())) {
-            CarEntry* own = m_multiCar->getCar(static_cast<int>(carId));
-            if (own && own->vehicle) {
-                const auto src = m_vehicle->getState();
-                ks::physics::SimulationState& dst = own->vehicle->state();
-                dst.position = src.position;
-                dst.rotation = src.rotation;
-                dst.heading = src.heading;
-                dst.velocity = src.velocity;
-                dst.speed = src.speed;
-                dst.rpm = src.rpm;
-                dst.gear = src.gear;
-            }
+if (!m_network->server()->IsClientConnected(slot)) return;
         }
 #endif
     };
@@ -256,7 +234,7 @@ bool SimulationLoop::initialize() {
     if (m_udpEnabled) {
         m_udp = std::make_unique<UdpTelemetryBridge>();
         if (m_udp->open(m_udpHost.c_str(), m_udpPort))
-            std::fprintf(stderr, "SimulationLoop: UDP → %s:%u\n", m_udpHost.c_str(), unsigned(m_udpPort));
+            std::fprintf(stderr, "SimulationLoop: UDP â†’ %s:%u\n", m_udpHost.c_str(), unsigned(m_udpPort));
     }
     if (m_tcpEnabled) {
         m_tcp = std::make_unique<TcpTelemetryBridge>();
@@ -344,7 +322,7 @@ bool SimulationLoop::loadCarAudio(const std::string& carDirectory) {
 
 void SimulationLoop::beginRaceSession() {
     // AI field (roadmap 3.5): respawn on every session so a reset re-staggers
-    // everyone behind the line. Only our own ids are removed — cars spawned
+    // everyone behind the line. Only our own ids are removed â€” cars spawned
     // by the multiplayer transport stay in the manager.
     if (m_multiCar) {
         for (int id : m_aiCarIds) m_multiCar->removeCar(id);
@@ -1269,7 +1247,7 @@ void SimulationLoop::initTracksideTerrain() {
 
 // Roadmap P1 (KS_PARTICLES=1): one dust emitter riding the car, stepped with
 // the frame's real dt and handed to the renderer as flat quads. Everything
-// here is behind the env flag — with it unset nothing is created, no emitter
+// here is behind the env flag â€” with it unset nothing is created, no emitter
 // exists and not a single float reaches setParticleVertices(), so the
 // default image is untouched.
 void SimulationLoop::updateAndDrawParticles(float dt) {
@@ -1324,3 +1302,4 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
 }
 
 } // namespace ks::sim
+

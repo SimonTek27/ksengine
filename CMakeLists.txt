@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+﻿cmake_minimum_required(VERSION 3.16)
 
 project(kseditor
 	VERSION 0.90
@@ -209,8 +209,8 @@ if(KS_QT_FREE_BUILD)
 	# gate after the qt-free return() above, so qt-free needs its own copy.
 	# Everything after this point (SimulatorApp, tests) compiles with
 	# HAS_KSNET=1 and links the ksnet target.
-	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/engine/Network/ksnet/CMakeLists.txt")
-		add_subdirectory(src/core/engine/Network/ksnet EXCLUDE_FROM_ALL)
+	if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/engine/Network/ksnet/CMakeLists.txt")
+		add_subdirectory(src/engine/Network/ksnet EXCLUDE_FROM_ALL)
 		add_compile_definitions(HAS_KSNET=1)
 	else()
 		add_compile_definitions(HAS_KSNET=0)
@@ -261,8 +261,8 @@ endif()
 # Built on netcode + reliable + serialize (all vendored)
 # ============================================================================
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/engine/Network/ksnet/CMakeLists.txt")
-    add_subdirectory(src/core/engine/Network/ksnet EXCLUDE_FROM_ALL)
+if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/engine/Network/ksnet/CMakeLists.txt")
+    add_subdirectory(src/engine/Network/ksnet EXCLUDE_FROM_ALL)
     set(HAS_KSNET TRUE)
     message(STATUS "ksnet multiplayer networking enabled")
     add_compile_definitions(HAS_KSNET=1)
@@ -350,13 +350,13 @@ file(GLOB KSEDITOR_MAIN_SOURCES
 	resources.qrc
 )
 
-# Enforce: src/core/ui must stay in resources/ui (single source of truth)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui")
-	file(GLOB _core_ui_headers "${CMAKE_CURRENT_SOURCE_DIR}/src/core/ui/*.h")
+# Enforce: src/engine/ui must stay in resources/ui (single source of truth)
+if(EXISTS "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui")
+	file(GLOB _core_ui_headers "\${CMAKE_CURRENT_SOURCE_DIR}/src/engine/ui/*.h")
 	foreach(_hdr IN LISTS _core_ui_headers)
 		get_filename_component(_name "${_hdr}" NAME)
 		if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/resources/ui/${_name}")
-			message(FATAL_ERROR "src/core/ui/${_name} has no counterpart in resources/ui — src/core/ui must stay in resources/ui")
+message(FATAL_ERROR "src/engine/ui/ has no counterpart in resources/ui - src/engine/ui must stay in resources/ui")
 		endif()
 	endforeach()
 endif()
@@ -515,11 +515,11 @@ target_link_libraries(SimulatorApp PRIVATE
 
 # Directory includi per i sottosistemi del motore core
 target_include_directories(SimulatorApp PRIVATE
-	"src/core/engine/Network"
-	"src/core/engine/Audio"
-	"src/core/engine/Graphics"
-	"src/core/engine/Physics"
-	"src/core/engine/Devices"
+	"src/engine/Network"
+	"src/engine/Audio"
+	"src/engine/Graphics"
+	"src/engine/Physics"
+	"src/engine/Devices"
 	"src/simulator"
 )
 
@@ -539,7 +539,7 @@ add_custom_command(TARGET SimulatorApp POST_BUILD
 
 target_include_directories(SimulatorApp PRIVATE
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
-	"${CMAKE_CURRENT_SOURCE_DIR}/src/core"
+	"\${CMAKE_CURRENT_SOURCE_DIR}/src/engine"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/plugins"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/simulator"
 )
