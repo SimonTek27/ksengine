@@ -10,6 +10,7 @@
 #include "engine/physics/TrackSurface.h"
 #include "engine/physics/LapSectorTimer.h"
 #include "engine/physics/PhysicsGolden.h"
+#include "engine/physics/WeatherPhysics.h"
 #include "engine/scene/Registry.h"
 #include "ui/NativeUiHub.h"
 #include "CameraController.h"
@@ -198,7 +199,13 @@ public:
 
     void setTimeOfDay(float hours) { m_timeOfDay = hours; }
     float timeOfDay() const { return m_timeOfDay; }
-    void setWeatherPreset(const ks::physics::WeatherState& state) { m_weather = state; }
+    // Roadmap 2.1: applying a preset also feeds WeatherSimulator, which
+    // evolves wetness from here on (rain soaks, dry air dries).
+    void setWeatherPreset(const ks::physics::WeatherState& state) {
+        m_weather = state;
+        m_weatherSim.setState(state);
+        m_weatherSim.start();
+    }
     const ks::physics::WeatherState& weatherState() const { return m_weather; }
 
     void setFfbEnabled(bool e) { m_ffbEnabled = e; }
@@ -240,7 +247,7 @@ private:
     void updateCamera(float dt);
     void updateAndDrawParticles(float dt);
     void initTracksideTerrain();
-    void updateWeather();
+    void updateWeather(float dt);
     void syncCarTransforms();
     // Roadmap 1.2: scene/car visual bookkeeping. Entities spawned from a
     // manifest are tracked so a track switch can despawn exactly them (the
@@ -316,6 +323,10 @@ private:
 
     float m_timeOfDay = 12.0f;
     ks::physics::WeatherState m_weather{};
+    // Roadmap 2.1 (P2.8): evolves the preset above over time — rain
+    // accumulation / track drying — and is mirrored back into m_weather
+    // every frame by updateWeather().
+    ks::physics::WeatherSimulator m_weatherSim;
 
     uint8_t m_sessionType = 0;
     uint8_t m_sessionPhase = 0;

@@ -52,6 +52,7 @@ set(KS_QT_FREE_TESTS
     keyboard_mapping_test
     content_library_test
     scene_assets_test
+    wet_physics_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

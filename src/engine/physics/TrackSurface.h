@@ -143,7 +143,13 @@ private:
                 const int idx = iy * m_res + ix;
                 const float wx = (static_cast<float>(ix) + 0.5f) / m_res * m_worldSize - m_worldSize * 0.5f;
                 const float wz = (static_cast<float>(iy) + 0.5f) / m_res * m_worldSize - m_worldSize * 0.5f;
-                const float d = std::sqrt((wx - p.x) * (wx - p.x) + (wz - p.z) * (wz - p.z));
+                // Distance to the cell's *box*, not its center: gameplay
+                // deposits use radius 1.5 m against 7.8 m cells, so a
+                // center-distance test would skip the cell the tire is
+                // actually standing on (rubber trail never built).
+                const float ex = std::max(std::fabs(wx - p.x) - cell * 0.5f, 0.0f);
+                const float ez = std::max(std::fabs(wz - p.z) - cell * 0.5f, 0.0f);
+                const float d = std::sqrt(ex * ex + ez * ez);
                 if (d > radius) continue;
                 const float w = 1.0f - d / radius;
                 fn(idx, w);

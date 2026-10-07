@@ -2,6 +2,7 @@
  * Parity 1.4 — same inputs + fixed dt → identical trajectory (deterministic).
  * Qt-free. Two independent VehicleSimulator runs must match bit-for-bit on key state.
  */
+#include "engine/physics/TrackSurface.h"
 #include "engine/physics/VehicleSimulator.h"
 #include <cstdio>
 #include <cmath>
@@ -52,6 +53,11 @@ bool same(const Snapshot& a, const Snapshot& b) {
 
 void runScript(ks::physics::VehicleSimulator& v, int steps) {
     v.reset();
+    // TrackSurface is a mutable shared singleton (rubber trails deposit into
+    // it while driving): give each run the same fresh environment, otherwise
+    // run A's deposits shift run B's sampled grip and the runs legitimately
+    // diverge.
+    ks::physics::TrackSurface::instance().configure();
     v.startSimulation();
     const double dt = 0.001;
     for (int i = 0; i < steps; ++i) {

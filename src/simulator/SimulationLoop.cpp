@@ -833,7 +833,13 @@ void SimulationLoop::publishSharedMemory() {
 #endif
 }
 
-void SimulationLoop::updateWeather() {
+void SimulationLoop::updateWeather(float dt) {
+    // Roadmap 2.1 (P2.8): evolve the preset first — rain soaks the track,
+    // dry air dries it (dt == 0 while paused leaves the state untouched) —
+    // then mirror the result so visuals, audio and TrackSurface all read
+    // the same evolving wetness.
+    m_weatherSim.update(dt);
+    m_weather = m_weatherSim.state();
     auto& rs = ks::engine::graphics::RenderSystem::instance();
     const float phase = (m_timeOfDay - 12.0f) / 12.0f * 3.14159265f;
     const float c = std::cos(phase), s = std::sin(phase);
@@ -1248,7 +1254,8 @@ void SimulationLoop::tick() {
         if (m_ffb) m_ffb->updateFFB(torqueNm);
     }
 #endif
-    updateWeather();
+    // Weather evolution freezes while a modal overlay pauses the world.
+    updateWeather(paused ? 0.0f : static_cast<float>(elapsed));
     publishSharedMemory();
     publishUdpTelemetry();
     publishTcpTelemetry();
