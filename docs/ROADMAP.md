@@ -21,7 +21,7 @@ Il lavoro residuo è **qualità prodotto** (P2) e **profondità pro** (P3).
 | Rendering KN5/LOD stabile | 🔶 | Parziale — P2.1 |
 | Audio 3D | 🔶 | Stub / volumes — P2.2 |
 | UI menu racing completa | 🔶 | Overlay base — P2.5 |
-| Aquaplaning / rain fisico | ✅ | Curve grip bagnato + G11 + evoluzione pioggia/asciutto — P2.8 (visual: 2.2) |
+| Aquaplaning / rain fisico | ✅ | Curve grip + G11 + evoluzione pioggia/asciutto + rain/spray particelle (`KS_PARTICLES=1`) — P2.8 |
 
 Riferimenti: `PARITY_STATUS.md`, `GAP_MATRIX.md`.
 

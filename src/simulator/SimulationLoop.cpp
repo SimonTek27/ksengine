@@ -10,6 +10,7 @@
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SceneAssets.h"
+#include "RainEffects.h"
 #include "SimulatorAudio.h"
 #include "engine/physics/DamageTelemetry.h"
 #include "ui/UiGpuPass.h"
@@ -1539,7 +1540,13 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
             dust.gravity = {0.0f, -1.6f, 0.0f};   // hangs, then settles
             dust.drag = 1.4f;
             m_particles.addEmitter(dust);
-            std::fprintf(stderr, "[particles] KS_PARTICLES=1: dust emitter up to %d sprites\n",
+            // Roadmap 2.2 (P2.8): rain column + wheel spray, driven per
+            // frame from the weather state below. Same KS_PARTICLES gate as
+            // the dust emitter — with the flag unset no emitter exists, so
+            // the default image is untouched.
+            m_particles.addEmitter(rainfx::makeRainEmitter());   // index 1
+            m_particles.addEmitter(rainfx::makeSprayEmitter());  // index 2
+            std::fprintf(stderr, "[particles] KS_PARTICLES=1: dust + rain + spray emitters up to %d sprites\n",
                          ParticleSystem::kMaxParticles);
         }
     }
@@ -1552,6 +1559,16 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
         em.position = {st.position.x, st.position.y + 0.15f, st.position.z};
         // Dust is kicked up by rolling tyres: stationary, there is none.
         em.enabled = std::fabs(st.speed) > 2.0f;
+        // Roadmap 2.2: rain follows the car from above, spray only comes off
+        // a wet track while the car is moving (both rules unit-tested in
+        // rain_effects_test). m_weather evolves since Roadmap 2.1, so a
+        // drying track turns the spray off by itself.
+        const ks::math::vec3 carPos{st.position.x, st.position.y, st.position.z};
+        rainfx::driveRainEmitter(m_particles.emitter(1), carPos,
+                                 m_weather.rainIntensity);
+        rainfx::driveSprayEmitter(m_particles.emitter(2), carPos,
+                                  m_weather.trackWetness,
+                                  static_cast<float>(st.speed));
     }
 #endif
 
