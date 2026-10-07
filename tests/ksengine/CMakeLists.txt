@@ -48,6 +48,7 @@ set(KS_QT_FREE_TESTS
     particle_test
     terrain_test
     png_test
+    damage_telemetry_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

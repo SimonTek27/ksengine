@@ -19,14 +19,20 @@ void DamageZoneData::applyImpact(float energy, const PhysVec3& direction, Damage
     float normalizedEnergy = std::min(energy / 50000.0f, 1.0f);
 
     structural = std::max(0.0f, structural - normalizedEnergy * 0.3f);
-    cosmetic = std::max(0.0f, cosmetic - normalizedEnergy * 0.5f);
+    // cosmetic is damage (0 = perfect, 1 = destroyed): an impact ADDS to it
+    // (it used to be decremented, which pinned it at 0 forever).
+    cosmetic = std::min(1.0f, cosmetic + normalizedEnergy * 0.5f);
     deformation = std::min(1.0f, deformation + normalizedEnergy * 0.4f);
 
     deformationDir = direction.normalized();
 }
 
 float DamageZoneData::combinedDamage() const {
-    return 1.0f - (structural * 0.7f + cosmetic * 0.3f);
+    // structural = integrity (1 = perfect), cosmetic = damage (0 = perfect),
+    // so a fresh zone (1, 0) must read 0 and a destroyed one (0, 1) must
+    // read 1. The old mix (1 - (0.7*structural + 0.3*cosmetic)) reported
+    // 0.3 damage on a brand-new zone and punished repaired cars.
+    return std::clamp((1.0f - structural) * 0.7f + cosmetic * 0.3f, 0.0f, 1.0f);
 }
 
 // ============================================================================

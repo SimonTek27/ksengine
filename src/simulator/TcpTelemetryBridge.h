@@ -151,15 +151,18 @@ public:
             char buf[1024];
             int n = std::snprintf(buf, sizeof(buf),
                 "{\"t\":%.3f,\"v\":%.2f,\"rpm\":%.0f,\"gear\":%d,\"thr\":%.3f,\"brk\":%.3f,"
-                "\"fuel\":%.2f,\"lap\":%d,\"ct\":%d,\"bt\":%d,\"spline\":%.4f}\n",
+                "\"fuel\":%.2f,\"lap\":%d,\"ct\":%d,\"bt\":%d,\"spline\":%.4f,"
+                "\"dmg\":%.3f,\"engH\":%.3f,\"pwr\":%.3f,\"warn\":%d,\"seized\":%d}\n",
                 s.timeSec, s.speedMs * 3.6, s.rpm, s.gear, s.throttle, s.brake,
-                s.fuelL, s.completedLaps, s.currentTimeMs, s.bestTimeMs, s.normalizedSpline);
+                s.fuelL, s.completedLaps, s.currentTimeMs, s.bestTimeMs, s.normalizedSpline,
+                s.damageOverall, s.engineHealth, s.powerMult, s.damageWarning,
+                static_cast<int>(s.engineSeized));
             if (n <= 0) return false;
             payload.assign(buf, buf + n);
         } else {
             UdpTelemPacket p{};
             p.magic[0] = 'K'; p.magic[1] = 'S'; p.magic[2] = 'I'; p.magic[3] = 'M';
-            p.version = 1;
+            p.version = 2; // v2 = damage channels (docs/DAMAGE_TELEMETRY.md)
             p.size = static_cast<uint16_t>(sizeof(UdpTelemPacket));
             p.sequence = ++m_seq;
             p.timeSec = s.timeSec;
@@ -178,6 +181,7 @@ public:
                 p.tyreTemp[i] = s.tyreTemp[i];
                 p.tyreWear[i] = s.tyreWear[i];
                 p.tyrePressure[i] = s.tyrePressure[i];
+                p.suspIntegrity[i] = s.suspIntegrity[i];
             }
             p.completedLaps = s.completedLaps;
             p.currentSector = s.currentSector;
@@ -193,6 +197,14 @@ public:
             p.roadTemp = s.roadTemp;
             p.inPit = s.inPit ? 1 : 0;
             p.pitLimiter = s.pitLimiter ? 1 : 0;
+            p.damageWarning = static_cast<uint8_t>(s.damageWarning);
+            p.engineSeized = s.engineSeized ? 1 : 0;
+            p.damageOverall = s.damageOverall;
+            p.engineHealth = s.engineHealth;
+            p.powerMult = s.powerMult;
+            p.dragMult = s.dragMult;
+            p.downforceMult = s.downforceMult;
+            for (int i = 0; i < 5; ++i) p.carDamage[i] = s.carDamage[i];
             const char* raw = reinterpret_cast<const char*>(&p);
             payload.assign(raw, raw + sizeof(p));
         }

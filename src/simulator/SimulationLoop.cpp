@@ -10,6 +10,7 @@
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SimulatorAudio.h"
+#include "engine/physics/DamageTelemetry.h"
 #include "ui/UiGpuPass.h"
 #include "ui/RaceTelemetryHud.h"
 #include "UdpTelemetryBridge.h"
@@ -651,6 +652,19 @@ void SimulationLoop::publishUdpTelemetry() {
     s.roadTemp = m_weather.trackTemp;
     s.inPit = st.inPitLane;
     s.pitLimiter = st.pitLimiterActive;
+    // Roadmap 1.5 / P1.10: damage channels (docs/DAMAGE_TELEMETRY.md).
+    {
+        const auto dmg = ks::physics::sampleDamage(m_vehicle->damage());
+        s.damageOverall = dmg.overall;
+        s.engineHealth = dmg.engineHealth;
+        s.powerMult = dmg.powerMult;
+        s.dragMult = dmg.dragMult;
+        s.downforceMult = dmg.downforceMult;
+        s.damageWarning = dmg.warningLevel;
+        s.engineSeized = dmg.engineSeized;
+        for (int i = 0; i < 5; ++i) s.carDamage[i] = dmg.carDamage[i];
+        for (int i = 0; i < 4; ++i) s.suspIntegrity[i] = dmg.suspIntegrity[i];
+    }
     m_udp->publish(s);
 #endif
 }
@@ -691,6 +705,19 @@ void SimulationLoop::publishTcpTelemetry() {
     s.roadTemp = m_weather.trackTemp;
     s.inPit = st.inPitLane;
     s.pitLimiter = st.pitLimiterActive;
+    // Roadmap 1.5 / P1.10: same damage channels as the UDP path.
+    {
+        const auto dmg = ks::physics::sampleDamage(m_vehicle->damage());
+        s.damageOverall = dmg.overall;
+        s.engineHealth = dmg.engineHealth;
+        s.powerMult = dmg.powerMult;
+        s.dragMult = dmg.dragMult;
+        s.downforceMult = dmg.downforceMult;
+        s.damageWarning = dmg.warningLevel;
+        s.engineSeized = dmg.engineSeized;
+        for (int i = 0; i < 5; ++i) s.carDamage[i] = dmg.carDamage[i];
+        for (int i = 0; i < 4; ++i) s.suspIntegrity[i] = dmg.suspIntegrity[i];
+    }
     m_tcp->publish(s);
 #endif
 }
@@ -738,6 +765,19 @@ void SimulationLoop::publishSharedMemory() {
     live.sessionTimeLeft = static_cast<float>(m_timeRemaining);
     live.trackSplineLength = m_trackData.splineLength;
     live.flag = ks::ac::ksRaceFlagToAcFlag(static_cast<int>(m_raceSession.flag()));
+    // Roadmap 1.5 / P1.10: AC carDamage[5] body zones (front, rear, left,
+    // right, overall) plus the ksengine-side damage snapshot in AcLiveInput.
+    {
+        const auto dmg = ks::physics::sampleDamage(m_vehicle->damage());
+        for (int i = 0; i < 5; ++i) live.carDamage[i] = dmg.carDamage[i];
+        live.damageOverall = dmg.overall;
+        live.engineHealth = dmg.engineHealth;
+        live.powerMult = dmg.powerMult;
+        live.dragMult = dmg.dragMult;
+        live.downforceMult = dmg.downforceMult;
+        live.damageWarning = dmg.warningLevel;
+        live.engineSeized = dmg.engineSeized;
+    }
     m_shm->publish(live);
 #endif
 }
@@ -786,6 +826,14 @@ void SimulationLoop::syncUiFromVehicle() {
     s.position = 1; s.totalCars = 1; s.lap = m_lapTimer.completedLaps() + 1; s.totalLaps = m_totalLaps;
     s.currentTimeMs = m_lapTimer.currentTimeMs(); s.lastTimeMs = m_lapTimer.lastTimeMs(); s.bestTimeMs = m_lapTimer.bestTimeMs();
     s.sector = m_lapTimer.sectorIndex(); s.inPit = st.inPitLane; s.pitLimiter = st.pitLimiterActive;
+    // Roadmap 1.5 / P1.10: damage strip channels (docs/DAMAGE_TELEMETRY.md —
+    // HUD, UDP/TCP and SM all read the same sampleDamage snapshot).
+    const auto dmg = ks::physics::sampleDamage(m_vehicle->damage());
+    s.damageOverall = dmg.overall;
+    s.engineHealth = dmg.engineHealth;
+    s.powerMult = dmg.powerMult;
+    s.damageWarning = dmg.warningLevel;
+    s.engineSeized = dmg.engineSeized;
     m_ui.pushRaceSample(s);
 #endif
 }
