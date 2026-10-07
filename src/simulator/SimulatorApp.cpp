@@ -137,24 +137,37 @@ static void handleKeyDown(int vk) {
 
     bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
 
-    switch (vk) {
-    case 'W': case VK_UP:
+    // Roadmap 1.4 / P2.7: driving bindings come from the rebindable
+    // KeyboardMapping (primary key + fixed arrow alternate). The exact key
+    // that was pressed is forwarded so release stays 1:1 even when two
+    // physical keys drive the same action.
+    auto* im = g_simulation->inputManager();
+    const ks::sim::KeyboardMapping kb = im ? im->keyboardMapping() : ks::sim::KeyboardMapping{};
+    if (vk == kb.throttle || vk == ks::sim::KeyboardMapping::AltThrottle) {
         g_throttle = true;
-        if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('W');
-        break;
-    case 'S': case VK_DOWN:
+        if (im) im->setKeyDown(vk);
+        return;
+    }
+    if (vk == kb.brake || vk == ks::sim::KeyboardMapping::AltBrake) {
         g_brake = true;
-        if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('S');
-        break;
-    case 'A': case VK_LEFT:
+        if (im) im->setKeyDown(vk);
+        return;
+    }
+    if (vk == kb.steerLeft || vk == ks::sim::KeyboardMapping::AltSteerLeft) {
         g_steerLeft = true;
-        if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('A');
-        break;
-    case 'D': case VK_RIGHT:
+        if (im) im->setKeyDown(vk);
+        return;
+    }
+    if (vk == kb.steerRight || vk == ks::sim::KeyboardMapping::AltSteerRight) {
         g_steerRight = true;
-        if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('D');
-        break;
-    case VK_SPACE: g_handbrake = true; break;
+        if (im) im->setKeyDown(vk);
+        return;
+    }
+    if (vk == kb.shiftUp) { if (im) im->setKeyDown(vk); return; }
+    if (vk == kb.shiftDown) { if (im) im->setKeyDown(vk); return; }
+    if (vk == kb.handbrake) { g_handbrake = true; return; }
+
+    switch (vk) {
     case 'C': {
         if (!g_simulation->camera()) break;
         auto mode = g_simulation->camera()->mode();
@@ -178,8 +191,6 @@ static void handleKeyDown(int vk) {
     case 'T':
         if (g_simulation->telemetry()) g_simulation->telemetry()->toggleVisible();
         break;
-    case 'E': if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('E'); break;
-    case 'Q': if (g_simulation->inputManager()) g_simulation->inputManager()->setKeyDown('Q'); break;
     case VK_F5:
         if (shift) { g_simulation->stop(); printf("Stopped.\n"); }
         else       { g_simulation->start(); printf("Driving started!\n"); }
@@ -207,27 +218,36 @@ static void handleKeyDown(int vk) {
 
 static void handleKeyUp(int vk) {
     // Always clear: swallowing the release while an overlay was open left
-    // the driving key latched on once the overlay closed.
-    switch (vk) {
-    case 'W': case VK_UP:
+    // the driving key latched on once the overlay closed. Shift keys (E/Q)
+    // were never released at all before, so keyboard shifting died after the
+    // first shift until the next reset().
+    auto* im = g_simulation ? g_simulation->inputManager() : nullptr;
+    const ks::sim::KeyboardMapping kb = im ? im->keyboardMapping() : ks::sim::KeyboardMapping{};
+    if (vk == kb.throttle || vk == ks::sim::KeyboardMapping::AltThrottle) {
         g_throttle = false;
-        if (g_simulation && g_simulation->inputManager()) g_simulation->inputManager()->setKeyUp('W');
-        break;
-    case 'S': case VK_DOWN:
-        g_brake = false;
-        if (g_simulation && g_simulation->inputManager()) g_simulation->inputManager()->setKeyUp('S');
-        break;
-    case 'A': case VK_LEFT:
-        g_steerLeft = false;
-        if (g_simulation && g_simulation->inputManager()) g_simulation->inputManager()->setKeyUp('A');
-        break;
-    case 'D': case VK_RIGHT:
-        g_steerRight = false;
-        if (g_simulation && g_simulation->inputManager()) g_simulation->inputManager()->setKeyUp('D');
-        break;
-    case VK_SPACE: g_handbrake = false; break;
-    default: break;
+        if (im) im->setKeyUp(vk);
+        return;
     }
+    if (vk == kb.brake || vk == ks::sim::KeyboardMapping::AltBrake) {
+        g_brake = false;
+        if (im) im->setKeyUp(vk);
+        return;
+    }
+    if (vk == kb.steerLeft || vk == ks::sim::KeyboardMapping::AltSteerLeft) {
+        g_steerLeft = false;
+        if (im) im->setKeyUp(vk);
+        return;
+    }
+    if (vk == kb.steerRight || vk == ks::sim::KeyboardMapping::AltSteerRight) {
+        g_steerRight = false;
+        if (im) im->setKeyUp(vk);
+        return;
+    }
+    if (vk == kb.shiftUp || vk == kb.shiftDown) {
+        if (im) im->setKeyUp(vk);
+        return;
+    }
+    if (vk == kb.handbrake) g_handbrake = false;
 }
 
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -529,10 +549,31 @@ static void initSimulation() {
         printf("Content browser: %s\n", type.c_str());
     };
     uiMenu->onOpenSettingsPanelRequested = [](const std::string& panel) {
+        if (panel == "keyboard") {
+            g_simulation->ui().menu().setVisible(false);
+            g_simulation->ui().keyRebind().setVisible(true);
+            return;
+        }
         printf("Settings panel: %s\n", panel.c_str());
     };
     uiMenu->onDevModeRequested = []() {
         printf("Dev mode request\n");
+    };
+
+    // --- Roadmap 1.4 / P2.7: keyboard bindings ---------------------------
+    // Load the persisted mapping (Key=Value, same user/ pattern as user/pb)
+    // and wire the rebind panel: every capture is applied immediately and
+    // written back.
+    if (auto* im = g_simulation->inputManager()) {
+        ks::sim::KeyboardMapping kb;
+        if (ks::sim::loadKeyboardMapping("user/keyboard.ini", kb))
+            im->setKeyboardMapping(kb);
+        g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
+    }
+    g_simulation->ui().keyRebind().onMappingChanged = [](const ks::sim::KeyboardMapping& m) {
+        if (auto* im = g_simulation->inputManager()) im->setKeyboardMapping(m);
+        if (ks::sim::saveKeyboardMapping("user/keyboard.ini", m))
+            printf("Keyboard bindings saved (user/keyboard.ini)\n");
     };
 
     // --- Roadmap 3.1: menu <-> transport ---------------------------------

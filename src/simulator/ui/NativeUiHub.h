@@ -8,6 +8,7 @@
 #include "UiInput.h"
 #include "FontTtfLoader.h"
 #include "DeviceSettingsOverlay.h"
+#include "KeyRebindOverlay.h"
 #include "MultiplayerOverlay.h"
 #include "ChatOverlay.h"
 #include "RaceTelemetryHud.h"
@@ -45,6 +46,7 @@ public:
     DashboardOverlay& dashboard() { return *m_dash; }
     TelemetryOverlay& telemetry() { return *m_telem; }
     DeviceSettingsOverlay& devices() { return *m_devices; }
+    KeyRebindOverlay& keyRebind() { return m_keyRebind; }
     MultiplayerOverlay& multiplayer() { return *m_mp; }
     ChatOverlay& chat() { return *m_chat; }
     RaceTelemetryHud& raceHud() { return m_raceHud; }
@@ -85,6 +87,7 @@ public:
             buildCinematicMenu(dl, width, height);
 
         m_devices->build(dl, width, height, &m_input);
+        m_keyRebind.build(dl, width, height, &m_input);
         m_mp->build(dl, width, height, &m_input);
         m_chat->build(dl, width, height, &m_input);
 
@@ -97,6 +100,7 @@ public:
         // half-typed message never reaches the menu or the server browser.
         if (m_chat->isTyping()) return m_chat->handleKey(key);
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
+        if (m_keyRebind.isVisible() && m_keyRebind.handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
         if (m_menu->isVisible() && m_menu->handleKeyPress(key)) return true;
         if (m_chat->handleKey(key)) return true;
@@ -123,6 +127,7 @@ public:
             m_input.notePressPosition();
 
         if (m_devices->isVisible() && m_devices->handleMouse(e)) return true;
+        if (m_keyRebind.isVisible() && m_keyRebind.handleMouse(e)) return true;
         if (m_mp->isVisible() && m_mp->handleMouse(e)) return true;
 
         if (m_menu->isVisible() || m_menu->fadeAlpha() > 0.5f) {
@@ -155,7 +160,8 @@ public:
     }
 
     bool blocksDrivingInput() const {
-        return m_menu->isInputBlocked() || m_devices->isVisible() || m_mp->isVisible() ||
+        return m_menu->isInputBlocked() || m_devices->isVisible() ||
+               m_keyRebind.isVisible() || m_mp->isVisible() ||
                m_chat->isTyping();
     }
 
@@ -344,6 +350,7 @@ private:
     TextRenderer m_text;
     UiInput m_input;
     RaceTelemetryHud m_raceHud;
+    KeyRebindOverlay m_keyRebind;
     int m_viewW = 1280, m_viewH = 720;
 
     std::unique_ptr<GameMenuOverlay> m_menu;

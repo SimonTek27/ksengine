@@ -49,6 +49,7 @@ set(KS_QT_FREE_TESTS
     terrain_test
     png_test
     damage_telemetry_test
+    keyboard_mapping_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

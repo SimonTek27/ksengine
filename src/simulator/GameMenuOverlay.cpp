@@ -170,7 +170,9 @@ void GameMenuOverlay::buildSettingsMenu()
 void GameMenuOverlay::buildControlsMenu()
 {
     m_items.clear();
-    m_items.push_back({ "KEYBOARD", "Driving bindings", [this]() {} });
+    m_items.push_back({ "KEYBOARD", "Driving bindings", [this]() {
+        if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("keyboard");
+    } });
     m_items.push_back({ "WHEEL", "Device and FFB", [this]() {
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("devices");
     } });

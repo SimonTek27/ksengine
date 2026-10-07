@@ -226,28 +226,33 @@ bool InputManager::isXInputConnected() const {
 }
 
 void InputManager::processKeyboard() {
-    m_throttle = 0;
-    if (isKeyDown('W') || isKeyDown('w') || isKeyDown(KEY_UP))
-        m_throttle = 1.0;
+    // Roadmap 1.4: primaries come from the rebindable mapping; arrows stay
+    // fixed as alternates. Key names are matched case-insensitively (the
+    // WM_KEYDOWN path inserts the uppercase VK, tests may inject 'w').
+    auto norm = [](int k) { return (k >= 'a' && k <= 'z') ? k - ('a' - 'A') : k; };
+    auto pressed = [&](int vk) {
+        if (vk <= 0) return false;
+        const int up = norm(vk);
+        if (isKeyDown(up)) return true;
+        if (up >= 'A' && up <= 'Z') return isKeyDown(up + ('a' - 'A'));
+        return false;
+    };
 
-    m_brake = 0;
-    if (isKeyDown('S') || isKeyDown('s') || isKeyDown(KEY_DOWN))
-        m_brake = 1.0;
+    m_throttle = (pressed(m_kb.throttle) || pressed(KeyboardMapping::AltThrottle)) ? 1.0 : 0.0;
+    m_brake = (pressed(m_kb.brake) || pressed(KeyboardMapping::AltBrake)) ? 1.0 : 0.0;
 
     m_steer = 0;
-    if (isKeyDown('A') || isKeyDown('a') || isKeyDown(KEY_LEFT))
-        m_steer -= 1.0;
-    if (isKeyDown('D') || isKeyDown('d') || isKeyDown(KEY_RIGHT))
-        m_steer += 1.0;
+    if (pressed(m_kb.steerLeft) || pressed(KeyboardMapping::AltSteerLeft)) m_steer -= 1.0;
+    if (pressed(m_kb.steerRight) || pressed(KeyboardMapping::AltSteerRight)) m_steer += 1.0;
 
     if (m_map.invertSteer) m_steer = -m_steer;
 
-    bool curE = isKeyDown('E') || isKeyDown('e');
-    bool curQ = isKeyDown('Q') || isKeyDown('q');
-    if (curE && !m_prevE) m_shiftUp = true;
-    if (curQ && !m_prevQ) m_shiftDown = true;
-    m_prevE = curE;
-    m_prevQ = curQ;
+    bool curUp = pressed(m_kb.shiftUp);
+    bool curDn = pressed(m_kb.shiftDown);
+    if (curUp && !m_prevShiftUpKey) m_shiftUp = true;
+    if (curDn && !m_prevShiftDownKey) m_shiftDown = true;
+    m_prevShiftUpKey = curUp;
+    m_prevShiftDownKey = curDn;
 
     m_steer = curve(m_steer, m_map.steerGamma, m_map.deadZone, true);
     m_throttle = std::clamp(m_throttle, 0.0, 1.0);

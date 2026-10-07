@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <unordered_set>
@@ -58,6 +62,127 @@ struct JoystickMapping {
     }
 };
 
+// Roadmap 1.4 / GAP P2.7: rebindable keyboard driving bindings. The primary
+// keys persist to user/keyboard.ini; the arrow keys stay fixed as alternates
+// so a profile can never lock the player out of throttle/brake/steer.
+struct KeyboardMapping {
+    int throttle = 'W';
+    int brake = 'S';
+    int steerLeft = 'A';
+    int steerRight = 'D';
+    int shiftUp = 'E';
+    int shiftDown = 'Q';
+    int handbrake = 0x20; // VK_SPACE
+
+    static constexpr int AltThrottle = 0x26;   // VK_UP
+    static constexpr int AltBrake = 0x28;      // VK_DOWN
+    static constexpr int AltSteerLeft = 0x25;  // VK_LEFT
+    static constexpr int AltSteerRight = 0x27; // VK_RIGHT
+};
+
+namespace kb_detail {
+struct KeyName { int vk; const char* name; };
+inline const KeyName* table() {
+    static const KeyName t[] = {
+        {0x20, "SPACE"},  {0x0D, "ENTER"},  {0x1B, "ESC"},    {0x09, "TAB"},
+        {0x25, "LEFT"},   {0x26, "UP"},     {0x27, "RIGHT"},  {0x28, "DOWN"},
+        {0x10, "SHIFT"},  {0x11, "CTRL"},   {0x12, "ALT"},
+        {0x24, "HOME"},   {0x23, "END"},    {0x21, "PGUP"},   {0x22, "PGDN"},
+        {0x2D, "INSERT"}, {0x2E, "DELETE"},
+        {0, nullptr},
+    };
+    return t;
+}
+} // namespace kb_detail
+
+/** Stable name for a virtual-key code: letters/digits as-is (W, 5), F1-F12,
+ *  the kb_detail table (SPACE, UP, ...), else VK<code>. */
+inline std::string keyName(int vk) {
+    if (vk >= 'A' && vk <= 'Z') return std::string(1, static_cast<char>(vk));
+    if (vk >= '0' && vk <= '9') return std::string(1, static_cast<char>(vk));
+    if (vk >= 0x70 && vk <= 0x7B) return "F" + std::to_string(vk - 0x6F);
+    for (const auto* e = kb_detail::table(); e->name; ++e)
+        if (e->vk == vk) return e->name;
+    return "VK" + std::to_string(vk);
+}
+
+/** Inverse of keyName() (case-insensitive); -1 when not recognised. */
+inline int keyFromName(std::string name) {
+    for (char& c : name)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (name.size() == 1) {
+        const char c = name[0];
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) return c;
+        return -1;
+    }
+    if (name.size() >= 2 && name[0] == 'F') {
+        const int f = std::atoi(name.c_str() + 1);
+        if (f >= 1 && f <= 12) return 0x70 + (f - 1);
+    }
+    for (const auto* e = kb_detail::table(); e->name; ++e)
+        if (name == e->name) return e->vk;
+    if (name.compare(0, 2, "VK") == 0) {
+        const int vk = std::atoi(name.c_str() + 2);
+        if (vk > 0 && vk < 256) return vk;
+    }
+    return -1;
+}
+
+/** Persist to a Key=Value ini (user/keyboard.ini). False if unwritable. */
+inline bool saveKeyboardMapping(const std::string& path, const KeyboardMapping& m) {
+    // Mirror PersonalBestStore: create the containing directory (user/) first.
+    {
+        const auto slash = path.find_last_of("/\\");
+        if (slash != std::string::npos) {
+            std::error_code ec;
+            std::filesystem::create_directories(path.substr(0, slash), ec);
+        }
+    }
+    std::FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) return false;
+    std::fprintf(f,
+        "# ksengine keyboard bindings (roadmap 1.4)\n"
+        "throttle=%s\nbrake=%s\nsteerLeft=%s\nsteerRight=%s\n"
+        "shiftUp=%s\nshiftDown=%s\nhandbrake=%s\n",
+        keyName(m.throttle).c_str(), keyName(m.brake).c_str(),
+        keyName(m.steerLeft).c_str(), keyName(m.steerRight).c_str(),
+        keyName(m.shiftUp).c_str(), keyName(m.shiftDown).c_str(),
+        keyName(m.handbrake).c_str());
+    std::fclose(f);
+    return true;
+}
+
+/**
+ * Load over an existing mapping: a missing file returns false and leaves it
+ * untouched; malformed lines and unknown key names are skipped individually
+ * (the field keeps whatever the mapping already held).
+ */
+inline bool loadKeyboardMapping(const std::string& path, KeyboardMapping& m) {
+    std::FILE* f = std::fopen(path.c_str(), "r");
+    if (!f) return false;
+    char line[128];
+    while (std::fgets(line, sizeof(line), f)) {
+        std::string s(line);
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
+            s.pop_back();
+        if (s.empty() || s[0] == '#') continue;
+        const auto eq = s.find('=');
+        if (eq == std::string::npos) continue;
+        const int vk = keyFromName(s.substr(eq + 1));
+        if (vk < 0) continue;
+        const std::string key = s.substr(0, eq);
+        if (key == "throttle") m.throttle = vk;
+        else if (key == "brake") m.brake = vk;
+        else if (key == "steerLeft") m.steerLeft = vk;
+        else if (key == "steerRight") m.steerRight = vk;
+        else if (key == "shiftUp") m.shiftUp = vk;
+        else if (key == "shiftDown") m.shiftDown = vk;
+        else if (key == "handbrake") m.handbrake = vk;
+    }
+    std::fclose(f);
+    return true;
+}
+
 class InputManager {
 public:
     static constexpr int KEY_UP = 0x26;
@@ -109,6 +234,9 @@ public:
     void setDeadZone(double dz) { m_map.deadZone = dz; }
     void setInvertSteer(bool i) { m_map.invertSteer = i; }
 
+    void setKeyboardMapping(const KeyboardMapping& m) { m_kb = m; }
+    const KeyboardMapping& keyboardMapping() const { return m_kb; }
+
     void injectAxes(const double axes[AXIS_COUNT], unsigned buttons);
     void injectAxis(int index, double value);
     void injectButton(int index, bool pressed);
@@ -126,10 +254,11 @@ private:
     double m_rawThrottle = 0, m_rawBrake = 0, m_rawSteer = 0;
 
     bool m_shiftUp = false, m_shiftDown = false;
-    bool m_prevE = false, m_prevQ = false;
+    bool m_prevShiftUpKey = false, m_prevShiftDownKey = false;
     bool m_prevShiftUpBtn = false, m_prevShiftDownBtn = false;
 
     JoystickMapping m_map = JoystickMapping::gamepadDefault();
+    KeyboardMapping m_kb;
 
     double m_axes[AXIS_COUNT] = {};
     unsigned m_buttons = 0;
