@@ -1,7 +1,8 @@
 #pragma once
 
-#include <string>
+#include "ContentLibrary.h"
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace ks::sim {
@@ -24,6 +25,9 @@ enum class MenuState {
     ContentManager,
     Settings,
     Controls,
+    CarSelect,
+    TrackSelect,
+    Results,
     DevModeConfirm,
     QuitConfirm
 };
@@ -51,6 +55,13 @@ struct MenuItem {
     bool enabled = true;
 };
 
+/** One line of the RESULTS screen (roadmap 1.3). */
+struct ResultsRow {
+    std::string position;
+    std::string driver;
+    std::string detail;
+};
+
 class GameMenuOverlay {
 public:
     GameMenuOverlay();
@@ -64,8 +75,14 @@ public:
     void setVisible(bool visible);
     void toggleVisible();
 
-    void setTrackName(const std::string& name) { m_trackName = name; }
-    void setCarName(const std::string& name) { m_carName = name; }
+    void setTrackName(const std::string& name) {
+        m_trackName = name;
+        m_menuDirty = true;
+    }
+    void setCarName(const std::string& name) {
+        m_carName = name;
+        m_menuDirty = true;
+    }
     void setProfileField(const std::string& fieldName, const std::string& value);
     void setNationalityFromList(int index);
 
@@ -87,10 +104,14 @@ public:
     const std::string& carName() const { return m_carName; }
     std::string sectionTitle() const;
 
+    // --- Roadmap 1.3: menu-minimum flow (select car -> track -> practice
+    //     -> results) ------------------------------------------------------
+    void openCarSelect();
+    void openTrackSelect();
+    void showResults(std::vector<ResultsRow> rows);
+
     std::function<void()> onExitRequested;
     std::function<void()> onStartDrivingRequested;
-    std::function<void()> onLoadTrackRequested;
-    std::function<void()> onLoadCarRequested;
     std::function<void()> onResetRequested;
     std::function<void()> onToggleFullscreenRequested;
     std::function<void(const DriverProfile&)> onProfileChanged;
@@ -101,7 +122,11 @@ public:
     std::function<void()> onOpenSetupGarageRequested;
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;
-    std::function<void(const std::string&)> onOpenContentBrowserRequested;
+    // Roadmap 1.3: content select screens scan content/cars and
+    // content/tracks (ContentLibrary.h) and report the chosen folder here.
+    std::function<void(const std::string&)> onCarChosen;
+    std::function<void(const std::string&)> onTrackChosen;
+    std::function<void()> onShowResultsRequested;
     std::function<void(const std::string&)> onOpenSettingsPanelRequested;
     // Roadmap 3.1 - network actions from the MULTI PLAYER section.
     std::function<void()> onHostServerRequested;
@@ -118,6 +143,9 @@ private:
     void buildContentManagerMenu();
     void buildSettingsMenu();
     void buildControlsMenu();
+    void buildCarSelectMenu();
+    void buildTrackSelectMenu();
+    void buildResultsMenu();
     void buildDevModeConfirm();
     void buildQuitConfirm();
     void switchMenu(MenuState state);
@@ -138,6 +166,8 @@ private:
 
     DriverProfile m_profile;
     std::vector<MenuItem> m_items;
+    std::vector<ContentEntry> m_selectEntries;
+    std::vector<ResultsRow> m_resultRows;
 };
 
 } // namespace ks::sim

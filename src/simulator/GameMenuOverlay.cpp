@@ -21,6 +21,9 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::ContentManager: return "CONTENT";
     case MenuState::Settings: return "SETTINGS";
     case MenuState::Controls: return "CONTROLS";
+    case MenuState::CarSelect: return "SELECT CAR";
+    case MenuState::TrackSelect: return "SELECT TRACK";
+    case MenuState::Results: return "RESULTS";
     case MenuState::DevModeConfirm: return "EDITOR";
     case MenuState::QuitConfirm: return "QUIT";
     }
@@ -91,12 +94,19 @@ void GameMenuOverlay::buildMainMenu()
 void GameMenuOverlay::buildSingleplayerMenu()
 {
     m_items.clear();
+    m_items.push_back({ "CAR", m_carName.empty() ? "Select a car" : m_carName,
+        [this]() { openCarSelect(); } });
+    m_items.push_back({ "TRACK", m_trackName.empty() ? "Select a track" : m_trackName,
+        [this]() { openTrackSelect(); } });
+    m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "PRACTICE", "Open session on the selected circuit",
         [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
     m_items.push_back({ "QUICK RACE", "Grid start against AI",
         [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
     m_items.push_back({ "TIME ATTACK", "Clean laps against the clock",
         [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
+    m_items.push_back({ "RESULTS", "Session standings",
+        [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "BACK", "Return",
         [this]() { goBack(); } });
@@ -148,9 +158,9 @@ void GameMenuOverlay::buildContentManagerMenu()
 {
     m_items.clear();
     m_items.push_back({ "TRACKS", "Browse circuits",
-        [this]() { if (onOpenContentBrowserRequested) onOpenContentBrowserRequested("tracks"); } });
+        [this]() { openTrackSelect(); } });
     m_items.push_back({ "CARS", "Browse vehicles",
-        [this]() { if (onOpenContentBrowserRequested) onOpenContentBrowserRequested("cars"); } });
+        [this]() { openCarSelect(); } });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 
@@ -177,6 +187,77 @@ void GameMenuOverlay::buildControlsMenu()
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("devices");
     } });
     m_items.push_back({ "BACK", "Return", [this]() { switchMenu(MenuState::Settings); } });
+}
+
+void GameMenuOverlay::openCarSelect()
+{
+    m_selectEntries = scanCarLibrary();
+    switchMenu(MenuState::CarSelect);
+}
+
+void GameMenuOverlay::openTrackSelect()
+{
+    m_selectEntries = scanTrackLibrary();
+    switchMenu(MenuState::TrackSelect);
+}
+
+void GameMenuOverlay::showResults(std::vector<ResultsRow> rows)
+{
+    m_resultRows = std::move(rows);
+    switchMenu(MenuState::Results);
+    setVisible(true);
+}
+
+void GameMenuOverlay::buildCarSelectMenu()
+{
+    m_items.clear();
+    if (m_selectEntries.empty()) {
+        m_items.push_back({ "(no cars found)",
+            "Put car folders in content/cars", nullptr });
+    } else {
+        for (const auto& e : m_selectEntries) {
+            const std::string path = e.path;
+            m_items.push_back({ e.label, e.path, [this, path]() {
+                if (onCarChosen) onCarChosen(path);
+                goBack();
+            } });
+        }
+    }
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+}
+
+void GameMenuOverlay::buildTrackSelectMenu()
+{
+    m_items.clear();
+    if (m_selectEntries.empty()) {
+        m_items.push_back({ "(no tracks found)",
+            "Put track folders in content/tracks", nullptr });
+    } else {
+        for (const auto& e : m_selectEntries) {
+            const std::string path = e.path;
+            m_items.push_back({ e.label, e.path, [this, path]() {
+                if (onTrackChosen) onTrackChosen(path);
+                goBack();
+            } });
+        }
+    }
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+}
+
+void GameMenuOverlay::buildResultsMenu()
+{
+    m_items.clear();
+    if (m_resultRows.empty()) {
+        m_items.push_back({ "(no results yet)",
+            "Finish or open a session first", nullptr });
+    } else {
+        for (const auto& r : m_resultRows)
+            m_items.push_back({ r.position + "  " + r.driver, r.detail, nullptr });
+    }
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 
 void GameMenuOverlay::buildDevModeConfirm()
@@ -213,6 +294,9 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::ContentManager: buildContentManagerMenu(); break;
     case MenuState::Settings: buildSettingsMenu(); break;
     case MenuState::Controls: buildControlsMenu(); break;
+    case MenuState::CarSelect: buildCarSelectMenu(); break;
+    case MenuState::TrackSelect: buildTrackSelectMenu(); break;
+    case MenuState::Results: buildResultsMenu(); break;
     case MenuState::DevModeConfirm: buildDevModeConfirm(); break;
     case MenuState::QuitConfirm: buildQuitConfirm(); break;
     }
@@ -229,6 +313,20 @@ void GameMenuOverlay::goBack()
     }
     if (m_currentState == MenuState::Controls) {
         switchMenu(MenuState::Settings);
+        return;
+    }
+    // Select/results screens return to whoever opened them (Singleplayer or
+    // Content), falling back to Main when entered directly.
+    if (m_currentState == MenuState::CarSelect ||
+        m_currentState == MenuState::TrackSelect ||
+        m_currentState == MenuState::Results) {
+        if (m_previousState != m_currentState &&
+            m_previousState != MenuState::CarSelect &&
+            m_previousState != MenuState::TrackSelect &&
+            m_previousState != MenuState::Results)
+            switchMenu(m_previousState);
+        else
+            switchMenu(MenuState::Main);
         return;
     }
     switchMenu(MenuState::Main);

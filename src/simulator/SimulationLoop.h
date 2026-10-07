@@ -196,6 +196,8 @@ public:
 
     void setRaceFlag(RaceFlag f) { m_raceSession.setFlag(f); }
     RaceFlag raceFlag() const { return m_raceSession.flag(); }
+    /** Standings feed for the RESULTS screen (roadmap 1.3). */
+    RaceSessionManager& raceSession() { return m_raceSession; }
     bool sharedMemoryEnabled() const { return m_shmEnabled; }
 
     void setAiCarCount(int n) { m_aiCarCount = n < 0 ? 0 : n; }

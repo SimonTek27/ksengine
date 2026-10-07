@@ -523,11 +523,19 @@ static void initSimulation() {
         g_simulation->start();
         printf("Driving started!\n");
     };
-    uiMenu->onLoadTrackRequested = []() {
-        printf("Load track: no in-game content browser yet.\n");
+    uiMenu->onTrackChosen = [](const std::string& dir) {
+        if (g_simulation->isRunning()) g_simulation->stop();
+        if (g_simulation->loadTrackFolder(dir))
+            printf("Track loaded: %s\n", dir.c_str());
+        else
+            printf("Track load failed: %s\n", dir.c_str());
     };
-    uiMenu->onLoadCarRequested = []() {
-        printf("Load car: no in-game content browser yet.\n");
+    uiMenu->onCarChosen = [](const std::string& dir) {
+        if (g_simulation->isRunning()) g_simulation->stop();
+        if (g_simulation->loadCar(dir))
+            printf("Car loaded: %s\n", dir.c_str());
+        else
+            printf("Car load failed: %s\n", dir.c_str());
     };
     uiMenu->onToggleFullscreenRequested = []() {
         SendMessageW(g_hWnd, WM_KEYDOWN, VK_F11, 0);
@@ -545,8 +553,26 @@ static void initSimulation() {
     uiMenu->onLoadReplayRequested = []() {
         printf("Load replay: not implemented yet.\n");
     };
-    uiMenu->onOpenContentBrowserRequested = [](const std::string& type) {
-        printf("Content browser: %s\n", type.c_str());
+    // Roadmap 1.3: RESULTS renders the live standings as menu rows.
+    uiMenu->onShowResultsRequested = []() {
+        std::vector<ks::sim::ResultsRow> rows;
+        for (const auto& s : g_simulation->raceSession().standings()) {
+            ks::sim::ResultsRow r;
+            r.position = std::to_string(s.position > 0 ? s.position
+                                                       : static_cast<int>(rows.size()) + 1);
+            r.driver = s.driverName.empty() ? s.carName : s.driverName;
+            if (s.disqualified) r.detail = "DSQ";
+            else if (s.finished) r.detail = "finished";
+            else if (s.bestLapTime < 1e8f) {
+                char buf[40];
+                std::snprintf(buf, sizeof(buf), "best %.3f", s.bestLapTime);
+                r.detail = buf;
+            } else {
+                r.detail = "lap " + std::to_string(s.currentLap);
+            }
+            rows.push_back(std::move(r));
+        }
+        g_simulation->ui().menu().showResults(std::move(rows));
     };
     uiMenu->onOpenSettingsPanelRequested = [](const std::string& panel) {
         if (panel == "keyboard") {

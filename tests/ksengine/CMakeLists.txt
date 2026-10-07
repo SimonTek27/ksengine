@@ -50,6 +50,7 @@ set(KS_QT_FREE_TESTS
     png_test
     damage_telemetry_test
     keyboard_mapping_test
+    content_library_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})
