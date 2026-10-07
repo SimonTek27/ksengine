@@ -511,6 +511,9 @@ static void initSimulation() {
     const int bakedMeshes = g_simulation->loadBakedScene("content/baked");
     printf("[INIT] Loaded %d baked mesh(es) into %zu scene entit%s\n", bakedMeshes,
            g_simulation->scene().alive(), g_simulation->scene().alive() == 1 ? "y" : "ies");
+    // Roadmap 1.2: a car visual exists from the first frame (solid box
+    // placeholder until SELECT CAR loads baked meshes, if any).
+    g_simulation->ensureCarVisual(std::string());
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();
     uiMenu->setVisible(true);

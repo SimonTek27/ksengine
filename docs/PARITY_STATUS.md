@@ -36,6 +36,9 @@
 | **Roadmap 1.1 audio base (SimulatorAudio telemetry + synth SFX)** | Done |
 | **Roadmap 1.5 Damage HUD + damage channels (HUD/SM/UDP/TCP)** | Done |
 | **Roadmap 1.6 Control API docs (`docs/CONTROL_API.md`)** | Done |
+| **Roadmap 1.4 Bindings volante (KeyboardMapping + rebind overlay)** | Done |
+| **Roadmap 1.3 Menu minimo (car/track select + results)** | Done |
+| **Roadmap 1.2 Track/car stable load (bake swap + solid placeholder)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 

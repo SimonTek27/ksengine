@@ -1072,6 +1072,15 @@ void NativeRenderer::destroyMesh(const std::string& name) {
         m_staticSceneMeshNames.end());
 }
 
+void NativeRenderer::clearStaticScene() {
+    // destroyMesh() erases the name from m_staticSceneMeshNames as a side
+    // effect, so iterate a copy: track switch (roadmap 1.2) frees the
+    // previous track's GPU buffers before the next bake is loaded.
+    const std::vector<std::string> names = m_staticSceneMeshNames;
+    for (const auto& name : names) destroyMesh(name);
+    m_staticSceneMeshNames.clear();
+}
+
 bool NativeRenderer::ensureScreenshotBuffer() {
     const VkDeviceSize size = static_cast<VkDeviceSize>(m_swapChainExtent.width) *
                               static_cast<VkDeviceSize>(m_swapChainExtent.height) * 4u;

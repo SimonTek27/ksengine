@@ -117,6 +117,13 @@ public:
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
     int loadBakedScene(const std::string& manifestDir);
+    // Roadmap 1.2 / GAP P2.1 — stable visuals for track and car load.
+    // applyTrackVisuals swaps the static scene to the track's baked cache
+    // (<track>/baked) when one exists, keeps the current scene otherwise.
+    void applyTrackVisuals(const std::string& trackDir);
+    // ensureCarVisual loads the car's baked meshes, or spawns a solid box
+    // placeholder so the vehicle is always visible after load.
+    void ensureCarVisual(const std::string& carDir);
     ks::ecs::Registry& scene();
 
     void start();
@@ -230,6 +237,14 @@ private:
     void initTracksideTerrain();
     void updateWeather();
     void syncCarTransforms();
+    // Roadmap 1.2: scene/car visual bookkeeping. Entities spawned from a
+    // manifest are tracked so a track switch can despawn exactly them (the
+    // car visuals live in a second list and survive the swap).
+    int spawnSceneEntities(const std::string& manifestDir);
+    void despawnSceneEntities();
+    void despawnCarVisuals();
+    std::vector<ks::ecs::Entity> m_sceneEntities;
+    std::vector<ks::ecs::Entity> m_carVisualEntities;
     void broadcastLocalCarState();
     void handleRemoteCarState(uint32_t carId, const net::CarStateData& state);
     void ensureScenePipeline();

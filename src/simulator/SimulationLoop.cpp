@@ -9,6 +9,7 @@
 #include "NetworkManager.h"
 #include "SetupGarage.h"
 #include "SetupFile.h"
+#include "SceneAssets.h"
 #include "SimulatorAudio.h"
 #include "engine/physics/DamageTelemetry.h"
 #include "ui/UiGpuPass.h"
@@ -273,6 +274,9 @@ bool SimulationLoop::loadTrack(const std::string& kn5Path) {
     m_trackData.name = std::filesystem::path(kn5Path).stem().string();
     if (!std::filesystem::exists(kn5Path)) { m_trackLoaded = false; return false; }
     m_trackData.valid = true; m_trackLoaded = true;
+    // Roadmap 1.2: also swap the visuals when a baked cache sits next to
+    // the .kn5 (metadata-only load already succeeded above).
+    applyTrackVisuals(std::filesystem::path(kn5Path).parent_path().string());
     m_ui.menu().setTrackName(m_trackData.name);
     m_lapTimer.configure(3);
     return true;
@@ -298,6 +302,8 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
     m_trackData.valid = true; m_trackLoaded = true;
     m_ui.menu().setTrackName(m_trackData.name);
     m_lapTimer.configure(3);
+    // Roadmap 1.2: a folder without a .kn5 can still carry a baked cache.
+    applyTrackVisuals(trackDirectory);
     return true;
 }
 
@@ -325,6 +331,9 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     m_carLoaded = true;
     m_ui.menu().setCarName(m_carName);
     if (m_shm) m_shm->invalidateStatic();
+    // Roadmap 1.2: visual for the freshly loaded car (baked meshes or
+    // solid box placeholder). Never fails the physics load.
+    ensureCarVisual(carDir);
     // Best effort: a missing audio device must not fail car load.
     loadCarAudio(carDir);
     return true;
@@ -916,6 +925,10 @@ void SimulationLoop::syncCarTransforms() {
     if (!m_vehicle) return;
     const auto st = m_vehicle->getState();
     const ks::math::vec3 pos{st.position.x, st.position.y, st.position.z};
+    // Tracked car visuals (roadmap 1.2): moved by entity id, so baked mesh
+    // names that don't carry the "car_" prefix still follow the vehicle.
+    for (const ks::ecs::Entity e : m_carVisualEntities)
+        if (auto* t = scene().tryGet<ks::ecs::Transform>(e)) t->position = pos;
     scene().each<ks::ecs::Transform, ks::ecs::MeshInstance>([&](ks::ecs::Entity, ks::ecs::Transform& t, ks::ecs::MeshInstance& mesh) {
         if (mesh.meshName.find("car_") != 0) return;
         t.position = pos;
@@ -928,8 +941,19 @@ ks::ecs::Registry& SimulationLoop::scene() { return Engine::instance().registry(
 int SimulationLoop::loadBakedScene(const std::string& manifestDir) {
     if (!m_vulkanRenderer || manifestDir.empty() || manifestDir == m_spawnedSceneDir) return 0;
     if (m_vulkanRenderer->loadMeshesFromManifest(manifestDir) <= 0) return 0;
+    if (!spawnSceneEntities(manifestDir)) return 0;
+    m_spawnedSceneDir = manifestDir;
+    std::fprintf(stderr, "[scene] %d entities from %s\n", static_cast<int>(scene().alive()),
+                 manifestDir.c_str());
+    return static_cast<int>(scene().alive());
+}
+
+// --- Roadmap 1.2 / GAP P2.1: stable track & car visuals ------------------
+
+int SimulationLoop::spawnSceneEntities(const std::string& manifestDir) {
     std::ifstream manifest(manifestDir + "/manifest.txt");
     if (!manifest.is_open()) return 0;
+    int spawned = 0;
     std::string name;
     while (std::getline(manifest, name)) {
         if (name.empty()) continue;
@@ -938,11 +962,112 @@ int SimulationLoop::loadBakedScene(const std::string& manifestDir) {
         scene().emplace<ks::ecs::Name>(e, ks::ecs::Name{name});
         scene().emplace<ks::ecs::Transform>(e);
         scene().emplace<ks::ecs::MeshInstance>(e, ks::ecs::MeshInstance{name});
+        m_sceneEntities.push_back(e);
+        ++spawned;
     }
-    m_spawnedSceneDir = manifestDir;
-    std::fprintf(stderr, "[scene] %d entities from %s\n", static_cast<int>(scene().alive()),
-                 manifestDir.c_str());
-    return static_cast<int>(scene().alive());
+    return spawned;
+}
+
+void SimulationLoop::despawnSceneEntities() {
+    for (const ks::ecs::Entity e : m_sceneEntities)
+        if (scene().valid(e)) scene().destroy(e);
+    m_sceneEntities.clear();
+}
+
+void SimulationLoop::despawnCarVisuals() {
+    for (const ks::ecs::Entity e : m_carVisualEntities) {
+        if (!scene().valid(e)) continue;
+        if (m_vulkanRenderer)
+            if (auto* mesh = scene().tryGet<ks::ecs::MeshInstance>(e))
+                m_vulkanRenderer->destroyMesh(mesh->meshName);
+        scene().destroy(e);
+    }
+    m_carVisualEntities.clear();
+}
+
+void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
+    if (!m_vulkanRenderer) return; // headless: metadata-only load is valid
+    const std::string baked = ks::sim::findBakedManifestDir(trackDir);
+    if (baked.empty()) {
+        // Unbaked or mesh-less track: keep the current scene on screen
+        // instead of blanking it (this is the stability guarantee), and
+        // print how to bake a .kn5 when there is one to bake.
+        namespace fs = std::filesystem;
+        if (fs::is_directory(trackDir)) {
+            std::error_code ec;
+            for (const auto& e : fs::directory_iterator(trackDir, ec))
+                if (e.path().extension() == ".kn5") {
+                    std::fprintf(stderr,
+                                 "[scene] track has .kn5 but no bake; run: "
+                                 "kn5baker \"%s\" <out>/baked\n",
+                                 e.path().string().c_str());
+                    break;
+                }
+        }
+        return;
+    }
+    if (baked == m_spawnedSceneDir) return;
+    despawnSceneEntities();
+    m_vulkanRenderer->clearStaticScene();
+    if (m_vulkanRenderer->loadMeshesFromManifest(baked) <= 0) {
+        std::fprintf(stderr, "[scene] track bake %s failed to load\n", baked.c_str());
+        m_spawnedSceneDir.clear();
+        return;
+    }
+    spawnSceneEntities(baked);
+    m_spawnedSceneDir = baked;
+    std::fprintf(stderr, "[scene] track visuals from %s (%d entities)\n",
+                 baked.c_str(), static_cast<int>(m_sceneEntities.size()));
+}
+
+void SimulationLoop::ensureCarVisual(const std::string& carDir) {
+    if (!m_vulkanRenderer) return;
+    despawnCarVisuals();
+    const std::string baked = ks::sim::findBakedManifestDir(carDir);
+    if (!baked.empty()) {
+        std::ifstream manifest(baked + "/manifest.txt");
+        std::string name;
+        while (manifest && std::getline(manifest, name)) {
+            if (name.empty()) continue;
+            // Prefixed so baked names (original kn5 node names) can neither
+            // collide with nor destroy scene meshes of the same name, and
+            // so the legacy "car_" prefix sync sees them too.
+            const std::string renderName = "car_" + name;
+            if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh"))
+                continue;
+            const ks::ecs::Entity e = scene().create();
+            if (e == ks::ecs::kNullEntity) break;
+            scene().emplace<ks::ecs::Name>(e, ks::ecs::Name{renderName});
+            scene().emplace<ks::ecs::Transform>(e);
+            scene().emplace<ks::ecs::MeshInstance>(e, ks::ecs::MeshInstance{renderName});
+            m_carVisualEntities.push_back(e);
+        }
+    }
+    if (!m_carVisualEntities.empty()) {
+        std::fprintf(stderr, "[scene] car visuals: %zu baked mesh(es) from %s\n",
+                     m_carVisualEntities.size(), baked.c_str());
+        return;
+    }
+    // Solid placeholder box (ROADMAP 1.2 "placeholder solido"): ~4.4x1.8 m
+    // body spanning y -0.40..1.00 in vehicle-local space, so the car is
+    // visible even when no visual asset exists.
+    const ks::sim::SolidBox box = ks::sim::makeSolidBox(0.90f, -0.40f, 1.00f, -2.20f, 2.20f);
+    NativeMesh nm;
+    static_assert(sizeof(ks::sim::SolidBoxVertex) == sizeof(NativeVertex),
+                  "SolidBoxVertex must be memcpy-compatible with NativeVertex");
+    nm.vertices.resize(box.vertices.size());
+    std::memcpy(nm.vertices.data(), box.vertices.data(),
+                box.vertices.size() * sizeof(ks::sim::SolidBoxVertex));
+    nm.indices = box.indices;
+    m_vulkanRenderer->setMesh("car_placeholder", nm);
+    const ks::ecs::Entity e = scene().create();
+    if (e != ks::ecs::kNullEntity) {
+        scene().emplace<ks::ecs::Name>(e, ks::ecs::Name{"car_placeholder"});
+        scene().emplace<ks::ecs::Transform>(e);
+        scene().emplace<ks::ecs::MeshInstance>(e, ks::ecs::MeshInstance{"car_placeholder"});
+        m_carVisualEntities.push_back(e);
+    }
+    std::fprintf(stderr, "[scene] car visual: solid placeholder box\n");
 }
 
 // Multiplayer (roadmap 3.1). All three bodies are no-ops unless the build
