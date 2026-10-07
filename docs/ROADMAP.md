@@ -19,7 +19,7 @@ Il lavoro residuo è **qualità prodotto** (P2) e **profondità pro** (P3).
 | Multiplayer ksnet (20 Hz, damage/setup, auth, secure) | ✅ | Host/join LAN |
 | Lobby hosted + CLI + web | ✅ | kslobby / kslobby-cli / browser |
 | Rendering KN5/LOD stabile | 🔶 | Parziale — P2.1 |
-| Audio 3D | 🔶 | Stub / volumes — P2.2 |
+| Audio 3D | ✅ | Doppler/distanza/pan voci altre auto (Audio3D.h) + rolling per superficie — P2.2 |
 | UI menu racing completa | 🔶 | Overlay base — P2.5 |
 | Aquaplaning / rain fisico | ✅ | Curve grip + G11 + evoluzione pioggia/asciutto + rain/spray particelle (`KS_PARTICLES=1`) — P2.8 |
 

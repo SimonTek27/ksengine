@@ -295,3 +295,23 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
     target_link_libraries(test_audio_render PRIVATE ksengine)
     add_test(NAME test_audio_render COMMAND test_audio_render)
 endif()
+
+# Roadmap 2.3 (P2.2) — 3D audio (doppler / distance / bearing pan +
+# rolling surface noise). Same headless setup and the same TU list as
+# test_audio_render: SimulatorAudio lives in the SimulatorApp target, not
+# in ksengine, so it is compiled in directly.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
+    add_executable(test_audio_3d
+        test_audio_3d.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
+    target_include_directories(test_audio_3d PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(test_audio_3d PRIVATE ksengine)
+    add_test(NAME test_audio_3d COMMAND test_audio_3d)
+endif()

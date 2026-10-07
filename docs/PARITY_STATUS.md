@@ -42,6 +42,7 @@
 | **Fase 1 exit: menu sessions gated (practice / quick race / time attack)** | Done |
 | **Roadmap 2.1 Wet physics (grip curve bagnato + aquaplaning G11 + WeatherSimulator dynamics)** | Done |
 | **Roadmap 2.2 Rain visual / spray (emitter pioggia + spray di ruota, `KS_PARTICLES=1`)** | Done |
+| **Roadmap 2.3 Audio 3D (doppler/distanza/bearing per altre auto + rumore rolling per superficie)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 

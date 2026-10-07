@@ -1369,6 +1369,46 @@ void SimulationLoop::tick() {
             false, slipRatio, slipAngle, surf, bodyDamage, brakeTemp,
             0.0f, static_cast<float>(ast.speed), wetness,
             m_weather.rainIntensity, static_cast<float>(elapsed));
+        // Roadmap 2.3 (P2.2): the listener rides the player's car —
+        // position, world velocity (the doppler half) and heading — and
+        // every other active car becomes an OtherCarVoice the mixer
+        // attenuates, pans and pitch-shifts (Audio3D.h).
+        m_audio->setListenerPosition(ast.position.x, ast.position.y + 0.5f,
+                                     ast.position.z);
+        if (ast.speed > 1.0f) {
+            const auto& v = ast.velocity;
+            const float vl = std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+            if (vl > 1e-3f)
+                m_audio->setListenerOrientation(v.x / vl, v.y / vl, v.z / vl,
+                                                0.f, 1.f, 0.f);
+            m_audio->setListenerVelocity(v.x, v.y, v.z);
+        } else {
+            m_audio->setListenerVelocity(0.f, 0.f, 0.f);
+        }
+        if (m_multiCar) {
+            ks::sim::audio3d::OtherCarVoice voices[SimulatorAudio::kMaxOtherCars];
+            int n = 0;
+            for (const auto& entry : m_multiCar->cars()) {
+                if (n >= SimulatorAudio::kMaxOtherCars) break;
+                if (!entry || !entry->isActive || entry->isPlayer || !entry->vehicle)
+                    continue;
+                const auto cs = entry->vehicle->getState();
+                auto& voice = voices[n++];
+                voice.px = cs.position.x;
+                voice.py = cs.position.y;
+                voice.pz = cs.position.z;
+                voice.vx = cs.velocity.x;
+                voice.vy = cs.velocity.y;
+                voice.vz = cs.velocity.z;
+                voice.rpm = static_cast<float>(entry->vehicle->rpm());
+                voice.gain = 1.0f;
+            }
+            m_audio->setOtherCarVoices(voices, n);
+        }
+    } else if (m_audio) {
+        // No player car (menu/teardown): drop the feed so a stale voice
+        // from the last session keeps ringing in the ears.
+        m_audio->setOtherCarVoices(nullptr, 0);
     }
 #endif
     updateCamera(static_cast<float>(elapsed));

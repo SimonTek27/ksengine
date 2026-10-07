@@ -2,6 +2,7 @@
 
 #include "WASAPIOutput.h"
 #include "AudioMixer.h"
+#include "Audio3D.h"
 #include "AudioBankManager.h"
 #include "SoundsIniParser.h"
 #include "Audio/AudioTypes.h"
@@ -103,7 +104,16 @@ public:
     void setListenerPosition(float x, float y, float z);
     void setListenerOrientation(float forwardX, float forwardY, float forwardZ,
                                 float upX, float upY, float upZ);
+    /** Listener (camera/car) world velocity — the other half of the
+     * doppler shift: roadmap 2.3. */
+    void setListenerVelocity(float vx, float vy, float vz);
     void setSourcePosition(SoundCategory cat, float x, float y, float z);
+
+    /** Roadmap 2.3 (P2.2): up to kMaxOtherCars hearable cars — engine
+     * tones attenuated by distance, panned by bearing and pitched by
+     * doppler (Audio3D.h). count 0 (or nullptr) clears the list. */
+    static constexpr int kMaxOtherCars = 12;
+    void setOtherCarVoices(const ks::sim::audio3d::OtherCarVoice* voices, int count);
 
     void setMasterVolume(float v) { m_masterVolume.store(v); }
     void setEngineVolume(float v) { m_engineVolume.store(v); }
@@ -158,7 +168,8 @@ public:
     enum ChannelId {
         ChEngineInt = 0, ChEngineExt, ChTurbo, ChWind, ChSkid, ChGearShift,
         ChBrakes, ChTransmission, ChBodywork, ChBackfire, ChLimiter,
-        ChRainAmbient, ChRainCar, ChWiper, ChCspSkid, ChCount
+        ChRainAmbient, ChRainCar, ChWiper, ChCspSkid, ChOtherCars, ChRolling,
+        ChCount
     };
 
 private:
@@ -178,6 +189,14 @@ private:
     void renderLimiter(float* output, int frames, int channels, int sampleRate);
     void renderAcoustics(float* output, int frames, int channels, int sampleRate);
     void renderSpatialization(float* output, int frames, int channels, int sampleRate);
+    /** Roadmap 2.3: synthesized engine tones for the other cars on track
+     * (distance gain + bearing pan + doppler written straight into the
+     * stereo channel buffer). */
+    void renderOtherCars(float* output, int frames, int channels, int sampleRate);
+    /** Roadmap 2.3: continuous tire/rolling noise tinted by the surface
+     * (asphalt hum .. grass/gravel rumble), speed-scaled. Unlike renderSkid
+     * this needs no slip — a car rolling quietly still makes contact noise. */
+    void renderRolling(float* output, int frames, int channels, int sampleRate);
     void renderModulation(float* output, int frames, int channels, int sampleRate);
     void renderWeather(float* output, int frames, int channels, int sampleRate);
     void renderCspSurfaces(float* output, int frames, int channels, int sampleRate);
@@ -204,6 +223,18 @@ private:
     float m_listenerX = 0, m_listenerY = 0, m_listenerZ = 0;
     float m_listenerForwardX = 0, m_listenerForwardY = 0, m_listenerForwardZ = -1;
     float m_listenerUpX = 0, m_listenerUpY = 1, m_listenerUpZ = 0;
+    float m_listenerVX = 0, m_listenerVY = 0, m_listenerVZ = 0;
+
+    // Roadmap 2.3: hearable other cars (fixed-size — written once per
+    // frame by the game thread, read by the render callback, like the
+    // listener above) and their per-voice oscillator phase.
+    ks::sim::audio3d::OtherCarVoice m_otherCars[kMaxOtherCars]{};
+    float m_otherCarPhase[kMaxOtherCars]{};
+    int m_otherCarCount = 0;
+
+    // Rolling-noise filter state (per channel) + deterministic noise LCG.
+    float m_rollingLpL = 0.0f, m_rollingLpR = 0.0f;
+    std::uint32_t m_rollingRng = 0x2545F491u;
 
     std::atomic<bool> m_loaded{false};
     std::atomic<bool> m_initialized{false};

@@ -116,6 +116,8 @@ bool SimulatorAudio::initialize(bool withOutput)
     m_mixer->addChannel("rain_car");
     m_mixer->addChannel("wiper");
     m_mixer->addChannel("csp_skid");
+    m_mixer->addChannel("other_cars");
+    m_mixer->addChannel("rolling");
 
     if (withOutput) {
         m_wasapi->setRenderCallback([this](float* output, int frames, const AudioFormat& fmt) {
@@ -318,6 +320,18 @@ void SimulatorAudio::setListenerOrientation(float fx, float fy, float fz, float 
 {
     m_listenerForwardX = fx; m_listenerForwardY = fy; m_listenerForwardZ = fz;
     m_listenerUpX = ux; m_listenerUpY = uy; m_listenerUpZ = uz;
+}
+
+void SimulatorAudio::setListenerVelocity(float vx, float vy, float vz)
+{
+    m_listenerVX = vx; m_listenerVY = vy; m_listenerVZ = vz;
+}
+
+void SimulatorAudio::setOtherCarVoices(const ks::sim::audio3d::OtherCarVoice* voices, int count)
+{
+    if (!voices || count <= 0) { m_otherCarCount = 0; return; }
+    m_otherCarCount = std::min(count, kMaxOtherCars);
+    for (int i = 0; i < m_otherCarCount; ++i) m_otherCars[i] = voices[i];
 }
 void SimulatorAudio::setSourcePosition(SoundCategory, float, float, float) {}
 
@@ -609,6 +623,24 @@ void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sa
         renderCspSurfaces(chBuf, bufFrames, 2, sampleRate);
     }
     m_mixer->setVolume(ChCspSkid, envVol * masterVol);
+
+    // Roadmap 2.3: other cars on track (environment category — audible
+    // regardless of the player's own engine volume) and the continuous
+    // rolling noise under the tires.
+    chBuf = m_mixer->channelBuffer(ChOtherCars);
+    if (chBuf) {
+        std::fill(chBuf, chBuf + bufFrames * 2, 0.0f);
+        renderOtherCars(chBuf, bufFrames, 2, sampleRate);
+    }
+    m_mixer->setVolume(ChOtherCars, envVol * masterVol);
+    m_mixer->setPan(ChOtherCars, 0.0f); // pan is baked in per voice
+
+    chBuf = m_mixer->channelBuffer(ChRolling);
+    if (chBuf) {
+        std::fill(chBuf, chBuf + bufFrames * 2, 0.0f);
+        renderRolling(chBuf, bufFrames, 2, sampleRate);
+    }
+    m_mixer->setVolume(ChRolling, envVol * masterVol);
 
     m_mixer->mix(output, bufFrames, channels, sampleRate);
 
@@ -997,6 +1029,113 @@ void SimulatorAudio::renderModulation(float* output, int frames, int channels, i
         output[i] *= extVol * masterVol;
         output[i] = std::max(-1.0f, std::min(1.0f, output[i]));
     }
+}
+
+void SimulatorAudio::renderOtherCars(float* output, int frames, int channels, int sampleRate)
+{
+    // Roadmap 2.3 (P2.2): synthesized engine tone per hearable car —
+    // distance gain, bearing pan and doppler pitch (Audio3D.h), baked into
+    // the stereo channel buffer. The channel's own volume/pan stay neutral
+    // (set in renderAudio); the level here is deliberately modest: these
+    // are the cars you *hear*, not the one you drive.
+    if (m_otherCarCount <= 0 || sampleRate <= 0) return;
+
+    for (int v = 0; v < m_otherCarCount; ++v) {
+        const auto& car = m_otherCars[v];
+        const float dx = car.px - m_listenerX;
+        const float dy = car.py - m_listenerY;
+        const float dz = car.pz - m_listenerZ;
+        const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const float atten = ks::sim::audio3d::distanceGain(dist);
+        if (atten <= 0.0015f || car.gain <= 0.0f) continue;
+        const float inv = 1.0f / dist;
+        const float sx = dx * inv, sy = dy * inv, sz = dz * inv;
+
+        // Radial speed along listener→car: positive = receding, so the
+        // closing speed the doppler term wants is its negation.
+        const float rvx = car.vx - m_listenerVX;
+        const float rvy = car.vy - m_listenerVY;
+        const float rvz = car.vz - m_listenerVZ;
+        const float vr = rvx * sx + rvy * sy + rvz * sz;
+        const float dop = ks::sim::audio3d::dopplerFactor(-vr);
+
+        const float pan = ks::sim::audio3d::bearingPan(
+            dx, dy, dz,
+            m_listenerForwardX, m_listenerForwardY, m_listenerForwardZ,
+            m_listenerUpX, m_listenerUpY, m_listenerUpZ);
+        const float angle = (pan + 1.0f) * kPi * 0.25f;
+        const float gL = std::cos(angle);
+        const float gR = std::sin(angle);
+
+        // Same harmonic shape as renderEngine, rpm-driven and doppler-scaled.
+        const float rpmNorm = std::clamp(car.rpm / 9000.0f, 0.0f, 1.0f);
+        const float freq = (30.0f + rpmNorm * 420.0f) * dop;
+        const float level = atten * car.gain * 0.55f;
+        const float step = freq * 6.2831853f / static_cast<float>(sampleRate);
+
+        float ph = m_otherCarPhase[v];
+        for (int i = 0; i < frames; ++i) {
+            float s = 0.45f * std::sin(ph)
+                    + 0.20f * std::sin(ph * 2.007f)
+                    + 0.08f * std::sin(ph * 3.013f);
+            s *= level;
+            output[i * channels] += s * gL;
+            if (channels > 1) output[i * channels + 1] += s * gR;
+            ph += step;
+        }
+        m_otherCarPhase[v] = std::fmod(ph, 6.2831853f);
+    }
+}
+
+void SimulatorAudio::renderRolling(float* output, int frames, int channels, int sampleRate)
+{
+    // Roadmap 2.3 (P2.2): continuous contact noise. renderSkid() only
+    // fires under slip; this is what the tires make just *rolling*,
+    // tinted per surface (asphalt hum, grass/gravel rumble, wet hiss) and
+    // scaled with speed. Deterministic LCG noise + one-pole lowpass,
+    // decorrelated L/R.
+    const float speed = std::fabs(m_state.speed);
+    if (speed < 0.5f || sampleRate <= 0) return;
+
+    // Asphalt is the quiet surface: this hum sits below the slip-skid
+    // event (test_audio_render pins skid > 2x the no-slip baseline, so a
+    // louder asphalt layer would bury the event it is meant to flag).
+    float gain = 0.015f;
+    float cutoff = 700.0f;
+    switch (m_state.surface) {
+    case 1:  gain = 0.17f; cutoff = 1800.0f; break; // grass
+    case 2:  gain = 0.19f; cutoff = 2400.0f; break; // gravel
+    case 3:  gain = 0.12f; cutoff = 1400.0f; break; // kerb
+    case 4:  gain = 0.11f; cutoff = 2200.0f; break; // wet
+    case 5:  gain = 0.05f; cutoff = 500.0f;  break; // ice
+    default: break;                                 // asphalt
+    }
+    // Speed build-up: nothing at a crawl, full tone from ~30 m/s on.
+    gain *= std::min(1.0f, speed / 30.0f);
+    // A wet asphalt film adds hiss on top of the hum.
+    if (m_state.surface == 0 && m_state.wetness > 0.1f) {
+        gain *= 1.0f + m_state.wetness * 0.5f;
+        cutoff += m_state.wetness * 900.0f;
+    }
+
+    const float a = 1.0f - std::exp(-6.2831853f * cutoff /
+                                    static_cast<float>(sampleRate));
+    float lpL = m_rollingLpL;
+    float lpR = m_rollingLpR;
+    std::uint32_t rng = m_rollingRng;
+    for (int i = 0; i < frames; ++i) {
+        rng = rng * 1664525u + 1013904223u;
+        const float nL = static_cast<float>((rng >> 8) & 0x00FFFFFFu) / 8388608.0f - 1.0f;
+        rng = rng * 1664525u + 1013904223u;
+        const float nR = static_cast<float>((rng >> 8) & 0x00FFFFFFu) / 8388608.0f - 1.0f;
+        lpL += a * (nL - lpL);
+        lpR += a * (nR - lpR);
+        output[i * channels] += lpL * gain;
+        if (channels > 1) output[i * channels + 1] += lpR * gain;
+    }
+    m_rollingLpL = lpL;
+    m_rollingLpR = lpR;
+    m_rollingRng = rng;
 }
 
 } // namespace ks::sim
