@@ -237,7 +237,8 @@ cmake --build --preset default
 5. CarStateSync UDP works without `HAS_KSNET`; ksnet path remains the preferred multiplayer transport.
 
 Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [PARITY_STATUS](docs/PARITY_STATUS.md) ·
-[GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md)
+[GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md) ·
+[CONTROL_API](docs/CONTROL_API.md) · [TCP_TELEMETRY](docs/TCP_TELEMETRY.md)
 
 ---
 

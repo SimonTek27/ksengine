@@ -1,4 +1,4 @@
-# Parity status — 2026-10-05
+# Parity status — 2026-10-07
 
 ## Wired + hardened
 
@@ -32,6 +32,10 @@
 | **ksnet auth token (ClientJoin + constant-time)** | Done |
 | **Matchmaking (LAN discovery + optional HTTP lobby)** | Done |
 | **Matchmaking wired into NetworkManager** | Done |
+| **kslobby registry (`kslobby` + `kslobby-cli`)** | Done |
+| **Roadmap 1.1 audio base (SimulatorAudio telemetry + synth SFX)** | Done |
+| **Roadmap 1.5 Damage HUD + damage channels (HUD/SM/UDP/TCP)** | Done |
+| **Roadmap 1.6 Control API docs (`docs/CONTROL_API.md`)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 
@@ -53,7 +57,6 @@ See `docs/SECURITY_HARDENING.md`.
 | Item | Notes |
 |------|-------|
 | ksnet secure-connect private-key plumbing | optional production hardening |
-| Hosted lobby server binary | optional; any JSON HTTP endpoint works |
 
 ## Roadmap
 
