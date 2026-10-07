@@ -128,6 +128,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/menu_session_gate_test.cpp" AND
     add_test(NAME menu_session_gate_test COMMAND menu_session_gate_test)
 endif()
 
+# Roadmap 2.5 — pit strategy screen (Sprint 8 / P1.8): GARAGE -> PIT
+# STRATEGY rows, fuel steps, toggles, confirm tuple + PitStrategyBridge.
+# Same TU pattern as menu_session_gate_test (PitStrategyBridge is header-only).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    add_executable(pit_strategy_menu_test
+        pit_strategy_menu_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    target_include_directories(pit_strategy_menu_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(pit_strategy_menu_test PRIVATE ksengine)
+    add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
     add_executable(track_loader_test

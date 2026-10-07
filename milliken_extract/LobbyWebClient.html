@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ksengine · Server Browser</title>
+  <style>
+    :root {
+      --bg: #0b0e14;
+      --panel: #121826;
+      --panel2: #1a2233;
+      --border: #2a3548;
+      --text: #e8eef8;
+      --muted: #8b9bb4;
+      --accent: #3d9cf0;
+      --accent2: #e8a838;
+      --ok: #3ecf8e;
+      --bad: #f07178;
+      --row-hover: #1e2a3d;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+      --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh;
+      font-family: var(--font);
+      background: radial-gradient(1200px 600px at 10% -10%, #1a2740 0%, var(--bg) 55%);
+      color: var(--text);
+    }
+    header {
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: rgba(18, 24, 38, 0.9);
+      backdrop-filter: blur(8px);
+      position: sticky; top: 0; z-index: 10;
+    }
+    header h1 {
+      margin: 0; font-size: 1.15rem; font-weight: 650; letter-spacing: 0.02em;
+    }
+    header h1 span { color: var(--accent); }
+    .badge {
+      font-size: 0.75rem; padding: 0.2rem 0.55rem; border-radius: 999px;
+      border: 1px solid var(--border); color: var(--muted);
+    }
+    .badge.ok { color: var(--ok); border-color: #2a6b4e; background: #12281e; }
+    .badge.bad { color: var(--bad); border-color: #6b2a32; background: #281218; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.25rem 1.5rem 3rem; }
+    .toolbar {
+      display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center;
+      margin-bottom: 1rem;
+    }
+    input, select, button {
+      font: inherit; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--panel2); color: var(--text); padding: 0.5rem 0.75rem;
+    }
+    input { min-width: 12rem; }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    button {
+      cursor: pointer; background: var(--accent); border-color: transparent;
+      color: #061018; font-weight: 600;
+    }
+    button.secondary { background: var(--panel2); color: var(--text); border-color: var(--border); }
+    button.danger { background: #8b2e36; color: #fff; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      overflow: hidden; margin-bottom: 1.25rem;
+    }
+    .panel h2 {
+      margin: 0; padding: 0.85rem 1rem; font-size: 0.9rem; font-weight: 600;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    th, td { text-align: left; padding: 0.7rem 1rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    tr:last-child td { border-bottom: none; }
+    tbody tr { cursor: pointer; transition: background 0.12s; }
+    tbody tr:hover, tbody tr.selected { background: var(--row-hover); }
+    tbody tr.selected { outline: 1px solid var(--accent); outline-offset: -1px; }
+    .mono { font-family: var(--mono); font-size: 0.85rem; }
+    .muted { color: var(--muted); }
+    .empty { padding: 2rem 1rem; text-align: center; color: var(--muted); }
+    .form-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 0.75rem; padding: 1rem;
+    }
+    .form-grid label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); }
+    .form-grid label input, .form-grid label select { width: 100%; min-width: 0; }
+    .form-actions { padding: 0 1rem 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    footer {
+      margin-top: 1.5rem; color: var(--muted); font-size: 0.8rem;
+      display: flex; flex-wrap: wrap; gap: 1rem; justify-content: space-between;
+    }
+    .toast {
+      position: fixed; bottom: 1.25rem; right: 1.25rem; max-width: 22rem;
+      padding: 0.75rem 1rem; border-radius: 10px; background: var(--panel2);
+      border: 1px solid var(--border); box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+      opacity: 0; transform: translateY(8px); transition: 0.2s; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .toast.err { border-color: #6b2a32; }
+    @media (max-width: 640px) {
+      input { min-width: 0; flex: 1; }
+      th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><span>ks</span>lobby · Server Browser</h1>
+    <span id="healthBadge" class="badge">…</span>
+    <span id="countBadge" class="badge">0 servers</span>
+    <span id="updatedBadge" class="badge muted">—</span>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <input id="apiUrl" type="text" placeholder="API base URL" spellcheck="false" />
+      <button id="btnRefresh" type="button">Refresh</button>
+      <button id="btnAuto" type="button" class="secondary">Auto: ON</button>
+      <label class="muted" style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;">
+        Interval
+        <select id="interval">
+          <option value="3">3s</option>
+          <option value="5" selected>5s</option>
+          <option value="10">10s</option>
+          <option value="30">30s</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="panel">
+      <h2>Live servers</h2>
+      <div id="tableWrap">
+        <div class="empty">Loading…</div>
+      </div>
+      <div class="form-actions">
+        <button id="btnDelete" type="button" class="danger" disabled>Remove selected</button>
+        <button id="btnCopy" type="button" class="secondary" disabled>Copy host:port</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Register / announce host</h2>
+      <div class="form-grid">
+        <label>Name <input id="fName" value="ksim Server" /></label>
+        <label>Track <input id="fTrack" value="Unknown" /></label>
+        <label>Host (optional) <input id="fHost" placeholder="auto from peer" /></label>
+        <label>Port <input id="fPort" type="number" value="40000" min="1" max="65535" /></label>
+        <label>Players <input id="fPlayers" type="number" value="1" min="0" /></label>
+        <label>Max <input id="fMax" type="number" value="16" min="1" /></label>
+        <label>Session
+          <select id="fSession">
+            <option value="0">Practice</option>
+            <option value="1">Qualifying</option>
+            <option value="2">Race</option>
+            <option value="3">Time Trial</option>
+            <option value="4">Hotlap</option>
+          </select>
+        </label>
+        <label style="flex-direction:row;align-items:center;gap:0.5rem;margin-top:1.4rem;">
+          <input id="fAuth" type="checkbox" style="width:auto;min-width:0;" /> Auth required
+        </label>
+      </div>
+      <div class="form-actions">
+        <button id="btnRegister" type="button">Register</button>
+        <button id="btnClearForm" type="button" class="secondary">Reset form</button>
+      </div>
+    </div>
+
+    <footer>
+      <span>ksengine matchmaking · GET/POST/DELETE <span class="mono">/api/v1/servers</span></span>
+      <span class="mono" id="footerHint"></span>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+
+  function defaultApiBase() {
+    const params = new URLSearchParams(location.search);
+    if (params.get("api")) return params.get("api").replace(/\/$/, "");
+    // Same origin when served by kslobby
+    if (location.protocol === "http:" || location.protocol === "https:") {
+      return location.origin + "/api/v1";
+    }
+    return "http://127.0.0.1:8080/api/v1";
+  }
+
+  const state = {
+    servers: [],
+    selected: null,
+    auto: true,
+    timer: null,
+  };
+
+  $("apiUrl").value = defaultApiBase();
+  $("footerHint").textContent = "API " + $("apiUrl").value;
+
+  function toast(msg, isErr) {
+    const el = $("toast");
+    el.textContent = msg;
+    el.classList.toggle("err", !!isErr);
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => el.classList.remove("show"), 2800);
+  }
+
+  function apiBase() {
+    return ($("apiUrl").value || "").replace(/\/$/, "");
+  }
+
+  async function api(path, opts) {
+    const url = apiBase() + path;
+    const res = await fetch(url, Object.assign({
+      headers: { "Accept": "application/json" },
+    }, opts || {}));
+    const text = await res.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch (_) { json = text; }
+    if (!res.ok) {
+      const err = (json && json.error) ? json.error : (res.status + " " + res.statusText);
+      throw new Error(err);
+    }
+    return json;
+  }
+
+  function sessionName(t) {
+    return ({ 0: "Practice", 1: "Qualifying", 2: "Race", 3: "Time Trial", 4: "Hotlap" })[t] || String(t);
+  }
+
+  function renderTable() {
+    const wrap = $("tableWrap");
+    if (!state.servers.length) {
+      wrap.innerHTML = '<div class="empty">No live servers. Host a session or register below.</div>';
+      $("btnDelete").disabled = true;
+      $("btnCopy").disabled = true;
+      return;
+    }
+    const rows = state.servers.map((s, i) => {
+      const key = (s.host || "") + ":" + (s.port || 0);
+      const sel = state.selected === key ? " selected" : "";
+      return `<tr class="${sel}" data-key="${key}" data-i="${i}">
+        <td><strong>${escapeHtml(s.name || "server")}</strong></td>
+        <td>${escapeHtml(s.track || "—")}</td>
+        <td class="mono">${escapeHtml(s.host || "?")}:${s.port || 0}</td>
+        <td>${s.players ?? 0}/${s.maxPlayers ?? 16}</td>
+        <td>${sessionName(s.sessionType)}</td>
+        <td>${s.auth ? "Yes" : "—"}</td>
+      </tr>`;
+    }).join("");
+    wrap.innerHTML = `<table>
+      <thead><tr>
+        <th>Name</th><th>Track</th><th>Address</th><th>Players</th><th>Session</th><th>Auth</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+    wrap.querySelectorAll("tbody tr").forEach((tr) => {
+      tr.addEventListener("click", () => {
+        state.selected = tr.getAttribute("data-key");
+        renderTable();
+        $("btnDelete").disabled = !state.selected;
+        $("btnCopy").disabled = !state.selected;
+      });
+    });
+    $("btnDelete").disabled = !state.selected;
+    $("btnCopy").disabled = !state.selected;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  }
+
+  async function refresh() {
+    try {
+      const health = await api("/health");
+      $("healthBadge").textContent = "online";
+      $("healthBadge").className = "badge ok";
+      $("countBadge").textContent = (health.servers ?? 0) + " servers";
+      const list = await api("/servers");
+      state.servers = Array.isArray(list) ? list : [];
+      if (state.selected && !state.servers.some((s) => (s.host + ":" + s.port) === state.selected))
+        state.selected = null;
+      renderTable();
+      $("updatedBadge").textContent = "updated " + new Date().toLocaleTimeString();
+      $("footerHint").textContent = "API " + apiBase();
+    } catch (e) {
+      $("healthBadge").textContent = "offline";
+      $("healthBadge").className = "badge bad";
+      $("tableWrap").innerHTML = '<div class="empty">Cannot reach lobby: ' + escapeHtml(e.message) + "</div>";
+      toast(e.message, true);
+    }
+  }
+
+  function schedule() {
+    clearInterval(state.timer);
+    if (!state.auto) return;
+    const sec = parseInt($("interval").value, 10) || 5;
+    state.timer = setInterval(refresh, sec * 1000);
+  }
+
+  $("btnRefresh").addEventListener("click", refresh);
+  $("btnAuto").addEventListener("click", () => {
+    state.auto = !state.auto;
+    $("btnAuto").textContent = "Auto: " + (state.auto ? "ON" : "OFF");
+    $("btnAuto").classList.toggle("secondary", state.auto);
+    schedule();
+  });
+  $("interval").addEventListener("change", schedule);
+  $("apiUrl").addEventListener("change", () => { refresh(); schedule(); });
+
+  $("btnCopy").addEventListener("click", async () => {
+    if (!state.selected) return;
+    try {
+      await navigator.clipboard.writeText(state.selected);
+      toast("Copied " + state.selected);
+    } catch (_) {
+      toast(state.selected);
+    }
+  });
+
+  $("btnDelete").addEventListener("click", async () => {
+    if (!state.selected) return;
+    const [host, port] = state.selected.split(":");
+    if (!confirm("Remove " + state.selected + " from lobby?")) return;
+    try {
+      await api("/servers?host=" + encodeURIComponent(host) + "&port=" + encodeURIComponent(port), {
+        method: "DELETE",
+      });
+      toast("Removed " + state.selected);
+      state.selected = null;
+      await refresh();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+
+  $("btnRegister").addEventListener("click", async () => {
+    const body = {
+      name: $("fName").value || "ksim Server",
+      track: $("fTrack").value || "Unknown",
+      port: parseInt($("fPort").value, 10) || 40000,
+      players: parseInt($("fPlayers").value, 10) || 0,
+      maxPlayers: parseInt($("fMax").value, 10) || 16,
+      sessionType: parseInt($("fSession").value, 10) || 0,
+      auth: $("fAuth").checked,
+    };
+    if ($("fHost").value.trim()) body.host = $("fHost").value.trim();
+    try {
+      await api("/servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body),
+      });
+      toast("Registered " + body.name + " :" + body.port);
+      await refresh();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  });
+
+  $("btnClearForm").addEventListener("click", () => {
+    $("fName").value = "ksim Server";
+    $("fTrack").value = "Unknown";
+    $("fHost").value = "";
+    $("fPort").value = "40000";
+    $("fPlayers").value = "1";
+    $("fMax").value = "16";
+    $("fSession").value = "0";
+    $("fAuth").checked = false;
+  });
+
+  refresh();
+  schedule();
+})();
+  </script>
+</body>
+</html>

@@ -1,8 +1,10 @@
 #include "Kn5Baker.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
-#include <filesystem>
 #include <fstream>
+#include <filesystem>
 #include <unordered_set>
 #include <vector>
 
@@ -83,9 +85,74 @@ std::string uniqueName(const std::string& base, std::unordered_set<std::string>&
     }
 }
 
+static bool nameIsNormalMap(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower.find("normal") != std::string::npos
+        || lower.find("nmap") != std::string::npos
+        || lower.find("bump") != std::string::npos;
+}
+
+static bool nameIsAlbedoMap(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower.find("albedo") != std::string::npos
+        || lower.find("basecolor") != std::string::npos
+        || lower.find("diffuse") != std::string::npos
+        || lower.find("color") != std::string::npos;
+}
+
+static void extractPbrProperties(const Kn5Material& material, float& roughness, float& metalness, std::string& normal_tex) {
+    // Extract roughness, metalness, and normal map name from KN5 material.
+    // Property names in AC are typically "ksRoughness", "ksMetalness", "ksNormalMap"
+    // stored as 40-byte value blobs in Kn5Property.  If not found, return defaults.
+
+    roughness = 0.0f;
+    metalness = 0.0f;
+    normal_tex = "";
+
+    // Heuristic: look through property names for known PBR tags
+    for (const auto& prop : material.properties) {
+        const std::string& name = prop.name;
+        if (name.find("Roughness") != std::string::npos || name.find("roughness") != std::string::npos) {
+            // The 40-byte value encodes a float; take the first 4 bytes as big-endian float.
+            // In practice AC packs the roughness value into the first 4 bytes of the property.
+            if (prop.value.size() >= 4) {
+                roughness = *reinterpret_cast<const float*>(prop.value.data());
+                if (roughness < 0.0f) roughness = 0.0f;
+                if (roughness > 1.0f) roughness = 1.0f;
+            }
+        } else if (name.find("Metalness") != std::string::npos || name.find("metalness") != std::string::npos) {
+            if (prop.value.size() >= 4) {
+                metalness = *reinterpret_cast<const float*>(prop.value.data());
+                if (metalness < 0.0f) metalness = 0.0f;
+                if (metalness > 1.0f) metalness = 1.0f;
+            }
+        }
+    }
+
+    // Also check texture mappings for a normal map reference
+    for (const auto& mapping : material.mappings) {
+        if (nameIsNormalMap(mapping.name)) {
+            normal_tex = mapping.texture;
+            break;
+        }
+    }
+}
+
+// -------------------------------------------------------------------
+// Extract PBR properties from the mesh's material and collect them.
+// -------------------------------------------------------------------
+
 void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
               std::ofstream& manifest, std::unordered_set<std::string>& used_names,
-              Kn5BakeResult& result) {
+              Kn5BakeResult& result,
+              const std::vector<Kn5Material>* kn5_materials,
+              std::vector<std::string>& mesh_names,
+              std::vector<std::string>& albedo_tex_names,
+              std::vector<float>& roughness_vals,
+              std::vector<float>& metalness_vals,
+              std::vector<std::string>& normal_tex_names) {
     if (mesh.positions.empty()) {
         ++result.meshes_skipped;
         return;
@@ -142,19 +209,63 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
     }
     manifest << safe_name << '\n';
     ++result.meshes_written;
+
+    // -------------------------------------------------------------------
+    // Extract PBR properties from the mesh's material and collect them.
+    // -------------------------------------------------------------------
+    if (mesh.material_id >= 0 && static_cast<std::size_t>(mesh.material_id) <
+        (kn5_materials ? kn5_materials->size() : 0)) {
+        const auto& mat = (*kn5_materials)[mesh.material_id];
+        float roughness = 0.0f;
+        float metalness = 0.0f;
+        std::string normal_tex;
+        extractPbrProperties(mat, roughness, metalness, normal_tex);
+
+        // Use albedo texture name from the first texture mapping, or empty
+        std::string albedo_tex = "";
+        for (const Kn5TextureMapping& m : mat.mappings) {
+            if (nameIsAlbedoMap(m.name)) {
+                albedo_tex = m.texture;
+                break;
+            }
+        }
+
+        mesh_names.push_back(safe_name);
+        albedo_tex_names.push_back(albedo_tex);
+        roughness_vals.push_back(roughness);
+        metalness_vals.push_back(metalness);
+        normal_tex_names.push_back(normal_tex);
+    } else {
+        // No material assigned; use heuristic defaults
+        mesh_names.push_back(safe_name);
+        albedo_tex_names.push_back("");
+        roughness_vals.push_back(0.35f); // paint default
+        metalness_vals.push_back(0.0f);
+        normal_tex_names.push_back("");
+    }
 }
 
 void visitNodes(const std::vector<Kn5Node>& nodes, const std::string& output_dir,
                 std::ofstream& manifest, std::unordered_set<std::string>& used_names,
-                Kn5BakeResult& result) {
+                Kn5BakeResult& result,
+                const std::vector<Kn5Material>* kn5_materials,
+                std::vector<std::string>& mesh_names,
+                std::vector<std::string>& albedo_tex_names,
+                std::vector<float>& roughness_vals,
+                std::vector<float>& metalness_vals,
+                std::vector<std::string>& normal_tex_names) {
     for (const Kn5Node& node : nodes) {
         if (!result.success) return; // a mesh bake failed; stop early
         if (node.node_class == Kn5NodeClass::skinned_mesh) {
             ++result.meshes_skipped;
         } else if (node.has_mesh) {
-            bakeMesh(node.mesh, output_dir, manifest, used_names, result);
+            bakeMesh(node.mesh, output_dir, manifest, used_names, result,
+                     kn5_materials, mesh_names, albedo_tex_names,
+                     roughness_vals, metalness_vals, normal_tex_names);
         }
-        visitNodes(node.children, output_dir, manifest, used_names, result);
+        visitNodes(node.children, output_dir, manifest, used_names, result,
+                   kn5_materials, mesh_names, albedo_tex_names,
+                   roughness_vals, metalness_vals, normal_tex_names);
     }
 }
 
@@ -196,6 +307,40 @@ void writeTextures(const Kn5File& kn5, const std::string& output_dir,
     }
 }
 
+// -------------------------------------------------------------------
+// Write a materials.txt summarising per-mesh PBR properties extracted
+// from the parsed KN5 materials.  Each line has the format:
+//   mesh_name  albedo_tex_name  roughness  metalness  normal_tex_name
+// Values are the baked texture names (as stored in Kn5Material.mappings) or
+// heuristic defaults when the mesh has no explicit material definition.
+// The file is optional — the runtime can fall back to the per-mesh defaults
+// stored in the NMS2 header (lodIn/lodOut only, no PBR).
+// -------------------------------------------------------------------
+static void writeMaterialsTxt(const std::string& output_dir,
+                              const std::vector<std::string>& mesh_names,
+                              const std::vector<std::string>& albedo_tex_names,
+                              const std::vector<float>& roughness_vals,
+                              const std::vector<float>& metalness_vals,
+                              const std::vector<std::string>& normal_tex_names) {
+    std::string txt_path = output_dir + "/materials.txt";
+    std::ofstream file(txt_path);
+    if (!file.is_open()) return;
+    for (std::size_t i = 0; i < mesh_names.size(); ++i) {
+        float roughness = roughness_vals[i];
+        float metalness = metalness_vals[i];
+        // Heuristic defaults when no explicit material maps are authored:
+        // paint: rough ~0.35 metal ~0 ; carbon: rough ~0.5 metal ~0
+        if (roughness <= 0.0f) roughness = 0.35f;
+        if (metalness <= 0.0f) metalness = 0.0f;
+        file << mesh_names[i] << '\t'
+             << albedo_tex_names[i] << '\t'
+             << roughness << '\t'
+             << metalness << '\t'
+             << normal_tex_names[i] << '\n';
+    }
+    file.close();
+}
+
 } // namespace
 
 Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir) {
@@ -218,14 +363,30 @@ Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir) {
         return result;
     }
 
+    // Collect per-mesh PBR property data for materials.txt
+    std::vector<std::string> mesh_names;
+    std::vector<std::string> albedo_tex_names;
+    std::vector<float> roughness_vals;
+    std::vector<float> metalness_vals;
+    std::vector<std::string> normal_tex_names;
+
+    // Pass KN5 materials through the bake chain so extractPbrProperties can read them
+    const std::vector<Kn5Material>* kn5_materials = &kn5.materials;
+
     std::unordered_set<std::string> used_names;
-    visitNodes(kn5.nodes, output_dir, manifest, used_names, result);
+    visitNodes(kn5.nodes, output_dir, manifest, used_names, result,
+               kn5_materials, mesh_names, albedo_tex_names,
+               roughness_vals, metalness_vals, normal_tex_names);
     manifest.flush();
     if (!manifest.good() && result.success) {
         result.success = false;
         result.error = "failed writing manifest.txt";
     }
     if (result.success) writeTextures(kn5, output_dir, result);
+    if (result.success) writeMaterialsTxt(output_dir,
+                                          mesh_names, albedo_tex_names,
+                                          roughness_vals, metalness_vals,
+                                          normal_tex_names);
     return result;
 }
 

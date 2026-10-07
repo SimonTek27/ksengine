@@ -22,6 +22,7 @@ enum class MenuState {
     Multiplayer,
     Profile,
     Garage,
+    PitStrategy,
     Replay,
     ContentManager,
     Settings,
@@ -115,6 +116,13 @@ public:
     void openTrackSelect();
     void showResults(std::vector<ResultsRow> rows);
 
+    // Roadmap 2.5 (Sprint 8 / P1.8): GARAGE -> PIT STRATEGY screen — fuel
+    // target and repair jobs for the next box stop. setPitStrategy() seeds
+    // the screen from the loop-owned state; CONFIRM PLAN reports the edited
+    // tuple through onPitStrategyConfirmRequested.
+    void setPitStrategy(float fuelL, bool tyres, bool body, bool susp, bool aero,
+                        bool engine);
+
     std::function<void()> onExitRequested;
     // Fase 1 exit: the SINGLE PLAYER session rows report which session the
     // player picked (Practice / TimeAttack / Race) — SimulationLoop applies
@@ -128,6 +136,9 @@ public:
     std::function<void()> onNationalityInputRequested;
     std::function<void()> onOpenGarageRequested;
     std::function<void()> onOpenSetupGarageRequested;
+    // Roadmap 2.5 (Sprint 8 / P1.8): pit strategy screen actions.
+    std::function<void(float, bool, bool, bool, bool, bool)> onPitStrategyConfirmRequested;
+    std::function<void()> onOpenPitStrategyRequested;
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;
     // Roadmap 1.3: content select screens scan content/cars and
@@ -150,6 +161,10 @@ private:
     void buildMultiplayerMenu();
     void buildProfileMenu();
     void buildGarageMenu();
+    void buildPitStrategyMenu();
+    // Rebuilds the pit strategy rows in place (fuel step / toggles edit the
+    // stored values) keeping the cursor — the row layout is stable.
+    void refreshPitStrategy();
     void buildReplayMenu();
     void buildContentManagerMenu();
     void buildSettingsMenu();
@@ -179,6 +194,14 @@ private:
     std::vector<MenuItem> m_items;
     std::vector<ContentEntry> m_selectEntries;
     std::vector<ResultsRow> m_resultRows;
+
+    // Pit strategy (Roadmap 2.5 / Sprint 8): what the next box stop does.
+    float m_pitFuelTargetL = 60.f;
+    bool m_pitWantTyres = true;
+    bool m_pitWantBody = true;
+    bool m_pitWantSuspension = true;
+    bool m_pitWantAero = false;
+    bool m_pitWantEngine = false;
 };
 
 } // namespace ks::sim

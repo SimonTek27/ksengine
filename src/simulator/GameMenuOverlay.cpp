@@ -1,6 +1,7 @@
 #include "GameMenuOverlay.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace ks::sim {
 
@@ -17,6 +18,7 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::Multiplayer: return "MULTI PLAYER";
     case MenuState::Profile: return "DRIVER";
     case MenuState::Garage: return "GARAGE";
+    case MenuState::PitStrategy: return "PIT STRATEGY";
     case MenuState::Replay: return "REPLAY";
     case MenuState::ContentManager: return "CONTENT";
     case MenuState::Settings: return "SETTINGS";
@@ -162,6 +164,76 @@ void GameMenuOverlay::buildGarageMenu()
     m_items.clear();
     m_items.push_back({ "SETUP", "Aero, gears, brakes and dampers",
         [this]() { if (onOpenSetupGarageRequested) onOpenSetupGarageRequested(); } });
+    m_items.push_back({ "PIT STRATEGY", "Fuel, tyres and repair plan for next stop",
+        [this]() {
+            if (onOpenPitStrategyRequested) onOpenPitStrategyRequested();
+            switchMenu(MenuState::PitStrategy);
+        } });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+}
+
+void GameMenuOverlay::setPitStrategy(float fuelL, bool tyres, bool body, bool susp,
+                                     bool aero, bool engine)
+{
+    m_pitFuelTargetL = fuelL;
+    m_pitWantTyres = tyres;
+    m_pitWantBody = body;
+    m_pitWantSuspension = susp;
+    m_pitWantAero = aero;
+    m_pitWantEngine = engine;
+    if (m_currentState == MenuState::PitStrategy)
+        refreshPitStrategy();
+}
+
+void GameMenuOverlay::refreshPitStrategy()
+{
+    if (m_currentState != MenuState::PitStrategy) return;
+    const int sel = m_selectedIndex;
+    buildPitStrategyMenu();
+    m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+    m_menuDirty = false;
+}
+
+void GameMenuOverlay::buildPitStrategyMenu()
+{
+    m_items.clear();
+    char fuelLine[64];
+    std::snprintf(fuelLine, sizeof(fuelLine), "FUEL TARGET  %.0f L", m_pitFuelTargetL);
+    m_items.push_back({ fuelLine, "Target fuel after stop", nullptr, false, false });
+    m_items.push_back({ "FUEL -5 L", "Reduce target",
+        [this]() {
+            m_pitFuelTargetL = std::max(0.f, m_pitFuelTargetL - 5.f);
+            m_menuDirty = true;
+        } });
+    m_items.push_back({ "FUEL +5 L", "Increase target",
+        [this]() {
+            m_pitFuelTargetL = std::min(120.f, m_pitFuelTargetL + 5.f);
+            m_menuDirty = true;
+        } });
+    m_items.push_back({ "", "", nullptr, true });
+
+    auto toggle = [this](const char* label, bool& flag, const char* desc) {
+        char t[80];
+        std::snprintf(t, sizeof(t), "%s  [%s]", label, flag ? "ON" : "OFF");
+        m_items.push_back({ t, desc, [&flag, this]() {
+            flag = !flag;
+            m_menuDirty = true;
+        } });
+    };
+    toggle("TYRES", m_pitWantTyres, "Change all four tyres");
+    toggle("BODY", m_pitWantBody, "Repair bodywork");
+    toggle("SUSPENSION", m_pitWantSuspension, "Repair suspension");
+    toggle("AERO", m_pitWantAero, "Repair wings / aero");
+    toggle("ENGINE", m_pitWantEngine, "Engine service");
+
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "CONFIRM PLAN", "Apply strategy for next pit stop",
+        [this]() {
+            if (onPitStrategyConfirmRequested)
+                onPitStrategyConfirmRequested(
+                    m_pitFuelTargetL, m_pitWantTyres, m_pitWantBody,
+                    m_pitWantSuspension, m_pitWantAero, m_pitWantEngine);
+        } });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 
@@ -309,6 +381,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::Multiplayer: buildMultiplayerMenu(); break;
     case MenuState::Profile: buildProfileMenu(); break;
     case MenuState::Garage: buildGarageMenu(); break;
+    case MenuState::PitStrategy: buildPitStrategyMenu(); break;
     case MenuState::Replay: buildReplayMenu(); break;
     case MenuState::ContentManager: buildContentManagerMenu(); break;
     case MenuState::Settings: buildSettingsMenu(); break;
@@ -334,6 +407,11 @@ void GameMenuOverlay::goBack()
         switchMenu(MenuState::Settings);
         return;
     }
+    // The pit strategy screen lives one level under GARAGE.
+    if (m_currentState == MenuState::PitStrategy) {
+        switchMenu(MenuState::Garage);
+        return;
+    }
     // Select/results screens return to whoever opened them (Singleplayer or
     // Content), falling back to Main when entered directly.
     if (m_currentState == MenuState::CarSelect ||
@@ -355,8 +433,14 @@ void GameMenuOverlay::activateSelected()
 {
     if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_items.size())) return;
     const auto& item = m_items[m_selectedIndex];
-    if (item.enabled && item.action && !item.isSeparator)
+    if (item.enabled && item.action && !item.isSeparator) {
         item.action();
+        // The pit strategy rows edit stored values in place (fuel step,
+        // repair toggles): rebuild that screen after the action so the
+        // value rows stay true, keeping the cursor put.
+        if (m_menuDirty && m_currentState == MenuState::PitStrategy)
+            refreshPitStrategy();
+    }
 }
 
 void GameMenuOverlay::render(int /*width*/, int /*height*/)

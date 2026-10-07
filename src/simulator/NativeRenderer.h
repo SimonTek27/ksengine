@@ -668,6 +668,32 @@ private:
     std::shared_ptr<ui::UiGpuPass> m_uiPass;
     int m_viewportW = 1280;
     int m_viewportH = 720;
+
+    // --- Image-Based Lighting (IBL) ---
+    // Environment map for ambient lighting (RGB radiance over sphere)
+    bool m_iblEnabled = false;
+    VkImage m_iblEnvMap = VK_NULL_HANDLE;
+    VkDeviceMemory m_iblEnvMemory = VK_NULL_HANDLE;
+    VkImageView m_iblEnvView = VK_NULL_HANDLE;
+    VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
+    // Pre-convolved environment map mipchain (roughness LODs)
+    bool m_iblPrefilterEnabled = false;
+    VkImage m_iblPrefilterMap = VK_NULL_HANDLE;
+    VkDeviceMemory m_iblPrefilterMemory = VK_NULL_HANDLE;
+    VkImageView m_iblPrefilterView = VK_NULL_HANDLE;
+    VkSampler m_iblPrefilterSampler = VK_NULL_HANDLE;
+    // BRDF lookup texture (encoded N dot H for specular integration)
+    bool m_iblBrdfLutEnabled = false;
+    VkImage m_iblBrdfLut = VK_NULL_HANDLE;
+    VkDeviceMemory m_iblBrdfLutMemory = VK_NULL_HANDLE;
+    VkImageView m_iblBrdfLutView = VK_NULL_HANDLE;
+    VkSampler m_iblBrdfLutSampler = VK_NULL_HANDLE;
+
+    // IBL descriptor set
+    VkDescriptorSetLayout m_iblSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_iblPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_iblSet = VK_NULL_HANDLE;
+
 };
 
 } // namespace ks::sim

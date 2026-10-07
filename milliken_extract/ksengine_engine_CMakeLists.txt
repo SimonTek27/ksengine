@@ -1,0 +1,344 @@
+# ============================================================================
+# KSEngine - Independent Engine Framework
+# ============================================================================
+# This is the core engine library, independent of the editor UI.
+# It contains: Math, Physics, Graphics, Audio, Animation, Mesh, Material,
+# Scripting, FileFormat, Assets, Devices, Tools, Sys, Archive, Network
+# ============================================================================
+
+cmake_minimum_required(VERSION 3.16)
+
+project(ksengine
+    VERSION 2.1.0
+    LANGUAGES C CXX
+)
+
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# MSVC flags
+if(MSVC)
+    add_compile_options(/permissive-)
+    add_compile_definitions(NOMINMAX)
+    add_compile_options(/FS)
+    add_compile_options(/bigobj)
+endif()
+
+# ============================================================================
+# Collect engine source files
+# ============================================================================
+
+file(GLOB_RECURSE KSENGINE_MATH_SOURCES
+    "Math/*.h"
+    "Math/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_PHYSICS_SOURCES
+    "physics/*.h"
+    "physics/*.cpp"
+)
+# Exclude weather UI files (editor-specific, not engine core)
+list(FILTER KSENGINE_PHYSICS_SOURCES EXCLUDE REGEX "physics/weather/WeatherEditor\\.cpp$")
+list(FILTER KSENGINE_PHYSICS_SOURCES EXCLUDE REGEX "physics/weather/WeatherEditor\\.h$")
+list(FILTER KSENGINE_PHYSICS_SOURCES EXCLUDE REGEX "physics/weather/WeatherModule\\.cpp$")
+list(FILTER KSENGINE_PHYSICS_SOURCES EXCLUDE REGEX "physics/weather/WeatherModule\\.h$")
+
+file(GLOB_RECURSE KSENGINE_GRAPHICS_SOURCES
+    "Graphics/*.h"
+    "Graphics/*.cpp"
+    "Graphics/**/*.h"
+    "Graphics/**/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_AUDIO_SOURCES
+    "Audio/*.h"
+    "Audio/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_ANIMATION_SOURCES
+    "animation/*.h"
+    "animation/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_MESH_SOURCES
+    "mesh/*.h"
+    "mesh/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_MATERIAL_SOURCES
+    "material/*.h"
+    "material/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_SCRIPTING_SOURCES
+    "Scripting/*.h"
+    "Scripting/*.cpp"
+    "Scripting/**/*.h"
+    "Scripting/**/*.cpp"
+)
+# Exclude Python scripting when Python is not available
+list(FILTER KSENGINE_SCRIPTING_SOURCES EXCLUDE REGEX "Scripting/python/")
+
+file(GLOB_RECURSE KSENGINE_FILEFORMAT_SOURCES
+    "FileFormat/*.h"
+    "FileFormat/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_ASSETS_SOURCES
+    "assets/*.h"
+    "assets/*.cpp"
+)
+# Exclude FormatConverter (depends on AC-specific acFiles/ headers)
+list(FILTER KSENGINE_ASSETS_SOURCES EXCLUDE REGEX "assets/FormatConverter\\.cpp$")
+list(FILTER KSENGINE_ASSETS_SOURCES EXCLUDE REGEX "assets/FormatConverter\\.h$")
+
+file(GLOB_RECURSE KSENGINE_DEVICES_SOURCES
+    "devices/*.h"
+    "devices/*.cpp"
+    "devices/**/*.h"
+    "devices/**/*.cpp"
+)
+# Exclude scanner files - depend on VulkanViewportItem (editor-specific)
+list(FILTER KSENGINE_DEVICES_SOURCES EXCLUDE REGEX "PhotogrammetryCapture\\.cpp$")
+list(FILTER KSENGINE_DEVICES_SOURCES EXCLUDE REGEX "TurntableScanner\\.cpp$")
+# Exclude 3D print files - depend on GeometryUtils (not in core)
+list(FILTER KSENGINE_DEVICES_SOURCES EXCLUDE REGEX "SlicerEngine\\.cpp$")
+list(FILTER KSENGINE_DEVICES_SOURCES EXCLUDE REGEX "SupportGenerator\\.cpp$")
+
+file(GLOB_RECURSE KSENGINE_TOOLS_SOURCES
+    "Tools/*.h"
+    "Tools/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_VIDEO_SOURCES
+    "Video/*.h"
+    "Video/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_SYS_SOURCES
+    "sys/*.h"
+    "sys/*.cpp"
+)
+# Exclude ModuleManager/PluginManager .cpp (depend on SDK module headers)
+list(FILTER KSENGINE_SYS_SOURCES EXCLUDE REGEX "sys/ModuleManager\\.cpp$")
+list(FILTER KSENGINE_SYS_SOURCES EXCLUDE REGEX "sys/PluginManager\\.cpp$")
+
+file(GLOB_RECURSE KSENGINE_ARCHIVE_SOURCES
+    "archive/*.h"
+    "archive/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_CONFIG_SOURCES
+    "Config/*.h"
+    "Config/*.cpp"
+)
+
+file(GLOB_RECURSE KSENGINE_NETWORK_SOURCES
+    "network/*.h"
+    "network/*.cpp"
+)
+# Exclude NetworkManager.cpp - depends on ksnet
+list(FILTER KSENGINE_NETWORK_SOURCES EXCLUDE REGEX "NetworkManager\\.cpp$")
+
+# ============================================================================
+# Skip AUTOMOC for headers whose .cpp files are excluded or missing
+# ============================================================================
+
+set(_SKIP_MOC_HEADERS
+    "${CMAKE_CURRENT_SOURCE_DIR}/devices/3dprint/SlicerEngine.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/devices/3dprint/SupportGenerator.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/devices/scanners/PhotogrammetryCapture.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/devices/scanners/TurntableScanner.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/network/NetworkManager.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Audio/AudioModuleBridge.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Audio/AudioVSTHost.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Audio/AudioVST3Host.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/Audio/AudioCore.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/mesh/Viewport3DSystem.h"
+)
+set_source_files_properties(${_SKIP_MOC_HEADERS} PROPERTIES SKIP_AUTOMOC ON)
+
+# ============================================================================
+# Create engine library
+# ============================================================================
+
+add_library(ksengine STATIC
+    ${KSENGINE_MATH_SOURCES}
+    ${KSENGINE_PHYSICS_SOURCES}
+    ${KSENGINE_GRAPHICS_SOURCES}
+    ${KSENGINE_AUDIO_SOURCES}
+    ${KSENGINE_ANIMATION_SOURCES}
+    ${KSENGINE_MESH_SOURCES}
+    ${KSENGINE_MATERIAL_SOURCES}
+    ${KSENGINE_SCRIPTING_SOURCES}
+    ${KSENGINE_FILEFORMAT_SOURCES}
+    ${KSENGINE_ASSETS_SOURCES}
+    ${KSENGINE_DEVICES_SOURCES}
+    ${KSENGINE_TOOLS_SOURCES}
+    ${KSENGINE_VIDEO_SOURCES}
+    ${KSENGINE_SYS_SOURCES}
+    ${KSENGINE_ARCHIVE_SOURCES}
+    ${KSENGINE_CONFIG_SOURCES}
+    ${KSENGINE_NETWORK_SOURCES}
+    "EngineModule.h"
+)
+
+target_include_directories(ksengine PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/.."
+)
+
+# Backward-compatible include paths
+# CMAKE_CURRENT_SOURCE_DIR = src/engine, so ../.. = kseditor/src
+target_include_directories(ksengine PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# ============================================================================
+# Dependencies
+# ============================================================================
+
+# Qt6
+find_package(Qt6 COMPONENTS Core Gui Widgets Network Qml Quick Quick3D QuickControls2 QuickWidgets Multimedia OpenGL Sql Charts WebSockets Svg DataVisualization QUIET)
+
+if(Qt6_FOUND)
+    target_link_libraries(ksengine PUBLIC
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        Qt6::Network
+        Qt6::Qml
+        Qt6::Quick
+        Qt6::Quick3D
+        Qt6::QuickControls2
+        Qt6::QuickWidgets
+        Qt6::Multimedia
+        Qt6::OpenGL
+        Qt6::Sql
+        Qt6::Charts
+        Qt6::WebSockets
+    )
+endif()
+
+# Vulkan
+find_package(Vulkan QUIET)
+if(Vulkan_FOUND)
+    target_include_directories(ksengine PUBLIC ${Vulkan_INCLUDE_DIRS})
+    target_link_libraries(ksengine PUBLIC ${Vulkan_LIBRARIES})
+    target_compile_definitions(ksengine PUBLIC HAS_VULKAN=1)
+endif()
+
+# Bullet Physics
+find_package(Bullet QUIET)
+if(BULLET_FOUND OR TARGET BulletDynamics)
+    target_link_libraries(ksengine PUBLIC Bullet3Common BulletDynamics BulletCollision LinearMath)
+    target_compile_definitions(ksengine PUBLIC HAS_BULLET=1)
+endif()
+
+# Eigen
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../external/eigen/Eigen/Core")
+    target_include_directories(ksengine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../../external/eigen")
+    target_compile_definitions(ksengine PUBLIC HAS_EIGEN=1)
+endif()
+
+# mikktspace (vendored)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/mikktspace/mikktspace.c")
+    if(NOT TARGET mikktspace)
+        add_library(mikktspace STATIC "${CMAKE_CURRENT_SOURCE_DIR}/external/mikktspace/mikktspace.c")
+        target_include_directories(mikktspace PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/external/mikktspace")
+        set_target_properties(mikktspace PROPERTIES C_STANDARD 11 AUTOMOC OFF)
+    endif()
+    target_link_libraries(ksengine PUBLIC mikktspace)
+    target_compile_definitions(ksengine PUBLIC HAS_MIKKTSPACE=1)
+else()
+    target_compile_definitions(ksengine PUBLIC HAS_MIKKTSPACE=0)
+endif()
+
+# stb_vorbis (vendored)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/stb/stb_vorbis.c")
+    target_include_directories(ksengine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/external/stb")
+    target_compile_definitions(ksengine PUBLIC HAS_STB=1)
+else()
+    target_compile_definitions(ksengine PUBLIC HAS_STB=0)
+endif()
+
+# OpenXR headers (vendored)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/openxr/openxr.h")
+    target_include_directories(ksengine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/external")
+    target_compile_definitions(ksengine PUBLIC HAS_OPENXR=1)
+else()
+    target_compile_definitions(ksengine PUBLIC HAS_OPENXR=0)
+endif()
+
+# Lua
+find_package(Lua QUIET)
+if(Lua_FOUND)
+    target_link_libraries(ksengine PUBLIC ${LUA_LIBRARIES})
+    target_include_directories(ksengine PUBLIC ${LUA_INCLUDE_DIR})
+    target_compile_definitions(ksengine PUBLIC HAS_LUA=1)
+endif()
+
+# Python (disabled for now — debug libs often missing, simulator doesn't need it)
+# find_package(Python3 COMPONENTS Development QUIET)
+# if(Python3_FOUND AND Python3_LIBRARIES)
+#     foreach(_pylib IN LISTS Python3_LIBRARIES)
+#         if(NOT _pylib MATCHES "_d\\.lib$")
+#             list(APPEND _pylib_release ${_pylib})
+#         endif()
+#     endforeach()
+#     if(_pylib_release)
+#         target_link_libraries(ksengine PRIVATE ${_pylib_release})
+#         target_include_directories(ksengine PRIVATE ${Python3_INCLUDE_DIRS})
+#         target_compile_definitions(ksengine PRIVATE HAS_PYTHON=1)
+#     endif()
+# endif()
+
+# zlib
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+    target_link_libraries(ksengine PUBLIC ZLIB::ZLIB)
+    target_compile_definitions(ksengine PUBLIC HAS_ZLIB=1)
+endif()
+
+# FFmpeg (video encoding)
+if(HAS_FFMPEG)
+    if(FFMPEG_LIBRARIES)
+        target_link_libraries(ksengine PUBLIC ${FFMPEG_LIBRARIES})
+        target_include_directories(ksengine PUBLIC ${FFMPEG_INCLUDE_DIRS})
+    elseif(TARGET PkgConfig::AVCODEC)
+        target_link_libraries(ksengine PUBLIC PkgConfig::AVCODEC PkgConfig::AVFORMAT PkgConfig::SWSCALE PkgConfig::AVUTIL)
+    endif()
+    target_compile_definitions(ksengine PUBLIC HAS_FFMPEG=1)
+endif()
+
+# ksnet multiplayer transport
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Network/ksnet/CMakeLists.txt")
+    if(NOT TARGET ksnet)
+        add_subdirectory(Network/ksnet ${CMAKE_BINARY_DIR}/ksnet EXCLUDE_FROM_ALL)
+    endif()
+    target_link_libraries(ksengine PUBLIC ksnet)
+    target_include_directories(ksengine PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Network/ksnet/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Network/ksnet/serialize")
+    target_compile_definitions(ksengine PUBLIC HAS_KSNET=1)
+endif()
+
+# ImGui
+find_package(imgui CONFIG QUIET)
+if(imgui_FOUND)
+    target_link_libraries(ksengine PUBLIC imgui::imgui)
+    target_compile_definitions(ksengine PUBLIC IMGUI_IMPL_OPENGL_LOADER_GLAD HAS_IMGUI=1)
+endif()
+
+# ============================================================================
+# Compile definitions
+# ============================================================================
+
+target_compile_definitions(ksengine PUBLIC
+    KSASSETTOCORSA_EXPORTS
+    KSASSETTOCORSAEVO_EXPORTS
+)
+
+message(STATUS "KSEngine v${PROJECT_VERSION} configured successfully")
