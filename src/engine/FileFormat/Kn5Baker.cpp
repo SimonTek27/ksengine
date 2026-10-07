@@ -51,14 +51,20 @@ void transformByMatrix(const std::array<float, 16>& m, float x, float y,
 }
 
 bool writeNMSH(const std::string& path, const std::vector<BakedVertex>& verts,
-               const std::vector<std::uint32_t>& indices) {
+               const std::vector<std::uint32_t>& indices, float lod_in,
+               float lod_out) {
     std::ofstream file(path, std::ios::binary);
     if (!file.is_open()) return false;
-    file.write("NMSH", 4);
+    // "NMS2" = "NMSH" + the KN5 authored distance window right after the
+    // counts (Roadmap 2.4). The runtime loader still accepts plain NMSH
+    // (editor bakes, terrain caches) and defaults those to "no window".
+    file.write("NMS2", 4);
     const auto v_count = static_cast<std::uint32_t>(verts.size());
     const auto i_count = static_cast<std::uint32_t>(indices.size());
     file.write(reinterpret_cast<const char*>(&v_count), sizeof(v_count));
     file.write(reinterpret_cast<const char*>(&i_count), sizeof(i_count));
+    file.write(reinterpret_cast<const char*>(&lod_in), sizeof(lod_in));
+    file.write(reinterpret_cast<const char*>(&lod_out), sizeof(lod_out));
     file.write(reinterpret_cast<const char*>(verts.data()),
                static_cast<std::streamsize>(sizeof(BakedVertex) * verts.size()));
     file.write(reinterpret_cast<const char*>(indices.data()),
@@ -129,7 +135,8 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
     }
 
     const std::string safe_name = uniqueName(sanitizeFileName(mesh.name), used_names);
-    if (!writeNMSH(output_dir + "/" + safe_name + ".nmsh", verts, mesh.indices)) {
+    if (!writeNMSH(output_dir + "/" + safe_name + ".nmsh", verts, mesh.indices,
+                   mesh.lod_in, mesh.lod_out)) {
         ++result.meshes_skipped;
         return;
     }

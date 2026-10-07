@@ -5,9 +5,13 @@
 // runtime already consumes:
 //
 //   <output_dir>/manifest.txt      one sanitized mesh name per line
-//   <output_dir>/<name>.nmsh       "NMSH" + u32 vCount + u32 iCount +
+//   <output_dir>/<name>.nmsh       "NMS2" + u32 vCount + u32 iCount +
+//                                  f32 lodIn + f32 lodOut (the KN5 authored
+//                                  distance window, Roadmap 2.4) +
 //                                  vCount * 12 floats (px,py,pz,nx,ny,nz,u,v,
-//                                  r,g,b,a) + iCount * u32 indices
+//                                  r,g,b,a) + iCount * u32 indices. Plain
+//                                  "NMSH" files (no LOD pair) are the legacy
+//                                  layout the runtime still accepts.
 //   <output_dir>/textures/<name>   each embedded texture payload, byte for
 //                                  byte (normally a complete .dds)
 //

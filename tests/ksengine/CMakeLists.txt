@@ -54,6 +54,7 @@ set(KS_QT_FREE_TESTS
     scene_assets_test
     wet_physics_test
     rain_effects_test
+    lod_window_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

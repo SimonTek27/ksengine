@@ -117,6 +117,12 @@ struct Kn5Mesh {
     std::string name;
     std::int32_t material_id = -1;
     std::uint32_t layer = 0;
+    // Authored distance window from the payload tail (Roadmap 2.4): the
+    // mesh is only meant to render while the camera sits within
+    // [lod_in, lod_out] metres. Default = no far limit, so a struct built
+    // without a tail (skinned, synthetic) behaves as "always visible".
+    float lod_in = 0.0f;
+    float lod_out = 1.0e9f;
     // Absolute transform of the mesh, accumulated from its Base ancestors at
     // parse time (row-vector convention). Applied by Kn5Baker.
     std::array<float, 16> world = kn5IdentityMatrix();

@@ -228,7 +228,11 @@ bool parseMeshPayload(ByteReader& r, Kn5Mesh& mesh) {
 
     if (!r.readI32(mesh.material_id)) return false;
     if (!r.readU32(mesh.layer)) return false;
-    return r.skip(kMeshTailBytes - 8); // lodIn, lodOut, bsCenter, bsRadius, renderable
+    // lodIn/lodOut become the runtime distance window (Roadmap 2.4); the
+    // remaining 17 bytes (bsCenter, bsRadius, isRenderable) are still unused.
+    if (!r.read(&mesh.lod_in, sizeof(float))) return false;
+    if (!r.read(&mesh.lod_out, sizeof(float))) return false;
+    return r.skip(kMeshTailBytes - 16);
 }
 
 bool parseSkinnedPayload(ByteReader& r) {

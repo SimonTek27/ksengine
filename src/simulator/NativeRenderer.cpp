@@ -1010,13 +1010,23 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
 
     char magic[4];
     f.read(magic, 4);
-    if (std::memcmp(magic, "NMSH", 4) != 0) { fprintf(stderr, "[NativeRenderer] bad mesh cache magic in %s\n", path.c_str()); return false; }
+    const bool v2 = std::memcmp(magic, "NMS2", 4) == 0;
+    if (!v2 && std::memcmp(magic, "NMSH", 4) != 0) {
+        fprintf(stderr, "[NativeRenderer] bad mesh cache magic in %s\n", path.c_str());
+        return false;
+    }
 
     uint32_t vCount = 0, iCount = 0;
     f.read(reinterpret_cast<char*>(&vCount), 4);
     f.read(reinterpret_cast<char*>(&iCount), 4);
 
     NativeMesh mesh;
+    if (v2) {
+        // KN5 authored distance window (Roadmap 2.4); "NMSH" keeps the
+        // LodWindow default = no window.
+        f.read(reinterpret_cast<char*>(&mesh.lod.in), 4);
+        f.read(reinterpret_cast<char*>(&mesh.lod.out), 4);
+    }
     mesh.vertices.resize(vCount);
     mesh.indices.resize(iCount);
     f.read(reinterpret_cast<char*>(mesh.vertices.data()), static_cast<std::streamsize>(sizeof(NativeVertex) * vCount));
@@ -1227,11 +1237,34 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
     const bool occlTest = m_occlusionCulling && m_occlGridValid &&
                           m_prevViewProjValid && !m_occlGrid.empty();
 
-    if ((m_frustumCulling || occlTest) && m_cameraValid && it->second.hasBounds) {
+    // Authored KN5 distance window (Roadmap 2.4): only meshes that actually
+    // carry one pay for the extra test, so legacy caches and runtime meshes
+    // keep the exact pre-2.4 path.
+    const bool hasLodWindow = ks::scene::hasAuthoredWindow(it->second.lod);
+
+    if (m_cameraValid && it->second.hasBounds &&
+        (m_frustumCulling || occlTest || hasLodWindow)) {
         ks::math::vec3 wmin, wmax;
         ks::math::Frustum::transformBounds(asMath(modelMatrix),
                                            asMath(it->second.boundsMin),
                                            asMath(it->second.boundsMax), wmin, wmax);
+        if (hasLodWindow) {
+            // Nearest-point distance: a mesh you are standing inside never
+            // reads as "far" no matter how large its bounds are.
+            const float dist =
+                ks::scene::distanceToBounds(asMath(m_camPosWS), wmin, wmax);
+            if (!ks::scene::inLodWindow(dist, it->second.lod)) {
+                ++m_stats.culled; // past (or before) its window: skip both
+                                  // the color pass and the shadow list
+                static bool s_lodDebug = getenv("KS_CULL_DEBUG") != nullptr;
+                if (s_lodDebug && m_stats.culled <= 8) {
+                    fprintf(stderr, "[lod] %s dist=%.1f window=[%.1f..%.1f]\n",
+                            name.c_str(), dist, it->second.lod.in,
+                            it->second.lod.out);
+                }
+                return;
+            }
+        }
         if (m_frustumCulling && !m_frustum.intersects(wmin, wmax)) {
             ++m_stats.culled;
             static bool s_cullDebug = getenv("KS_CULL_DEBUG") != nullptr;

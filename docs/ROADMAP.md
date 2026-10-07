@@ -18,7 +18,7 @@ Il lavoro residuo è **qualità prodotto** (P2) e **profondità pro** (P3).
 | AI racing line + overtake | ✅ | Base utilizzabile |
 | Multiplayer ksnet (20 Hz, damage/setup, auth, secure) | ✅ | Host/join LAN |
 | Lobby hosted + CLI + web | ✅ | kslobby / kslobby-cli / browser |
-| Rendering KN5/LOD stabile | 🔶 | Parziale — P2.1 |
+| Rendering KN5/LOD stabile | 🔶 | LOD KN5 end-to-end (finestre lodIn/lodOut → NMS2 + distance culling) — P2.1: texture pipeline runtime aperta |
 | Audio 3D | ✅ | Doppler/distanza/pan voci altre auto (Audio3D.h) + rolling per superficie — P2.2 |
 | UI menu racing completa | 🔶 | Overlay base — P2.5 |
 | Aquaplaning / rain fisico | ✅ | Curve grip + G11 + evoluzione pioggia/asciutto + rain/spray particelle (`KS_PARTICLES=1`) — P2.8 |

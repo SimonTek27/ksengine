@@ -270,8 +270,11 @@ const Kn5Node* findNode(const std::vector<Kn5Node>& nodes, const std::string& na
 
 struct NmshData {
     bool valid = false;
+    bool v2 = false; // NMS2 = NMSH + authored LOD window (Roadmap 2.4)
     std::uint32_t vcount = 0;
     std::uint32_t icount = 0;
+    float lod_in = 0.0f;
+    float lod_out = 0.0f;
     std::vector<float> verts; // vcount * 12 floats
     std::vector<std::uint32_t> indices;
 };
@@ -283,10 +286,15 @@ NmshData readNmsh(const fs::path& path) {
 
     char magic[4];
     file.read(magic, sizeof(magic));
-    if (std::memcmp(magic, "NMSH", 4) != 0) return data;
+    data.v2 = std::memcmp(magic, "NMS2", 4) == 0;
+    if (!data.v2 && std::memcmp(magic, "NMSH", 4) != 0) return data;
     file.read(reinterpret_cast<char*>(&data.vcount), 4);
     file.read(reinterpret_cast<char*>(&data.icount), 4);
     if (data.vcount > 1000000 || data.icount > 1000000) return data;
+    if (data.v2) {
+        file.read(reinterpret_cast<char*>(&data.lod_in), 4);
+        file.read(reinterpret_cast<char*>(&data.lod_out), 4);
+    }
 
     data.verts.resize(static_cast<std::size_t>(data.vcount) * 12);
     data.indices.resize(data.icount);
@@ -372,6 +380,10 @@ int main() {
                 KS_CHECK_NEAR(triangle->mesh.world[12], 10.0f, 1e-6);
                 KS_CHECK_NEAR(triangle->mesh.world[13], 5.0f, 1e-6);
                 KS_CHECK_NEAR(triangle->mesh.world[14], 0.0f, 1e-6);
+                // Roadmap 2.4: the payload tail's authored distance window
+                // is kept instead of skipped (builder writes 0 / 1000).
+                KS_CHECK_NEAR(triangle->mesh.lod_in, 0.0f, 1e-6);
+                KS_CHECK_NEAR(triangle->mesh.lod_out, 1000.0f, 1e-6);
                 KS_CHECK(triangle->mesh.positions.size() == 9);
                 KS_CHECK(triangle->mesh.uvs.size() == 6);
                 KS_CHECK(triangle->mesh.indices.size() == 3);
@@ -517,6 +529,11 @@ int main() {
     if (triangle_nmsh.valid) {
         KS_CHECK(triangle_nmsh.vcount == 3);
         KS_CHECK(triangle_nmsh.icount == 3);
+        // Roadmap 2.4: the bake writes NMS2 and carries the KN5 window
+        // (synthetic tail: lodIn=0, lodOut=1000) through to disk.
+        KS_CHECK(triangle_nmsh.v2);
+        KS_CHECK_NEAR(triangle_nmsh.lod_in, 0.0f, 1e-6);
+        KS_CHECK_NEAR(triangle_nmsh.lod_out, 1000.0f, 1e-6);
         KS_CHECK(triangle_nmsh.verts.size() == 36);
         KS_CHECK(triangle_nmsh.indices.size() == 3);
         if (triangle_nmsh.verts.size() == 36) {

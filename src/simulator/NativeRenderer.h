@@ -45,6 +45,7 @@
 #include <memory>
 #include "MathTypes.h"
 #include "engine/Math/Frustum.h"
+#include "engine/scene/LodWindow.h"
 
 namespace ks::sim {
 
@@ -78,6 +79,11 @@ struct NativeMesh {
     vec3 boundsMin{};
     vec3 boundsMax{};
     bool hasBounds = false;
+    // KN5 authored distance window (NMS2 caches): the instance is queued only
+    // while the camera sits within [in, out] metres — see LodWindow.h.
+    // Defaults = no window, so runtime-generated meshes (solids, terrain,
+    // placeholders) and legacy NMSH caches render exactly as before.
+    ks::scene::LodWindow lod;
 };
 
 struct DirectionalLight {
@@ -114,8 +120,11 @@ public:
 
     // Loads a pre-baked, Qt-free mesh cache (see the file note above for why
     // this exists instead of parsing .kn5 directly). Format: a tiny custom
-    // binary — 4-byte magic "NMSH", uint32 vertexCount, uint32 indexCount,
-    // then the raw NativeVertex array, then the raw uint32 index array.
+    // binary — 4-byte magic + uint32 vertexCount + uint32 indexCount, then
+    // the raw NativeVertex array, then the raw uint32 index array. Magic
+    // "NMS2" (kn5baker output) inserts the KN5 distance window — f32 lodIn,
+    // f32 lodOut — between the counts and the vertices; magic "NMSH" is the
+    // legacy layout (no window, mesh always queued).
     bool loadMeshFromFile(const std::string& name, const std::string& path);
     // Reads <dir>/manifest.txt (one mesh name per line, as written by the
     // kn5baker tool) and calls loadMeshFromFile(name, dir+"/"+name+".nmsh")
