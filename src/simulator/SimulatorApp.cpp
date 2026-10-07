@@ -521,10 +521,10 @@ static void initSimulation() {
         g_running = false;
         PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
     };
-    uiMenu->onStartDrivingRequested = []() {
+    uiMenu->onStartDrivingRequested = [](ks::sim::GameSessionMode mode) {
         g_simulation->ui().menu().setVisible(false);
-        g_simulation->start();
-        printf("Driving started!\n");
+        g_simulation->startSession(mode);
+        printf("Session started: %s\n", ks::sim::sessionModeName(mode));
     };
     uiMenu->onTrackChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();

@@ -62,6 +62,8 @@
 
 namespace ks::sim {
 
+static constexpr uint8_t SESSION_PRACTICE = 0;
+static constexpr uint8_t SESSION_QUALIFYING = 1;
 static constexpr uint8_t SESSION_RACE = 2;
 static constexpr uint8_t PHASE_COUNTDOWN = 1;
 static constexpr uint8_t PHASE_GREEN_FLAG = 2;
@@ -369,16 +371,31 @@ void SimulationLoop::beginRaceSession() {
         }
     }
     RaceConfig rc;
-    rc.sessionType = RaceConfig::SessionType::Race;
+    // The session byte decides the RaceSessionManager type: race gets the
+    // 5 s countdown and a 10-lap-style limit already set by the caller;
+    // practice / qualifying / time attack start green with open laps.
+    if (m_sessionType == SESSION_RACE)
+        rc.sessionType = RaceConfig::SessionType::Race;
+    else if (m_sessionType == SESSION_QUALIFYING)
+        rc.sessionType = RaceConfig::SessionType::Qualifying;
+    else
+        rc.sessionType = RaceConfig::SessionType::Practice;
     rc.trackLength = std::max(100.0f, m_trackData.splineLength);
     rc.totalLaps = m_totalLaps;
     rc.numCars = 1 + static_cast<int>(m_aiCarIds.size());
     m_raceSession.configure(rc);
     m_raceSession.setPlayerCarIndex(0);
     m_raceSession.startSession();
-    m_raceSession.startCountdown(5.0f);
-    m_sessionPhase = PHASE_COUNTDOWN;
-    m_timeRemaining = 5.0;
+    if (rc.sessionType == RaceConfig::SessionType::Race) {
+        m_raceSession.startCountdown(5.0f);
+        m_sessionPhase = PHASE_COUNTDOWN;
+        m_timeRemaining = 5.0;
+    } else {
+        // Open session: straight to green (onCountdownFinished never fires,
+        // so set the phase here — lap timing was armed by start()).
+        m_sessionPhase = PHASE_GREEN_FLAG;
+        m_timeRemaining = 0.0;
+    }
     m_goldenExportActive = false;
     m_goldenTime = 0.0;
     m_goldenSampleAccum = 0.0;
@@ -406,7 +423,11 @@ void SimulationLoop::start() {
     if (m_vehicle) m_vehicle->startSimulation();
 #endif
     m_lastTime = std::chrono::steady_clock::now();
-    m_sessionType = SESSION_RACE; m_currentLap = 0; m_totalLaps = 5;
+    // Session byte / lap limit are NOT forced here: startSession() and the
+    // control API set them before this runs, and a bare start() (F5,
+    // KS_HEADLESS) keeps whatever the current session is (default: practice,
+    // open laps — member defaults 0).
+    m_currentLap = 0;
     m_lapDistance = 0; m_normalizedSpline = 0; m_simTime = 0;
     m_lapTimer.reset(); m_lapTimer.start();
     beginRaceSession();
@@ -424,6 +445,27 @@ void SimulationLoop::stop() {
 #endif
     finishGoldenExport();
     if (onSimulationStopped) onSimulationStopped();
+}
+
+void SimulationLoop::startSession(GameSessionMode mode) {
+    if (m_running) stop(); // picking a mode from the menu starts a fresh session
+    // Configure BEFORE start(): beginRaceSession() reads the session byte
+    // (countdown + RaceSessionManager type), the lap limit and the AI count.
+    m_sessionType = toNetSessionType(mode);
+    const SessionStartParams p = defaultsForMode(mode);
+    // 0 = open session (RaceSessionManager only finishes on totalLaps > 0).
+    m_totalLaps = p.totalLaps;
+    if (mode == GameSessionMode::Race) {
+        // QUICK RACE promises a grid: keep an explicit KS_AI_CARS value,
+        // otherwise default to 5 opponents.
+        if (m_aiCarCount == 0) setAiCarCount(5);
+    } else {
+        // Practice / time attack are solo by definition.
+        setAiCarCount(0);
+    }
+    std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI)\n",
+                 sessionModeName(mode), m_totalLaps, m_aiCarCount);
+    start();
 }
 
 void SimulationLoop::reset() {
@@ -462,7 +504,7 @@ void SimulationLoop::startFeatureServices(bool hostAnnounce) {
 
     m_features.onBeginSession = [this](GameSessionMode mode,
                                        const SessionStartParams& p) {
-        if (!m_running) start(); // start() forces a 5-lap race; overridden below
+        if (!m_running) start();
         m_sessionType = toNetSessionType(mode);
         // 0 = no lap limit (RaceSessionManager treats totalLaps <= 0 as an
         // open session: practice, qualifying, time attack).

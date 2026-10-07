@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ContentLibrary.h"
+#include "SessionController.h"
 #include <functional>
 #include <string>
 #include <vector>
@@ -78,10 +79,14 @@ public:
     void setTrackName(const std::string& name) {
         m_trackName = name;
         m_menuDirty = true;
+        // The session rows' gating (below) depends on these names: refresh
+        // the screen when a load lands while it is showing.
+        if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
     }
     void setCarName(const std::string& name) {
         m_carName = name;
         m_menuDirty = true;
+        if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
     }
     void setProfileField(const std::string& fieldName, const std::string& value);
     void setNationalityFromList(int index);
@@ -111,7 +116,10 @@ public:
     void showResults(std::vector<ResultsRow> rows);
 
     std::function<void()> onExitRequested;
-    std::function<void()> onStartDrivingRequested;
+    // Fase 1 exit: the SINGLE PLAYER session rows report which session the
+    // player picked (Practice / TimeAttack / Race) — SimulationLoop applies
+    // the mode (laps, AI grid, countdown) through startSession().
+    std::function<void(GameSessionMode)> onStartDrivingRequested;
     std::function<void()> onResetRequested;
     std::function<void()> onToggleFullscreenRequested;
     std::function<void(const DriverProfile&)> onProfileChanged;
@@ -134,6 +142,9 @@ public:
     std::function<void()> onDisconnectRequested;
 
 private:
+    // Fires onStartDrivingRequested and closes the menu (used by the gated
+    // session rows of the SINGLE PLAYER screen).
+    void startDriving(GameSessionMode mode);
     void buildMainMenu();
     void buildSingleplayerMenu();
     void buildMultiplayerMenu();

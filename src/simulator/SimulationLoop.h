@@ -129,6 +129,11 @@ public:
     void start();
     void stop();
     void reset();
+    // Fase 1 exit: start a session of the mode chosen in the menu (practice
+    // = open laps solo, race = grid vs AI + countdown, time attack = solo).
+    // Configures laps/AI/session byte BEFORE start(), which then builds the
+    // grid and countdown from those values.
+    void startSession(GameSessionMode mode);
     bool isRunning() const { return m_running; }
     void tick();
 

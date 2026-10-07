@@ -112,6 +112,19 @@ endif()
 # TrackLoader (src/simulator) — real-KN5 header validation regression test.
 # Compiles the simulator TU directly: TrackLoader is part of SimulatorApp,
 # not ksengine, but only depends on engine headers/libs.
+# Fase 1 exit — session rows gated on car+track (GameMenuOverlay TU).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/menu_session_gate_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    add_executable(menu_session_gate_test
+        menu_session_gate_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    target_include_directories(menu_session_gate_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(menu_session_gate_test PRIVATE ksengine)
+    add_test(NAME menu_session_gate_test COMMAND menu_session_gate_test)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
     add_executable(track_loader_test

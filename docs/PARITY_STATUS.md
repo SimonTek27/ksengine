@@ -39,6 +39,7 @@
 | **Roadmap 1.4 Bindings volante (KeyboardMapping + rebind overlay)** | Done |
 | **Roadmap 1.3 Menu minimo (car/track select + results)** | Done |
 | **Roadmap 1.2 Track/car stable load (bake swap + solid placeholder)** | Done |
+| **Fase 1 exit: menu sessions gated (practice / quick race / time attack)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 

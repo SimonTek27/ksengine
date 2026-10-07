@@ -66,6 +66,12 @@ void GameMenuOverlay::setNationalityFromList(int index)
     }
 }
 
+void GameMenuOverlay::startDriving(GameSessionMode mode)
+{
+    if (onStartDrivingRequested) onStartDrivingRequested(mode);
+    setVisible(false);
+}
+
 void GameMenuOverlay::buildMainMenu()
 {
     m_items.clear();
@@ -99,12 +105,25 @@ void GameMenuOverlay::buildSingleplayerMenu()
     m_items.push_back({ "TRACK", m_trackName.empty() ? "Select a track" : m_trackName,
         [this]() { openTrackSelect(); } });
     m_items.push_back({ "", "", nullptr, true });
-    m_items.push_back({ "PRACTICE", "Open session on the selected circuit",
-        [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
-    m_items.push_back({ "QUICK RACE", "Grid start against AI",
-        [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
-    m_items.push_back({ "TIME ATTACK", "Clean laps against the clock",
-        [this]() { if (onStartDrivingRequested) onStartDrivingRequested(); setVisible(false); } });
+    // Fase 1 exit ("sessione practice da giocatore"): a session starts only
+    // once BOTH sides are chosen — otherwise the player would drop into an
+    // empty world with no explanation. The disabled rows say what is missing.
+    const bool carOk = !m_carName.empty();
+    const bool trackOk = !m_trackName.empty();
+    const bool ready = carOk && trackOk;
+    std::string hint;
+    if (!carOk && !trackOk) hint = "Select a car and a track first";
+    else if (!carOk) hint = "Select a car first";
+    else hint = "Select a track first";
+    m_items.push_back({ "PRACTICE",
+        ready ? "Open session on the selected circuit" : hint,
+        [this]() { startDriving(GameSessionMode::Practice); }, false, ready });
+    m_items.push_back({ "QUICK RACE",
+        ready ? "Grid start against AI" : hint,
+        [this]() { startDriving(GameSessionMode::Race); }, false, ready });
+    m_items.push_back({ "TIME ATTACK",
+        ready ? "Clean laps against the clock" : hint,
+        [this]() { startDriving(GameSessionMode::TimeAttack); }, false, ready });
     m_items.push_back({ "RESULTS", "Session standings",
         [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
     m_items.push_back({ "", "", nullptr, true });
