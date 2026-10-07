@@ -241,7 +241,28 @@ void main() {
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
     vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) * NdotL * shadow;
 
-    vec3 lit = ambient + diffuse + specular;
+    // -------------------------------------------------------------------
+    // Clear-coat (P4) — secondary specular layer on top of the base paint.
+    // Simulates a clear clear-coated finish (e.g. factory clear coat over base paint).
+    // -------------------------------------------------------------------
+    float clearcoat = 0.0f;           // authored per-mesh or fallback 0
+    float clearcoat_roughness = 0.05f;// default very sharp clear coat
+    float Fcc = 0.25;                 // clear coat Fresnel at normal incidence
+    // Simple heuristic: if mesh has no explicit clearcoat, stay at 0.
+    // Future: read from Kn5Material or materials.txt.
+
+    // Clear-coat GGX about H, with its own roughness
+    float a_cc = clearcoat_roughness;
+    float a_cc2 = a_cc * a_cc;
+    float NdotH2 = max(dot(N, H), 0.0);
+    float NdotV2 = max(dot(N, V), 1e-4);
+    float ccD = a_cc2 / (PI * pow(max(NdotH2, 1e-4), 3.0) * (1.0 - (a_cc2) * (1.0 - NdotH2) + 1e-4));
+    float ccG = (NdotL * (1.0 - (a_cc2) / 3.0 + (a_cc2) * NdotL) + NdotV * (1.0 - (a_cc2) / 3.0 + (a_cc2) * NdotV)) / (2.0 * (NdotL + NdotV + 1e-4));
+    vec3 Fcc_vec = vec3(Fcc);
+    vec3 specular_cc = (ccD * ccG * Fcc_vec) / (4.0 * NdotL * NdotV2 + 1e-4) * NdotL * shadow;
+
+    // Blend clear-coat with base specular (clear coat on top)
+    vec3 lit = ambient + diffuse + specular + specular_cc;
 
     // Screen-space reflections on top of the specular term: fresnel-weighted
     // (metals are the only strong reflectors this GBuffer can express, and it
