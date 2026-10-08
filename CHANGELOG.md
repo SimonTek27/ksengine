@@ -6,6 +6,43 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Roadmap 2A block A (2.2/2.3) — texture + materiali end-to-end**:
+  `MaterialCache.h` legge `materials.txt` e risolve i path texture
+  (`resolveTexturePath`, specchio di `Kn5Baker::sanitizeFileName`);
+  `NativeRenderer` possiede `TextureRuntime` e vincola il descriptor set 1
+  (albedo + normal + `MaterialUBO`) per mesh sia nel passo forward sia nel
+  GBuffer; `native_forward.frag`/`gbuffer.frag` campionano l'albedo,
+  applicano la normal map (TBN derivativo) e portano la roughness del
+  materiale nella GBuffer; test `material_cache_test` + fixture DDS in
+  `test_renderer`
+- **Roadmap 2A block B (2.4/2.5) — contenuto di riferimento + verifica
+  GPU**: bake sintetico commitato `content/baked/` (pista: 6 mesh con
+  finestre LOD, `materials.txt` con nome grezzo `skin:paint.dds`, texture
+  `skin_paint.dds`) e `content/cars/refcar/` (`body.nmsh` + `car_paint.dds`),
+  rigenerabili con `tools/make_reference_content.ps1`; `test_renderer` guida
+  l'intera catena (manifest → materiali → path sanitizzato → DDS → pixel),
+  verifica contatori `submitted/drawn/culled`, la finestra LOD NMS2
+  [0..1] m, il differenziale roughness in deferred, scrive l'artefatto
+  `test_renderer_reference.png` e controlla i 4 messaggi di fallback
+  (manifesto/mesh/DDS/shader mancanti); 52/52 ctest, gate Qt-free 0/906
+- `SimulationLoop::ensureCarVisual` applica ora `materials.txt` della
+  vettura (riga materiale + `textures/`) e normalizza i manifest CRLF:
+  prima una vettura baked veniva renderizzata vertex-white e un manifest
+  con `\r` falliva in silenzio
+- `SimulatorApp`: `KS_SCREENSHOT=<path.png>` (+ `KS_SCREENSHOT_DELAY=N`,
+  default 60 frame) cattura un frame presentato, lo salva in PNG e chiude
+  l'app; `KS_CAR=<dir>` avvia con una vettura reale invece dello
+  placeholder (stesso percorso di SELECT CAR); accessor
+  `NativeRenderer::extent()` per la dimensione della lettura GPU
+- POST_BUILD copia `content/baked` e `content/cars/refcar` accanto a
+  `SimulatorApp.exe` (come già accade per gli shader), così una build
+  installata riproduce la sessione di riferimento
+
+---
+
 ## [0.90] - 2026-10-05 - Version unification + merge of origin/master
 
 ### Added

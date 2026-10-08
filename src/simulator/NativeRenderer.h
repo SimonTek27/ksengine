@@ -338,10 +338,15 @@ public:
     // extent, origin top-left as stored). One frame per request; the wait
     // for the copy happens inside endFrame(), so this stalls — it is a
     // validation/screenshot hook, not a per-frame feature.
-    // Used by tests/ksengine/test_renderer.cpp (roadmap 2.1).
+    // Used by tests/ksengine/test_renderer.cpp (roadmap 2.1) and by
+    // SimulatorApp's KS_SCREENSHOT capture (roadmap 2.4/2.5).
     void requestScreenshot() { m_screenshotPending = true; m_screenshotReady = false; }
     bool screenshotReady() const { return m_screenshotReady; }
     const std::vector<unsigned char>& screenshotPixels() const { return m_screenshotPixels; }
+    // Pixel size of the swapchain the readback above came from (width *
+    // height * 4 == screenshotPixels().size()): turns those bytes into an
+    // image without guessing the row pitch. Roadmap 2.4/2.5.
+    const VkExtent2D& extent() const { return m_swapChainExtent; }
 
     // UI overlay GPU pass. SimulationLoop owns the pass (it builds the font
     // atlas + per-frame dynamic VB/IB); NativeRenderer keeps it alive and

@@ -91,6 +91,23 @@ if(TARGET ks_shaders)
 		COMMENT "Installing .spv shaders next to SimulatorApp.exe")
 endif()
 
+# Roadmap 2.4 — reference content: content/baked and the reference car are
+# read relative to the working directory, which for a normally launched app
+# is the exe directory (the shaders get the same treatment above). Only the
+# committed reference trees are copied, never a user's local content/cars.
+if(EXISTS "${CMAKE_SOURCE_DIR}/content/baked/manifest.txt")
+	add_custom_command(TARGET SimulatorApp POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/content/baked" "$<TARGET_FILE_DIR:SimulatorApp>/content/baked"
+		COMMENT "Installing reference bake next to SimulatorApp.exe")
+endif()
+if(EXISTS "${CMAKE_SOURCE_DIR}/content/cars/refcar/baked/manifest.txt")
+	add_custom_command(TARGET SimulatorApp POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory
+			"${CMAKE_SOURCE_DIR}/content/cars/refcar" "$<TARGET_FILE_DIR:SimulatorApp>/content/cars/refcar"
+		COMMENT "Installing reference car next to SimulatorApp.exe")
+endif()
+
 message(STATUS "SimulatorApp: Qt-free runtime (src/simulator, render=src/engine)")
 
 # ---------------------------------------------------------------------------

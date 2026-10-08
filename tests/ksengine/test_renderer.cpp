@@ -17,6 +17,15 @@
 //     and the push-constant MVP;
 //   - per-frame culling stats: submitted/drawn == 1, culled == 0.
 //
+// Roadmap 2.4/2.5 — reference content (content/baked, committed; regenerate
+// with tools/make_reference_content.ps1) is then driven end to end on the
+// same device: manifest -> materials.txt (raw "skin:paint.dds" name,
+// sanitised into textures/) -> DDS upload -> descriptor set 1 -> pixels,
+// the NMS2 [0..1] m LOD window through the culled/drawn counters, the
+// deferred GGX highlight for roughness 0.05 vs 0.95, the reference car bake
+// through loadMeshFromFile(), and the "useful message" contract for a
+// missing manifest / mesh / texture / shader (captured stderr).
+//
 // SKIPs (exit 0) when no Vulkan instance extensions / no GPU: the test must
 // not fail a machine that simply cannot run Vulkan.
 
@@ -36,6 +45,10 @@
 // the shared NativeVertex pipeline reads.
 #include "engine/terrain/TerrainMesh.h"
 #include "engine/terrain/TerrainHeightmap.h"
+// Roadmap 2.4/2.5: reference content (materials.txt pairing) + the PNG
+// artifact writer for the screenshot regression.
+#include "MaterialCache.h"
+#include "engine/material/PngCodec.h"
 
 #include <algorithm>
 #include <cmath>
@@ -44,6 +57,9 @@
 #include <filesystem>
 #include <fstream>
 #include <vector>
+// StderrCapture swaps fd 2 at the fd level (roadmap 2.5 message checks).
+#include <fcntl.h>
+#include <io.h>
 
 namespace {
 
@@ -276,6 +292,81 @@ NativeMesh makeTerrain()
     mesh.indices = std::move(data.indices);
     return mesh;
 }
+
+// Roadmap 2.5 — fraction of pixels that differ from the fog-clear colour,
+// the same definition renderFrame() uses, for the reference captures below.
+float coverageOf(const std::vector<unsigned char>& px)
+{
+    if (px.empty()) return 0.0f;
+    size_t differing = 0;
+    for (size_t i = 0; i + 3 < px.size(); i += 4)
+        if (!isClearPixel(px.data() + i)) ++differing;
+    return float(differing) / float(px.size() / 4);
+}
+
+// Roadmap 2.4/2.5 — minimal NMS2 writer, the exact byte layout
+// NativeRenderer::loadMeshFromFile() reads, for the broken-content fixtures
+// (the committed reference bakes come from tools/make_reference_content.ps1).
+void writeNmsh(const std::filesystem::path& path, const NativeMesh& mesh,
+               float lodIn = 0.0f, float lodOut = 1.0e9f)
+{
+    std::ofstream f(path, std::ios::binary);
+    f.write("NMS2", 4);
+    const std::uint32_t v = static_cast<std::uint32_t>(mesh.vertices.size());
+    const std::uint32_t i = static_cast<std::uint32_t>(mesh.indices.size());
+    f.write(reinterpret_cast<const char*>(&v), 4);
+    f.write(reinterpret_cast<const char*>(&i), 4);
+    f.write(reinterpret_cast<const char*>(&lodIn), 4);
+    f.write(reinterpret_cast<const char*>(&lodOut), 4);
+    f.write(reinterpret_cast<const char*>(mesh.vertices.data()),
+            static_cast<std::streamsize>(sizeof(NativeVertex) * v));
+    f.write(reinterpret_cast<const char*>(mesh.indices.data()),
+            static_cast<std::streamsize>(sizeof(std::uint32_t) * i));
+}
+
+// Roadmap 2.5 — captures every byte written to stderr while alive, so the
+// "useful message for a missing asset/shader" contract can be asserted. The
+// swap happens at fd level because fprintf(stderr) is unbuffered and lands
+// in the file immediately; stop() restores fd 2 and returns the text.
+class StderrCapture
+{
+public:
+    StderrCapture()
+    {
+        static int s_next = 0;
+        std::fflush(stderr);
+        m_saved = _dup(_fileno(stderr));
+        m_path = std::filesystem::temp_directory_path() /
+                 ("ksengine_stderr_" + std::to_string(GetCurrentProcessId()) + "_" +
+                  std::to_string(s_next++) + ".log");
+        { std::ofstream touch(m_path); } // create, then reopen by fd
+        const int fd = _open(m_path.string().c_str(), _O_WRONLY | _O_TRUNC);
+        if (fd >= 0 && m_saved >= 0) _dup2(fd, _fileno(stderr));
+        if (fd >= 0) _close(fd);
+    }
+    StderrCapture(const StderrCapture&) = delete;
+    StderrCapture& operator=(const StderrCapture&) = delete;
+
+    std::string stop()
+    {
+        if (m_saved < 0) return {};
+        std::fflush(stderr);
+        _dup2(m_saved, _fileno(stderr));
+        _close(m_saved);
+        m_saved = -1;
+        std::ifstream in(m_path, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        std::error_code ec;
+        std::filesystem::remove(m_path, ec);
+        return text;
+    }
+    ~StderrCapture() { (void)stop(); }
+
+private:
+    int m_saved = -1;
+    std::filesystem::path m_path;
+};
 
 } // namespace
 
@@ -571,6 +662,266 @@ int main()
         std::printf("test_renderer: deferred terrain changed %zu of %zu px\n", changed, framePx);
     }
     renderer.setDeferred(false);
+
+    // ---- Roadmap 2.4/2.5 — reference content, end to end --------------------
+    // content/baked (committed; regenerate with tools/make_reference_content.ps1)
+    // is the same bake the windowed app loads at startup, here driven through
+    // the whole runtime chain: manifest -> materials.txt (raw "skin:paint.dds"
+    // name sanitised into textures/) -> DDS upload -> descriptor set 1 ->
+    // pixels, plus the NMS2 [0..1] m LOD window, the deferred GGX roughness
+    // path and the reference car bake. Readback is BGRA, every frame draws
+    // exactly the mesh it names, so the culling counters attribute cleanly.
+    const std::string refBake = KS_TEST_REFERENCE_BAKE;
+    const int refLoaded = renderer.loadMeshesFromManifest(refBake);
+    std::printf("test_renderer: reference bake loaded %d mesh(es) from %s\n",
+                refLoaded, refBake.c_str());
+    KS_CHECK(refLoaded >= 5);                      // plain sign smooth rough lodable ground
+    KS_CHECK(renderer.cachedTextureCount() == 1);  // only textures/skin_paint.dds
+
+    const mat4 projRef =
+        mat4::perspective(60.0f * kPi / 180.0f, float(kW) / float(kH), 0.1f, 100.0f);
+    auto aimAt = [&](float ex, float ey, float ez, float tx, float ty, float tz, vec3 up) {
+        renderer.setCamera(mat4::lookAt(vec3(ex, ey, ez), vec3(tx, ty, tz), up),
+                           projRef, 0.1f, 100.0f);
+    };
+    DirectionalLight sunRef;
+    sunRef.color = vec3(1, 1, 1);
+    sunRef.intensity = 1.0f;
+    sunRef.direction = vec3(0, 0, 1); // L = -direction = (0,0,-1): head-on for the -z quads
+    renderer.setSun(sunRef);
+
+    struct RefShot {
+        bool ok = false;
+        std::vector<unsigned char> px;
+        NativeRenderer::FrameStats stats{};
+    };
+    auto capture = [&](const char* mesh, const mat4& model, RefShot& out) {
+        renderer.requestScreenshot();
+        if (!renderer.beginFrame()) {
+            std::printf("test_renderer: beginFrame failed\n");
+            return;
+        }
+        renderer.drawMesh(mesh, model);
+        renderer.endFrame();
+        if (!renderer.screenshotReady()) {
+            std::printf("test_renderer: no screenshot readback\n");
+            return;
+        }
+        out.px = renderer.screenshotPixels();
+        out.stats = renderer.lastFrameStats();
+        out.ok = out.px.size() == size_t(kW) * kH * 4;
+    };
+    auto centrePx = [](const RefShot& s) -> const unsigned char* {
+        return s.px.data() + ((size_t(kH) / 2) * kW + kW / 2) * 4;
+    };
+    auto redDominant = [](const unsigned char* c) {
+        return int(c[2]) > int(c[1]) + 40 && int(c[2]) > int(c[0]) + 40;
+    };
+    auto greenDominant = [](const unsigned char* c) {
+        return int(c[1]) > int(c[2]) + 40 && int(c[1]) > int(c[0]) + 40;
+    };
+
+    // (a) No materials.txt row: defaults + white albedo fallback -> the lit
+    //     centre is exact white (the plain-quad pin), corners stay clear.
+    aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+    RefShot plainShot;
+    capture("plain", mat4(), plainShot);
+    KS_CHECK(plainShot.ok);
+    if (plainShot.ok) {
+        const unsigned char* c = centrePx(plainShot);
+        KS_CHECK(c[0] >= 245 && c[1] >= 245 && c[2] >= 245); // BGRA all white
+        KS_CHECK(isClearPixel(plainShot.px.data()));          // corners = fog clear
+        KS_CHECK(plainShot.stats.submitted == 1);
+        KS_CHECK(plainShot.stats.drawn == 1);
+        KS_CHECK(plainShot.stats.culled == 0);
+    }
+
+    // (b) Textured: the row's raw KN5 name must sanitise to
+    //     textures/skin_paint.dds and the orange albedo must reach the frame.
+    RefShot signShot;
+    capture("sign", mat4(), signShot);
+    KS_CHECK(signShot.ok);
+    if (signShot.ok) {
+        KS_CHECK(coverageOf(signShot.px) > 0.12f);
+        const unsigned char* c = centrePx(signShot);
+        KS_CHECK(!isClearPixel(c));
+        KS_CHECK(redDominant(c)); // orange paint: not white, not clear
+        KS_CHECK(signShot.stats.drawn == 1);
+    }
+
+    // (c) Ground plane from above: winding + texture on the big plane the
+    //     windowed session looks down at (lit from straight up).
+    sunRef.direction = vec3(0, -1, 0);
+    renderer.setSun(sunRef);
+    aimAt(0, 10, 0, 0, 0, 0, vec3(0, 0, -1));
+    RefShot groundShot;
+    capture("ground", mat4(), groundShot);
+    KS_CHECK(groundShot.ok);
+    if (groundShot.ok) {
+        KS_CHECK(coverageOf(groundShot.px) > 0.5f);
+        KS_CHECK(redDominant(centrePx(groundShot)));
+        KS_CHECK(groundShot.stats.drawn == 1);
+    }
+
+    // (d) NMS2 LOD window [0..1] m: past the window at ~3 m (culled counter,
+    //     centre clear), inside it at ~0.4 m (drawn).
+    sunRef.direction = vec3(0, 0, 1);
+    renderer.setSun(sunRef);
+    aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+    RefShot lodFar;
+    capture("lodable", mat4(), lodFar);
+    KS_CHECK(lodFar.ok);
+    if (lodFar.ok) {
+        KS_CHECK(lodFar.stats.submitted == 1);
+        KS_CHECK(lodFar.stats.culled == 1);
+        KS_CHECK(lodFar.stats.drawn == 0);
+        KS_CHECK(isClearPixel(centrePx(lodFar)));
+    }
+    aimAt(0, 3, -0.5f, 0, 3, 0, vec3(0, 1, 0));
+    RefShot lodNear;
+    capture("lodable", mat4(), lodNear);
+    KS_CHECK(lodNear.ok);
+    if (lodNear.ok) {
+        KS_CHECK(lodNear.stats.drawn == 1);
+        KS_CHECK(lodNear.stats.culled == 0);
+        KS_CHECK(!isClearPixel(centrePx(lodNear)));
+    }
+
+    // (e) Deferred: identical geometry and albedo, materials.txt roughness
+    //     0.05 vs 0.95 -> only the smooth surface gets the GGX highlight, so
+    //     its centre blue channel lifts far above the rough one (GBuffer
+    //     RT1.w = material.roughness, deferred_lighting.frag applies GGX).
+    renderer.setDeferred(true);
+    aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+    RefShot smoothShot, roughShot;
+    capture("smooth", mat4(), smoothShot);
+    capture("rough", mat4(), roughShot);
+    KS_CHECK(smoothShot.ok && roughShot.ok);
+    if (smoothShot.ok && roughShot.ok) {
+        KS_CHECK(smoothShot.stats.drawn == 1 && roughShot.stats.drawn == 1);
+        const unsigned char* sm = centrePx(smoothShot);
+        const unsigned char* rg = centrePx(roughShot);
+        KS_CHECK(int(sm[0]) > int(rg[0]) + 40); // blue: specular highlight
+        KS_CHECK(std::max<int>(rg[0], std::max<int>(rg[1], rg[2])) >= 180);
+        std::printf("test_renderer: deferred roughness blue smooth=%u rough=%u\n",
+                    static_cast<unsigned>(sm[0]), static_cast<unsigned>(rg[0]));
+    }
+    renderer.setDeferred(false);
+
+    // (f) Reference car bake: the loadMeshFromFile() call shape
+    //     SimulationLoop::ensureCarVisual() now makes (materials.txt row +
+    //     textureDir) — green paint on the -z face, authored [0..1000] window.
+    ks::sim::MaterialCache carMaterials;
+    const std::string refCar = KS_TEST_REFERENCE_CAR;
+    const bool carHasMaterials = carMaterials.load(refCar + "/materials.txt");
+    KS_CHECK(carHasMaterials);
+    const ks::sim::MeshMaterial* carMaterial =
+        carHasMaterials ? carMaterials.find("body") : nullptr;
+    KS_CHECK(carMaterial != nullptr);
+    if (carMaterial) {
+        KS_CHECK(renderer.loadMeshFromFile("car_body", refCar + "/body.nmsh",
+                                           carMaterial, refCar + "/textures"));
+        KS_CHECK(renderer.cachedTextureCount() == 2); // + textures/car_paint.dds
+        aimAt(0, 0.3f, -4.5f, 0, 0.3f, 0, vec3(0, 1, 0));
+        RefShot carShot;
+        capture("car_body", mat4(), carShot);
+        KS_CHECK(carShot.ok);
+        if (carShot.ok) {
+            KS_CHECK(coverageOf(carShot.px) > 0.12f);
+            const unsigned char* c = centrePx(carShot);
+            KS_CHECK(!isClearPixel(c));
+            KS_CHECK(greenDominant(c));
+            KS_CHECK(carShot.stats.drawn == 1);
+        }
+    }
+
+    // (g) Screenshot regression artifact (roadmap 2.5): the textured frame
+    //     written next to the build for eyeballing / CI triage (BGRA -> RGBA).
+    {
+        ks::image::RawImage img;
+        img.resize(int(kW), int(kH));
+        for (size_t i = 0; i + 3 < signShot.px.size(); i += 4) {
+            img.rgba[i] = signShot.px[i + 2];
+            img.rgba[i + 1] = signShot.px[i + 1];
+            img.rgba[i + 2] = signShot.px[i];
+            img.rgba[i + 3] = 255;
+        }
+        const std::string shotPath =
+            std::string(KS_TEST_SHADER_DIR) + "/../test_renderer_reference.png";
+        std::string pngErr;
+        if (!ks::image::saveImageFile(shotPath, img, &pngErr))
+            std::printf("test_renderer: png save failed: %s\n", pngErr.c_str());
+        KS_CHECK(std::filesystem::exists(shotPath));
+        std::printf("test_renderer: reference screenshot -> %s\n", shotPath.c_str());
+    }
+
+    // (h) Roadmap 2.5 — the useful message for every missing piece: no
+    //     manifest, a manifest row without its .nmsh, a materials.txt row
+    //     without its DDS, shaders that are not there. stderr is captured
+    //     around each single call (fd-level swap; stderr is unbuffered, so
+    //     fprintf lands in the file at once).
+    const std::filesystem::path broken =
+        std::filesystem::temp_directory_path() /
+        ("ksengine_broken_" + std::to_string(GetCurrentProcessId()));
+    std::error_code brokenEc;
+    std::filesystem::remove_all(broken, brokenEc);
+
+    { // directory with no manifest.txt at all
+        StderrCapture cap;
+        const int n = renderer.loadMeshesFromManifest((broken / "empty").string());
+        const std::string log = cap.stop();
+        KS_CHECK(n == 0);
+        const bool said = log.find("no manifest.txt in") != std::string::npos;
+        if (!said) std::printf("test_renderer: missing-manifest stderr:\n%s\n", log.c_str());
+        KS_CHECK(said);
+    }
+    { // manifest.txt names a mesh whose .nmsh is missing
+        const std::filesystem::path dir = broken / "ghost";
+        std::filesystem::create_directories(dir);
+        {
+            std::ofstream m(dir / "manifest.txt");
+            m << "ghost\n";
+        }
+        StderrCapture cap;
+        const int n = renderer.loadMeshesFromManifest(dir.string());
+        const std::string log = cap.stop();
+        KS_CHECK(n == 0);
+        bool said = log.find("cannot open mesh cache") != std::string::npos &&
+                    log.find("ghost.nmsh") != std::string::npos;
+        if (!said) std::printf("test_renderer: missing-mesh stderr:\n%s\n", log.c_str());
+        KS_CHECK(said);
+    }
+    { // materials.txt row pointing at a texture that does not exist
+        const std::filesystem::path dir = broken / "notex";
+        std::filesystem::create_directories(dir);
+        {
+            std::ofstream m(dir / "manifest.txt");
+            m << "t\n";
+            std::ofstream mat(dir / "materials.txt");
+            mat << "t\tgone.dds\t0.35\t0.00\n";
+        }
+        writeNmsh(dir / "t.nmsh", makeQuad(false));
+        StderrCapture cap;
+        const int n = renderer.loadMeshesFromManifest(dir.string());
+        const std::string log = cap.stop();
+        KS_CHECK(n == 1);
+        bool said = log.find("cannot open texture") != std::string::npos &&
+                    log.find("gone.dds") != std::string::npos;
+        if (!said) std::printf("test_renderer: missing-texture stderr:\n%s\n", log.c_str());
+        KS_CHECK(said);
+    }
+    { // shader directory that does not exist — the last renderer call, so a
+      // null module pair left behind cannot disturb anything that follows.
+        StderrCapture cap;
+        const bool pipes =
+            renderer.loadPipelines(std::string(KS_TEST_SHADER_DIR) + "/no_such_dir");
+        const std::string log = cap.stop();
+        KS_CHECK(!pipes);
+        const bool said = log.find("failed to load native_forward") != std::string::npos;
+        if (!said) std::printf("test_renderer: missing-shader stderr:\n%s\n", log.c_str());
+        KS_CHECK(said);
+    }
+    std::filesystem::remove_all(broken, brokenEc);
 
     renderer.shutdown();
     return KS_TEST_RESULT("test_renderer");

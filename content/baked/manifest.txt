@@ -1,0 +1,6 @@
+plain
+sign
+smooth
+rough
+lodable
+ground

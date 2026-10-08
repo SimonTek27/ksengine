@@ -32,7 +32,7 @@ confondere le basi tecniche già presenti con una vertical slice verificata.
 | Multiplayer LAN e lobby | ✅ | `ksnet`, sync 20 Hz, danni/setup, auth applicativa, discovery e lobby opzionale. Il secure-connect a chiave privata resta opzionale. |
 | Vertical slice menu, binding e telemetria | ✅ | Selezione auto/pista, practice/quick race/time attack, risultati, rebind persistente, HUD danni e Control API. |
 | Pioggia, aquaplaning e audio 3D | ✅ | Wet physics, particelle rain/spray opt-in, doppler/distanza e rolling per superficie. |
-| Rendering delle mesh | 🟡 | Bake KN5 → NMS2, finestre LOD e culling sono consegnati. La pipeline di **materiali/texture a runtime** non è ancora usata dal renderer. |
+| Rendering delle mesh | ✅ | Bake KN5 → NMS2, finestre LOD/culling, texture DDS e materiali `materials.txt` raggiungono il frame (set 1) e sono verificati su contenuto di riferimento (2.2–2.5). Restano IBL e clear-coat come infrastruttura, non come deliverable. |
 | UX racing completa | 🟡 | Menu, garage, risultati e piano pit esistono; va completato il flusso di gara con team, servizi box e contenuto selezionato. |
 | Contenuto e presentazione | 🟡 | Parser per team/upgrades/livree/sound pack e cache texture esistono, ma non sono ancora risolti e applicati in una sessione di gara end-to-end. |
 
@@ -97,16 +97,29 @@ validazione.
 | 2.1 | Mesh pista/auto con LOD | ✅ | Bake NMS2 conserva `lodIn`/`lodOut`; il renderer culla per distanza senza regressioni dei mesh legacy. |
 | 2.2 | Texture DDS a runtime | ✅ | `TextureRuntime` è posseduto dal renderer, risolve le texture della cache baked (`<dir>/textures/`) e fa fallback bianco (e flat-normal per le normal map). Evidenza: fixture DDS in `test_renderer` (decode → upload → cache → fallback), bind del set 1 nel frame. |
 | 2.3 | Materiali PBR per mesh | ✅ | Il runtime legge `materials.txt` (`MaterialCache`), associa albedo/normal/roughness/metalness per mesh e li passa a descriptor (set 1: albedo + normal + `MaterialUBO`) e shader (`native_forward.frag`, `gbuffer.frag` → roughness nella GBuffer). Evidenza: `material_cache_test` + `test_renderer`. |
-| 2.4 | Un contenuto di riferimento | ⬜ | Una pista e una vettura sono caricabili da cache, con texture e LOD verificati in una sessione windowed. |
-| 2.5 | Verifica GPU e degradazione | ⬜ | Screenshot/regression test su scena textured, contatori culling e messaggio utile per asset o shader mancanti. |
+| 2.4 | Un contenuto di riferimento | ✅ | Una pista e una vettura sono caricabili da cache, con texture e LOD verificati in una sessione windowed. Evidenza: bake sintetico commitato `content/baked/` (6 mesh, `materials.txt` con nome grezzo `skin:paint.dds`, finestra LOD [0..1] m su `lodable`) e `content/cars/refcar/`, rigenerabili con `tools/make_reference_content.ps1`; `test_renderer` verifica l'intera catena (manifest → materiali → path sanitizzato in `textures/` → DDS → pixel, culling LOD, vettura con materiali); sessione windowed `KS_AUTOSTART=1` + `KS_CAR=content/cars/refcar` → `6 entities from content/baked`, `car visuals: 1 baked mesh(es) … (materials.txt applied)` e screenshot 1904×1041 (terreno textured + vettura verde). La sessione manuale con contenuto AC reale resta il gate umano (vedi gate di uscita 2A). |
+| 2.5 | Verifica GPU e degradazione | ✅ | Screenshot/regression test su scena textured, contatori culling e messaggio utile per asset o shader mancanti. Evidenza: `test_renderer` cattura 7 frame di riferimento con asserzioni pixel (bianco esatto, arancione textured, verde vettura, differenziale blu smooth/rough in deferred), asserzioni `submitted/drawn/culled`, artefatto PNG `test_renderer_reference.png` e 4 controlli su stderr (manifesto mancante, `.nmsh` mancante, DDS mancante, directory shader inesistente → `failed to load native_forward`); `SimulatorApp` accetta `KS_SCREENSHOT=<png>` (+ `KS_SCREENSHOT_DELAY=N`) e si chiude da solo con la PNG scritta. 52/52 ctest, gate Qt-free 0/906. |
 
 **Nota tecnica:** texture, normal map e roughness raggiungono ora il frame
 (upload + descriptor set 1 + binding + shader, con `material_cache_test` e
 `test_renderer` verdi), ma IBL e clear-coat restano infrastruttura, non un
 deliverable visivo, finché non esistono upload, descriptor, binding e test
-immagine. IBL resta quindi fuori dall'uscita minima 2A. La verifica visiva su
-contenuto reale (pista/vettura baked con texture e LOD in sessione windowed)
-resta il compito di 2.4–2.5, non di 2.2–2.3.
+immagine. IBL resta quindi fuori dall'uscita minima 2A. Con 2.4–2.5 la
+verifica visiva è chiusa su contenuto di riferimento commitato (bake
+sintetico + sessione windowed fotografata); la sessione manuale con
+pista/vettura reali resta il gate umano di fase.
+
+### Gate di uscita da eseguire (2A)
+
+- [x] Contenuto di riferimento: `test_renderer` verde su scena textured
+      (pixel + finestra LOD + contatori culling + messaggi di fallback) e
+      sessione windowed fotografata con `KS_SCREENSHOT` su
+      `content/baked` + `content/cars/refcar`.
+- [ ] Sessione windowed manuale con pista e vettura reali (cache AC):
+      texture, LOD e materiali visibili, nessun fallback inatteso.
+
+Il secondo gate è un test di accettazione umano: non va marcato completo
+senza il report della macchina che lo ha eseguito.
 
 ### 2B — Gara, box e identità della vettura
 
@@ -188,7 +201,7 @@ Non usare campi Vulkan o shader non collegati come prova di consegna.
 | Riscrivere fisica, sessione o `ksnet` | Sono fondazioni già funzionali; il rischio supera il valore senza un difetto misurato. |
 | Aggiungere domini moto/barca/aereo | Deviano dall'obiettivo auto e richiedono modelli indipendenti. |
 | Fare ranked globale prima del loop offline/LAN | Serve infrastruttura, moderazione e anti-cheat; non chiude un gap del giocatore locale. |
-| Promuovere IBL/clear-coat o texture come “finiti” | Sono parziali finché upload, binding e verifica visiva non sono end-to-end. |
+| Promuovere IBL/clear-coat come “finiti” | Restano infrastruttura (nessun upload, binding o test immagine end-to-end); texture e materiali invece sono ora verificati end-to-end (2.2–2.5). |
 | Riattivare l'editor Qt per compensare un gap runtime | La slice deve restare eseguibile Qt-free; l'editor è tooling opzionale. |
 
 ---

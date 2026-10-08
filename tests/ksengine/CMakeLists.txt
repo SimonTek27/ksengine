@@ -79,6 +79,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp")
     find_package(Vulkan QUIET)
     if(Vulkan_FOUND)
+        # Roadmap 2.4 — the committed reference bakes the test drives end to
+        # end (tools/make_reference_content.ps1 regenerates them). Resolved
+        # against this file's directory, so both the top-level and the
+        # standalone tests/ksengine configure land on the same content.
+        get_filename_component(_ks_ref_bake
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../content/baked" ABSOLUTE)
+        get_filename_component(_ks_ref_car
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../content/cars/refcar/baked" ABSOLUTE)
         file(GLOB _rtest_ui_sources "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/*.cpp")
         add_executable(test_renderer
             test_renderer.cpp
@@ -92,7 +100,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
             ${Vulkan_INCLUDE_DIRS})
         target_compile_definitions(test_renderer PRIVATE
             KSENGINE_QT_FREE=1
-            KS_TEST_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders")
+            KS_TEST_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
+            # Roadmap 2.4/2.5: committed reference content (absolute, so the
+            # test does not depend on the ctest working directory).
+            KS_TEST_REFERENCE_BAKE="${_ks_ref_bake}"
+            KS_TEST_REFERENCE_CAR="${_ks_ref_car}")
         target_link_libraries(test_renderer PRIVATE ksengine ${Vulkan_LIBRARIES})
         if(WIN32)
             target_link_libraries(test_renderer PRIVATE user32 gdi32)

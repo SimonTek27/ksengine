@@ -10,6 +10,7 @@
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SceneAssets.h"
+#include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
 #include "RainEffects.h"
 #include "SimulatorAudio.h"
 #include "engine/physics/DamageTelemetry.h"
@@ -1073,16 +1074,30 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
     if (!m_vulkanRenderer) return;
     despawnCarVisuals();
     const std::string baked = ks::sim::findBakedManifestDir(carDir);
+    // Roadmap 2.4: car bakes pair with materials.txt exactly like track
+    // bakes, so the car reaches the frame painted instead of vertex-white.
+    ks::sim::MaterialCache materials;
+    bool appliedMaterials = false;
     if (!baked.empty()) {
+        const bool hasMaterials = materials.load(baked + "/materials.txt");
+        appliedMaterials = hasMaterials && materials.size() > 0;
+        if (appliedMaterials)
+            std::fprintf(stderr, "[scene] car materials.txt: %zu mesh material(s)\n",
+                         materials.size());
+        const std::string textureDir = baked + "/textures";
         std::ifstream manifest(baked + "/manifest.txt");
         std::string name;
         while (manifest && std::getline(manifest, name)) {
+            if (!name.empty() && name.back() == '\r') name.pop_back(); // CRLF manifests
             if (name.empty()) continue;
+            const ks::sim::MeshMaterial* material =
+                hasMaterials ? materials.find(name) : nullptr;
             // Prefixed so baked names (original kn5 node names) can neither
             // collide with nor destroy scene meshes of the same name, and
             // so the legacy "car_" prefix sync sees them too.
             const std::string renderName = "car_" + name;
-            if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh"))
+            if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh",
+                                                    material, textureDir))
                 continue;
             const ks::ecs::Entity e = scene().create();
             if (e == ks::ecs::kNullEntity) break;
@@ -1093,8 +1108,9 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
         }
     }
     if (!m_carVisualEntities.empty()) {
-        std::fprintf(stderr, "[scene] car visuals: %zu baked mesh(es) from %s\n",
-                     m_carVisualEntities.size(), baked.c_str());
+        std::fprintf(stderr, "[scene] car visuals: %zu baked mesh(es) from %s%s\n",
+                     m_carVisualEntities.size(), baked.c_str(),
+                     appliedMaterials ? " (materials.txt applied)" : "");
         return;
     }
     // Solid placeholder box (ROADMAP 1.2 "placeholder solido"): ~4.4x1.8 m

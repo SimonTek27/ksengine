@@ -13,12 +13,16 @@
 #include "simulator/NetworkManager.h"
 #include "simulator/ShadowSystem.h"
 #include "simulator/NativeRenderer.h"
+// Roadmap 2.4/2.5 — KS_SCREENSHOT writes the readback with this Qt-free
+// encoder (same PNG writer the material module uses).
+#include "engine/material/PngCodec.h"
 #include "engine/physics/VehicleSimulator.h"
 #include "devices/DeviceManager.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 static const char* AC_PATH = "F:/SteamLibrary/steamapps/common/assettocorsa";
@@ -43,6 +47,15 @@ static bool g_running = true;
 // it). KS_HEADLESS_SECONDS=N auto-exits after N seconds (CI smoke).
 static bool g_headless = false;
 static double g_headlessSeconds = 0.0;
+
+// Roadmap 2.4/2.5 — KS_SCREENSHOT=<path.png> captures one presented frame
+// KS_SCREENSHOT_DELAY frames in (default 60) and exits, so a windowed
+// session leaves verifiable image evidence behind. Ignored when headless
+// (there is no renderer to read back from).
+static std::string g_shotPath;
+static int g_shotDelay = 60;
+static bool g_shotRequested = false;
+static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
 
 static const wchar_t* WINDOW_CLASS = L"KsEditorSimWindow";
@@ -514,6 +527,14 @@ static void initSimulation() {
     // Roadmap 1.2: a car visual exists from the first frame (solid box
     // placeholder until SELECT CAR loads baked meshes, if any).
     g_simulation->ensureCarVisual(std::string());
+    // KS_CAR=<dir>: start with a real car instead of the placeholder box —
+    // the committed reference bake content/cars/refcar turns this into the
+    // scriptable way to photograph a cached car (roadmap 2.4). Same loadCar()
+    // path SELECT CAR uses; headless mode never reaches this block.
+    if (const char* car = std::getenv("KS_CAR"); car && car[0]) {
+        if (!g_simulation->loadCar(car))
+            printf("[INIT] KS_CAR load failed: %s\n", car);
+    }
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();
     uiMenu->setVisible(true);
@@ -685,6 +706,35 @@ static void initSimulation() {
     }
 }
 
+// Roadmap 2.4/2.5 — KS_SCREENSHOT writer: NativeRenderer readback rows are
+// tightly packed BGRA (B8G8R8A8 swapchain, origin top-left); PngCodec wants
+// RGBA with straight alpha. Every mismatch prints its reason, so a failed
+// capture is never silent.
+static bool saveScreenshotToFile(const std::string& path) {
+    const std::vector<unsigned char>& px = g_nativeRenderer->screenshotPixels();
+    const VkExtent2D ext = g_nativeRenderer->extent();
+    if (ext.width == 0 || ext.height == 0 ||
+        px.size() != size_t(ext.width) * size_t(ext.height) * 4) {
+        printf("[shot] unexpected readback: %zu bytes for %ux%u\n",
+               px.size(), ext.width, ext.height);
+        return false;
+    }
+    ks::image::RawImage img;
+    img.resize(int(ext.width), int(ext.height));
+    for (size_t i = 0; i + 3 < px.size(); i += 4) {
+        img.rgba[i] = px[i + 2];
+        img.rgba[i + 1] = px[i + 1];
+        img.rgba[i + 2] = px[i];
+        img.rgba[i + 3] = 255; // swapchain alpha is not meaningful
+    }
+    std::string err;
+    if (!ks::image::saveImageFile(path, img, &err)) {
+        printf("[shot] encode failed: %s\n", err.c_str());
+        return false;
+    }
+    return true;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     g_hInstance = hInstance;
 
@@ -701,6 +751,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     if (const char* hs = std::getenv("KS_HEADLESS_SECONDS")) {
         const double s = std::strtod(hs, nullptr);
         if (s > 0.0) g_headlessSeconds = s;
+    }
+    // Roadmap 2.4/2.5 — screenshot capture (see globals). Parsed regardless
+    // of mode; the state machine below is gated on the renderer, so a
+    // headless run with KS_SCREENSHOT set simply never fires.
+    if (const char* ss = std::getenv("KS_SCREENSHOT"); ss && ss[0]) {
+        g_shotPath = ss;
+    }
+    if (const char* sd = std::getenv("KS_SCREENSHOT_DELAY")) {
+        const int d = std::atoi(sd);
+        if (d >= 0) g_shotDelay = d;
     }
 
     printf("[MAIN] Starting ksEditor Simulator (Qt-free%s)...\n",
@@ -740,6 +800,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         // the session is stopped and pauses physics while a modal overlay is
         // up, so gating here would keep the menu from ever being drawn.
         if (g_simulation) g_simulation->tick();
+
+        // Roadmap 2.4/2.5 — KS_SCREENSHOT: request after the delay, save as
+        // soon as endFrame() has produced the readback, then leave through
+        // the same path the menu's EXIT uses (deterministic teardown).
+        if (g_nativeRenderer && !g_shotPath.empty()) {
+            if (!g_shotRequested) {
+                if (++g_shotFrame > g_shotDelay) {
+                    g_nativeRenderer->requestScreenshot();
+                    g_shotRequested = true;
+                }
+            } else if (g_nativeRenderer->screenshotReady()) {
+                if (saveScreenshotToFile(g_shotPath))
+                    printf("[shot] saved %s (%ux%u)\n", g_shotPath.c_str(),
+                           g_nativeRenderer->extent().width,
+                           g_nativeRenderer->extent().height);
+                else
+                    printf("[shot] FAILED %s\n", g_shotPath.c_str());
+                g_running = false;
+                PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
+            }
+        }
 
         if (g_headless && g_headlessSeconds > 0.0) {
             g_headlessElapsed += elapsed;

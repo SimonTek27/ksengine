@@ -1,0 +1,2 @@
+# reference car bake (roadmap 2.4) - regenerate with tools/make_reference_content.ps1
+body	car_paint.dds	0.30	0.00

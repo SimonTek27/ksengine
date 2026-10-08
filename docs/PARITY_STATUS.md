@@ -45,6 +45,8 @@
 | **Roadmap 2.3 Audio 3D (doppler/distanza/bearing per altre auto + rumore rolling per superficie)** | Done |
 | **Roadmap 2.4 Rendering LOD (finestre KN5 lodIn/lodOut → cache NMS2 + distance culling in drawMesh)** | Done |
 | **Rendering 2A texture + materiali (TextureRuntime DDS + `MaterialCache` materials.txt → descriptor set 1 albedo/normal/UBO → shader forward/GBuffer)** | Done |
+| **Roadmap 2.4 Contenuto di riferimento (bake commitati `content/baked` + `content/cars/refcar` via `tools/make_reference_content.ps1`; `test_renderer` su manifest→materiali→DDS→pixel; sessione windowed `KS_AUTOSTART`+`KS_CAR`+`KS_SCREENSHOT`)** | Done |
+| **Roadmap 2.5 Verifica GPU (artifact PNG `test_renderer_reference.png` + `KS_SCREENSHOT` in SimulatorApp, contatori `submitted/drawn/culled`, messaggi stderr per manifesto/mesh/DDS/shader mancanti)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 
