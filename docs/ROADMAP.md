@@ -1,6 +1,6 @@
 # Roadmap ksim / ksengine — motore auto
 
-**Aggiornata:** 2026-10-07
+**Aggiornata:** 2026-10-08
 **Ambito:** simulatore **auto**: dinamica a quattro ruote, sessioni racing,
 contenuti pista/auto e multiplayer `ksnet`.
 **Fuori ambito:** moto, barche e aerei; richiedono modelli fisici e flussi di
@@ -38,7 +38,9 @@ confondere le basi tecniche già presenti con una vertical slice verificata.
 
 Riferimenti: [PARITY_STATUS.md](PARITY_STATUS.md),
 [GAP_MATRIX.md](GAP_MATRIX.md), [ARCHITECTURE.md](ARCHITECTURE.md),
-[MILLIKEN_KSENGINE.md](MILLIKEN_KSENGINE.md) e
+[MILLIKEN_KSENGINE.md](MILLIKEN_KSENGINE.md),
+[CHECKLIST.md](CHECKLIST.md) (checklist operativa),
+[WIREUP_GAPS.md](WIREUP_GAPS.md) (gap di cablaggio puntuali) e
 [ksengine-vs-cryengine-gap.md](ksengine-vs-cryengine-gap.md).
 
 ---
@@ -97,43 +99,28 @@ validazione.
 | 2.1 | Mesh pista/auto con LOD | ✅ | Bake NMS2 conserva `lodIn`/`lodOut`; il renderer culla per distanza senza regressioni dei mesh legacy. |
 | 2.2 | Texture DDS a runtime | ✅ | `TextureRuntime` è posseduto dal renderer, risolve le texture della cache baked (`<dir>/textures/`) e fa fallback bianco (e flat-normal per le normal map). Evidenza: fixture DDS in `test_renderer` (decode → upload → cache → fallback), bind del set 1 nel frame. |
 | 2.3 | Materiali PBR per mesh | ✅ | Il runtime legge `materials.txt` (`MaterialCache`), associa albedo/normal/roughness/metalness per mesh e li passa a descriptor (set 1: albedo + normal + `MaterialUBO`) e shader (`native_forward.frag`, `gbuffer.frag` → roughness nella GBuffer). Evidenza: `material_cache_test` + `test_renderer`. |
-| 2.4 | Un contenuto di riferimento | ✅ | Una pista e una vettura sono caricabili da cache, con texture e LOD verificati in una sessione windowed. Evidenza: bake sintetico commitato `content/baked/` (6 mesh, `materials.txt` con nome grezzo `skin:paint.dds`, finestra LOD [0..1] m su `lodable`) e `content/cars/refcar/`, rigenerabili con `tools/make_reference_content.ps1`; `test_renderer` verifica l'intera catena (manifest → materiali → path sanitizzato in `textures/` → DDS → pixel, culling LOD, vettura con materiali); sessione windowed `KS_AUTOSTART=1` + `KS_CAR=content/cars/refcar` → `6 entities from content/baked`, `car visuals: 1 baked mesh(es) … (materials.txt applied)` e screenshot 1904×1041 (terreno textured + vettura verde). La sessione manuale con contenuto AC reale resta il gate umano (vedi gate di uscita 2A). |
-| 2.5 | Verifica GPU e degradazione | ✅ | Screenshot/regression test su scena textured, contatori culling e messaggio utile per asset o shader mancanti. Evidenza: `test_renderer` cattura 7 frame di riferimento con asserzioni pixel (bianco esatto, arancione textured, verde vettura, differenziale blu smooth/rough in deferred), asserzioni `submitted/drawn/culled`, artefatto PNG `test_renderer_reference.png` e 4 controlli su stderr (manifesto mancante, `.nmsh` mancante, DDS mancante, directory shader inesistente → `failed to load native_forward`); `SimulatorApp` accetta `KS_SCREENSHOT=<png>` (+ `KS_SCREENSHOT_DELAY=N`) e si chiude da solo con la PNG scritta. 52/52 ctest, gate Qt-free 0/906. |
-
-**Nota tecnica:** texture, normal map e roughness raggiungono ora il frame
-(upload + descriptor set 1 + binding + shader, con `material_cache_test` e
-`test_renderer` verdi), ma IBL e clear-coat restano infrastruttura, non un
-deliverable visivo, finché non esistono upload, descriptor, binding e test
-immagine. IBL resta quindi fuori dall'uscita minima 2A. Con 2.4–2.5 la
-verifica visiva è chiusa su contenuto di riferimento commitato (bake
-sintetico + sessione windowed fotografata); la sessione manuale con
-pista/vettura reali resta il gate umano di fase.
+| 2.4 | Un contenuto di riferimento | ✅ | Una pista e una vettura sono caricabili da cache, con texture e LOD verificati in una sessione windowed. Evidenza: bake sintetico commitato `content/baked/` e `content/cars/refcar/`. |
+| 2.5 | Verifica GPU e degradazione | ✅ | Screenshot/regression test su scena textured, contatori culling e messaggio utile per asset o shader mancanti. |
 
 ### Gate di uscita da eseguire (2A)
 
-- [x] Contenuto di riferimento: `test_renderer` verde su scena textured
-      (pixel + finestra LOD + contatori culling + messaggi di fallback) e
-      sessione windowed fotografata con `KS_SCREENSHOT` su
-      `content/baked` + `content/cars/refcar`.
+- [x] Contenuto di riferimento: `test_renderer` verde + sessione windowed fotografata.
 - [ ] Sessione windowed manuale con pista e vettura reali (cache AC):
       texture, LOD e materiali visibili, nessun fallback inatteso.
-
-Il secondo gate è un test di accettazione umano: non va marcato completo
-senza il report della macchina che lo ha eseguito.
 
 ### 2B — Gara, box e identità della vettura
 
 | # | Deliverable | Stato | Criterio di accettazione |
 |---|---|---|---|
 | 2.6 | Piano pit nella UI | ✅ | Fuel e lavori di riparazione sono modificabili e copiati in `PitRepairInput`; il piano non richiede automaticamente il servizio. |
-| 2.7 | Servizio box end-to-end | 🟡 | Conferma piano → richiesta esplicita in box → tempi di servizio → stato, danni e fuel aggiornati nel HUD. |
-| 2.8 | Team, numero e box assegnati | 🟡 | `team.ini` determina roster, livrea/numero e garage/grid del player e degli AI alla partenza della sessione. |
-| 2.9 | Upgrade, livrea e sound pack | 🟡 | La selezione applica `VehicleUpgradeSystem` a fisica, nodi render, texture/livrea e banca audio; il fallback è il contenuto base. |
-| 2.10 | Menu racing coerente | 🟡 | Garage, pit, risultati e multiplayer espongono lo stesso stato di sessione, senza callback o overlay duplicati. |
+| 2.7 | Servizio box end-to-end | 🟡 | Conferma piano → richiesta esplicita in box → tempi di servizio → stato, danni e fuel aggiornati nel HUD. Vedi [WIREUP_GAPS.md](WIREUP_GAPS.md). |
+| 2.8 | Team, numero e box assegnati | 🟡 | `team.ini` determina roster, livrea/numero e garage/grid. `loadTeam` + `buildFieldFromTeam` + menu `onTeamChosen` sono cablati; resta collaudo end-to-end. |
+| 2.9 | Upgrade, livrea e sound pack | 🟡 | Menu `upgradeRowLabels` / `onUpgradeRowCycled` → `cycleUpgradeRow` cablato; resta collaudo con contenuto reale. |
+| 2.10 | Menu racing coerente | 🟡 | Garage, pit, risultati e multiplayer espongono lo stesso stato di sessione. |
 
 I modelli dati di 2.8 e 2.9 sono già presenti (`TeamInfo`, `GarageSpawn`,
 `VehicleAppearanceBundle`, `ApplyVehicleUpgrades`); il lavoro rimanente è il
-wire-up nel selettore e in `SimulationLoop`, non la loro riscrittura.
+wire-up residuale e il collaudo, non la loro riscrittura.
 
 ### 2C — Accettazione e qualità
 
@@ -142,7 +129,7 @@ wire-up nel selettore e in `SimulationLoop`, non la loro riscrittura.
 | 2.11 | Gara asciutto/bagnato ripetibile | ⬜ | Gara 10–15 min, 8+ auto; grip, spray, audio e risultati coerenti. |
 | 2.12 | Stabilità lunga | ⬜ | Run di un'ora senza NaN o recovery; log e telemetria ispezionabili. |
 | 2.13 | Regressione automatica | 🟡 | CTest Qt-free e standalone restano verdi; aggiungere test per manifest materiali, fallback texture e bridge team/upgrades. |
-| 2.14 | Profilo di frame reale | ⬜ | Misurare CPU fisica e GPU su hardware target con la scena di riferimento; nessun KPI GPU viene dichiarato prima della misura. |
+| 2.14 | Profilo di frame reale | ⬜ | Misurare CPU fisica e GPU su hardware target con la scena di riferimento. |
 
 ### Ordine di esecuzione consigliato
 
@@ -154,31 +141,20 @@ wire-up nel selettore e in `SimulationLoop`, non la loro riscrittura.
 | D. Servizio box e UX (2.7, 2.10) | C | Una gara completa passa dal garage al pit e ai risultati. |
 | E. Soak/performance (2.11–2.14) | A–D | Gate di rilascio basati su misure, non su stime. |
 
-Il blocco A può procedere in parallelo con la definizione del contenuto di
-riferimento; C e D non dovrebbero iniziare prima che B renda visibile la
-vettura selezionata.
-
 ---
 
 ## Fase 3 — Profondità pro, solo dopo la Fase 2
 
 | # | Deliverable | Priorità | Nota |
 |---|---|---|---|
-| 3.1 | Validazione pneumatici contro telemetria reale | Alta | Campagna dati, tuning dei coefficienti e confronto ripetibile; il modello Milliken resta il riferimento. |
-| 3.2 | Secure-connect ksnet, reconnect e server dedicato operativo | Media | Hardening di produzione dopo il collaudo LAN; non blocca la vertical slice. |
+| 3.1 | Validazione pneumatici contro telemetria reale | Alta | Campagna dati; modello Milliken come riferimento. |
+| 3.2 | Secure-connect ksnet, reconnect e server dedicato | Media | Hardening dopo collaudo LAN. |
 | 3.3 | Multi-layout senza reload completo | Media | Solo se i contenuti scelti lo richiedono. |
-| 3.4 | Driver swap endurance | Media | Dopo che pit strategy e sessione lunga sono validate. |
-| 3.5 | VR OpenXR | Bassa | Integrare solo quando esiste una camera/render loop stabile da estendere. |
-| 3.6 | Triple monitor | Bassa | Il manager di configurazione esiste; manca il render multi-view nel runtime. |
-| 3.7 | Ranked / skill rating | Bassa | Richiede infrastruttura server e policy anti-cheat, non core engine. |
-| 3.8 | Laser-scan track pipeline | Bassa | Tooling offline, separato dal runtime. |
-
-### Backlog visivo non bloccante
-
-Terrain, acqua, vegetazione instanced, skinning, IBL completo e clear-coat
-sono miglioramenti separati dalla readiness racing. Vanno avviati solo con un
-brief che definisca: contenuto sorgente, budget GPU, fallback e test immagine.
-Non usare campi Vulkan o shader non collegati come prova di consegna.
+| 3.4 | Driver swap endurance | Media | Dopo pit strategy e sessione lunga. |
+| 3.5 | VR OpenXR | Bassa | Solo con camera/render loop stabile. |
+| 3.6 | Triple monitor | Bassa | Manca multi-view nel runtime. |
+| 3.7 | Ranked / skill rating | Bassa | Infrastruttura server + anti-cheat. |
+| 3.8 | Laser-scan track pipeline | Bassa | Tooling offline. |
 
 ---
 
@@ -187,10 +163,10 @@ Non usare campi Vulkan o shader non collegati come prova di consegna.
 | Milestone | Gate |
 |---|---|
 | Fase 1 | Practice giocabile; FFB/audio, bind persistenti e LAN 2-client verificati su build pulito. |
-| Fase 2 | Gara 10–15 min in asciutto e bagnato, 8+ auto, una pista/auto textured con LOD; nessun fallback inatteso. |
-| Stabilità | Zero NaN in soak di un'ora; nessun crash o desync grave nel test LAN previsto. |
-| Prestazioni | Fisica entro il budget già profilato; budget GPU dichiarato solo dopo la misura sulla scena di riferimento. |
-| Qualità | Suite automatizzate verdi e ogni nuovo bridge end-to-end coperto da un test mirato. |
+| Fase 2 | Gara 10–15 min in asciutto e bagnato, 8+ auto, una pista/auto textured con LOD. |
+| Stabilità | Zero NaN in soak di un'ora; nessun crash o desync grave nel test LAN. |
+| Prestazioni | Fisica entro budget; GPU solo dopo misura. |
+| Qualità | Suite automatizzate verdi e bridge end-to-end coperto da test. |
 
 ---
 
@@ -198,22 +174,24 @@ Non usare campi Vulkan o shader non collegati come prova di consegna.
 
 | Non fare ora | Motivo |
 |---|---|
-| Riscrivere fisica, sessione o `ksnet` | Sono fondazioni già funzionali; il rischio supera il valore senza un difetto misurato. |
-| Aggiungere domini moto/barca/aereo | Deviano dall'obiettivo auto e richiedono modelli indipendenti. |
-| Fare ranked globale prima del loop offline/LAN | Serve infrastruttura, moderazione e anti-cheat; non chiude un gap del giocatore locale. |
-| Promuovere IBL/clear-coat come “finiti” | Restano infrastruttura (nessun upload, binding o test immagine end-to-end); texture e materiali invece sono ora verificati end-to-end (2.2–2.5). |
-| Riattivare l'editor Qt per compensare un gap runtime | La slice deve restare eseguibile Qt-free; l'editor è tooling opzionale. |
+| Riscrivere fisica, sessione o `ksnet` | Fondazioni già funzionali. |
+| Aggiungere moto/barca/aereo | Fuori ambito auto. |
+| Ranked globale prima del loop offline/LAN | Serve infrastruttura e anti-cheat. |
+| Promuovere IBL/clear-coat come “finiti” | Restano infrastruttura. |
+| Riattivare l'editor Qt per compensare un gap runtime | La slice deve restare Qt-free. |
 
 ---
 
 ## Documenti operativi
 
+- [CHECKLIST.md](CHECKLIST.md) — checklist operativa con gate e ordine di lavoro.
+- [WIREUP_GAPS.md](WIREUP_GAPS.md) — gap di cablaggio puntuali (file + riga) per 2.7–2.10.
 - [PARITY_STATUS.md](PARITY_STATUS.md) — stato puntuale delle funzionalità cablate.
-- [GAP_MATRIX.md](GAP_MATRIX.md) — mappa storica P0–P3; usarla come inventario, non come criterio di rilascio.
-- [MILLIKEN_KSENGINE.md](MILLIKEN_KSENGINE.md) — priorità e validazione della dinamica veicolo.
-- [CONTROL_API.md](CONTROL_API.md) — API esterna del simulatore.
-- [NATIVE_UI.md](NATIVE_UI.md), [VEHICLE_UPGRADES.md](VEHICLE_UPGRADES.md) e
-  [GARAGE_TEAM_AUDIO.md](GARAGE_TEAM_AUDIO.md) — contratti da completare nella Fase 2.
+- [GAP_MATRIX.md](GAP_MATRIX.md) — mappa storica P0–P3.
+- [MILLIKEN_KSENGINE.md](MILLIKEN_KSENGINE.md) — dinamica veicolo.
+- [CONTROL_API.md](CONTROL_API.md) — API esterna.
+- [NATIVE_UI.md](NATIVE_UI.md), [VEHICLE_UPGRADES.md](VEHICLE_UPGRADES.md),
+  [GARAGE_TEAM_AUDIO.md](GARAGE_TEAM_AUDIO.md) — contratti Fase 2.
 
 *Aggiornare questa roadmap alla chiusura di ogni gate e includere nel commit il
 test o la misura che giustifica il cambio di stato.*
