@@ -497,6 +497,7 @@ add_executable(SimulatorApp
 	"src/simulator/InputManager.cpp"
 	"src/simulator/CameraController.cpp"
 	"src/simulator/NativeRenderer.cpp"
+	"src/simulator/TextureRuntime.cpp"
 	"src/simulator/SimulationLoop.cpp"
 	"src/simulator/SimulatorAudio.cpp"
 	"src/simulator/AIController.cpp"

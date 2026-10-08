@@ -50,6 +50,10 @@
 namespace ks::sim {
 
 class CascadedShadowMap;
+class TextureRuntime;
+// Defined in MaterialCache.h (materials.txt sidecar reader); only ever used
+// through a pointer here so the header stays free of that dependency.
+struct MeshMaterial;
 
 namespace ui {
 class UiGpuPass;
@@ -84,6 +88,20 @@ struct NativeMesh {
     // Defaults = no window, so runtime-generated meshes (solids, terrain,
     // placeholders) and legacy NMSH caches render exactly as before.
     ks::scene::LodWindow lod;
+    // Roadmap 2.3 — per-mesh PBR material resolved from materials.txt at
+    // load time (defaults when no row exists). The renderer creates
+    // descriptor set 1 (albedo + normal samplers + MaterialUBO) from these
+    // in setMesh(); empty texture paths bind TextureRuntime's fallbacks.
+    std::string albedoTexture; // resolved path, "" = none authored
+    std::string normalTexture; // resolved path, "" = none authored
+    float roughness = 0.35f;
+    float metalness = 0.0f;
+    // Descriptor set 1 for this mesh + its 16-byte std140 material block.
+    // Null until createMaterialDescriptor() succeeds (or after it fails);
+    // the draw path then binds the default material set instead.
+    VkDescriptorSet materialSet = VK_NULL_HANDLE;
+    VkBuffer materialUbo = VK_NULL_HANDLE;
+    VkDeviceMemory materialUboMemory = VK_NULL_HANDLE;
 };
 
 struct DirectionalLight {
@@ -95,7 +113,11 @@ struct DirectionalLight {
 class NativeRenderer {
 public:
     ~NativeRenderer();
-    NativeRenderer() = default;
+    // Declared here, defaulted in the .cpp: m_textureRuntime is a
+    // unique_ptr to a forward-declared type, and an inline defaulted
+    // constructor needs the complete type (unwind cleanup) — TUs that
+    // include this header without TextureRuntime.h would not compile.
+    NativeRenderer();
     NativeRenderer(const NativeRenderer&) = delete;
     NativeRenderer& operator=(const NativeRenderer&) = delete;
 
@@ -125,10 +147,21 @@ public:
     // "NMS2" (kn5baker output) inserts the KN5 distance window — f32 lodIn,
     // f32 lodOut — between the counts and the vertices; magic "NMSH" is the
     // legacy layout (no window, mesh always queued).
-    bool loadMeshFromFile(const std::string& name, const std::string& path);
+    //
+    // material/textureDir (Roadmap 2.3): when a materials.txt row is passed,
+    // its texture references are resolved against textureDir (the bake's
+    // textures/ directory) and its PBR values are stored on the mesh before
+    // upload, so setMesh() creates the right material descriptor. Both
+    // default to "no authored material" — pure geometry loads unchanged.
+    bool loadMeshFromFile(const std::string& name, const std::string& path,
+                          const MeshMaterial* material = nullptr,
+                          const std::string& textureDir = {});
     // Reads <dir>/manifest.txt (one mesh name per line, as written by the
     // kn5baker tool) and calls loadMeshFromFile(name, dir+"/"+name+".nmsh")
-    // for each. Returns the number of meshes successfully loaded. Meshes
+    // for each, pairing every mesh with its optional <dir>/materials.txt row
+    // (roughness/metalness/albedo/normal, see MaterialCache.h) and resolved
+    // <dir>/textures/ paths. Returns the number of meshes successfully
+    // loaded. Meshes
     // loaded this way are remembered as "static scene" meshes — see
     // drawStaticScene() — since baked track/prop geometry is already in
     // world space (kn5.worldMatrix was applied at bake time) and should be
@@ -346,6 +379,14 @@ public:
     VkCommandPool commandPool() const { return m_commandPool; }
     VkCommandBuffer currentCommandBuffer() const { return m_commandBuffer; }
 
+    // Loads a baked DDS through the renderer-owned cache. The returned handles
+    // remain valid until clearTextureCache(), shutdown(), or renderer
+    // destruction; callers must not destroy them. This is the texture-loading
+    // half of the material pipeline. Descriptor binding remains per-material.
+    VkImageView textureView(const std::string& path, VkSampler& outSampler);
+    std::size_t cachedTextureCount() const noexcept;
+    void clearTextureCache();
+
 private:
     bool createCommandPoolAndBuffer();
     bool createSyncObjects();
@@ -359,6 +400,7 @@ private:
     uint32_t m_graphicsQueueFamily = 0;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
+    std::unique_ptr<TextureRuntime> m_textureRuntime;
 
     VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
     VkFormat m_swapChainFormat = VK_FORMAT_B8G8R8A8_UNORM;
@@ -397,6 +439,30 @@ private:
     VkBuffer m_frameUBO = VK_NULL_HANDLE;
     VkDeviceMemory m_frameUBOMemory = VK_NULL_HANDLE;
     void* m_frameUBOMapped = nullptr;
+
+    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo + normal sampler and
+    // the std140 MaterialUBO (roughness, metalness, normalScale). Bound
+    // inside recordDrawList() for every mesh of both the forward and the
+    // GBuffer pass — they share m_pipelineLayout, which therefore carries
+    // both set layouts. One pool serves every mesh set plus the default set
+    // bound when a mesh has none (created without FREE bit would prevent
+    // per-mesh frees on track switch, hence the flag).
+    VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_materialPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_defaultMaterialSet = VK_NULL_HANDLE;
+    bool createMaterialDescriptorResources();
+    void destroyMaterialDescriptorResources();
+    bool createMaterialDescriptor(NativeMesh& mesh);
+    void destroyMaterialDescriptor(NativeMesh& mesh);
+    // (Re)writes a set's three bindings from the given texture paths,
+    // resolving them through TextureRuntime (white/flat fallbacks when a
+    // path is empty or missing).
+    bool writeMaterialDescriptorSet(VkDescriptorSet set,
+                                    const std::string& albedoPath,
+                                    const std::string& normalPath);
+    // After clearTextureCache() drops images that live descriptor sets still
+    // reference: re-resolve every set (lazy DDS reload on next use).
+    void rewriteMaterialDescriptors();
 
     // 1x1 white shadow-cascade-array stand-in, bound when no CascadedShadowMap
     // is attached, so the descriptor set is always valid to bind (the shader

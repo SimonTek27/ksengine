@@ -4,6 +4,10 @@
 **Riferimento prodotto:** SimulatorApp indipendente (stile racing sim completo)  
 **Benchmark operativi:** rF2 (garage/pit/danni), LFS (ops/server), AC (formati/telemetria), non clone brand
 
+> **Stato al 2026-10-07:** questa matrice è l'inventario tecnico P0–P3 e
+> conserva la sua classificazione storica. Per l'ordine di prodotto corrente,
+> gli stati end-to-end e i gate di rilascio, usare [ROADMAP.md](ROADMAP.md).
+
 Scala effort: **S** ≤1 sett · **M** 2–4 sett · **L** 1–3 mesi · **XL** >3 mesi  
 Scala impatto: **Critico** (blocco uso serio) · **Alto** · **Medio** · **Basso**
 

@@ -41,6 +41,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <vector>
 
 namespace {
@@ -77,6 +79,57 @@ NativeMesh makeQuad(bool reversed)
     if (reversed) mesh.indices = {2, 1, 0, 3, 2, 0};
     else          mesh.indices = {0, 1, 2, 0, 2, 3};
     return mesh;
+}
+
+void appendU32(std::vector<unsigned char>& bytes, std::uint32_t value)
+{
+    bytes.push_back(static_cast<unsigned char>(value & 0xFFu));
+    bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xFFu));
+    bytes.push_back(static_cast<unsigned char>((value >> 16) & 0xFFu));
+    bytes.push_back(static_cast<unsigned char>((value >> 24) & 0xFFu));
+}
+
+// A minimal 4x4 uncompressed RGBA DDS. TextureRuntime intentionally uses the
+// shared DdsReader instead of a second parser, so this exercises its complete
+// path: DDS decode -> staging buffer -> device-local image -> sampled view.
+bool writeTextureFixture(const std::filesystem::path& path)
+{
+    constexpr std::uint32_t kWidth = 4;
+    constexpr std::uint32_t kHeight = 4;
+    constexpr std::uint32_t kFlags = 0x0000100Fu; // caps, height, width, pitch, pixel format
+    constexpr std::uint32_t kRgbAlpha = 0x00000042u;
+    std::vector<unsigned char> bytes;
+    bytes.reserve(128 + kWidth * kHeight * 4);
+    bytes.insert(bytes.end(), {'D', 'D', 'S', ' '});
+    appendU32(bytes, 124);
+    appendU32(bytes, kFlags);
+    appendU32(bytes, kHeight);
+    appendU32(bytes, kWidth);
+    appendU32(bytes, kWidth * 4);
+    appendU32(bytes, 0);
+    appendU32(bytes, 0);
+    for (int index = 0; index < 11; ++index) appendU32(bytes, 0);
+    appendU32(bytes, 32);
+    appendU32(bytes, kRgbAlpha);
+    appendU32(bytes, 0);
+    appendU32(bytes, 32);
+    appendU32(bytes, 0x000000FFu);
+    appendU32(bytes, 0x0000FF00u);
+    appendU32(bytes, 0x00FF0000u);
+    appendU32(bytes, 0xFF000000u);
+    for (int index = 0; index < 5; ++index) appendU32(bytes, 0);
+    for (std::uint32_t index = 0; index < kWidth * kHeight; ++index) {
+        bytes.push_back(220);
+        bytes.push_back(80);
+        bytes.push_back(30);
+        bytes.push_back(255);
+    }
+
+    std::ofstream file(path, std::ios::binary);
+    if (!file) return false;
+    file.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    return static_cast<bool>(file);
 }
 
 // Clear colour is setFog({0, 0.5, 0}) -> BGRA bytes (0, 128, 0, 255);
@@ -320,6 +373,35 @@ int main()
     KS_CHECK(renderer.loadPipelines(KS_TEST_SHADER_DIR));
     if (!swapOk)
         return KS_TEST_RESULT("test_renderer");
+
+    // ---- Runtime DDS cache (roadmap 2A): a real DDS is decoded by the
+    // shared reader, uploaded via the renderer's transfer queue, cached by
+    // normalized path and safely falls back for a missing file. The material
+    // descriptor binding comes in the next slice; this pins the resource
+    // lifetime and upload contract before that wiring is added. ----
+    const std::filesystem::path texturePath =
+        std::filesystem::temp_directory_path() /
+        ("ksengine_texture_runtime_" + std::to_string(GetCurrentProcessId()) + ".dds");
+    KS_CHECK(writeTextureFixture(texturePath));
+    VkSampler textureSampler = VK_NULL_HANDLE;
+    const VkImageView textureView = renderer.textureView(texturePath.string(), textureSampler);
+    KS_CHECK(textureView != VK_NULL_HANDLE);
+    KS_CHECK(textureSampler != VK_NULL_HANDLE);
+    KS_CHECK(renderer.cachedTextureCount() == 1);
+    VkSampler cachedSampler = VK_NULL_HANDLE;
+    KS_CHECK(renderer.textureView(texturePath.string(), cachedSampler) == textureView);
+    KS_CHECK(cachedSampler == textureSampler);
+    VkSampler fallbackSampler = VK_NULL_HANDLE;
+    const VkImageView fallbackView =
+        renderer.textureView((texturePath.parent_path() / "missing_texture.dds").string(),
+                             fallbackSampler);
+    KS_CHECK(fallbackView != VK_NULL_HANDLE);
+    KS_CHECK(fallbackSampler != VK_NULL_HANDLE);
+    KS_CHECK(renderer.cachedTextureCount() == 1);
+    renderer.clearTextureCache();
+    KS_CHECK(renderer.cachedTextureCount() == 0);
+    std::error_code removeError;
+    std::filesystem::remove(texturePath, removeError);
 
     VkSurfaceCapabilitiesKHR caps{};
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(renderer.physicalDevice(), surface, &caps);

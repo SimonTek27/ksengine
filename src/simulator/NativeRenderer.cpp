@@ -1,5 +1,9 @@
 #include "NativeRenderer.h"
 #include "ShadowSystem.h"
+#include "TextureRuntime.h"
+// Roadmap 2.3: materials.txt reader (header-only) — pairs baked meshes with
+// their PBR properties and texture references in loadMeshesFromManifest().
+#include "MaterialCache.h"
 #include "ui/UiGpuPass.h"
 #include "ui/UiRenderer.h"
 #include "engine/Math/OcclusionTest.h"
@@ -24,6 +28,8 @@
 namespace ks::sim {
 
 using engine::graphics::ParticleSystem;
+
+NativeRenderer::NativeRenderer() = default;
 
 namespace {
 
@@ -207,7 +213,10 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
     }
     vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
 
-    return createCommandPoolAndBuffer() && createSyncObjects();
+    if (!createCommandPoolAndBuffer() || !createSyncObjects()) return false;
+    m_textureRuntime = std::make_unique<TextureRuntime>(
+        m_device, m_physicalDevice, m_commandPool, m_graphicsQueue);
+    return true;
 }
 
 bool NativeRenderer::createCommandPoolAndBuffer() {
@@ -583,14 +592,29 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
         return false;
     }
 
+    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo/normal samplers +
+    // material UBO. Required before any mesh uploads, since setMesh() writes
+    // its descriptor immediately (and the sweep below covers meshes that
+    // were uploaded before the pipeline existed).
+    if (!createMaterialDescriptorResources()) {
+        fprintf(stderr, "[NativeRenderer] failed to create material descriptor resources\n");
+        return false;
+    }
+    for (auto& [name, mesh] : m_meshes) {
+        if (!mesh.materialSet) createMaterialDescriptor(mesh);
+    }
+
     VkPushConstantRange pcRange{};
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pcRange.size = sizeof(float) * 16 * 2; // model + mvp
 
+    // Set 0 = frame (both geometry passes), set 1 = per-mesh material
+    // (bound inside recordDrawList() for every instance).
+    VkDescriptorSetLayout setLayouts[2] = {m_frameSetLayout, m_materialSetLayout};
     VkPipelineLayoutCreateInfo layoutCi{};
     layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutCi.setLayoutCount = 1;
-    layoutCi.pSetLayouts = &m_frameSetLayout;
+    layoutCi.setLayoutCount = 2;
+    layoutCi.pSetLayouts = setLayouts;
     layoutCi.pushConstantRangeCount = 1;
     layoutCi.pPushConstantRanges = &pcRange;
     if (vkCreatePipelineLayout(m_device, &layoutCi, nullptr, &m_pipelineLayout) != VK_SUCCESS) return false;
@@ -638,6 +662,21 @@ struct FrameDataUBO {
     float motionBlurParams[4]; // x = strength, y = sample count, z = max length, w = 1 when enabled (KS_MOTIONBLUR)
 };
 static_assert(sizeof(FrameDataUBO) == 480, "FrameDataUBO is read as a std140 uniform block");
+
+// Per-mesh material block of descriptor set 1 (set 1 binding 2), read as
+// `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs four
+// scalars at 0/4/8/12 — no padding surprises. Values are static per mesh and
+// written once when the mesh's descriptor is created.
+struct MaterialUBO {
+    float roughness = 0.35f;  // matches Kn5Baker's paint heuristic default
+    float metalness = 0.0f;
+    // 0 = no normal map authored (shader keeps the vertex normal), 1 = full
+    // perturbation strength. Also gates the derivative-TBN blend so a mesh
+    // without a normal map never reads its fallback texel as a normal.
+    float normalScale = 0.0f;
+    float pad = 0.0f;
+};
+static_assert(sizeof(MaterialUBO) == 16, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -978,6 +1017,211 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
     vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Descriptor set 1 — per-mesh material (Roadmap 2.3).
+// ---------------------------------------------------------------------------
+
+bool NativeRenderer::createMaterialDescriptorResources() {
+    // Set layout: binding 0 = albedo sampler, binding 1 = normal sampler,
+    // binding 2 = MaterialUBO. Must match MaterialData/sampler declarations
+    // in native_forward.frag and gbuffer.frag.
+    VkDescriptorSetLayoutBinding bindings[3]{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[2].binding = 2;
+    bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[2].descriptorCount = 1;
+    bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo dslCi{};
+    dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    dslCi.bindingCount = 3;
+    dslCi.pBindings = bindings;
+    VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_materialSetLayout);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: set layout failed (%d)\n", int(res));
+        return false;
+    }
+
+    // One set per mesh plus headroom for reload cycles; FREE bit so
+    // destroyMesh() can hand sets back on track switch instead of leaking
+    // them until pool reset. 2 samplers per set.
+    constexpr uint32_t kMaxMaterialSets = 4096;
+    VkDescriptorPoolSize poolSizes[3]{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = kMaxMaterialSets * 2;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[1].descriptorCount = kMaxMaterialSets;
+
+    VkDescriptorPoolCreateInfo poolCi{};
+    poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolCi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    poolCi.maxSets = kMaxMaterialSets;
+    poolCi.poolSizeCount = 2;
+    poolCi.pPoolSizes = poolSizes;
+    res = vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_materialPool);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: pool failed (%d)\n", int(res));
+        return false;
+    }
+
+    VkDescriptorSetAllocateInfo dsAi{};
+    dsAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsAi.descriptorPool = m_materialPool;
+    dsAi.descriptorSetCount = 1;
+    dsAi.pSetLayouts = &m_materialSetLayout;
+    res = vkAllocateDescriptorSets(m_device, &dsAi, &m_defaultMaterialSet);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: default set failed (%d)\n", int(res));
+        return false;
+    }
+    // Default = no textures (white albedo / flat normal), heuristic
+    // roughness — i.e. exactly the pre-2.3 look for unauthored meshes.
+    if (!writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {})) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: texture fallback unavailable "
+                        "(TextureRuntime white fallback not ready)\n");
+        return false;
+    }
+    return true;
+}
+
+void NativeRenderer::destroyMaterialDescriptorResources() {
+    // Frees every set allocated from the pool, default set included.
+    if (m_materialPool) vkDestroyDescriptorPool(m_device, m_materialPool, nullptr);
+    m_materialPool = VK_NULL_HANDLE;
+    m_defaultMaterialSet = VK_NULL_HANDLE;
+    if (m_materialSetLayout) vkDestroyDescriptorSetLayout(m_device, m_materialSetLayout, nullptr);
+    m_materialSetLayout = VK_NULL_HANDLE;
+}
+
+bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
+                                                const std::string& albedoPath,
+                                                const std::string& normalPath) {
+    if (!set || !m_textureRuntime) return false;
+
+    VkSampler albedoSampler = VK_NULL_HANDLE;
+    VkSampler normalSampler = VK_NULL_HANDLE;
+    // Empty or missing paths resolve to TextureRuntime's fallbacks (white
+    // albedo, flat normal), so the descriptor is always valid to bind.
+    const VkImageView albedoView = m_textureRuntime->get(albedoPath, albedoSampler);
+    const VkImageView normalView = m_textureRuntime->get(normalPath, normalSampler,
+                                                         /*flatNormalFallback=*/true);
+    if (!albedoView || !normalView || !albedoSampler || !normalSampler) return false;
+
+    VkDescriptorImageInfo albedoInfo{};
+    albedoInfo.sampler = albedoSampler;
+    albedoInfo.imageView = albedoView;
+    albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo normalInfo{};
+    normalInfo.sampler = normalSampler;
+    normalInfo.imageView = normalView;
+    normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet writes[2]{};
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[0].pImageInfo = &albedoInfo;
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = set;
+    writes[1].dstBinding = 1;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[1].pImageInfo = &normalInfo;
+    vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+    return true;
+}
+
+bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
+    if (!m_materialPool) return false; // pipelines not loaded yet; swept later
+    destroyMaterialDescriptor(mesh);   // re-create path: previous set + UBO go
+
+    // 16-byte std140 material block, static per mesh: map, fill, unmap.
+    MaterialUBO ubo;
+    ubo.roughness = mesh.roughness;
+    ubo.metalness = mesh.metalness;
+    ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
+    if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
+                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      mesh.materialUbo, mesh.materialUboMemory)) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: UBO allocation failed for mesh\n");
+        return false;
+    }
+    void* mapped = nullptr;
+    if (vkMapMemory(m_device, mesh.materialUboMemory, 0, sizeof(MaterialUBO), 0, &mapped) !=
+            VK_SUCCESS || !mapped) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: UBO map failed\n");
+        destroyMaterialDescriptor(mesh);
+        return false;
+    }
+    std::memcpy(mapped, &ubo, sizeof(MaterialUBO));
+    vkUnmapMemory(m_device, mesh.materialUboMemory);
+
+    VkDescriptorSetAllocateInfo dsAi{};
+    dsAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    dsAi.descriptorPool = m_materialPool;
+    dsAi.descriptorSetCount = 1;
+    dsAi.pSetLayouts = &m_materialSetLayout;
+    if (vkAllocateDescriptorSets(m_device, &dsAi, &mesh.materialSet) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] material descriptors: set allocation failed "
+                        "(pool exhausted at 4096?)\n");
+        destroyMaterialDescriptor(mesh);
+        return false;
+    }
+
+    // Sampler bindings first — if texture resolution fails the set stays
+    // incomplete, so drop it entirely and let the draw path bind the default.
+    if (!writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture, mesh.normalTexture)) {
+        destroyMaterialDescriptor(mesh);
+        return false;
+    }
+
+    VkDescriptorBufferInfo bufInfo{};
+    bufInfo.buffer = mesh.materialUbo;
+    bufInfo.range = sizeof(MaterialUBO);
+    VkWriteDescriptorSet uboWrite{};
+    uboWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    uboWrite.dstSet = mesh.materialSet;
+    uboWrite.dstBinding = 2;
+    uboWrite.descriptorCount = 1;
+    uboWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uboWrite.pBufferInfo = &bufInfo;
+    vkUpdateDescriptorSets(m_device, 1, &uboWrite, 0, nullptr);
+    return true;
+}
+
+void NativeRenderer::destroyMaterialDescriptor(NativeMesh& mesh) {
+    if (mesh.materialSet && m_materialPool) {
+        vkFreeDescriptorSets(m_device, m_materialPool, 1, &mesh.materialSet);
+    }
+    mesh.materialSet = VK_NULL_HANDLE;
+    if (mesh.materialUbo) vkDestroyBuffer(m_device, mesh.materialUbo, nullptr);
+    mesh.materialUbo = VK_NULL_HANDLE;
+    if (mesh.materialUboMemory) vkFreeMemory(m_device, mesh.materialUboMemory, nullptr);
+    mesh.materialUboMemory = VK_NULL_HANDLE;
+}
+
+void NativeRenderer::rewriteMaterialDescriptors() {
+    // clearTextureCache() destroyed images whose views are still written
+    // into live sets: re-resolve (DDS reloads lazily on the next get()) so
+    // no descriptor points at a freed image.
+    if (m_defaultMaterialSet) writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {});
+    for (auto& [name, mesh] : m_meshes) {
+        if (mesh.materialSet) {
+            writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture, mesh.normalTexture);
+        }
+    }
+}
+
 void NativeRenderer::uploadMesh(NativeMesh& mesh) {
     VkDeviceSize vSize = sizeof(NativeVertex) * mesh.vertices.size();
     VkDeviceSize iSize = sizeof(uint32_t) * mesh.indices.size();
@@ -1004,7 +1248,9 @@ void NativeRenderer::uploadMesh(NativeMesh& mesh) {
     // thousands of verts) are flowing through here instead of test geometry.
 }
 
-bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string& path) {
+bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string& path,
+                                      const MeshMaterial* material,
+                                      const std::string& textureDir) {
     std::ifstream f(path, std::ios::binary);
     if (!f.is_open()) { fprintf(stderr, "[NativeRenderer] cannot open mesh cache %s\n", path.c_str()); return false; }
 
@@ -1033,6 +1279,19 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
     f.read(reinterpret_cast<char*>(mesh.indices.data()), static_cast<std::streamsize>(sizeof(uint32_t) * iCount));
     if (!f) { fprintf(stderr, "[NativeRenderer] truncated mesh cache %s\n", path.c_str()); return false; }
 
+    // Roadmap 2.3 — attach the materials.txt row before upload so setMesh()
+    // resolves the textures and writes the right descriptor in one pass.
+    // Texture references are raw KN5 names; resolveTexturePath applies the
+    // same sanitization the baker used when writing the DDS files.
+    if (material) {
+        mesh.roughness = material->roughness;
+        mesh.metalness = material->metalness;
+        mesh.albedoTexture =
+            MaterialCache::resolveTexturePath(textureDir, material->albedo);
+        mesh.normalTexture =
+            MaterialCache::resolveTexturePath(textureDir, material->normal);
+    }
+
     setMesh(name, mesh);
     return true;
 }
@@ -1043,13 +1302,29 @@ int NativeRenderer::loadMeshesFromManifest(const std::string& dir) {
         fprintf(stderr, "[NativeRenderer] no manifest.txt in %s\n", dir.c_str());
         return 0;
     }
+    // Roadmap 2.3 — optional sidecar: absent or unreadable materials.txt
+    // just means every mesh keeps its defaults (the scene still renders).
+    MaterialCache materials;
+    const bool hasMaterials = materials.load(dir + "/materials.txt");
+    if (hasMaterials && materials.size() > 0) {
+        std::string note;
+        if (materials.skippedRows() > 0) {
+            note = " (" + std::to_string(materials.skippedRows()) +
+                   " malformed rows skipped)";
+        }
+        fprintf(stderr, "[NativeRenderer] materials.txt: %zu mesh materials%s\n",
+                materials.size(), note.c_str());
+    }
+    const std::string textureDir = dir + "/textures";
     int loaded = 0;
     std::string name;
     while (std::getline(manifest, name)) {
+        if (!name.empty() && name.back() == '\r') name.pop_back();
         if (name.empty()) continue;
-        if (loadMeshFromFile(name, dir + "/" + name + ".nmsh")) {
-            m_staticSceneMeshNames.push_back(name);
+        const MeshMaterial* material = hasMaterials ? materials.find(name) : nullptr;
+        if (loadMeshFromFile(name, dir + "/" + name + ".nmsh", material, textureDir)) {
             ++loaded;
+            m_staticSceneMeshNames.push_back(name);
         }
     }
     return loaded;
@@ -1066,6 +1341,10 @@ void NativeRenderer::setMesh(const std::string& name, const NativeMesh& meshIn) 
     NativeMesh mesh = meshIn;
     computeBounds(mesh); // before upload: culling needs the local-space AABB
     uploadMesh(mesh);
+    // Roadmap 2.3: descriptor set 1 for this mesh (albedo/normal samplers +
+    // material UBO). Failures leave materialSet null — the draw path then
+    // binds the default material set instead of an invalid descriptor.
+    createMaterialDescriptor(mesh);
     m_meshes[name] = mesh;
 }
 
@@ -1076,6 +1355,7 @@ void NativeRenderer::destroyMesh(const std::string& name) {
     if (it->second.vertexMemory) vkFreeMemory(m_device, it->second.vertexMemory, nullptr);
     if (it->second.indexBuffer) vkDestroyBuffer(m_device, it->second.indexBuffer, nullptr);
     if (it->second.indexMemory) vkFreeMemory(m_device, it->second.indexMemory, nullptr);
+    destroyMaterialDescriptor(it->second);
     m_meshes.erase(it);
     m_staticSceneMeshNames.erase(
         std::remove(m_staticSceneMeshNames.begin(), m_staticSceneMeshNames.end(), name),
@@ -1089,6 +1369,24 @@ void NativeRenderer::clearStaticScene() {
     const std::vector<std::string> names = m_staticSceneMeshNames;
     for (const auto& name : names) destroyMesh(name);
     m_staticSceneMeshNames.clear();
+}
+
+VkImageView NativeRenderer::textureView(const std::string& path, VkSampler& outSampler) {
+    outSampler = VK_NULL_HANDLE;
+    if (!m_textureRuntime) return VK_NULL_HANDLE;
+    return m_textureRuntime->get(path, outSampler);
+}
+
+std::size_t NativeRenderer::cachedTextureCount() const noexcept {
+    return m_textureRuntime ? m_textureRuntime->cachedTextureCount() : 0;
+}
+
+void NativeRenderer::clearTextureCache() {
+    if (m_textureRuntime) m_textureRuntime->clear();
+    // Live descriptor sets still hold views into the images clear() just
+    // destroyed: re-resolve every set now (DDS files reload lazily on the
+    // next get()) instead of sampling freed memory next frame.
+    rewriteMaterialDescriptors();
 }
 
 bool NativeRenderer::ensureScreenshotBuffer() {
@@ -1427,7 +1725,8 @@ void NativeRenderer::endFrame() {
 
     // Replay of the queued instance list, shared by the forward and GBuffer
     // passes: both bind m_pipelineLayout (set0 = FrameData + shadow array,
-    // push constants = model + mvp), so only the pipeline object differs.
+    // set1 = per-mesh material, push constants = model + mvp), so only the
+    // pipeline object differs.
     // m_mainDrawList, not m_drawList: the shadow cascades above keep drawing
     // occluded objects (they may still cast visible shadows), the camera
     // passes must not.
@@ -1446,6 +1745,16 @@ void NativeRenderer::endFrame() {
                     std::fprintf(stderr, "[draw] %s: no vertex buffer, instance skipped\n",
                                  draw.meshName.c_str());
                 continue;
+            }
+
+            // Descriptor set 1 (Roadmap 2.3): the mesh's own albedo/normal/
+            // material set, or the default (white/flat, heuristic PBR) when
+            // the mesh never got one — a null set must never be bound.
+            if (m_defaultMaterialSet) {
+                VkDescriptorSet materialSet =
+                    mesh.materialSet ? mesh.materialSet : m_defaultMaterialSet;
+                vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        m_pipelineLayout, 1, 1, &materialSet, 0, nullptr);
             }
 
             struct { mat4 model; mat4 mvp; } pc;
@@ -1763,11 +2072,16 @@ void NativeRenderer::shutdown() {
         if (mesh.vertexMemory) vkFreeMemory(m_device, mesh.vertexMemory, nullptr);
         if (mesh.indexBuffer) vkDestroyBuffer(m_device, mesh.indexBuffer, nullptr);
         if (mesh.indexMemory) vkFreeMemory(m_device, mesh.indexMemory, nullptr);
+        destroyMaterialDescriptor(mesh); // set back to the pool + UBO freed
     }
     m_meshes.clear();
 
     if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
     if (m_pipelineLayout) vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+    // After m_pipelineLayout: it embeds both set layouts, so the material
+    // layout must outlive it (and its pool must outlive every set free
+    // done in the mesh loop above).
+    destroyMaterialDescriptorResources();
     if (m_vertModule) vkDestroyShaderModule(m_device, m_vertModule, nullptr);
     if (m_fragModule) vkDestroyShaderModule(m_device, m_fragModule, nullptr);
 
@@ -1777,6 +2091,10 @@ void NativeRenderer::shutdown() {
     destroyParticlePipelines();
     destroyParticleBuffer();
     m_particleVerts.clear();
+
+    // TextureRuntime owns images allocated from this device and records
+    // uploads through this command pool, so it must die before either handle.
+    m_textureRuntime.reset();
 
     if (m_frameUBOMapped) { vkUnmapMemory(m_device, m_frameUBOMemory); m_frameUBOMapped = nullptr; }
     if (m_frameUBO) vkDestroyBuffer(m_device, m_frameUBO, nullptr);

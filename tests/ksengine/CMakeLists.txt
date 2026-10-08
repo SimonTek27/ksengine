@@ -83,6 +83,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
         add_executable(test_renderer
             test_renderer.cpp
             "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TextureRuntime.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ShadowSystem.cpp"
             ${_rtest_ui_sources})
         target_include_directories(test_renderer PRIVATE
@@ -141,6 +142,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
     target_link_libraries(pit_strategy_menu_test PRIVATE ksengine)
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
+endif()
+
+# Roadmap 2.3 — materials.txt: parse/format/degradation + the texture path
+# resolution that mirrors the baker's sanitizeFileName. Header-only
+# MaterialCache.h, so this target compiles just the test TU.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_cache_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MaterialCache.h")
+    add_executable(material_cache_test material_cache_test.cpp)
+    target_include_directories(material_cache_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(material_cache_test PRIVATE ksengine)
+    add_test(NAME material_cache_test COMMAND material_cache_test)
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND

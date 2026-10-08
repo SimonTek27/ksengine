@@ -17,11 +17,14 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec3 fragWorldPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec4 fragColor;
+// Roadmap 2.3: mesh UV drives the albedo/normal sampling of descriptor set 1.
+layout(location = 3) out vec2 fragUV;
 
 void main() {
     vec4 worldPos = pc.model * vec4(inPosition, 1.0);
     fragWorldPos = worldPos.xyz;
     fragNormal = mat3(pc.model) * inNormal;
     fragColor = inColor;
+    fragUV = inUV;
     gl_Position = pc.mvp * vec4(inPosition, 1.0);
 }

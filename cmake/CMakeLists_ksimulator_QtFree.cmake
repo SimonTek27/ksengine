@@ -19,6 +19,7 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/AudioBankManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SoundsIniParser.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/NativeRenderer.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/TextureRuntime.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/ShadowSystem.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/DashboardOverlay.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SetupGarage.cpp

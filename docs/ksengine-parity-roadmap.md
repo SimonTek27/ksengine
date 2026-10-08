@@ -5,6 +5,10 @@
 Target: **AC** feel/telemetry · **rF2** platform · **GD** library  
 Product identity: **ksim** (AC formats only in `adapters/`).
 
+> **Scope note (2026-10-07):** this is a technical multi-target parity log.
+> The authoritative ksim product sequence, delivery states, and release gates
+> are in [ROADMAP.md](ROADMAP.md).
+
 ---
 
 ## 0. Current status

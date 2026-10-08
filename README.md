@@ -4,7 +4,9 @@ Qt-free / optional-Qt simulation engine (physics, AI, multiplayer, telemetry).
 
 ## Status
 
-See [docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/GAP_MATRIX.md](docs/GAP_MATRIX.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the product plan, plus
+[docs/PARITY_STATUS.md](docs/PARITY_STATUS.md) and [docs/GAP_MATRIX.md](docs/GAP_MATRIX.md)
+for the implementation inventory.
 
 **SimulatorApp** is the standalone runtime executable (`src/simulator/`) that links
 *only* ksengine. It is a native Win32 window with a raw Vulkan renderer (`NativeRenderer`, precompiled `.spv` shaders), driving `SimulationLoop`: KN5 track/car loading, vehicle physics, FFB and sim-racing device input, audio, dashboard/telemetry overlays, setup garage and multiplayer networking. `examples/MinimalSimulator` shows the minimal way to run it.
@@ -236,8 +238,8 @@ cmake --build --preset default
 4. Pit/garage is a state machine separate from vehicle integrate.
 5. CarStateSync UDP works without `HAS_KSNET`; ksnet path remains the preferred multiplayer transport.
 
-Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [PARITY_STATUS](docs/PARITY_STATUS.md) ·
-[GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md) ·
+Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [ROADMAP](docs/ROADMAP.md) ·
+[PARITY_STATUS](docs/PARITY_STATUS.md) · [GAP_MATRIX](docs/GAP_MATRIX.md) · [GITHUB_RESTORE_AUDIT](docs/GITHUB_RESTORE_AUDIT.md) ·
 [CONTROL_API](docs/CONTROL_API.md) · [TCP_TELEMETRY](docs/TCP_TELEMETRY.md)
 
 ---

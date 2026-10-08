@@ -3,6 +3,7 @@
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec4 fragColor;
+layout(location = 3) in vec2 fragUV;
 
 layout(location = 0) out vec4 outColor;
 
@@ -26,6 +27,38 @@ layout(set = 0, binding = 0) uniform FrameData {
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
+
+// Descriptor set 1 (Roadmap 2.3) — per-mesh material, bound for every
+// instance inside NativeRenderer::recordDrawList(). Empty texture paths are
+// already resolved by TextureRuntime to a white albedo and a flat (0,0,255)
+// normal, so every descriptor is valid to sample: a mesh without authored
+// textures renders exactly like before (white × vertex colour, normalScale 0).
+layout(set = 1, binding = 0) uniform sampler2D albedoMap;
+layout(set = 1, binding = 1) uniform sampler2D normalMap;
+layout(set = 1, binding = 2) uniform MaterialData {
+    float roughness;
+    float metalness;
+    float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
+    float pad;
+} material;
+
+// Derivative-based TBN: KN5 bakes no tangents, so the tangent frame is
+// reconstructed from screen-space position/UV derivatives. The derivatives
+// are taken at top level (uniform control flow) and only the blend happens
+// behind normalScale, so implicit LODs and dFdx/dFdy stay well defined.
+// tbs guard: meshes with degenerate/constant UVs (placeholder solids) would
+// otherwise normalize by zero into NaN normals.
+vec3 perturbNormal(vec3 N, vec3 worldPos, vec2 uv, vec3 mapN, float scale) {
+    vec3 dp1 = dFdx(worldPos), dp2 = dFdy(worldPos);
+    vec2 duv1 = dFdx(uv), duv2 = dFdy(uv);
+    vec3 T = cross(dp2, N) * duv1.x + cross(N, dp1) * duv2.x;
+    vec3 B = cross(dp2, N) * duv1.y + cross(N, dp1) * duv2.y;
+    float tbs = max(dot(T, T), dot(B, B));
+    if (tbs <= 1e-12) return N;
+    float invmax = inversesqrt(tbs);
+    vec3 mapped = normalize(mat3(T * invmax, B * invmax, N) * mapN);
+    return normalize(mix(N, mapped, clamp(scale, 0.0, 1.0)));
+}
 
 float sampleShadow(vec3 worldPos, int cascadeIndex) {
     vec4 lightClip = frame.cascadeViewProj[cascadeIndex] * vec4(worldPos, 1.0);
@@ -53,7 +86,17 @@ float heightFogAmount(vec3 camPos, vec3 worldPos) {
 }
 
 void main() {
+    // Roadmap 2.3: albedo = vertex colour × baked texture (white fallback
+    // keeps untextured meshes byte-identical to the pre-2.3 path).
+    vec3 albedo = fragColor.rgb * texture(albedoMap, fragUV).rgb;
+
     vec3 N = normalize(fragNormal);
+    // Normal map sampled unconditionally so the derivatives inside
+    // perturbNormal() are computed in uniform control flow; normalScale 0
+    // (no authored map) blends straight back to the vertex normal.
+    vec3 mapN = texture(normalMap, fragUV).xyz * 2.0 - 1.0;
+    N = perturbNormal(N, fragWorldPos, fragUV, mapN, material.normalScale);
+
     vec3 L = normalize(-frame.sunDirection.xyz);
     float NdotL = max(dot(N, L), 0.0);
 
@@ -68,8 +111,8 @@ void main() {
 
     float shadow = sampleShadow(fragWorldPos, cascadeIndex);
 
-    vec3 ambient = fragColor.rgb * 0.25;
-    vec3 diffuse = fragColor.rgb * frame.sunColor.rgb * frame.sunColor.a * NdotL * shadow;
+    vec3 ambient = albedo * 0.25;
+    vec3 diffuse = albedo * frame.sunColor.rgb * frame.sunColor.a * NdotL * shadow;
     vec3 lit = ambient + diffuse;
 
     // Height fog, same model the deferred path uses, so switching between

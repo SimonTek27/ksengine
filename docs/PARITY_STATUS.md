@@ -44,6 +44,7 @@
 | **Roadmap 2.2 Rain visual / spray (emitter pioggia + spray di ruota, `KS_PARTICLES=1`)** | Done |
 | **Roadmap 2.3 Audio 3D (doppler/distanza/bearing per altre auto + rumore rolling per superficie)** | Done |
 | **Roadmap 2.4 Rendering LOD (finestre KN5 lodIn/lodOut → cache NMS2 + distance culling in drawMesh)** | Done |
+| **Rendering 2A texture + materiali (TextureRuntime DDS + `MaterialCache` materials.txt → descriptor set 1 albedo/normal/UBO → shader forward/GBuffer)** | Done |
 
 See `docs/SECURITY_HARDENING.md`.
 
@@ -68,4 +69,6 @@ See `docs/SECURITY_HARDENING.md`.
 
 ## Roadmap
 
-Vedi **GAP_MATRIX.md** (P0–P3 prioritizzata).
+Vedi [**ROADMAP.md**](ROADMAP.md) per le priorità correnti e i gate di
+rilascio del runtime. [**GAP_MATRIX.md**](GAP_MATRIX.md) resta l'inventario
+storico dei gap P0–P3.
