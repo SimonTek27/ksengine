@@ -51,4 +51,27 @@ inline std::vector<ContentEntry> scanTrackLibrary(const std::string& root = "con
     return content_detail::scanRoot(root);
 }
 
+/** Teams (roadmap 2.8): a team folder is any subdirectory of the root that
+ *  holds a team.ini. A missing root yields an empty list, so a fresh
+ *  checkout just shows the empty select screen. */
+inline std::vector<ContentEntry> scanTeamLibrary(const std::string& root = "content/teams") {
+    namespace fs = std::filesystem;
+    std::vector<ContentEntry> out;
+    std::error_code ec;
+    if (!fs::is_directory(root, ec)) return out;
+    for (const auto& e : fs::directory_iterator(root, ec)) {
+        if (!e.is_directory(ec)) continue;
+        if (!fs::is_regular_file(e.path() / "team.ini", ec)) continue;
+        ContentEntry entry;
+        entry.path = e.path().string();
+        entry.id = e.path().filename().string();
+        entry.label = entry.id;
+        out.push_back(std::move(entry));
+    }
+    std::sort(out.begin(), out.end(), [](const ContentEntry& a, const ContentEntry& b) {
+        return a.label < b.label;
+    });
+    return out;
+}
+
 } // namespace ks::sim

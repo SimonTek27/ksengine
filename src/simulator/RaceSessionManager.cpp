@@ -286,6 +286,21 @@ void RaceSessionManager::setGridPosition(int carIndex, int gridPosition)
     }
 }
 
+void RaceSessionManager::setDriverIdentity(int carIndex, const std::string& driver,
+                                           const std::string& car, int raceNumber,
+                                           int gridPosition)
+{
+    // standingFor() keys on the identity field, so this stays correct after
+    // standings have been re-sorted (configure() order == carIndex only until
+    // the first sort).
+    if (DriverStanding* s = standingFor(carIndex)) {
+        s->driverName = driver;
+        s->carName = car;
+        s->raceNumber = raceNumber;
+        s->gridPosition = gridPosition;
+    }
+}
+
 void RaceSessionManager::startCountdown(float countdownSeconds)
 {
     m_countingDown = true;

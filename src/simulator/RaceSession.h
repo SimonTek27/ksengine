@@ -37,7 +37,10 @@ enum class PenaltyType : uint8_t {
     Disqualified = 5
 };
 
-struct Penalty {
+// Named SessionPenalty: RaceSessionManager.h defines its own `Penalty`
+// (Type/targetCarIndex/value shape), and some TUs now pull in both headers
+// (GarageSpawn.h -> here, SimulationLoop.h -> RaceSessionManager.h).
+struct SessionPenalty {
     PenaltyType type = PenaltyType::None;
     float timeSeconds = 0.f;
     std::string reason;
@@ -55,7 +58,7 @@ struct RaceSessionState {
     int totalCars = 1;
     bool pitLaneOpen = true;
     bool mandatoryPitDone = false;
-    std::vector<Penalty> penalties;
+    std::vector<SessionPenalty> penalties;
 };
 
 class RaceSession {
@@ -88,7 +91,7 @@ public:
     }
 
     void addPenalty(PenaltyType type, float seconds = 0.f, const std::string& reason = {}) {
-        Penalty p;
+        SessionPenalty p;
         p.type = type;
         p.timeSeconds = seconds;
         p.reason = reason;

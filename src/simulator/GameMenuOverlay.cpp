@@ -25,6 +25,7 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::Controls: return "CONTROLS";
     case MenuState::CarSelect: return "SELECT CAR";
     case MenuState::TrackSelect: return "SELECT TRACK";
+    case MenuState::TeamSelect: return "SELECT TEAM";
     case MenuState::Results: return "RESULTS";
     case MenuState::DevModeConfirm: return "EDITOR";
     case MenuState::QuitConfirm: return "QUIT";
@@ -106,6 +107,10 @@ void GameMenuOverlay::buildSingleplayerMenu()
         [this]() { openCarSelect(); } });
     m_items.push_back({ "TRACK", m_trackName.empty() ? "Select a track" : m_trackName,
         [this]() { openTrackSelect(); } });
+    // Roadmap 2.8: optional team roster (drivers, numbers, liveries, grid).
+    // It never gates the session rows — no team keeps the legacy identity.
+    m_items.push_back({ "TEAM", m_teamName.empty() ? "Select a team (optional)" : m_teamName,
+        [this]() { openTeamSelect(); } });
     m_items.push_back({ "", "", nullptr, true });
     // Fase 1 exit ("sessione practice da giocatore"): a session starts only
     // once BOTH sides are chosen — otherwise the player would drop into an
@@ -164,6 +169,20 @@ void GameMenuOverlay::buildGarageMenu()
     m_items.clear();
     m_items.push_back({ "SETUP", "Aero, gears, brakes and dampers",
         [this]() { if (onOpenSetupGarageRequested) onOpenSetupGarageRequested(); } });
+    // Roadmap 2.9: one row per upgrade package of the loaded car — the label
+    // shows the selected level, activating cycles to the next one and the
+    // loop re-applies physics, nodes, livery texture and sound pack.
+    if (upgradeRowLabels) {
+        const std::vector<std::string> labels = upgradeRowLabels();
+        for (int i = 0; i < static_cast<int>(labels.size()); ++i) {
+            const int row = i;
+            m_items.push_back({ labels[i], "Cycle to the next level",
+                [this, row]() {
+                    if (onUpgradeRowCycled) onUpgradeRowCycled(row);
+                    m_menuDirty = true; // rebuild so the label shows the new level
+                } });
+        }
+    }
     m_items.push_back({ "PIT STRATEGY", "Fuel, tyres and repair plan for next stop",
         [this]() {
             if (onOpenPitStrategyRequested) onOpenPitStrategyRequested();
@@ -292,6 +311,12 @@ void GameMenuOverlay::openTrackSelect()
     switchMenu(MenuState::TrackSelect);
 }
 
+void GameMenuOverlay::openTeamSelect()
+{
+    m_selectEntries = scanTeamLibrary();
+    switchMenu(MenuState::TeamSelect);
+}
+
 void GameMenuOverlay::showResults(std::vector<ResultsRow> rows)
 {
     m_resultRows = std::move(rows);
@@ -329,6 +354,27 @@ void GameMenuOverlay::buildTrackSelectMenu()
             const std::string path = e.path;
             m_items.push_back({ e.label, e.path, [this, path]() {
                 if (onTrackChosen) onTrackChosen(path);
+                goBack();
+            } });
+        }
+    }
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+}
+
+// Roadmap 2.8: teams are folders holding a team.ini under content/teams —
+// same list screen as cars/tracks, applying the roster the moment it is hit.
+void GameMenuOverlay::buildTeamSelectMenu()
+{
+    m_items.clear();
+    if (m_selectEntries.empty()) {
+        m_items.push_back({ "(no teams found)",
+            "Put team folders (team.ini) in content/teams", nullptr });
+    } else {
+        for (const auto& e : m_selectEntries) {
+            const std::string path = e.path;
+            m_items.push_back({ e.label, e.path, [this, path]() {
+                if (onTeamChosen) onTeamChosen(path);
                 goBack();
             } });
         }
@@ -388,6 +434,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::Controls: buildControlsMenu(); break;
     case MenuState::CarSelect: buildCarSelectMenu(); break;
     case MenuState::TrackSelect: buildTrackSelectMenu(); break;
+    case MenuState::TeamSelect: buildTeamSelectMenu(); break;
     case MenuState::Results: buildResultsMenu(); break;
     case MenuState::DevModeConfirm: buildDevModeConfirm(); break;
     case MenuState::QuitConfirm: buildQuitConfirm(); break;
@@ -416,10 +463,12 @@ void GameMenuOverlay::goBack()
     // Content), falling back to Main when entered directly.
     if (m_currentState == MenuState::CarSelect ||
         m_currentState == MenuState::TrackSelect ||
+        m_currentState == MenuState::TeamSelect ||
         m_currentState == MenuState::Results) {
         if (m_previousState != m_currentState &&
             m_previousState != MenuState::CarSelect &&
             m_previousState != MenuState::TrackSelect &&
+            m_previousState != MenuState::TeamSelect &&
             m_previousState != MenuState::Results)
             switchMenu(m_previousState);
         else
@@ -440,6 +489,14 @@ void GameMenuOverlay::activateSelected()
         // value rows stay true, keeping the cursor put.
         if (m_menuDirty && m_currentState == MenuState::PitStrategy)
             refreshPitStrategy();
+        // The GARAGE upgrade rows rebuild after cycling so the label reflects
+        // the newly selected level (same cursor-keeping as PitStrategy).
+        else if (m_menuDirty && m_currentState == MenuState::Garage) {
+            const int sel = m_selectedIndex;
+            buildGarageMenu();
+            m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+            m_menuDirty = false;
+        }
     }
 }
 

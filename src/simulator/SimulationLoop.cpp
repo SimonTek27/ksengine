@@ -11,9 +11,14 @@
 #include "SetupFile.h"
 #include "SceneAssets.h"
 #include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
+#include "GarageSpawn.h"     // rF2-like garage/grid placement (roadmap 2.8)
 #include "RainEffects.h"
 #include "SimulatorAudio.h"
+#include "VehicleAudioHook.h" // upgrade sound pack -> SimulatorAudio (roadmap 2.9)
 #include "engine/physics/DamageTelemetry.h"
+#include "engine/physics/AeroModel.h"   // baseline aero capture (roadmap 2.9)
+#include "engine/vehicle/VehicleAppearanceBundle.h"      // resolveAppearance (2.9)
+#include "engine/vehicle/ApplyVehicleUpgrades.h"         // physics bridge (2.9)
 #include "ui/UiGpuPass.h"
 #include "ui/RaceTelemetryHud.h"
 #include "UdpTelemetryBridge.h"
@@ -35,6 +40,7 @@
 #include "adapters/assetto_corsa/AcSurfacesLoader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
@@ -63,6 +69,19 @@
 #endif
 
 namespace ks::sim {
+
+// Roadmap 2.9 — everything the loop needs to (re)apply upgrade selections for
+// the loaded car: the package list, the resolved appearance, and the car's
+// post-ini baseline so re-selection recomputes from absolutes instead of
+// stacking on already-modified state (the aero config is restored before
+// every apply for the same reason — applyUpgrades reads the current value).
+struct UpgradeRuntime {
+    ks::vehicle::VehicleUpgradeSystem system;
+    ks::vehicle::VehicleAppearanceBundle appearance;
+    ks::vehicle::BaselineVehicleParams basePhysics;
+    ks::physics::AeroModel::AeroConfig baseAero{};
+    bool fromCarIni = false; // upgrades.ini parsed (false = built-in defaults)
+};
 
 static constexpr uint8_t SESSION_PRACTICE = 0;
 static constexpr uint8_t SESSION_QUALIFYING = 1;
@@ -316,6 +335,7 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     if (!fs::is_directory(carDir)) return false;
     loadContentMods(carDir); // Lua Mod SDK: <car>/scripts/*.lua
     m_carName = fs::path(carDir).filename().string();
+    m_carDir = carDir; // roadmap 2.8/2.9: livery + upgrades resolve against it
 #if HAS_VEHICLE_SIM
     if (m_vehicle) {
         m_vehicle->setMass(1200); m_vehicle->setEnginePower(260); m_vehicle->setMaxRpm(8500);
@@ -332,14 +352,22 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         tryLoad("suspension.ini", [&](const std::string& p) { m_vehicle->loadSuspensionFromIni(p); });
     }
 #endif
+    // Roadmap 2.9: upgrade packages for this car (upgrades.ini, or the
+    // built-in stock packages when that file is missing = base content
+    // fallback), then apply the selected physics on top of the baseline the
+    // car's own inis just produced.
+    loadUpgradesForCar(carDir);
+    applyUpgradePhysics();
     m_carLoaded = true;
     m_ui.menu().setCarName(m_carName);
     if (m_shm) m_shm->invalidateStatic();
     // Roadmap 1.2: visual for the freshly loaded car (baked meshes or
-    // solid box placeholder). Never fails the physics load.
+    // solid box placeholder). Never fails the physics load. Applies the
+    // appearance's node filter and livery texture override (roadmap 2.9).
     ensureCarVisual(carDir);
     // Best effort: a missing audio device must not fail car load.
     loadCarAudio(carDir);
+    applyUpgradeAudio(); // appearance sound pack on top of the baseline (2.9)
     return true;
 }
 
@@ -356,7 +384,40 @@ bool SimulationLoop::loadCarAudio(const std::string& carDirectory) {
     return m_audio->loadCarAudio(carDirectory);
 }
 
+// Roadmap 2.8 — team roster: team.ini decides drivers, numbers, liveries,
+// garage boxes and grid slots at session start. Loading it re-applies the
+// player livery immediately when a car is already loaded.
+bool SimulationLoop::loadTeam(const std::string& teamPath) {
+    namespace fs = std::filesystem;
+    std::string path = teamPath;
+    if (fs::is_directory(path)) path = (fs::path(path) / "team.ini").string();
+    if (!fs::is_regular_file(path)) {
+        std::fprintf(stderr, "[team] no team.ini at %s\n", path.c_str());
+        return false;
+    }
+    TeamInfo loaded = TeamInfoLoader::loadIni(path);
+    if (loaded.slots.empty()) {
+        std::fprintf(stderr, "[team] %s: no active [Car_N] slots\n", path.c_str());
+        return false;
+    }
+    m_team = std::move(loaded);
+    std::fprintf(stderr, "[team] loaded %s (%d car(s) in roster)\n", path.c_str(),
+                 m_team.assignedCarCount());
+    m_ui.menu().setTeamName(m_team.name.empty() ? m_team.id : m_team.name);
+    // A team picked after the car still has to reach this car's visuals
+    // (player slot livery texture override).
+    if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
+    return true;
+}
+
 void SimulationLoop::beginRaceSession() {
+    // Roadmap 2.8: the starting field (drivers, numbers, liveries, garage
+    // boxes, grid slots) comes from team.ini when one is loaded; without it
+    // buildFieldFromTeam yields the legacy identity (synthetic "AI N",
+    // standings keep falling back to "Car N" because driverName is empty).
+    m_sessionField = buildFieldFromTeam(m_team, m_aiCarCount);
+    std::fprintf(stderr, "%s", fieldTable(m_sessionField, m_team.name).c_str());
+
     // AI field (roadmap 3.5): respawn on every session so a reset re-staggers
     // everyone behind the line. Only our own ids are removed — cars spawned
     // by the multiplayer transport stay in the manager.
@@ -364,14 +425,31 @@ void SimulationLoop::beginRaceSession() {
         for (int id : m_aiCarIds) m_multiCar->removeCar(id);
         m_aiCarIds.clear();
         m_aiLastLaps.clear();
+        despawnAiVisuals(); // session respawn owns the AI visuals (2.8)
         if (m_aiCarCount > 0 && !m_trackData.directory.empty()) {
-            m_aiCarIds = m_multiCar->spawnGrid(
-                m_aiCarCount, m_carName.empty() ? "ks_car" : m_carName, "AI ");
+            // Roster first: each non-player slot keeps its grid slot, so the
+            // player's row is reserved on the grid (roadmap 2.8). Spawn order
+            // == field order, which is the zip used for identity + visuals.
+            std::vector<MultiCarManager::GridCar> aiField;
+            for (const auto& slot : m_sessionField) {
+                if (slot.isPlayer) continue;
+                aiField.push_back({slot.driverName,
+                                   slot.carModel.empty()
+                                       ? (m_carName.empty() ? "ks_car" : m_carName)
+                                       : slot.carModel,
+                                   slot.gridSlot});
+            }
+            m_aiCarIds = m_multiCar->spawnGrid(aiField, 6.0f);
             m_aiLastLaps.assign(m_aiCarIds.size(), 0);
             std::fprintf(stderr, "SimulationLoop: spawned %d AI cars\n",
                          static_cast<int>(m_aiCarIds.size()));
+            spawnSessionAiVisuals(); // renderer-backed, no-op headless (2.8)
         }
     }
+    // Roadmap 2.8: the player takes his garage box or grid slot too (rF2-like
+    // policy: race = grid, practice/qualify = garage, time attack = line).
+    placePlayerForSession();
+
     RaceConfig rc;
     // The session byte decides the RaceSessionManager type: race gets the
     // 5 s countdown and a 10-lap-style limit already set by the caller;
@@ -387,6 +465,26 @@ void SimulationLoop::beginRaceSession() {
     rc.numCars = 1 + static_cast<int>(m_aiCarIds.size());
     m_raceSession.configure(rc);
     m_raceSession.setPlayerCarIndex(0);
+    // Roadmap 2.8: roster identity reaches the standings — standings[0] is
+    // the player, then the AI in spawn (= field) order; grid positions stay
+    // the roster's, so RESULTS shows real drivers and door numbers.
+    if (!m_team.slots.empty()) {
+        const FieldSlot* player = nullptr;
+        for (const auto& s : m_sessionField)
+            if (s.isPlayer) { player = &s; break; }
+        auto apply = [this](int idx, const FieldSlot& s) {
+            m_raceSession.setDriverIdentity(
+                idx, s.driverName, s.carModel.empty() ? m_carName : s.carModel,
+                s.raceNumber, s.gridSlot + 1);
+        };
+        if (player) apply(0, *player);
+        int standing = 1;
+        for (const auto& s : m_sessionField) {
+            if (s.isPlayer) continue;
+            if (standing >= rc.numCars) break;
+            apply(standing++, s);
+        }
+    }
     m_raceSession.startSession();
     if (rc.sessionType == RaceConfig::SessionType::Race) {
         m_raceSession.startCountdown(5.0f);
@@ -415,6 +513,158 @@ void SimulationLoop::finishGoldenExport() {
     if (m_goldenRecorder.saveCsv(m_goldenExportPath))
         std::fprintf(stderr, "[golden] exported %zu samples -> %s\n",
                      m_goldenRecorder.refCount(), m_goldenExportPath.c_str());
+}
+
+// Roadmap 2.8 — the player takes his garage box or grid slot at session
+// start (rF2-like policy: race = grid, practice/qualy = garage box, time
+// attack = on the line), anchored on the same spline geometry as the AI.
+// No spline = no world anchor: content-baked / trackless runs keep the
+// legacy behaviour (spawn wherever the physics default put the car).
+void SimulationLoop::placePlayerForSession() {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle || !m_multiCar) return;
+    const FieldSlot* pslot = nullptr;
+    for (const auto& s : m_sessionField)
+        if (s.isPlayer) { pslot = &s; break; }
+    const int slot = pslot ? pslot->gridSlot : 0;
+
+    vec3 gpos;
+    float gheading = 0.0f;
+    if (!m_multiCar->gridPose(slot, 6.0f, gpos, gheading)) return;
+
+    // Session byte -> the policy's SessionType (3/4 are time attack / hotlap).
+    SessionType st = SessionType::Practice;
+    switch (m_sessionType) {
+        case SESSION_QUALIFYING: st = SessionType::Qualify; break;
+        case SESSION_RACE:       st = SessionType::Race; break;
+        case 3: case 4:          st = SessionType::Hotlap; break;
+        default: break;
+    }
+
+    // One pose per field slot (index == gridSlot): the policy's grid branch
+    // reads this, and the garage fallback lands on the line instead of the
+    // origin when a box is missing.
+    const int nslots = std::max(static_cast<int>(m_sessionField.size()), slot + 1);
+    std::vector<WorldPose> gridPoses(static_cast<size_t>(nslots),
+                                     WorldPose{gpos.x, gpos.y, gpos.z, gheading});
+    for (int i = 0; i < nslots; ++i) {
+        vec3 p;
+        float h = 0.0f;
+        if (m_multiCar->gridPose(i, 6.0f, p, h))
+            gridPoses[static_cast<size_t>(i)] = WorldPose{p.x, p.y, p.z, h};
+    }
+
+    // Garage row beside the start line: track pit boxes are not wired yet
+    // (their loader lives in the orphan FeatureMethods TU), so a linear row
+    // 12 m off the line carries the team's Garage= indices. Practice/qualy
+    // spawn no AI, so nothing else occupies that strip.
+    int boxes = 20;
+    for (const auto& slot : m_team.slots)
+        if (slot.active) boxes = std::max(boxes, slot.garageIndex + 1);
+    const WorldPose& first = gridPoses[0];
+    WorldPose rowStart = first;
+    rowStart.x += -std::cos(first.heading) * 12.f;
+    rowStart.z += std::sin(first.heading) * 12.f;
+    // makeLinearRow advances the boxes along pitHeading+90°: rotating the
+    // heading by +90° makes the row recede upstream (parallel to the track,
+    // cars facing it) instead of marching straight across the grid.
+    const GarageLayout layout = GarageSpawnPolicy::makeLinearRow(
+        boxes, rowStart, 6.f, first.heading + 1.5707963f);
+    GarageLayout assigned = layout;
+    if (!m_team.slots.empty()) GarageSpawnPolicy::assignTeamToGarage(assigned, m_team);
+
+    SpawnRequest req;
+    req.session = st;
+    req.garageIndex = pslot ? std::max(0, pslot->garageIndex) : 0;
+    req.gridPosition = slot + 1;
+    // The row is sized to cover every roster garage index, so the Garage
+    // branch always finds the box; Track (hotlap/time attack) means "on the
+    // line" and resolves here, because the policy leaves that to the caller.
+    WorldPose pose;
+    if (GarageSpawnPolicy::locationForSession(st) == SpawnLocation::Track)
+        pose = gridPoses[static_cast<size_t>(slot)];
+    else
+        pose = GarageSpawnPolicy::resolvePose(req, assigned, &gridPoses);
+
+    auto& state = m_vehicle->state();
+    state.position = {pose.x, pose.y, pose.z};
+    state.heading = pose.heading;
+    std::fprintf(stderr,
+                 "[team] player spawn: slot %d at (%.1f, %.1f, %.1f) heading %.2f [%s]\n",
+                 slot + 1, pose.x, pose.y, pose.z, pose.heading,
+                 GarageSpawnPolicy::locationForSession(st) == SpawnLocation::Garage
+                     ? "garage box"
+                     : GarageSpawnPolicy::locationForSession(st) == SpawnLocation::Grid
+                           ? "grid" : "line");
+#endif
+}
+
+// Roadmap 2.8 — visual entities for the spawned AI cars: one mesh set per
+// livery key (base textures when the slot has no skin folder), shared by
+// every car that wears it. No-op without a renderer, an AI field or a bake.
+void SimulationLoop::spawnSessionAiVisuals() {
+    if (!m_vulkanRenderer || !m_multiCar || m_aiCarIds.empty()) return;
+    const std::string baked = ks::sim::findBakedManifestDir(m_carDir);
+    if (baked.empty()) return; // unbaked car: AI stay physics-only (as before)
+
+    int ord = 0;
+    for (const auto& slot : m_sessionField) {
+        if (slot.isPlayer) continue;
+        if (ord >= static_cast<int>(m_aiCarIds.size())) break;
+        const int carId = m_aiCarIds[ord++];
+
+        const std::string key = slot.liveryId.empty() ? std::string("base") : slot.liveryId;
+        const std::string prefix = "ai_" + key + "_";
+        if (m_aiMeshSets.find(prefix) == m_aiMeshSets.end()) {
+            std::string textureDir = baked + "/textures";
+            if (!slot.liveryId.empty()) {
+                const std::string cand = m_carDir + "/liveries/" + slot.liveryId;
+                if (std::filesystem::is_directory(cand)) textureDir = cand;
+            }
+            std::vector<std::string> names = loadCarMeshSet(baked, prefix, textureDir);
+            if (names.empty()) continue; // no mesh for this slot: stays invisible
+            m_aiMeshSets.emplace(prefix, std::move(names));
+        }
+
+        AiVisual av;
+        av.carId = carId;
+        av.liveryKey = slot.liveryId;
+        for (const auto& renderName : m_aiMeshSets.at(prefix)) {
+            const ks::ecs::Entity e = scene().create();
+            if (e == ks::ecs::kNullEntity) break;
+            scene().emplace<ks::ecs::Name>(e, ks::ecs::Name{renderName});
+            scene().emplace<ks::ecs::Transform>(e);
+            scene().emplace<ks::ecs::MeshInstance>(e, ks::ecs::MeshInstance{renderName});
+            av.entities.push_back(e);
+        }
+        // Land on the grid pose immediately so no frame is drawn at origin.
+        if (CarEntry* c = m_multiCar->getCar(carId); c && c->vehicle) {
+            const auto as = c->vehicle->getState();
+            const ks::math::vec3 apos{as.position.x, as.position.y, as.position.z};
+            const ks::math::vec3 arot{as.rotation.x, as.rotation.y, as.rotation.z};
+            for (const ks::ecs::Entity e : av.entities)
+                if (auto* t = scene().tryGet<ks::ecs::Transform>(e)) {
+                    t->position = apos;
+                    t->rotation = arot;
+                }
+        }
+        if (!av.entities.empty()) m_aiVisuals.push_back(std::move(av));
+    }
+    if (!m_aiVisuals.empty())
+        std::fprintf(stderr, "[scene] AI visuals: %zu car(s), %zu mesh set(s)\n",
+                     m_aiVisuals.size(), m_aiMeshSets.size());
+}
+
+void SimulationLoop::despawnAiVisuals() {
+    if (m_vulkanRenderer) {
+        for (const auto& kv : m_aiMeshSets) // each render name exactly once
+            for (const auto& n : kv.second) m_vulkanRenderer->destroyMesh(n);
+    }
+    for (auto& av : m_aiVisuals)
+        for (const ks::ecs::Entity e : av.entities)
+            if (scene().valid(e)) scene().destroy(e);
+    m_aiVisuals.clear();
+    m_aiMeshSets.clear();
 }
 
 void SimulationLoop::start() {
@@ -975,14 +1225,38 @@ void SimulationLoop::syncCarTransforms() {
     if (!m_vehicle) return;
     const auto st = m_vehicle->getState();
     const ks::math::vec3 pos{st.position.x, st.position.y, st.position.z};
+    // Full body attitude (roll/pitch/yaw — rotation.y mirrors heading): with
+    // position only, the visual slid through corners without ever turning,
+    // while the camera already followed the rotated body.
+    const ks::math::vec3 rot{st.rotation.x, st.rotation.y, st.rotation.z};
     // Tracked car visuals (roadmap 1.2): moved by entity id, so baked mesh
     // names that don't carry the "car_" prefix still follow the vehicle.
     for (const ks::ecs::Entity e : m_carVisualEntities)
-        if (auto* t = scene().tryGet<ks::ecs::Transform>(e)) t->position = pos;
+        if (auto* t = scene().tryGet<ks::ecs::Transform>(e)) {
+            t->position = pos;
+            t->rotation = rot;
+        }
     scene().each<ks::ecs::Transform, ks::ecs::MeshInstance>([&](ks::ecs::Entity, ks::ecs::Transform& t, ks::ecs::MeshInstance& mesh) {
         if (mesh.meshName.find("car_") != 0) return;
         t.position = pos;
+        t.rotation = rot;
     });
+    // Roadmap 2.8: every AI visual follows its own car entry — position and
+    // attitude, because the AI steers along the spline.
+    if (m_multiCar) {
+        for (auto& av : m_aiVisuals) {
+            CarEntry* c = m_multiCar->getCar(av.carId);
+            if (!c || !c->vehicle) continue;
+            const auto as = c->vehicle->getState();
+            const ks::math::vec3 apos{as.position.x, as.position.y, as.position.z};
+            const ks::math::vec3 arot{as.rotation.x, as.rotation.y, as.rotation.z};
+            for (const ks::ecs::Entity e : av.entities)
+                if (auto* t = scene().tryGet<ks::ecs::Transform>(e)) {
+                    t->position = apos;
+                    t->rotation = arot;
+                }
+        }
+    }
 #endif
 }
 
@@ -1070,35 +1344,102 @@ void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
                  baked.c_str(), static_cast<int>(m_sceneEntities.size()));
 }
 
+// Loads a bake's meshes under a name prefix — materials.txt, the texture dir
+// (livery override) and the resolved appearance's node filter all apply.
+// Shared by the player car ("car_") and the AI livery sets ("ai_<key>_"),
+// roadmap 2.8/2.9.
+std::vector<std::string> SimulationLoop::loadCarMeshSet(const std::string& baked,
+                                                        const std::string& prefix,
+                                                        const std::string& textureDir,
+                                                        bool* materialsApplied) {
+    std::vector<std::string> loaded;
+    if (baked.empty() || !m_vulkanRenderer) return loaded;
+    ks::sim::MaterialCache materials;
+    const bool hasMaterials = materials.load(baked + "/materials.txt");
+    if (materialsApplied) *materialsApplied = hasMaterials && materials.size() > 0;
+    // Announce once for the player set only ("car_"); the AI livery sets
+    // reuse the same materials silently to keep the log readable.
+    if (prefix == "car_" && hasMaterials && materials.size() > 0)
+        std::fprintf(stderr, "[scene] car materials.txt: %zu mesh material(s)\n",
+                     materials.size());
+    std::ifstream manifest(baked + "/manifest.txt");
+    std::string name;
+    while (manifest && std::getline(manifest, name)) {
+        if (!name.empty() && name.back() == '\r') name.pop_back(); // CRLF manifests
+        if (name.empty()) continue;
+        // Roadmap 2.9: a node the appearance disabled (race [Nodes] x=0 or an
+        // upgrade DisableNode) is not spawned at all.
+        if (m_upgradeRt &&
+            !ks::vehicle::appearanceNodeVisible(m_upgradeRt->appearance, name)) {
+            std::fprintf(stderr, "[scene] node %s hidden by appearance\n", name.c_str());
+            continue;
+        }
+        const ks::sim::MeshMaterial* material =
+            hasMaterials ? materials.find(name) : nullptr;
+        // Prefixed so baked names (original kn5 node names) can neither
+        // collide with nor destroy scene meshes of the same name, and
+        // so the legacy "car_" prefix sync sees them too.
+        const std::string renderName = prefix + name;
+        if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh",
+                                                material, textureDir))
+            continue;
+        loaded.push_back(renderName);
+    }
+    return loaded;
+}
+
 void SimulationLoop::ensureCarVisual(const std::string& carDir) {
     if (!m_vulkanRenderer) return;
     despawnCarVisuals();
+    despawnAiVisuals(); // AI share this car's bake + appearance (2.8/2.9)
+    if (!carDir.empty()) m_carDir = carDir;
     const std::string baked = ks::sim::findBakedManifestDir(carDir);
     // Roadmap 2.4: car bakes pair with materials.txt exactly like track
     // bakes, so the car reaches the frame painted instead of vertex-white.
-    ks::sim::MaterialCache materials;
     bool appliedMaterials = false;
+    std::string liveryLabel;
     if (!baked.empty()) {
-        const bool hasMaterials = materials.load(baked + "/materials.txt");
-        appliedMaterials = hasMaterials && materials.size() > 0;
-        if (appliedMaterials)
-            std::fprintf(stderr, "[scene] car materials.txt: %zu mesh material(s)\n",
-                         materials.size());
-        const std::string textureDir = baked + "/textures";
-        std::ifstream manifest(baked + "/manifest.txt");
-        std::string name;
-        while (manifest && std::getline(manifest, name)) {
-            if (!name.empty() && name.back() == '\r') name.pop_back(); // CRLF manifests
-            if (name.empty()) continue;
-            const ks::sim::MeshMaterial* material =
-                hasMaterials ? materials.find(name) : nullptr;
-            // Prefixed so baked names (original kn5 node names) can neither
-            // collide with nor destroy scene meshes of the same name, and
-            // so the legacy "car_" prefix sync sees them too.
-            const std::string renderName = "car_" + name;
-            if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh",
-                                                    material, textureDir))
-                continue;
+        // Roadmap 2.8/2.9: texture override — the selected upgrade livery
+        // first (explicit intent), then the team slot's skin, else the bake's
+        // own textures. A folder that does not exist falls through: base
+        // content is the fallback.
+        std::string textureDir = baked + "/textures";
+        auto carRelative = [this](std::string p) {
+            if (p.size() > 1 && (p[0] == '/' || (p.size() > 2 && p[1] == ':'))) return p;
+            if (!m_carDir.empty()) {
+                if (m_carDir.back() == '/' || m_carDir.back() == '\\') return m_carDir + p;
+                return m_carDir + "/" + p;
+            }
+            return p;
+        };
+        if (m_upgradeRt && m_upgradeRt->appearance.hasLivery() &&
+            !m_upgradeRt->appearance.livery.folder.empty()) {
+            const std::string cand = carRelative(m_upgradeRt->appearance.livery.folder);
+            if (std::filesystem::is_directory(cand)) {
+                textureDir = cand;
+                liveryLabel = m_upgradeRt->appearance.livery.id;
+            } else {
+                std::fprintf(stderr, "[scene] upgrade livery folder missing (%s) -> base\n",
+                             cand.c_str());
+            }
+        }
+        if (textureDir == baked + "/textures") {
+            if (const TeamCarSlot* p = playerSlot(m_team); p && !p->liveryId.empty()) {
+                const std::string cand = m_carDir + "/liveries/" + p->liveryId;
+                if (std::filesystem::is_directory(cand)) {
+                    textureDir = cand;
+                    liveryLabel = p->liveryId;
+                } else {
+                    std::fprintf(stderr,
+                                 "[scene] team livery '%s' missing (%s) -> base\n",
+                                 p->liveryId.c_str(), cand.c_str());
+                }
+            }
+        }
+
+        const std::vector<std::string> meshes =
+            loadCarMeshSet(baked, "car_", textureDir, &appliedMaterials);
+        for (const auto& renderName : meshes) {
             const ks::ecs::Entity e = scene().create();
             if (e == ks::ecs::kNullEntity) break;
             scene().emplace<ks::ecs::Name>(e, ks::ecs::Name{renderName});
@@ -1107,10 +1448,14 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
             m_carVisualEntities.push_back(e);
         }
     }
+    // Roadmap 2.8/2.9: a running session's AI wear this bake + appearance too
+    // (re-selection mid-session respawns them with the new nodes/livery).
+    if (m_running && !m_aiCarIds.empty()) spawnSessionAiVisuals();
     if (!m_carVisualEntities.empty()) {
+        std::string suffix = appliedMaterials ? " (materials.txt applied)" : "";
+        if (!liveryLabel.empty()) suffix += " (livery: " + liveryLabel + ")";
         std::fprintf(stderr, "[scene] car visuals: %zu baked mesh(es) from %s%s\n",
-                     m_carVisualEntities.size(), baked.c_str(),
-                     appliedMaterials ? " (materials.txt applied)" : "");
+                     m_carVisualEntities.size(), baked.c_str(), suffix.c_str());
         return;
     }
     // Solid placeholder box (ROADMAP 1.2 "placeholder solido"): ~4.4x1.8 m
@@ -1133,6 +1478,160 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
         m_carVisualEntities.push_back(e);
     }
     std::fprintf(stderr, "[scene] car visual: solid placeholder box\n");
+}
+
+// Roadmap 2.9 — upgrades.ini -> package list for the loaded car. A missing
+// or unparsable file falls back to the built-in stock packages: level 0
+// everywhere carries zero deltas, so physics, nodes, livery and audio all
+// resolve to the base content.
+void SimulationLoop::loadUpgradesForCar(const std::string& carDir) {
+    auto rt = std::make_unique<UpgradeRuntime>();
+    const bool fromIni = rt->system.loadFromIni(carDir + "/upgrades.ini");
+    if (!fromIni) rt->system.loadDefaults();
+    m_upgradeRt = std::move(rt);
+
+    // Selection override for headless/CI runs: "Engine:stage2,Livery:...".
+    // The menu rows (cycleUpgradeRow) drive the same path interactively.
+    if (const char* sel = std::getenv("KS_UPGRADES"); sel && sel[0])
+        applyUpgradeSelectionString(sel);
+
+    // Race _rd*.ini next to the kn5 + the selected upgrade levels, priority
+    // upgrades > race > defaults (round 1: no race-round context yet).
+    m_upgradeRt->appearance = ks::vehicle::resolveAppearance(
+        carDir + "/" + m_carName + ".kn5", 1, &m_upgradeRt->system);
+#if HAS_VEHICLE_SIM
+    if (m_vehicle) {
+        // Baseline = the car AFTER its own data inis (the tuned values, not
+        // the hardcoded defaults), captured once per car load so every later
+        // re-selection recomputes from absolutes instead of stacking.
+        m_upgradeRt->basePhysics = {m_vehicle->mass(), m_vehicle->enginePowerKw(),
+                                    m_vehicle->maxRpm(), m_vehicle->dragCoeff(),
+                                    m_vehicle->frontalArea()};
+        m_upgradeRt->baseAero = m_vehicle->aero().getConfig();
+    }
+#endif
+    std::fprintf(stderr, "[upgrade] %s: %zu package(s) from %s\n", m_carName.c_str(),
+                 m_upgradeRt->system.types().size(),
+                 fromIni ? "upgrades.ini" : "built-in defaults");
+}
+
+// Re-resolves the appearance after a selection change and re-applies every
+// domain: physics, render nodes, livery texture and the sound pack.
+void SimulationLoop::refreshUpgradeApplication() {
+    if (!m_upgradeRt || m_carDir.empty()) return;
+    m_upgradeRt->appearance = ks::vehicle::resolveAppearance(
+        m_carDir + "/" + m_carName + ".kn5", 1, &m_upgradeRt->system);
+    applyUpgradePhysics();
+    if (m_carLoaded) ensureCarVisual(m_carDir); // nodes + livery (+ AI respawn)
+    applyUpgradeAudio();
+}
+
+void SimulationLoop::applyUpgradePhysics() {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle || !m_upgradeRt) return;
+    // applyUpgradesToVehicleSimulator reads the CURRENT aero config, so the
+    // captured baseline goes back first — otherwise every re-selection would
+    // stack lift/mults on the previous result.
+    m_vehicle->aero().setConfig(m_upgradeRt->baseAero);
+    ks::vehicle::applyUpgradesToVehicleSimulator(*m_vehicle, m_upgradeRt->basePhysics,
+                                                 m_upgradeRt->appearance.physics);
+    std::fprintf(stderr, "[upgrade] physics: %.1f kW, %.0f kg, cd %.3f, cl %.3f\n",
+                 m_vehicle->enginePowerKw(), m_vehicle->mass(), m_vehicle->dragCoeff(),
+                 m_vehicle->aero().getConfig().liftCoefficient);
+#endif
+}
+
+void SimulationLoop::applyUpgradeAudio() {
+    if (!m_audio || !m_upgradeRt) return;
+    if (!m_upgradeRt->appearance.hasSound()) return;
+    // false = bank/sounds.ini missing on disk: the baseline audio loaded by
+    // loadCarAudio() stays untouched (base-content fallback).
+    if (ks::sim::applyAppearanceAudio(*m_audio, m_upgradeRt->appearance, m_carDir))
+        std::fprintf(stderr, "[upgrade] sound pack applied (%s)\n",
+                     m_upgradeRt->appearance.sound.id.empty()
+                         ? "-" : m_upgradeRt->appearance.sound.id.c_str());
+    else
+        std::fprintf(stderr, "[upgrade] sound pack unavailable -> baseline audio\n");
+}
+
+// "Engine:stage2,Livery:sponsor_red,Sound:race_exhaust" — category names are
+// matched the same way the ini parser maps UpgradeType= lines.
+void SimulationLoop::applyUpgradeSelectionString(const char* spec) {
+    if (!m_upgradeRt || !spec) return;
+    using ks::vehicle::UpgradeCategory;
+    auto catOf = [](std::string low) -> int {
+        for (char& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (low.find("engine") != std::string::npos) return static_cast<int>(UpgradeCategory::Engine);
+        if (low.find("aero") != std::string::npos || low.find("wing") != std::string::npos)
+            return static_cast<int>(UpgradeCategory::Aero);
+        if (low.find("trans") != std::string::npos || low.find("gear") != std::string::npos)
+            return static_cast<int>(UpgradeCategory::Transmission);
+        if (low.find("susp") != std::string::npos) return static_cast<int>(UpgradeCategory::Suspension);
+        if (low.find("brake") != std::string::npos) return static_cast<int>(UpgradeCategory::Brakes);
+        if (low.find("liver") != std::string::npos || low.find("skin") != std::string::npos)
+            return static_cast<int>(UpgradeCategory::Livery);
+        if (low.find("sound") != std::string::npos || low.find("audio") != std::string::npos)
+            return static_cast<int>(UpgradeCategory::Sound);
+        if (low.find("body") != std::string::npos) return static_cast<int>(UpgradeCategory::Body);
+        return -1;
+    };
+    const std::string s = spec;
+    size_t start = 0;
+    while (start <= s.size()) {
+        const size_t comma = s.find(',', start);
+        const std::string tok =
+            s.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+        start = (comma == std::string::npos) ? s.size() + 1 : comma + 1;
+        if (tok.empty()) continue;
+        const size_t colon = tok.find(':');
+        if (colon == std::string::npos || colon == 0) {
+            std::fprintf(stderr, "[upgrade] KS_UPGRADES: bad token '%s' (want Cat:id)\n",
+                         tok.c_str());
+            continue;
+        }
+        const std::string cat = tok.substr(0, colon);
+        const std::string id = tok.substr(colon + 1);
+        const int c = catOf(cat);
+        if (c < 0) {
+            std::fprintf(stderr, "[upgrade] KS_UPGRADES: unknown category '%s'\n", cat.c_str());
+            continue;
+        }
+        if (m_upgradeRt->system.selectById(static_cast<UpgradeCategory>(c), id))
+            std::fprintf(stderr, "[upgrade] selected %s:%s\n", cat.c_str(), id.c_str());
+        else
+            std::fprintf(stderr, "[upgrade] no level '%s' in category %s\n", id.c_str(),
+                         cat.c_str());
+    }
+}
+
+// Garage menu rows (roadmap 2.9): one label per package of the car's
+// upgrades.ini, showing the currently selected level.
+std::vector<std::string> SimulationLoop::upgradeRowLabels() const {
+    std::vector<std::string> out;
+    if (!m_upgradeRt) return out;
+    for (const auto& t : m_upgradeRt->system.types()) {
+        const auto* L = t.current();
+        std::string label = t.name + "  ";
+        label += L ? L->name : "-";
+        out.push_back(std::move(label));
+    }
+    return out;
+}
+
+// Cycling a row selects the next level of that package and re-applies
+// everything (physics, nodes, livery, sound) through refreshUpgradeApplication.
+void SimulationLoop::cycleUpgradeRow(int row) {
+    if (!m_upgradeRt || row < 0 ||
+        row >= static_cast<int>(m_upgradeRt->system.types().size()))
+        return;
+    auto& t = m_upgradeRt->system.types()[static_cast<size_t>(row)];
+    if (t.levels.empty()) return;
+    const int n = static_cast<int>(t.levels.size());
+    const int next = ((t.selected % n) + 1) % n;
+    if (!m_upgradeRt->system.select(t.category, next)) return;
+    std::fprintf(stderr, "[upgrade] %s -> %s\n", t.name.c_str(),
+                 t.levels[static_cast<size_t>(next)].name.c_str());
+    refreshUpgradeApplication();
 }
 
 // Multiplayer (roadmap 3.1). All three bodies are no-ops unless the build

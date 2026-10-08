@@ -54,6 +54,24 @@ public:
     std::vector<int> spawnGrid(int count, const std::string& carName,
                                const std::string& driverPrefix, float spacing = 6.0f);
 
+    /** One car to place on the grid (roadmap 2.8): identity + 0-based slot.
+     *  The player's slot is simply absent from the vector, so its geometry
+     *  stays reserved on the grid. */
+    struct GridCar {
+        std::string driverName;
+        std::string carName;
+        int gridSlot = 0;
+    };
+
+    /** Grid geometry for a 0-based slot — rows of `spacing` meters, two-wide
+     *  (same staggered layout as spawnGrid). False without a loaded spline;
+     *  used for the player's garage/grid pose too (roadmap 2.8). */
+    bool gridPose(int slot, float spacing, vec3& outPos, float& outHeading) const;
+
+    /** Spawn `field`, each car at its GridCar::gridSlot. Returns the spawned
+     *  ids in field order (zip with the input). Empty without a spline. */
+    std::vector<int> spawnGrid(const std::vector<GridCar>& field, float spacing = 6.0f);
+
     void setPlayerCarId(int id) { m_playerCarId = id; }
     void setCollisionEnabled(bool e) { m_collisionEnabled = e; }
 

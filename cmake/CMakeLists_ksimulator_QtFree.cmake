@@ -15,6 +15,8 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/InputManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/CameraController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp
+	# race/upgrade sound packs (roadmap 2.9) — was never compiled before
+	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio_SoundPack.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AudioMixer.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AudioBankManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SoundsIniParser.cpp

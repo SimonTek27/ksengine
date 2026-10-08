@@ -178,49 +178,59 @@ void MultiCarManager::loadAiSpline(const std::string& trackDirectory)
     }
 }
 
-std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carName,
-                                             const std::string& driverPrefix, float spacing)
+bool MultiCarManager::gridPose(int slot, float spacing, vec3& outPos, float& outHeading) const
 {
-    std::vector<int> ids;
-    if (count <= 0 || !m_gridSpline.isValid() || m_gridSpline.totalDistance <= 0.0f)
-        return ids;
+    if (slot < 0 || !m_gridSpline.isValid() || m_gridSpline.totalDistance <= 0.0f ||
+        m_gridSpline.points.size() < 2)
+        return false;
 
     const auto& pts = m_gridSpline.points;
     const float total = m_gridSpline.totalDistance;
-    for (int i = 0; i < count; ++i) {
-        const float back = static_cast<float>(i / 2) * spacing;
-        float d;
-        if (m_gridSpline.closed) {
-            d = std::fmod(total - back, total);
-            if (d < 0.0f) d += total;
-        } else {
-            d = std::min(back, total * 0.999f);
-        }
+    const float back = static_cast<float>(slot / 2) * spacing;
+    float d;
+    if (m_gridSpline.closed) {
+        d = std::fmod(total - back, total);
+        if (d < 0.0f) d += total;
+    } else {
+        d = std::min(back, total * 0.999f);
+    }
 
-        auto it = std::lower_bound(pts.begin(), pts.end(), d,
-                                   [](const ks::ai::AiSplinePoint& p, float v) {
-                                       return p.distance < v;
-                                   });
-        size_t hi = static_cast<size_t>(it - pts.begin());
-        if (hi >= pts.size()) hi = pts.size() - 1;
-        if (hi == 0) hi = 1;
-        const size_t lo = hi - 1;
-        const float segLen = pts[hi].distance - pts[lo].distance;
-        const float t = segLen > 1e-4f
-                          ? std::clamp((d - pts[lo].distance) / segLen, 0.0f, 1.0f)
-                          : 0.0f;
-        const auto& a = pts[lo].position;
-        const auto& b = pts[hi].position;
-        vec3 pos{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
+    auto it = std::lower_bound(pts.begin(), pts.end(), d,
+                               [](const ks::ai::AiSplinePoint& p, float v) {
+                                   return p.distance < v;
+                               });
+    size_t hi = static_cast<size_t>(it - pts.begin());
+    if (hi >= pts.size()) hi = pts.size() - 1;
+    if (hi == 0) hi = 1;
+    const size_t lo = hi - 1;
+    const float segLen = pts[hi].distance - pts[lo].distance;
+    const float t = segLen > 1e-4f
+                        ? std::clamp((d - pts[lo].distance) / segLen, 0.0f, 1.0f)
+                        : 0.0f;
+    const auto& a = pts[lo].position;
+    const auto& b = pts[hi].position;
+    vec3 pos{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t};
 
-        const float dx = b.x - a.x, dz = b.z - a.z;
-        const float heading = (std::fabs(dx) + std::fabs(dz) > 1e-5f)
-                                ? std::atan2(dx, dz) : 0.0f;
-        const float lateral = (i % 2 == 0) ? 1.5f : -1.5f;
-        pos.x += -std::cos(heading) * lateral;
-        pos.z += std::sin(heading) * lateral;
+    const float dx = b.x - a.x, dz = b.z - a.z;
+    const float heading = (std::fabs(dx) + std::fabs(dz) > 1e-5f)
+                              ? std::atan2(dx, dz) : 0.0f;
+    const float lateral = (slot % 2 == 0) ? 1.5f : -1.5f;
+    pos.x += -std::cos(heading) * lateral;
+    pos.z += std::sin(heading) * lateral;
 
-        const int id = addCar(carName, driverPrefix + std::to_string(i + 1), pos, false);
+    outPos = pos;
+    outHeading = heading;
+    return true;
+}
+
+std::vector<int> MultiCarManager::spawnGrid(const std::vector<GridCar>& field, float spacing)
+{
+    std::vector<int> ids;
+    for (const auto& gc : field) {
+        vec3 pos;
+        float heading = 0.0f;
+        if (!gridPose(gc.gridSlot, spacing, pos, heading)) break; // no spline: nothing spawns
+        const int id = addCar(gc.carName, gc.driverName, pos, false);
         if (CarEntry* e = getCar(id)) {
             auto& st = e->vehicle->state();
             st.position = {pos.x, pos.y, pos.z};
@@ -229,6 +239,16 @@ std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carNam
         ids.push_back(id);
     }
     return ids;
+}
+
+std::vector<int> MultiCarManager::spawnGrid(int count, const std::string& carName,
+                                             const std::string& driverPrefix, float spacing)
+{
+    std::vector<GridCar> field;
+    field.reserve(count > 0 ? static_cast<size_t>(count) : 0);
+    for (int i = 0; i < count; ++i)
+        field.push_back({driverPrefix + std::to_string(i + 1), carName, i});
+    return spawnGrid(field, spacing);
 }
 
 void MultiCarManager::checkCollisions()

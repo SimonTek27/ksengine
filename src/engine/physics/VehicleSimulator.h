@@ -61,6 +61,15 @@ public:
     void setWheelBase(double m);
     void setTrackWidth(double m);
 
+    // Roadmap 2.9: read back the tuned values so upgrade application can
+    // capture the car's baseline AFTER its own data inis loaded and recompute
+    // from absolutes on every re-selection (never stacking on modified state).
+    double mass() const { return m_mass; }
+    double enginePowerKw() const { return m_enginePowerKw; }
+    double maxRpm() const { return m_maxRpm; }
+    double dragCoeff() const { return m_cd; }
+    double frontalArea() const { return m_frontalArea; }
+
     /** Apply garage/setup values into runtime physics parameters. */
     struct SetupParams {
         float tirePsi[4] = {2.2f, 2.2f, 2.0f, 2.0f};

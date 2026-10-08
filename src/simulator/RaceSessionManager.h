@@ -56,6 +56,7 @@ struct DriverStanding {
     int carIndex = 0;
     std::string carName;
     std::string driverName;
+    int raceNumber = 0; // door number from team.ini (0 = none; roadmap 2.8)
     int position = 0;
     int gridPosition = 0;
     int currentLap = 0;
@@ -101,6 +102,13 @@ public:
     void updateCarProgress(int carIndex, int currentLap, float totalDistance);
 
     void setGridPosition(int carIndex, int gridPosition);
+
+    /** Roster identity (roadmap 2.8): driver name, car label, race number and
+     *  grid slot straight from team.ini. RESULTS renders driverName when it
+     *  is set, falling back to carName otherwise. */
+    void setDriverIdentity(int carIndex, const std::string& driver,
+                           const std::string& car, int raceNumber, int gridPosition);
+
     void startCountdown(float countdownSeconds = 5.0f);
     bool isCountingDown() const { return m_countingDown; }
     float countdownValue() const { return m_countdownValue; }

@@ -20,6 +20,7 @@
 #include "FeatureHub.h"
 #include "CarStateSync.h"
 #include "CarStateSyncBridge.h"
+#include "TeamSessionBridge.h" // roadmap 2.8: team.ini roster -> session field
 
 #include <memory>
 #include <chrono>
@@ -53,6 +54,7 @@ class NativeRenderer;
 class MultiCarManager;
 class NetworkManager;
 class UdpTelemetryBridge;
+struct UpgradeRuntime; // upgrade/appearance state for the loaded car (roadmap 2.9, .cpp)
 class TcpTelemetryBridge;
 
 namespace ui {
@@ -117,6 +119,16 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
+    // Roadmap 2.8: load a team roster (dir or team.ini). The roster decides
+    // driver names, race numbers, liveries, garage boxes and the grid slots
+    // of the player and the AI at session start. No team = legacy identity.
+    bool loadTeam(const std::string& teamPath);
+    const TeamInfo& team() const { return m_team; }
+    // Roadmap 2.9: garage-menu upgrade rows — one per package of the car's
+    // upgrades.ini; cycling a row re-resolves the appearance and re-applies
+    // physics, render nodes, livery texture and the sound pack.
+    std::vector<std::string> upgradeRowLabels() const;
+    void cycleUpgradeRow(int row);
     int loadBakedScene(const std::string& manifestDir);
     // Roadmap 1.2 / GAP P2.1 — stable visuals for track and car load.
     // applyTrackVisuals swaps the static scene to the track's baked cache
@@ -255,6 +267,23 @@ private:
     int spawnSceneEntities(const std::string& manifestDir);
     void despawnSceneEntities();
     void despawnCarVisuals();
+    // Roadmap 2.8: player garage/grid placement + AI visual entities (one
+    // per spawned AI car, meshes shared per livery key). No-op headless.
+    void placePlayerForSession();
+    void spawnSessionAiVisuals();
+    void despawnAiVisuals();
+    // Roadmap 2.9: upgrades.ini -> appearance -> physics/nodes/livery/sound.
+    void loadUpgradesForCar(const std::string& carDir);
+    void refreshUpgradeApplication();
+    void applyUpgradePhysics();
+    void applyUpgradeAudio();
+    void applyUpgradeSelectionString(const char* spec);
+    // Loads a bake's meshes under a name prefix (materials, textureDir and
+    // node filtering applied); shared by the player car and the AI sets.
+    std::vector<std::string> loadCarMeshSet(const std::string& baked,
+                                            const std::string& prefix,
+                                            const std::string& textureDir,
+                                            bool* materialsApplied = nullptr);
     std::vector<ks::ecs::Entity> m_sceneEntities;
     std::vector<ks::ecs::Entity> m_carVisualEntities;
     void broadcastLocalCarState();
@@ -344,6 +373,28 @@ private:
     bool m_pipelineInitialized = false;
     uint32_t m_streamlineFrameIndex = 0;
     std::string m_carName;
+    std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
+
+    // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,
+    // which keeps the legacy identity ("AI N", standings "Car N").
+    TeamInfo m_team;
+    std::vector<FieldSlot> m_sessionField; // built at beginRaceSession, grid order
+
+    // Roadmap 2.8 — AI visual entities (one block per spawned AI car; meshes
+    // are shared per livery key so N cars with the same skin load once).
+    struct AiVisual {
+        int carId = -1;
+        std::string liveryKey; // empty = base car textures
+        std::vector<ks::ecs::Entity> entities;
+    };
+    std::vector<AiVisual> m_aiVisuals;
+    // livery key ("base", a skin id, ...) -> loaded render names: every AI
+    // car with the same skin shares one mesh set.
+    std::unordered_map<std::string, std::vector<std::string>> m_aiMeshSets;
+
+    // Roadmap 2.9 — upgrade packages + resolved appearance for m_carDir
+    // (UpgradeRuntime is defined in SimulationLoop.cpp).
+    std::unique_ptr<UpgradeRuntime> m_upgradeRt;
 
     int m_aiCarCount = 0;
     std::vector<int> m_aiCarIds;

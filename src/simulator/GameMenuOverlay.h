@@ -29,6 +29,7 @@ enum class MenuState {
     Controls,
     CarSelect,
     TrackSelect,
+    TeamSelect,
     Results,
     DevModeConfirm,
     QuitConfirm
@@ -89,6 +90,13 @@ public:
         m_menuDirty = true;
         if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
     }
+    // Roadmap 2.8: the chosen team sits next to car/track; unlike those two
+    // it never gates the session rows (no team = legacy identity).
+    void setTeamName(const std::string& name) {
+        m_teamName = name;
+        m_menuDirty = true;
+        if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
+    }
     void setProfileField(const std::string& fieldName, const std::string& value);
     void setNationalityFromList(int index);
 
@@ -114,6 +122,7 @@ public:
     //     -> results) ------------------------------------------------------
     void openCarSelect();
     void openTrackSelect();
+    void openTeamSelect(); // roadmap 2.8: team.ini roster picker
     void showResults(std::vector<ResultsRow> rows);
 
     // Roadmap 2.5 (Sprint 8 / P1.8): GARAGE -> PIT STRATEGY screen — fuel
@@ -145,6 +154,13 @@ public:
     // content/tracks (ContentLibrary.h) and report the chosen folder here.
     std::function<void(const std::string&)> onCarChosen;
     std::function<void(const std::string&)> onTrackChosen;
+    // Roadmap 2.8: the TEAM row reports the chosen team folder (holding
+    // team.ini); SimulationLoop::loadTeam applies it at session start.
+    std::function<void(const std::string&)> onTeamChosen;
+    // Roadmap 2.9: GARAGE upgrade rows — labels come from the loop's package
+    // list, cycling a row reports its index back (select next level + apply).
+    std::function<std::vector<std::string>()> upgradeRowLabels;
+    std::function<void(int)> onUpgradeRowCycled;
     std::function<void()> onShowResultsRequested;
     std::function<void(const std::string&)> onOpenSettingsPanelRequested;
     // Roadmap 3.1 - network actions from the MULTI PLAYER section.
@@ -171,6 +187,7 @@ private:
     void buildControlsMenu();
     void buildCarSelectMenu();
     void buildTrackSelectMenu();
+    void buildTeamSelectMenu();
     void buildResultsMenu();
     void buildDevModeConfirm();
     void buildQuitConfirm();
@@ -189,6 +206,7 @@ private:
     float m_transitionProgress = 1.0f;
     std::string m_trackName;
     std::string m_carName;
+    std::string m_teamName; // roadmap 2.8
 
     DriverProfile m_profile;
     std::vector<MenuItem> m_items;

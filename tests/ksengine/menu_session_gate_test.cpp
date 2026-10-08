@@ -18,9 +18,9 @@ using ks::sim::MenuItem;
 using ks::sim::MenuState;
 
 namespace {
-// Row order built by buildSingleplayerMenu().
-constexpr int kCar = 0, kTrack = 1, kPractice = 3, kQuickRace = 4,
-              kTimeAttack = 5, kResults = 6;
+// Row order built by buildSingleplayerMenu() (TEAM added by roadmap 2.8).
+constexpr int kCar = 0, kTrack = 1, kTeam = 2, kPractice = 4, kQuickRace = 5,
+              kTimeAttack = 6, kResults = 7;
 }
 
 int main() {
@@ -37,7 +37,8 @@ int main() {
     menu.onStartDrivingRequested = [&](GameSessionMode m) { picked = m; ++calls; };
 
     // Nothing selected: the three session rows are disabled and the hint
-    // names both missing pieces.
+    // names both missing pieces. The TEAM row never gates anything — no
+    // team keeps the legacy identity (roadmap 2.8).
     {
         const std::vector<MenuItem> items = menu.items();
         KS_CHECK(items.size() > kResults);
@@ -46,6 +47,8 @@ int main() {
         KS_CHECK(!items[kTimeAttack].enabled);
         KS_CHECK(items[kResults].enabled); // results never gated
         KS_CHECK(items[kPractice].description == "Select a car and a track first");
+        KS_CHECK(items[kTeam].enabled);
+        KS_CHECK(items[kTeam].description == "Select a team (optional)");
     }
 
     // ENTER on a gated row must do nothing (no callback, menu stays open).
@@ -54,9 +57,9 @@ int main() {
     KS_CHECK(calls == 0);
     KS_CHECK(menu.isVisible());
 
-    // Keyboard navigation skips gated rows: from TRACK, DOWN lands on
+    // Keyboard navigation skips gated rows: from TEAM, DOWN lands on
     // RESULTS, not PRACTICE.
-    menu.setSelectedIndex(kTrack);
+    menu.setSelectedIndex(kTeam);
     KS_CHECK(menu.handleKeyPress(0x28)); // DOWN
     KS_CHECK(menu.selectedIndex() == kResults);
 
@@ -68,8 +71,10 @@ int main() {
         KS_CHECK(items[kPractice].description == "Select a car first");
     }
 
-    // Car only (track still set) -> ready: original descriptions back.
+    // Car only (track still set) -> ready: original descriptions back. The
+    // team name surfaces on its row when one is loaded.
     menu.setCarName("gt3");
+    menu.setTeamName("ksim_racing");
     {
         const std::vector<MenuItem> items = menu.items();
         KS_CHECK(items[kPractice].enabled);
@@ -80,6 +85,7 @@ int main() {
         KS_CHECK(items[kTimeAttack].description == "Clean laps against the clock");
         KS_CHECK(items[kCar].description == "gt3"); // selection surfaced
         KS_CHECK(items[kTrack].description == "monza");
+        KS_CHECK(items[kTeam].description == "ksim_racing");
     }
 
     // Each row reports its own mode and closes the menu.

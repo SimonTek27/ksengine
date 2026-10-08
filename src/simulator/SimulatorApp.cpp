@@ -535,6 +535,19 @@ static void initSimulation() {
         if (!g_simulation->loadCar(car))
             printf("[INIT] KS_CAR load failed: %s\n", car);
     }
+    // KS_TRACK=<dir>: pick a track before the first frame (same path SELECT
+    // TRACK uses; a folder without a bake keeps the current scene, and the
+    // ai/fast_lane.ai spline inside it feeds the grid).
+    if (const char* track = std::getenv("KS_TRACK"); track && track[0]) {
+        if (!g_simulation->loadTrackFolder(track))
+            printf("[INIT] KS_TRACK load failed: %s\n", track);
+    }
+    // KS_TEAM=<dir>: load a team roster (team.ini) so drivers, race numbers,
+    // liveries, garage boxes and grid slots come from it (roadmap 2.8).
+    if (const char* team = std::getenv("KS_TEAM"); team && team[0]) {
+        if (!g_simulation->loadTeam(team))
+            printf("[INIT] KS_TEAM load failed: %s\n", team);
+    }
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();
     uiMenu->setVisible(true);
@@ -561,6 +574,18 @@ static void initSimulation() {
         else
             printf("Car load failed: %s\n", dir.c_str());
     };
+    // Roadmap 2.8: TEAM row -> load the roster (applies immediately; the next
+    // beginRaceSession builds the field from it).
+    uiMenu->onTeamChosen = [](const std::string& dir) {
+        if (g_simulation->loadTeam(dir))
+            printf("Team loaded: %s\n", dir.c_str());
+        else
+            printf("Team load failed: %s\n", dir.c_str());
+    };
+    // Roadmap 2.9: GARAGE lists the car's upgrade packages; cycling a row
+    // selects the next level and re-applies physics/nodes/livery/sound.
+    uiMenu->upgradeRowLabels = []() { return g_simulation->upgradeRowLabels(); };
+    uiMenu->onUpgradeRowCycled = [](int row) { g_simulation->cycleUpgradeRow(row); };
     uiMenu->onToggleFullscreenRequested = []() {
         SendMessageW(g_hWnd, WM_KEYDOWN, VK_F11, 0);
     };
@@ -701,7 +726,16 @@ static void initSimulation() {
     } else if (const char* autostart = std::getenv("KS_AUTOSTART");
         autostart && autostart[0] == '1') {
         printf("[INIT] KS_AUTOSTART=1 -> starting drive session, menu suppressed\n");
-        g_simulation->start();
+        // KS_SESSION=<mode> picks the session type (race = grid placement,
+        // roadmap 2.8 evidence); without it bare start() keeps the practice
+        // default exactly like before.
+        if (const char* sess = std::getenv("KS_SESSION"); sess && sess[0]) {
+            const ks::sim::GameSessionMode mode = ks::sim::modeFromMenuEntry(sess);
+            printf("[INIT] KS_SESSION=%s -> %s\n", sess, ks::sim::sessionModeName(mode));
+            g_simulation->startSession(mode); // startSession() calls start()
+        } else {
+            g_simulation->start();
+        }
         g_simulation->ui().menu().setVisible(false);
     }
 }

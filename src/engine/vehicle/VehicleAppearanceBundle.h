@@ -71,5 +71,18 @@ inline VehicleAppearanceBundle resolveAppearance(
     return out;
 }
 
+/**
+ * Node visibility for the resolved appearance (roadmap 2.9): a node listed
+ * as disabled — race [Nodes] name=0 or upgrade DisableNode — is hidden;
+ * everything else renders. The enable list never hides anything: the bake
+ * manifest already carries every node, and treating `active` as a whitelist
+ * (what RaceComponentConfig::isActive does once it is non-empty) would blank
+ * the whole car whenever an ini lists only the wings.
+ */
+inline bool appearanceNodeVisible(const VehicleAppearanceBundle& app, const std::string& name)
+{
+    return app.components.inactive.count(name) == 0;
+}
+
 } // namespace vehicle
 } // namespace ks

@@ -6,6 +6,7 @@
 #include "SimulatorAudio.h"
 #include "engine/vehicle/RaceComponentConfig.h"
 #include <string>
+#include <unordered_map>
 #include <cstdio>
 
 namespace ks {
@@ -36,6 +37,10 @@ inline bool applyVehicleSoundPack(SimulatorAudio& audio,
         std::fprintf(stderr, "VehicleAudioHook: empty sound pack, skip\n");
         return false;
     }
+    // SoundPackRef carries sample overrides in an ordered map, the audio
+    // bank API speaks unordered_map: convert once (the refs are tiny).
+    const std::unordered_map<std::string, std::string> overrides(pack.sampleOverrides.begin(),
+                                                                 pack.sampleOverrides.end());
     return audio.applySoundPack(
         resolveAudioPath(carDirectory, pack.bankPath),
         resolveAudioPath(carDirectory, pack.soundsIni),
@@ -43,7 +48,7 @@ inline bool applyVehicleSoundPack(SimulatorAudio& audio,
         pack.engineGain,
         pack.exteriorGain,
         pack.turboGain,
-        pack.sampleOverrides,
+        overrides,
         carDirectory);
 }
 

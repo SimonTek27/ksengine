@@ -500,6 +500,7 @@ add_executable(SimulatorApp
 	"src/simulator/TextureRuntime.cpp"
 	"src/simulator/SimulationLoop.cpp"
 	"src/simulator/SimulatorAudio.cpp"
+	"src/simulator/SimulatorAudio_SoundPack.cpp"
 	"src/simulator/AIController.cpp"
 	"src/simulator/RaceSessionManager.cpp"
 	"src/simulator/DashboardOverlay.cpp"
