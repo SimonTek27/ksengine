@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file TrackSurface.h
@@ -26,7 +27,12 @@ struct SurfaceSample {
     float rubber = 0.0f;
 };
 
-class TrackSurface {
+// Exported: instance() holds a function-local static, so without
+// KSENGINE_API the DLL and every consumer (tests, ksim.exe) would each get
+// their own singleton — the test's setWetness/configure() would then land
+// on a copy the simulator never reads (wet_physics / determinism failures
+// in the shared build).
+class KSENGINE_API TrackSurface {
 public:
     static TrackSurface& instance() {
         static TrackSurface s;
