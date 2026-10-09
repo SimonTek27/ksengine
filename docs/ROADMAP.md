@@ -32,7 +32,7 @@ confondere le basi tecniche già presenti con una vertical slice verificata.
 | Multiplayer LAN e lobby | ✅ | `ksnet`, sync 20 Hz, danni/setup, auth applicativa, discovery e lobby opzionale. Il secure-connect a chiave privata resta opzionale. |
 | Vertical slice menu, binding e telemetria | ✅ | Selezione auto/pista, practice/quick race/time attack, risultati, rebind persistente, HUD danni e Control API. |
 | Pioggia, aquaplaning e audio 3D | ✅ | Wet physics, particelle rain/spray opt-in, doppler/distanza e rolling per superficie. |
-| Rendering delle mesh | ✅ | Bake KN5 → NMS2, finestre LOD/culling, texture DDS e materiali `materials.txt` raggiungono il frame (set 1) e sono verificati su contenuto di riferimento (2.2–2.5). Sprint S1: mip runtime + anisotropia sul sampler albedo. Sprint S2 (brief P1): celle roughness/metalness dual-typed in `materials.txt` (numero O mappa), mappe PBR campionate nel GBuffer (RT0.a = metalness) e F0 metallico in `deferred_lighting.frag`, differenziale verificato su contenuto di riferimento. Restano IBL e clear-coat come infrastruttura, non come deliverable. |
+| Rendering delle mesh | ✅ | Bake KN5 → NMS2, finestre LOD/culling, texture DDS e materiali `materials.txt` raggiungono il frame (set 1) e sono verificati su contenuto di riferimento (2.2–2.5). Sprint S1: mip runtime + anisotropia sul sampler albedo. Sprint S2 (brief P1): celle roughness/metalness dual-typed in `materials.txt` (numero O mappa), mappe PBR campionate nel GBuffer (RT0.a = metalness) e F0 metallico in `deferred_lighting.frag`, differenziale verificato su contenuto di riferimento. Sprint S3 (brief P2): IBL split-sum generata a CPU a runtime (`IblGenerator.h`: cielo equirettangolare procedurale senza disco solare, prefilter a 5 mip, irradiance E/π, BRDF LUT Karis in RGBA16F), branch ambient riscritto in `native_forward.frag` e `deferred_lighting.frag` con `iblParams` in coda di `FrameDataUBO` e fallback flat ×0.25 fail-open, A/B con sole spento su contenuto di riferimento. Resta il clear-coat come infrastruttura, non come deliverable (S4). |
 | UX racing completa | 🟡 | Menu, garage, risultati e piano pit esistono; va completato il flusso di gara con team, servizi box e contenuto selezionato. |
 | Contenuto e presentazione | 🟡 | Parser per team/upgrades/livree/sound pack e cache texture esistono, ma non sono ancora risolti e applicati in una sessione di gara end-to-end. |
 
@@ -181,7 +181,7 @@ con contenuto AC reale (gate di uscita sopra), non riscritture.
 | Riscrivere fisica, sessione o `ksnet` | Fondazioni già funzionali. |
 | Aggiungere moto/barca/aereo | Fuori ambito auto. |
 | Ranked globale prima del loop offline/LAN | Serve infrastruttura e anti-cheat. |
-| Promuovere IBL/clear-coat come “finiti” | Restano infrastruttura. |
+| Promuovere il clear-coat come “finito” | Resta infrastruttura (S4/P3); l'IBL è invece consegnato dallo sprint S3 con A/B su contenuto di riferimento. |
 | Riattivare l'editor Qt per compensare un gap runtime | La slice deve restare Qt-free. |
 
 ---

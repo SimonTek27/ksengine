@@ -847,6 +847,82 @@ int main()
     }
     renderer.setDeferred(false);
 
+    // (e3) Brief P2 — IBL A/B. Sun intensity 0 makes the frame ambient-only,
+    //     so the two captures differ by exactly the ambient model: the legacy
+    //     flat albedo * 0.25 is neutral grey, the split-sum IBL picks up the
+    //     procedural sky's horizon (blue-dominant on the -z-facing plain
+    //     quad, whose reflection vector R = (0,0,-1) sits on the horizon
+    //     band). The metal quad then proves the specular lobe: with no sun
+    //     and no diffuse, its only light source is the prefiltered sky, so
+    //     IBL on must be clearly brighter than the flat 0.25 fallback.
+    //     Runs both paths (forward + deferred) — the two shaders carry
+    //     independent IBL branches.
+    {
+        DirectionalLight sunAmb = sunRef;
+        sunAmb.intensity = 0.0f; // ambient only: the A/B isolates IBL
+        renderer.setSun(sunAmb);
+        aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+
+        auto iblPair = [&](const char* mesh, RefShot& off, RefShot& on) {
+            renderer.setIblEnabled(false);
+            capture(mesh, mat4(), off);
+            renderer.setIblEnabled(true);
+            capture(mesh, mat4(), on);
+        };
+
+        // Forward path: plain white quad + metal quad.
+        RefShot fOff, fOn, fmOff, fmOn;
+        iblPair("plain", fOff, fOn);
+        iblPair("metal", fmOff, fmOn);
+        KS_CHECK(fOff.ok && fOn.ok && fmOff.ok && fmOn.ok);
+        if (fOff.ok && fOn.ok) {
+            const unsigned char* o = centrePx(fOff);
+            const unsigned char* n = centrePx(fOn);
+            const int rOff = int(o[2]), bOff = int(o[0]); // BGRA
+            const int rOn = int(n[2]), bOn = int(n[0]);
+            std::printf("test_renderer: IBL forward plain off RB=%d,%d on RB=%d,%d\n",
+                        rOff, bOff, rOn, bOn);
+            KS_CHECK(!isClearPixel(o) && !isClearPixel(n)); // both on the quad
+            KS_CHECK(std::abs(bOff - rOff) <= 8);  // flat ambient = neutral grey
+            KS_CHECK(bOn > rOn + 8);               // sky horizon: blue dominant
+        }
+        if (fmOff.ok && fmOn.ok) {
+            const unsigned char* o = pxAt(fmOff, 0.40f, 0.35f);
+            const unsigned char* n = pxAt(fmOn, 0.40f, 0.35f);
+            const int sOff = int(o[0]) + int(o[1]) + int(o[2]);
+            const int sOn = int(n[0]) + int(n[1]) + int(n[2]);
+            std::printf("test_renderer: IBL forward metal sum off=%d on=%d\n", sOff, sOn);
+            KS_CHECK(!isClearPixel(o) && !isClearPixel(n));
+            // Observed +45 (off 82 -> on 127): the prefiltered horizon sky is
+            // clearly above the flat 0.25 fallback without demanding double.
+            KS_CHECK(sOn > sOff + 30); // prefiltered sky >> flat 0.25 ambient
+        }
+
+        // Deferred path: same plain-quad pin through the GBuffer + the
+        // deferred lighting shader's own IBL branch.
+        renderer.setDeferred(true);
+        RefShot dOff, dOn;
+        iblPair("plain", dOff, dOn);
+        KS_CHECK(dOff.ok && dOn.ok);
+        if (dOff.ok && dOn.ok) {
+            const unsigned char* o = centrePx(dOff);
+            const unsigned char* n = centrePx(dOn);
+            const int rOff = int(o[2]), bOff = int(o[0]);
+            const int rOn = int(n[2]), bOn = int(n[0]);
+            std::printf("test_renderer: IBL deferred plain off RB=%d,%d on RB=%d,%d\n",
+                        rOff, bOff, rOn, bOn);
+            KS_CHECK(!isClearPixel(o) && !isClearPixel(n));
+            KS_CHECK(std::abs(bOff - rOff) <= 8);
+            // Deferred goes through tonemap.frag's sRGB OETF, so the linear
+            // blue-vs-red skew is gamma-compressed (observed 224 vs 231):
+            // +4 still discriminates from the neutral off capture (diff 0).
+            KS_CHECK(bOn > rOn + 4);
+        }
+        renderer.setDeferred(false);
+        renderer.setIblEnabled(false);
+        renderer.setSun(sunRef); // restore the lit sun for (f)
+    }
+
     // (f) Reference car bake: the loadMeshFromFile() call shape
     //     SimulationLoop::ensureCarVisual() now makes (materials.txt row +
     //     textureDir) — green paint on the -z face, authored [0..1000] window.

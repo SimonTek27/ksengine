@@ -24,9 +24,20 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 aoParams;          // x = radius, y = bias, z = strength, w = 1 when enabled
     vec4 ssrParams;         // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled
     vec4 motionBlurParams;  // x = strength, y = sample count, z = max length, w = 1 when enabled
+    vec4 iblParams;         // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
+// Brief P2: split-sum IBL samplers (irradiance / prefilter chain / BRDF LUT),
+// the same three the deferred lighting pass binds at its own set 0 5..7.
+layout(set = 0, binding = 2) uniform sampler2D iblIrradiance;
+layout(set = 0, binding = 3) uniform sampler2D iblPrefiltered;
+layout(set = 0, binding = 4) uniform sampler2D iblBrdfLut;
+
+vec2 equirectUv(vec3 d) {
+    return vec2(atan(d.z, d.x) * 0.15915494 + 0.5,
+                acos(clamp(d.y, -1.0, 1.0)) * 0.31830989);
+}
 
 // Descriptor set 1 (Roadmap 2.3) — per-mesh material, bound for every
 // instance inside NativeRenderer::recordDrawList(). Empty texture paths are
@@ -114,7 +125,25 @@ void main() {
 
     float shadow = sampleShadow(fragWorldPos, cascadeIndex);
 
-    vec3 ambient = albedo * 0.25;
+    // Ambient: split-sum IBL when enabled (brief P2), legacy flat albedo *
+    // 0.25 otherwise. Diffuse lobe from the irradiance map, specular from
+    // the prefiltered sky weighted by the BRDF LUT — that is what puts the
+    // sky/horizon on a glossy car body in the forward path too.
+    vec3 ambient;
+    if (frame.iblParams.x > 0.5) {
+        vec3 V = normalize(frame.cameraPos.xyz - fragWorldPos);
+        float NdotV = max(dot(N, V), 1e-4);
+        vec3 F0 = mix(vec3(0.04), albedo, material.metalness);
+        vec2 brdf = texture(iblBrdfLut, vec2(NdotV, material.roughness)).rg;
+        vec3 R = reflect(-V, N);
+        vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
+                                  material.roughness * frame.iblParams.y).rgb;
+        vec3 diffIbl = texture(iblIrradiance, equirectUv(N)).rgb;
+        ambient = diffIbl * albedo * (1.0 - material.metalness) +
+                  specIbl * (F0 * brdf.x + brdf.y);
+    } else {
+        ambient = albedo * 0.25;
+    }
     vec3 diffuse = albedo * frame.sunColor.rgb * frame.sunColor.a * NdotL * shadow;
     vec3 lit = ambient + diffuse;
 

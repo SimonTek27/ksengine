@@ -2,8 +2,12 @@
 #include "ShadowSystem.h"
 #include "TextureRuntime.h"
 // Roadmap 2.3: materials.txt reader (header-only) — pairs baked meshes with
-// their PBR properties and texture references in loadMeshesFromManifest().
+// their P1 roughness/metalness maps and PBR properties in
+// loadMeshesFromManifest().
 #include "MaterialCache.h"
+// Brief P2 (S3): CPU precomputation of the IBL maps (procedural sky,
+// irradiance, GGX prefilter chain, BRDF LUT).
+#include "IblGenerator.h"
 #include "ui/UiGpuPass.h"
 #include "ui/UiRenderer.h"
 #include "engine/Math/OcclusionTest.h"
@@ -596,9 +600,18 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     dynState.dynamicStateCount = 2;
     dynState.pDynamicStates = dynStates;
 
+    // ---- IBL maps (brief P2): generated + uploaded before the first
+    // descriptor write, so set 0 can bind them unconditionally. ----
+    if (!createIblResources()) {
+        fprintf(stderr, "[NativeRenderer] ibl resources failed; ambient stays flat\n");
+        // Non-fatal: the 1x1 fallbacks (or nothing at all) still leave the
+        // descriptor sets complete and iblParams.x = 0.
+    }
+
     // Descriptor set 0: frame-global UBO (light + cascade matrices) + shadow
-    // cascade array sampler — the persistent layout/pool/set/UBO/dummy
-    // texture are created here and written each frame in endFrame().
+    // cascade array sampler + the three IBL samplers (brief P2) — the
+    // persistent layout/pool/set/UBO/dummy texture are created here and
+    // written each frame in endFrame().
     if (!createFrameDescriptorResources()) {
         fprintf(stderr, "[NativeRenderer] failed to create frame descriptor resources\n");
         return false;
@@ -672,8 +685,9 @@ struct FrameDataUBO {
     float aoParams[4];        // x = radius, y = bias, z = strength, w = 1 when enabled (KS_SSAO)
     float ssrParams[4];       // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled (KS_SSR)
     float motionBlurParams[4]; // x = strength, y = sample count, z = max length, w = 1 when enabled (KS_MOTIONBLUR)
+    float iblParams[4];       // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD (mips-1)
 };
-static_assert(sizeof(FrameDataUBO) == 480, "FrameDataUBO is read as a std140 uniform block");
+static_assert(sizeof(FrameDataUBO) == 496, "FrameDataUBO is read as a std140 uniform block");
 
 // Per-mesh material block of descriptor set 1 (set 1 binding 2), read as
 // `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs four
@@ -923,11 +937,237 @@ bool NativeRenderer::createDummyShadowTexture() {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Image-Based Lighting (brief P2 / S3).
+//
+// One RGBA16F texture from CPU-generated pixels: optimal-tiling image, a
+// host-visible staging buffer, one one-shot command buffer that copies every
+// mip (packed mip-major, see ibl::chainMipOffset) and leaves the image in
+// SHADER_READ_ONLY. Same upload shape as createDummyShadowTexture; called
+// once from loadPipelines, before any frame runs, so the command buffer and
+// queue are idle.
+// ---------------------------------------------------------------------------
+bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t mipLevels,
+                                      const std::vector<uint16_t>& rgba16f,
+                                      VkImage& image, VkDeviceMemory& memory, VkImageView& view) {
+    VkImageCreateInfo ci{};
+    ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ci.imageType = VK_IMAGE_TYPE_2D;
+    ci.extent = {width, height, 1};
+    ci.mipLevels = mipLevels;
+    ci.arrayLayers = 1;
+    ci.format = VK_FORMAT_R16G16B16A16_SFLOAT; // linear filtering mandatory
+    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkResult res = vkCreateImage(m_device, &ci, nullptr, &image);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: vkCreateImage %ux%u failed (%d)\n",
+                width, height, int(res));
+        return false;
+    }
+
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(m_device, image, &mr);
+    uint32_t memType = 0;
+    if (!findMemoryTypeStrict(m_physicalDevice, mr.memoryTypeBits,
+                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, memType) &&
+        !findMemoryTypeStrict(m_physicalDevice, mr.memoryTypeBits,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, memType)) {
+        fprintf(stderr, "[NativeRenderer] ibl: no suitable memory type\n");
+        return false;
+    }
+    VkMemoryAllocateInfo mai{};
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = memType;
+    if ((res = vkAllocateMemory(m_device, &mai, nullptr, &memory)) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: vkAllocateMemory failed (%d)\n", int(res));
+        return false;
+    }
+    if ((res = vkBindImageMemory(m_device, image, memory, 0)) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: vkBindImageMemory failed (%d)\n", int(res));
+        return false;
+    }
+
+    const VkDeviceSize bytes =
+        static_cast<VkDeviceSize>(rgba16f.size()) * sizeof(uint16_t);
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory stagingMem = VK_NULL_HANDLE;
+    if (!createBuffer(m_physicalDevice, m_device, bytes,
+                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      staging, stagingMem)) {
+        fprintf(stderr, "[NativeRenderer] ibl: staging buffer failed\n");
+        return false;
+    }
+    void* mapped = nullptr;
+    vkMapMemory(m_device, stagingMem, 0, bytes, 0, &mapped);
+    if (mapped) {
+        std::memcpy(mapped, rgba16f.data(), static_cast<size_t>(bytes));
+        vkUnmapMemory(m_device, stagingMem);
+    }
+
+    VkCommandBufferBeginInfo cbBegin{};
+    cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkResetCommandBuffer(m_commandBuffer, 0);
+    vkBeginCommandBuffer(m_commandBuffer, &cbBegin);
+
+    VkImageMemoryBarrier toDst{};
+    toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toDst.srcAccessMask = 0;
+    toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toDst.image = image;
+    toDst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1};
+    vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
+
+    // One copy per mip; offsets stay 8-byte aligned because every RGBA16F
+    // mip row is a whole number of texels (VUID vkCmdCopyBufferToImage-
+    // bufferOffset-07737).
+    VkDeviceSize offset = 0;
+    for (uint32_t mip = 0; mip < mipLevels; ++mip) {
+        const uint32_t mw = std::max(width >> mip, 1u);
+        const uint32_t mh = std::max(height >> mip, 1u);
+        VkBufferImageCopy region{};
+        region.bufferOffset = offset;
+        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 1};
+        region.imageExtent = {mw, mh, 1};
+        vkCmdCopyBufferToImage(m_commandBuffer, staging, image,
+                               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        offset += static_cast<VkDeviceSize>(mw) * mh * 4 * sizeof(uint16_t);
+    }
+
+    VkImageMemoryBarrier toRead = toDst;
+    toRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    toRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toRead);
+
+    vkEndCommandBuffer(m_commandBuffer);
+    VkSubmitInfo submit{};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &m_commandBuffer;
+    res = vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+    if (res == VK_SUCCESS) res = vkQueueWaitIdle(m_graphicsQueue);
+    vkDestroyBuffer(m_device, staging, nullptr);
+    vkFreeMemory(m_device, stagingMem, nullptr);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: staging upload failed (%d)\n", int(res));
+        return false;
+    }
+
+    VkImageViewCreateInfo vCi{};
+    vCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vCi.image = image;
+    vCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vCi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    vCi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1};
+    if ((res = vkCreateImageView(m_device, &vCi, nullptr, &view)) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: vkCreateImageView failed (%d)\n", int(res));
+        return false;
+    }
+    return true;
+}
+
+bool NativeRenderer::createIblResources() {
+    // ---- CPU precomputation (deterministic, a few ms). ----
+    const ibl::Image env = ibl::generateSky();
+    const ibl::Image prefilter = ibl::generatePrefilteredEnv(env);
+    const ibl::Image irradiance = ibl::generateIrradiance(env);
+    const ibl::Image brdfLut = ibl::generateBrdfLut();
+
+    // ---- Upload. Any failure falls back to flat 1x1 maps: the descriptors
+    // stay complete (both shaders statically use every binding) and
+    // iblParams.x = 0 keeps the shaders on the legacy ambient. ----
+    bool ok = createIblTexture(ibl::kSkyWidth, ibl::kSkyHeight, ibl::kPrefilterMips,
+                               ibl::toRgba16F(prefilter),
+                               m_iblImages[0], m_iblMemory[0], m_iblViews[0]) &&
+              createIblTexture(ibl::kIrradianceWidth, ibl::kIrradianceHeight, 1,
+                               ibl::toRgba16F(irradiance),
+                               m_iblImages[1], m_iblMemory[1], m_iblViews[1]) &&
+              createIblTexture(ibl::kBrdfLutSize, ibl::kBrdfLutSize, 1,
+                               ibl::toRgba16F(brdfLut),
+                               m_iblImages[2], m_iblMemory[2], m_iblViews[2]);
+    if (!ok) {
+        fprintf(stderr, "[NativeRenderer] ibl: full maps failed, falling back to flat 1x1\n");
+        destroyIblResources();
+        // Flattened legacy ambient (0.25) in the irradiance slot and zeros
+        // elsewhere; never sampled, because iblParams.x stays 0.
+        std::vector<uint16_t> flat(4, ibl::floatToHalf(0.25f));
+        flat[3] = ibl::floatToHalf(1.0f);
+        std::vector<uint16_t> zero(4, 0);
+        zero[3] = ibl::floatToHalf(1.0f);
+        createIblTexture(1, 1, 1, flat, m_iblImages[0], m_iblMemory[0], m_iblViews[0]);
+        createIblTexture(1, 1, 1, flat, m_iblImages[1], m_iblMemory[1], m_iblViews[1]);
+        createIblTexture(1, 1, 1, zero, m_iblImages[2], m_iblMemory[2], m_iblViews[2]);
+        m_iblReady = false;
+    } else {
+        m_iblReady = true;
+        std::printf("[NativeRenderer] ibl: %dx%d prefilter x%u + %dx%d irradiance + "
+                    "%dx%d brdf lut uploaded\n",
+                    ibl::kSkyWidth, ibl::kSkyHeight, ibl::kPrefilterMips,
+                    ibl::kIrradianceWidth, ibl::kIrradianceHeight,
+                    ibl::kBrdfLutSize, ibl::kBrdfLutSize);
+    }
+
+    // ---- Samplers: equirect addressing (wrap U, clamp V, mip chain) for
+    // sky + irradiance; plain clamp for the BRDF LUT. ----
+    VkSamplerCreateInfo sCi{};
+    sCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sCi.magFilter = VK_FILTER_LINEAR;
+    sCi.minFilter = VK_FILTER_LINEAR;
+    sCi.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sCi.minLod = 0.0f;
+    sCi.maxLod = static_cast<float>(ibl::kPrefilterMips - 1);
+    VkResult res = vkCreateSampler(m_device, &sCi, nullptr, &m_iblEnvSampler);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: env sampler failed (%d)\n", int(res));
+        return false;
+    }
+    sCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sCi.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sCi.maxLod = 0.0f;
+    res = vkCreateSampler(m_device, &sCi, nullptr, &m_iblLutSampler);
+    if (res != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: lut sampler failed (%d)\n", int(res));
+        return false;
+    }
+    return true;
+}
+
+void NativeRenderer::destroyIblResources() {
+    if (!m_device) return;
+    for (int i = 0; i < 3; ++i) {
+        if (m_iblViews[i]) { vkDestroyImageView(m_device, m_iblViews[i], nullptr); m_iblViews[i] = VK_NULL_HANDLE; }
+        if (m_iblImages[i]) { vkDestroyImage(m_device, m_iblImages[i], nullptr); m_iblImages[i] = VK_NULL_HANDLE; }
+        if (m_iblMemory[i]) { vkFreeMemory(m_device, m_iblMemory[i], nullptr); m_iblMemory[i] = VK_NULL_HANDLE; }
+    }
+    if (m_iblEnvSampler) { vkDestroySampler(m_device, m_iblEnvSampler, nullptr); m_iblEnvSampler = VK_NULL_HANDLE; }
+    if (m_iblLutSampler) { vkDestroySampler(m_device, m_iblLutSampler, nullptr); m_iblLutSampler = VK_NULL_HANDLE; }
+    m_iblReady = false;
+}
+
 bool NativeRenderer::createFrameDescriptorResources() {
     // Every failure below reports *which* step broke: "it failed somewhere"
     // is unactionable, and this path failing means the whole forward pipeline
     // never gets built (loadPipelines() returns before creating it).
-    VkDescriptorSetLayoutBinding bindings[2]{};
+    // Bindings 2..4 (brief P2): irradiance, GGX prefilter chain, BRDF LUT.
+    // Appended after the shadow array, never reordered (old-cache rule).
+    VkDescriptorSetLayoutBinding bindings[5]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
@@ -936,10 +1176,16 @@ bool NativeRenderer::createFrameDescriptorResources() {
     bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (uint32_t b = 2; b < 5; ++b) {
+        bindings[b].binding = b;
+        bindings[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        bindings[b].descriptorCount = 1;
+        bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
 
     VkDescriptorSetLayoutCreateInfo dslCi{};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 2;
+    dslCi.bindingCount = 5;
     dslCi.pBindings = bindings;
     VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_frameSetLayout);
     if (res != VK_SUCCESS) {
@@ -951,7 +1197,7 @@ bool NativeRenderer::createFrameDescriptorResources() {
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = 1;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = 1;
+    poolSizes[1].descriptorCount = 4; // shadow array + 3 IBL samplers
 
     VkDescriptorPoolCreateInfo poolCi{};
     poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1012,21 +1258,36 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
     // SHADER_READ_ONLY_OPTIMAL, so one layout covers either source.
     imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[2]{};
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = m_frameSet;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
+    // Bindings 2..4 (brief P2): irradiance, prefilter chain, BRDF LUT.
+    // Written unconditionally — createIblResources() guarantees valid views
+    // (real maps or 1x1 fallbacks) before the first call; the dummy shadow
+    // view covers the pathological "even the fallback failed" case so no
+    // descriptor is ever VK_NULL_HANDLE at bind time.
+    VkDescriptorImageInfo iblInfo[3]{};
+    for (int i = 0; i < 3; ++i) {
+        iblInfo[i].sampler = m_iblViews[i]
+                                 ? ((i == 2) ? m_iblLutSampler : m_iblEnvSampler)
+                                 : m_dummyShadowSampler;
+        iblInfo[i].imageView = m_iblViews[i] ? m_iblViews[i] : m_dummyShadowView;
+        iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    VkWriteDescriptorSet writes[5]{};
+    for (int i = 0; i < 5; ++i) {
+        writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[i].dstSet = m_frameSet;
+        writes[i].dstBinding = uint32_t(i);
+        writes[i].descriptorCount = 1;
+        writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    }
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].pBufferInfo = &bufInfo;
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = m_frameSet;
-    writes[1].dstBinding = 1;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[1].pImageInfo = &imgInfo;
+    writes[2].pImageInfo = &iblInfo[0];
+    writes[3].pImageInfo = &iblInfo[1];
+    writes[4].pImageInfo = &iblInfo[2];
 
-    vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,6 +2029,11 @@ void NativeRenderer::endFrame() {
     frameData.motionBlurParams[1] = static_cast<float>(m_mbSamples);
     frameData.motionBlurParams[2] = m_mbMaxLength;
     frameData.motionBlurParams[3] = (m_motionBlur && m_deferred) ? 1.0f : 0.0f;
+    // IBL (brief P2): the branch flag gates the split-sum block in both
+    // lighting shaders; when it is 0 they reproduce the exact legacy
+    // `albedo * 0.25` ambient, so a missing/failed env costs nothing.
+    frameData.iblParams[0] = (m_iblWanted && m_iblReady) ? 1.0f : 0.0f;
+    frameData.iblParams[1] = static_cast<float>(ibl::kPrefilterMips - 1);
 
     // Either the real shadow cascade array or the 1x1 dummy (always-lit)
     // texture if no shadow map is attached/initialized yet.
@@ -2127,6 +2393,10 @@ void NativeRenderer::shutdown() {
 
     // Torn down first so no deferred pipeline outlives m_pipelineLayout.
     destroyDeferredResources();
+
+    // IBL maps (brief P2): device-lifetime, not swapchain-bound — after the
+    // deferred/forward descriptor sets that reference the views are gone.
+    destroyIblResources();
 
     for (auto& [name, mesh] : m_meshes) {
         if (mesh.vertexBuffer) vkDestroyBuffer(m_device, mesh.vertexBuffer, nullptr);
@@ -3484,23 +3754,24 @@ bool NativeRenderer::ensureDeferredResources() {
         }
     }
 
-    // ---- Lighting descriptors: FrameData UBO, shadow cascade array, and
-    // the three GBuffer targets. ----
+    // ---- Lighting descriptors: FrameData UBO, shadow cascade array, the
+    // three GBuffer targets, and the three IBL samplers (brief P2, bindings
+    // 5..7 — appended, never reordered). ----
     {
-        VkDescriptorSetLayoutBinding bindings[5]{};
+        VkDescriptorSetLayoutBinding bindings[8]{};
         bindings[0] = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
-        for (int i = 1; i < 5; ++i)
+        for (int i = 1; i < 8; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 5;
+        dslCi.bindingCount = 8;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_lightingSetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorPoolSize poolSizes[2]{};
         poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
-        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
+        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 7};
 
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -4206,8 +4477,19 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
         gInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    VkWriteDescriptorSet writes[5]{};
-    for (int i = 0; i < 5; ++i) {
+    // Bindings 5..7 (brief P2): same IBL views the forward set binds (with
+    // the same never-null guard).
+    VkDescriptorImageInfo iblInfo[3]{};
+    for (int i = 0; i < 3; ++i) {
+        iblInfo[i].sampler = m_iblViews[i]
+                                 ? ((i == 2) ? m_iblLutSampler : m_iblEnvSampler)
+                                 : shadowSampler;
+        iblInfo[i].imageView = m_iblViews[i] ? m_iblViews[i] : shadowView;
+        iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+
+    VkWriteDescriptorSet writes[8]{};
+    for (int i = 0; i < 8; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = m_lightingSet;
         writes[i].dstBinding = uint32_t(i);
@@ -4215,12 +4497,14 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
     }
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].pBufferInfo = &bufInfo;
-    for (int i = 1; i < 5; ++i) {
+    for (int i = 1; i < 8; ++i) {
         writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[i].pImageInfo = (i == 1) ? &shadowInfo : &gInfo[i - 2];
+        writes[i].pImageInfo = (i == 1) ? &shadowInfo
+                              : (i < 5) ? &gInfo[i - 2]
+                                        : &iblInfo[i - 5];
     }
 
-    vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 8, writes, 0, nullptr);
 }
 
 void NativeRenderer::writeResolveDescriptorSet() {

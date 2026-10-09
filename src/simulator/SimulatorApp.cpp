@@ -26,7 +26,9 @@
 #include <vector>
 
 static const char* AC_PATH = "F:/SteamLibrary/steamapps/common/assettocorsa";
-static const char* SHADER_DIR = "shaders";
+// Installed layout: SPIR-V lives in system/shaders next to ksim.exe
+// (cmake/KsInstallLayout.cmake).
+static const char* SHADER_DIR = "system/shaders";
 
 static HINSTANCE g_hInstance = nullptr;
 static HWND g_hWnd = nullptr;
@@ -461,6 +463,17 @@ static void initVulkanAndSimulation() {
             g_nativeRenderer->setDeferred(true);    // resolve pass only exists deferred
             printf("[INIT] Motion blur: on (strength %.2f)\n", static_cast<double>(strength));
         }
+    }
+
+    // Brief P2 — image-based lighting is on by default in the windowed app
+    // (the sky/horizon fill on paint and track); KS_IBL=0 opts out and the
+    // shaders fall back to the exact legacy flat ambient. Works on both the
+    // forward and deferred paths, so no setDeferred() here.
+    {
+        const char* ibl = std::getenv("KS_IBL");
+        const bool iblOn = !ibl || std::strcmp(ibl, "0") != 0;
+        g_nativeRenderer->setIblEnabled(iblOn);
+        if (!iblOn) printf("[INIT] IBL: off (KS_IBL=0)\n");
     }
 
     printf("[INIT] Creating Vulkan device...\n");

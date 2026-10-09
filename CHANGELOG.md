@@ -9,6 +9,28 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rendering AI brief — Sprint S3 (P2)** (`RENDERING_AI_BRIEF.md`):
+  IBL split-sum sul path Vulkan Qt-free, generata interamente a CPU a
+  runtime (`src/simulator/IblGenerator.h`, deterministica — sequenza
+  Hammersley, nessun RNG). All'upload della scena si produce un cielo
+  equirettangolare procedurale 128×64 RGBA16F **senza disco solare**
+  (orizzonte (0.62,0.68,0.80), zenito (0.22,0.36,0.66), suolo
+  (0.14,0.135,0.125)) e da esso derivano tre sole immagini: catena
+  prefilter a 5 mip (mip0 = ambiente speculare, roughness =
+  mip/(mips−1)), irradiance (memorizza E/π, quindi un cielo piatto L
+  riproduce l'ambient legacy ×0.25 esattamente) e BRDF LUT 128×128
+  (scale/offset di Karis), tutte `VK_FORMAT_R16G16B16A16_SFLOAT` per il
+  filtraggio lineare obbligatorio. `FrameDataUBO` cresce in coda di
+  `iblParams[4]` (solo append: x = flag attivo, y = maxLOD della
+  catena); i set 0 di forward (5 binding) e lighting (8 binding)
+  aggiungono irradiance/prefilter/LUT con viste dummy mai-nulle, e
+  `KS_IBL=0` disattiva tutto. In fallback (upload fallito o opt-out)
+  `iblParams.x=0` mantiene l'ambiente flat ×0.25: i vecchi bake e le
+  cache restano validi. Verifica: A/B con sole a intensità 0 su
+  contenuto di riferimento — quad plain grigio neutro → dominanza blu
+  dell'orizzonte su entrambi i path (forward + deferred), quad metal
+  più luminoso con il riflesso del cielo nel lobo speculare; 52/52
+  ctest, gate Qt-free 0/907
 - **Rendering AI brief — Sprint S2 (P1)** (`RENDERING_AI_BRIEF.md`):
   materiali PBR differenziati (vernice / pavimento opaco / metallo nudo
   sotto la stessa luce). `materials.txt` accetta ora celle roughness e

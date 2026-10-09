@@ -31,14 +31,28 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 fogParams;         // x = density, y = height falloff, z = start distance, w = max opacity
     vec4 aoParams;          // x = radius, y = bias, z = strength, w = 1 when enabled
     vec4 ssrParams;         // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled
+    vec4 motionBlurParams;  // declared to reach iblParams below (std140 offsets must be walked member by member)
+    vec4 iblParams;         // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
 layout(set = 0, binding = 2) uniform sampler2D gbufAlbedo;
 layout(set = 0, binding = 3) uniform sampler2D gbufNormal;
 layout(set = 0, binding = 4) uniform sampler2D gbufWorldPos;
+// Brief P2: split-sum IBL (Karis). Irradiance stores E/PI, so texture * albedo
+// replaces the legacy `albedo * 0.25` exactly when the sky is flat grey.
+layout(set = 0, binding = 5) uniform sampler2D iblIrradiance;
+layout(set = 0, binding = 6) uniform sampler2D iblPrefiltered; // mip chain: roughness * maxLOD
+layout(set = 0, binding = 7) uniform sampler2D iblBrdfLut;     // RG = scale/offset
 
 const float PI = 3.14159265;
+
+// Equirect mapping matching IblGenerator.h: u = azimuth, v = acos(y)/PI with
+// row 0 at the zenith. The env sampler wraps U and clamps V.
+vec2 equirectUv(vec3 d) {
+    return vec2(atan(d.z, d.x) * 0.15915494 + 0.5,
+                acos(clamp(d.y, -1.0, 1.0)) * 0.31830989);
+}
 
 // In-scatter shaping only — density/falloff/opacity come from the UBO so the
 // weather system can drive them (see NativeRenderer::setFog).
@@ -229,7 +243,23 @@ void main() {
     float NdotL = max(dot(N, L), 0.0);
     float shadow = sampleShadow(worldPos, cascadeFor(viewDist));
 
-    vec3 ambient = albedo * 0.25 * ssao(worldPos, N);
+    // Ambient: split-sum IBL when enabled (brief P2), legacy flat albedo *
+    // 0.25 otherwise. SSAO modulates either so creases stay dark; the sun
+    // above stays the dominant hard light — IBL only fills.
+    vec3 ambient;
+    if (frame.iblParams.x > 0.5) {
+        float NdotV = max(dot(N, V), 1e-4);
+        vec3 F0 = mix(vec3(0.04), albedo, metalness);
+        vec2 brdf = texture(iblBrdfLut, vec2(NdotV, roughness)).rg;
+        vec3 R = reflect(-V, N);
+        vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
+                                  roughness * frame.iblParams.y).rgb;
+        vec3 diffIbl = texture(iblIrradiance, equirectUv(N)).rgb;
+        ambient = (diffIbl * albedo * (1.0 - metalness) +
+                   specIbl * (F0 * brdf.x + brdf.y)) * ssao(worldPos, N);
+    } else {
+        ambient = albedo * 0.25 * ssao(worldPos, N);
+    }
     // Metals have no diffuse lobe (energy goes into the specular term
     // below, coloured by F0) — this is what makes paint, matte floor and
     // bare exhaust read as different materials under the same light.

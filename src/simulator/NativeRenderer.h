@@ -303,6 +303,17 @@ public:
     }
     bool isMotionBlur() const { return m_motionBlur; }
 
+    // Image-based lighting (brief P2 / S3). The three precomputed maps
+    // (procedural sky prefilter chain, irradiance, BRDF LUT — see
+    // IblGenerator.h) are uploaded once when the device comes up, and the
+    // split-sum ambient replaces the flat `albedo * 0.25` in both the
+    // forward and the deferred lighting shader when this is on. Fail-open:
+    // if generation or upload fails the renderer keeps valid 1x1 textures
+    // bound and iblParams.x stays 0, so the shader falls back to the exact
+    // legacy ambient. The sun/CSM path is untouched — IBL only fills.
+    void setIblEnabled(bool enabled) { m_iblWanted = enabled; }
+    bool isIblEnabled() const { return m_iblWanted; }
+
     // Display transform of the deferred path (the tonemap.frag pass that now
     // owns the backbuffer). Exposure and the tone-curve operator are the two
     // knobs the SDR and HDR10 encodings share; modes: 0 none, 1 Reinhard,
@@ -752,30 +763,26 @@ private:
     int m_viewportW = 1280;
     int m_viewportH = 720;
 
-    // --- Image-Based Lighting (IBL) ---
-    // Environment map for ambient lighting (RGB radiance over sphere)
-    bool m_iblEnabled = false;
-    VkImage m_iblEnvMap = VK_NULL_HANDLE;
-    VkDeviceMemory m_iblEnvMemory = VK_NULL_HANDLE;
-    VkImageView m_iblEnvView = VK_NULL_HANDLE;
-    VkSampler m_iblEnvSampler = VK_NULL_HANDLE;
-    // Pre-convolved environment map mipchain (roughness LODs)
-    bool m_iblPrefilterEnabled = false;
-    VkImage m_iblPrefilterMap = VK_NULL_HANDLE;
-    VkDeviceMemory m_iblPrefilterMemory = VK_NULL_HANDLE;
-    VkImageView m_iblPrefilterView = VK_NULL_HANDLE;
-    VkSampler m_iblPrefilterSampler = VK_NULL_HANDLE;
-    // BRDF lookup texture (encoded N dot H for specular integration)
-    bool m_iblBrdfLutEnabled = false;
-    VkImage m_iblBrdfLut = VK_NULL_HANDLE;
-    VkDeviceMemory m_iblBrdfLutMemory = VK_NULL_HANDLE;
-    VkImageView m_iblBrdfLutView = VK_NULL_HANDLE;
-    VkSampler m_iblBrdfLutSampler = VK_NULL_HANDLE;
+    // --- Image-Based Lighting (brief P2 / S3) ---
+    // 0 = GGX-prefiltered procedural sky (128x64 + 5 mips of roughness
+    // LODs; mip 0 doubles as the mirror env, so no separate raw sky),
+    // 1 = irradiance convolution (32x16, stores E/PI), 2 = split-sum BRDF
+    // LUT (128x128, RG = scale/offset). All RGBA16F, all created in
+    // createIblResources() (called from loadPipelines before the forward
+    // set 0 is written) and destroyed with the device, not the swapchain.
+    bool m_iblWanted = false; // setIblEnabled()
+    bool m_iblReady = false;  // real maps uploaded (else 1x1 fallbacks)
+    VkImage m_iblImages[3] = {};
+    VkDeviceMemory m_iblMemory[3] = {};
+    VkImageView m_iblViews[3] = {};
+    VkSampler m_iblEnvSampler = VK_NULL_HANDLE; // repeat U / clamp V, mips
+    VkSampler m_iblLutSampler = VK_NULL_HANDLE; // clamp, no mips
 
-    // IBL descriptor set
-    VkDescriptorSetLayout m_iblSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_iblPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_iblSet = VK_NULL_HANDLE;
+    bool createIblResources();
+    void destroyIblResources();
+    bool createIblTexture(uint32_t width, uint32_t height, uint32_t mipLevels,
+                          const std::vector<uint16_t>& rgba16f,
+                          VkImage& image, VkDeviceMemory& memory, VkImageView& view);
 
 };
 
