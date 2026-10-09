@@ -1,6 +1,7 @@
-# reference bake (roadmap 2.4/2.5) - regenerate with tools/make_reference_content.ps1
+# reference bake (roadmap 2.4/2.5, brief P1) - regenerate with tools/make_reference_content.ps1
 sign	skin:paint.dds	0.35	0.00
 smooth	skin:paint.dds	0.05	0.00
 rough	skin:paint.dds	0.95	0.00
+metal	skin:paint.dds	0.05	metal_mask.dds
 lodable	skin:paint.dds	0.35	0.00
 ground	skin:paint.dds	0.60	0.00

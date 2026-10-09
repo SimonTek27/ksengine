@@ -9,6 +9,25 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rendering AI brief — Sprint S2 (P1)** (`RENDERING_AI_BRIEF.md`):
+  materiali PBR differenziati (vernice / pavimento opaco / metallo nudo
+  sotto la stessa luce). `materials.txt` accetta ora celle roughness e
+  metalness *dual-typed*: un numero resta lo scalare Roadmap 2.3, un nome
+  con estensione (es. `body_rough.dds`) è una mappa (e lo scalare diventa
+  l'identità 1.0, il moltiplicatore che i shader applicano). I vecchi
+  bake restano validi byte per byte (riga e header NMS2 invariati,
+  nessun bump). `Kn5Baker` emette le celle mappe quando il KN5 le
+  autorizza (slot riconosciuti per nome, le mappe vincono sullo scalare)
+  e applica l'euristica paint/carbon (0.35 / 0.5) quando mancano sia
+  proprietà sia mappa (`heuristicMaterialRoughness`, esposta per test).
+  Runtime: descriptor set 1 cresce ai binding 3/4 (sampler roughness /
+  metalness con fallback bianco = identità), `gbuffer.frag` campiona le
+  mappe e scrive la metalness in RT0.a (AO costante rimossa),
+  `deferred_lighting.frag` usa F0 = mix(0.04, albedo, metalness),
+  spegne il lobo diffuse dei metalli e usa la metalness nella fresnel
+  SSR. Verifica: 52/52 ctest (nuovi casi `material_cache_test` e
+  `kn5_test`, differenziale metalness su contenuto di riferimento in
+  `test_renderer`), gate Qt-free 0/907
 - **Rendering AI brief — Sprint S1 (P0)** (`RENDERING_AI_BRIEF.md`):
   percorso texture reso affidabile sul path Vulkan Qt-free.
   `TextureRuntime` genera ora la catena mip a runtime (box filter CPU

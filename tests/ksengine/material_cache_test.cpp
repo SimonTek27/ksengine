@@ -3,6 +3,11 @@
  *  - MaterialCache::load() parses the exact row format Kn5Baker::
  *    writeMaterialsTxt() emits (mesh \t albedo \t roughness \t metalness
  *    \t normal), including CRLF files from a Windows bake;
+ *  - brief P1: the roughness/metalness cells are dual-typed — a finite
+ *    number stays the scalar, a dotted non-numeric cell is a map texture
+ *    name (and the scalar becomes the identity 1.0 the shaders multiply
+ *    by), dotless garbage keeps the per-field default so old bakes behave
+ *    exactly as before;
  *  - degradation: missing file = load() false + nullptr lookups (the scene
  *    still renders with defaults), empty file = valid table with 0 entries,
  *    malformed rows are skipped and counted, bad/out-of-range PBR values
@@ -97,6 +102,10 @@ int main() {
     if (bad) {
         KS_CHECK_NEAR(bad->roughness, 0.35f, 1e-6f); // NaN → default, not NaN
         KS_CHECK_NEAR(bad->metalness, 0.0f, 1e-6f);
+        // Dotless garbage is NOT a map name (only dotted cells are): the
+        // legacy per-field fallback must keep holding for old bakes.
+        KS_CHECK(bad->roughnessMap.empty());
+        KS_CHECK(bad->metalnessMap.empty());
     }
     const MeshMaterial* wide = cache.find("wide");
     KS_CHECK(wide != nullptr);
@@ -113,6 +122,53 @@ int main() {
     const MeshMaterial* dup = cache.find("dup");
     KS_CHECK(dup != nullptr);
     if (dup) KS_CHECK(dup->albedo == "SECOND.dds");
+
+    // --- Brief P1: dual-typed roughness/metalness cells --------------------
+    writeFile(tmp,
+              // Legacy scalar row: no maps anywhere (regression).
+              "painted\tP.dds\t0.35\t0\tP_n.dds\n"
+              // Both cells hold texture names: scalars become identity 1.0.
+              "bumpy\tB.dds\tB_rough.dds\tB_metal.dds\t\n"
+              // Mixed: scalar roughness, textured metalness.
+              "half\tH.dds\t0.60\tH_metal.dds\t\n"
+              // Numeric-looking map name: "0.5.dds" is not a full-number
+              // parse, so the '.' decides it is a texture.
+              "tiny\tT.dds\t0.5.dds\t0\t\n");
+    KS_CHECK(cache.load(tmp));
+    KS_CHECK(cache.size() == 4);
+    KS_CHECK(cache.skippedRows() == 0);
+    const MeshMaterial* painted = cache.find("painted");
+    KS_CHECK(painted != nullptr);
+    if (painted) {
+        KS_CHECK(painted->roughnessMap.empty());
+        KS_CHECK(painted->metalnessMap.empty());
+        KS_CHECK_NEAR(painted->roughness, 0.35f, 1e-6f);
+        KS_CHECK_NEAR(painted->metalness, 0.0f, 1e-6f);
+    }
+    const MeshMaterial* bumpy = cache.find("bumpy");
+    KS_CHECK(bumpy != nullptr);
+    if (bumpy) {
+        KS_CHECK(bumpy->roughnessMap == "B_rough.dds");
+        KS_CHECK(bumpy->metalnessMap == "B_metal.dds");
+        KS_CHECK_NEAR(bumpy->roughness, 1.0f, 1e-6f); // identity multiplier
+        KS_CHECK_NEAR(bumpy->metalness, 1.0f, 1e-6f);
+        KS_CHECK(bumpy->albedo == "B.dds");
+        KS_CHECK(bumpy->authored);
+    }
+    const MeshMaterial* half = cache.find("half");
+    KS_CHECK(half != nullptr);
+    if (half) {
+        KS_CHECK(half->roughnessMap.empty());
+        KS_CHECK_NEAR(half->roughness, 0.60f, 1e-6f);
+        KS_CHECK(half->metalnessMap == "H_metal.dds");
+        KS_CHECK_NEAR(half->metalness, 1.0f, 1e-6f);
+    }
+    const MeshMaterial* tiny = cache.find("tiny");
+    KS_CHECK(tiny != nullptr);
+    if (tiny) {
+        KS_CHECK(tiny->roughnessMap == "0.5.dds");
+        KS_CHECK_NEAR(tiny->roughness, 1.0f, 1e-6f);
+    }
 
     // --- Missing / empty file ------------------------------------------------
     MaterialCache missing;

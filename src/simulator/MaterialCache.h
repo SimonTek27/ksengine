@@ -5,10 +5,18 @@
 //
 //     mesh_name \t albedo_tex \t roughness \t metalness \t normal_tex \n
 //
-// The runtime uses it to associate per-mesh PBR properties with baked meshes
-// and hand them to descriptor set 1 (albedo sampler + normal sampler +
-// material UBO) in NativeRenderer, so a baked track/car stops rendering as
-// monochrome vertex colour.
+// Rendering brief P1: the roughness and metalness cells are dual-typed —
+// either a scalar in [0,1] (the Roadmap 2.3 format, still what every old
+// bake ships) or a *texture name* (a cell that does not parse as a finite
+// number and contains a '.', e.g. "body_rough.dds"). With a map authored
+// the stored scalar becomes 1.0, the identity multiplier the shaders use:
+//
+//     finalRough = material.roughness * texture(roughnessMap, uv).r
+//
+// so a white 1×1 fallback (no map, or a missing file) leaves legacy rows
+// byte-identical while a real map carries absolute values. Row format and
+// the NMS2 mesh header did NOT change — old bakes keep parsing exactly as
+// before, extra care is therefore not needed for cache invalidation.
 //
 // Degradation rules, in order of importance:
 //   - a missing or unreadable file is NOT an error for the scene: load()
@@ -16,7 +24,10 @@
 //     back to per-mesh defaults (roughness 0.35, metalness 0, no textures);
 //   - a readable file with garbage rows skips just those rows (counted in
 //     skippedRows()) instead of dropping the whole table;
-//   - out-of-range or non-numeric PBR values fall back to defaults per field.
+//   - out-of-range scalar PBR values clamp to [0,1]; a non-numeric cell
+//     without a '.' ("NOTAFLOAT") is legacy garbage and keeps the per-field
+//     default — only dotted names are taken as maps, and a map file that
+//     does not exist resolves to TextureRuntime's white fallback.
 //
 // Header-only on purpose: like LodWindow.h and PitStrategyBridge.h this is
 // pure Qt-free logic, so tests/ksengine/material_cache_test.cpp includes it
@@ -40,6 +51,15 @@ struct MeshMaterial {
     // textures/ directory before handing them to TextureRuntime.
     std::string albedo;
     std::string normal;
+    // P1 — optional PBR map names from the dual-typed cells ("" = the cell
+    // held a scalar and the map path stays empty).
+    std::string roughnessMap;
+    std::string metalnessMap;
+    // Scalar PBR values. Meaning per cell (see load()):
+    //   - map authored  -> this is 1.0, the identity multiplier: the shader
+    //     computes material.roughness * map.r, so the map carries absolute
+    //     values and a white fallback degrades to them;
+    //   - no map        -> the authored scalar (or the default below).
     float roughness = 0.35f;
     float metalness = 0.0f;
     // True when a materials.txt row supplied these values; false = defaults
@@ -79,11 +99,15 @@ public:
             MeshMaterial material;
             material.authored = true;
             if (fieldCount >= 2) material.albedo = trim(fields[1]);
-            if (fieldCount >= 3) material.roughness = parseFloat(fields[2], 0.35f);
-            if (fieldCount >= 4) material.metalness = parseFloat(fields[3], 0.0f);
+            if (fieldCount >= 3) {
+                applyPbrCell(trim(fields[2]), material.roughness,
+                             material.roughnessMap, 0.35f);
+            }
+            if (fieldCount >= 4) {
+                applyPbrCell(trim(fields[3]), material.metalness,
+                             material.metalnessMap, 0.0f);
+            }
             if (fieldCount >= 5) material.normal = trim(fields[4]);
-            material.roughness = clamp01(material.roughness);
-            material.metalness = clamp01(material.metalness);
 
             m_entries[fields[0]] = std::move(material);
         }
@@ -157,16 +181,29 @@ private:
         return s.substr(b, e - b);
     }
 
-    // strtof with full-string validation: garbage — and non-finite values
-    // like "nan"/"inf", which would slip past clamp01 — keep the default.
-    static float parseFloat(const std::string& text, float fallback) {
-        const std::string t = trim(text);
-        if (t.empty()) return fallback;
+    // One dual-typed P1 cell. Outcomes, in order:
+    //   - empty                     -> scalar keeps the per-field default;
+    //   - full-string finite number  -> classic scalar, clamped to [0,1]
+    //     (non-finite "nan"/"inf" full parses keep the default, they would
+    //     otherwise slip past clamp01);
+    //   - anything else *without* a '.' is legacy garbage ("NOTAFLOAT")
+    //     and also keeps the default — the Roadmap 2.3 degradation, so
+    //     old bakes behave exactly as before;
+    //   - anything else with a '.' is a map texture name: the scalar
+    //     becomes 1.0, the identity multiplier the shaders use
+    //     (material.roughness * map.r, white fallback = *1).
+    static void applyPbrCell(const std::string& cell, float& scalar,
+                             std::string& map, float fallback) {
+        if (cell.empty()) { scalar = fallback; return; }
         char* end = nullptr;
-        const float value = std::strtof(t.c_str(), &end);
-        if (end == t.c_str() || *end != '\0') return fallback;
-        if (!std::isfinite(value)) return fallback;
-        return value;
+        const float value = std::strtof(cell.c_str(), &end);
+        if (end != cell.c_str() && *end == '\0') {
+            scalar = std::isfinite(value) ? clamp01(value) : fallback;
+            return;
+        }
+        if (cell.find('.') == std::string::npos) { scalar = fallback; return; }
+        map = cell;
+        scalar = 1.0f;
     }
 
     static float clamp01(float v) {

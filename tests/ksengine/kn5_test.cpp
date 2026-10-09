@@ -217,22 +217,31 @@ std::vector<char> buildKn5(int version) {
     putU32(out, static_cast<std::uint32_t>(dds.size()));
     out.insert(out.end(), dds.begin(), dds.end());
 
-    // One material with a property and a texture mapping. depthMode (42) is
-    // only present for version >= 5 — writing a distinctive value proves the
-    // reader consumes exactly that field and stays aligned after it.
+    // One material with two properties and two texture mappings (brief P1:
+    // ksMetalness exercises the scalar-property cell, ksRoughnessMap the
+    // dual-typed texture-name cell). depthMode (42) is only present for
+    // version >= 5 — writing a distinctive value proves the reader consumes
+    // exactly that field and stays aligned after it.
     putI32(out, 1);
     putStr(out, "body");
     putStr(out, "ksPerPixel");
     putU8(out, 0); // blend
     putU8(out, 0); // alphaTested
     if (version >= 5) putI32(out, 42);
-    putI32(out, 1);
+    putI32(out, 2);
     putStr(out, "ksAmbient");
     for (int i = 0; i < 10; ++i) putF32(out, static_cast<float>(i)); // 40 bytes
-    putI32(out, 1);
+    putStr(out, "ksMetalness");
+    for (int i = 0; i < 10; ++i) {
+        putF32(out, i == 0 ? 0.25f : 0.0f); // value lives in the first float
+    }
+    putI32(out, 2);
     putStr(out, "ksDiffuse");
     putI32(out, 0);
     putStr(out, "diffuse.dds");
+    putStr(out, "ksRoughnessMap");
+    putI32(out, 1);
+    putStr(out, "rough.dds");
 
     // Root Base node with two children chains plus two direct meshes.
     putI32(out, 1); // Base
@@ -351,19 +360,22 @@ int main() {
             KS_CHECK(material.name == "body");
             KS_CHECK(material.shader == "ksPerPixel");
             KS_CHECK(material.depth_mode == 42); // v6 carries depthMode
-            KS_CHECK(material.properties.size() == 1);
-            if (material.properties.size() == 1) {
+            KS_CHECK(material.properties.size() == 2);
+            if (material.properties.size() == 2) {
                 KS_CHECK(material.properties[0].name == "ksAmbient");
                 float last_value = 0.0f;
                 std::memcpy(&last_value, material.properties[0].value.data() + 36,
                             sizeof(last_value));
                 KS_CHECK_NEAR(last_value, 9.0f, 1e-6); // 10th float of the blob
+                KS_CHECK(material.properties[1].name == "ksMetalness");
             }
-            KS_CHECK(material.mappings.size() == 1);
-            if (material.mappings.size() == 1) {
+            KS_CHECK(material.mappings.size() == 2);
+            if (material.mappings.size() == 2) {
                 KS_CHECK(material.mappings[0].name == "ksDiffuse");
                 KS_CHECK(material.mappings[0].slot == 0);
                 KS_CHECK(material.mappings[0].texture == "diffuse.dds");
+                KS_CHECK(material.mappings[1].name == "ksRoughnessMap");
+                KS_CHECK(material.mappings[1].texture == "rough.dds");
             }
         }
 
@@ -426,7 +438,7 @@ int main() {
         KS_CHECK(parsed_v4.file.materials.size() == 1);
         if (parsed_v4.file.materials.size() == 1) {
             KS_CHECK(parsed_v4.file.materials[0].depth_mode == 0);
-            KS_CHECK(parsed_v4.file.materials[0].properties.size() == 1);
+            KS_CHECK(parsed_v4.file.materials[0].properties.size() == 2);
         }
         KS_CHECK(findNode(parsed_v4.file.nodes, "triangle") != nullptr);
     }
@@ -498,6 +510,14 @@ int main() {
         }
     }
 
+    // --- brief P1 heuristic defaults (paint vs carbon) ----------------------
+    using ks::engine::fileformat::heuristicMaterialRoughness;
+    KS_CHECK_NEAR(heuristicMaterialRoughness("body", "ksPerPixel"), 0.35f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("carbon_fiber", "ksPerPixel"), 0.5f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("body", "ksCarbonPaint"), 0.5f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("CARBON", "ksMultilayer"), 0.5f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("", ""), 0.35f, 1e-6);
+
     // --- bake: parse from disk, check NMSH bytes + manifest ---------------
     const fs::path temp_dir = fs::temp_directory_path() / "ks_qtfree_kn5_test";
     const fs::path kn5_path = temp_dir / "synthetic.kn5";
@@ -522,6 +542,21 @@ int main() {
         KS_CHECK(manifest[0] == "triangle");
         KS_CHECK(manifest[1] == "bad_name"); // ":" sanitized to "_"
         KS_CHECK(manifest[2] == "triangle_2");
+    }
+
+    // --- materials.txt (brief P1 dual-typed cells) -------------------------
+    // triangle/bad_name share material "body": the rough cell carries the
+    // authored map name (maps beat the scalar), the metal cell the
+    // ksMetalness property float, albedo the ksDiffuse mapping, normal is
+    // empty. triangle_2 references material_id 1 (out of range) → the
+    // paint heuristic defaults with no textures.
+    const std::vector<std::string> material_rows =
+        readLines(out_dir / "materials.txt");
+    KS_CHECK(material_rows.size() == 3);
+    if (material_rows.size() == 3) {
+        KS_CHECK(material_rows[0] == "triangle\tdiffuse.dds\trough.dds\t0.25\t");
+        KS_CHECK(material_rows[1] == "bad_name\tdiffuse.dds\trough.dds\t0.25\t");
+        KS_CHECK(material_rows[2] == "triangle_2\t\t0.35\t0\t");
     }
 
     const NmshData triangle_nmsh = readNmsh(out_dir / "triangle.nmsh");

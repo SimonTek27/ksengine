@@ -5,15 +5,16 @@
 // by particle.vert — but it writes the three MRT targets
 // deferred_lighting.frag reads.
 //
-// An opaque GBuffer has no way to hold fractional alpha: RT0.a is ambient
-// occlusion and RT2.w is the coverage test (>= 0.5 means "there is a
-// surface here"). So the sprite's soft edge is resolved the only honest way
+// An opaque GBuffer has no way to hold fractional alpha: RT0.a is the
+// metalness channel (brief P1 — sprites are vapour/dust, so it is written
+// 0) and RT2.w is the coverage test (>= 0.5 means "there is a surface
+// here"). So the sprite's soft edge is resolved the only honest way
 // available - the rim below the alpha threshold is discarded, and the
 // surviving interior writes coverage 1 exactly like solid geometry, then
 // gets lit by the lighting pass with the camera-facing normal the vertex
 // stage supplies.
 //
-//   RT0  rgb = sprite tint,        a = 1 (no AO term for a sprite)
+//   RT0  rgb = sprite tint,        a = metalness (0 = dielectric)
 //   RT1  xyz = camera-facing normal, w = roughness
 //   RT2  xyz = sprite centre position, w = coverage
 
@@ -37,7 +38,7 @@ void main() {
     // half of its life instead of vanishing in one pop at death.
     if (fragColor.a * shape < 0.2) discard;
 
-    outAlbedoAO = vec4(fragColor.rgb, 1.0);
+    outAlbedoAO = vec4(fragColor.rgb, 0.0); // metalness 0: dust is dielectric
     // Sprites are vapour/dust/smoke: very rough, so the specular lobe stays
     // a wide sheen instead of a mirror dot.
     outNormalRoughness = vec4(normalize(fragNormal), 0.85);

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <fstream>
 #include <filesystem>
@@ -9,6 +10,30 @@
 #include <vector>
 
 namespace ks::engine::fileformat {
+
+// Brief P1 — default roughness for a KN5 material that authors neither a
+// ksRoughness property nor a roughness map. Carbon fibre reads rougher
+// than paint; every other surface (paint, plastic, unknown shaders) starts
+// at the paint value. Matched case-insensitively against the material name
+// AND the shader, because real AC carbon materials carry "carbon" in one of
+// the two. Metalness has no counterpart: without an authored value paint,
+// carbon and bare metal alike default to 0 (metalness is 1 only when a
+// property or map says so). Exposed for kn5_test.
+float heuristicMaterialRoughness(const std::string& materialName,
+                                 const std::string& shaderName) {
+    const auto lower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        return s;
+    };
+    const std::string name = lower(materialName);
+    const std::string shader = lower(shaderName);
+    if (name.find("carbon") != std::string::npos ||
+        shader.find("carbon") != std::string::npos) {
+        return 0.5f;
+    }
+    return 0.35f;
+}
 
 namespace {
 
@@ -102,43 +127,96 @@ static bool nameIsAlbedoMap(const std::string& name) {
         || lower.find("color") != std::string::npos;
 }
 
-static void extractPbrProperties(const Kn5Material& material, float& roughness, float& metalness, std::string& normal_tex) {
-    // Extract roughness, metalness, and normal map name from KN5 material.
-    // Property names in AC are typically "ksRoughness", "ksMetalness", "ksNormalMap"
-    // stored as 40-byte value blobs in Kn5Property.  If not found, return defaults.
+// Brief P1 — the two new texture-slot heuristics, same shape as the
+// normal/albedo ones above: the mapping *name* decides the slot ("ksRough",
+// "roughness_map", "TX_METAL" ...). Case-insensitive substring on purpose —
+// AC content spells these a dozen ways and a wrong guess only means the
+// scalar fallback stays in effect.
+static bool nameIsRoughnessMap(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower.find("rough") != std::string::npos;
+}
 
-    roughness = 0.0f;
-    metalness = 0.0f;
-    normal_tex = "";
+static bool nameIsMetalnessMap(const std::string& name) {
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower.find("metal") != std::string::npos;
+}
 
-    // Heuristic: look through property names for known PBR tags
+// Everything one KN5 material says about its PBR surface (brief P1).
+// Scalars come from ksRoughness/ksMetalness properties (40-byte blobs,
+// first float), maps from the texture mappings — a map wins over its
+// scalar at emission time, the materials.txt cell can hold only one.
+struct MaterialPbr {
+    float roughness = 0.0f;
+    float metalness = 0.0f;
+    bool hasRoughness = false; // authored property present
+    bool hasMetalness = false;
+    std::string roughTex; // authored roughness map ("" = none)
+    std::string metalTex;
+    std::string normalTex;
+    std::string albedoTex;
+};
+
+static MaterialPbr extractPbr(const Kn5Material& material) {
+    MaterialPbr pbr;
+
+    // Heuristic: look through property names for known PBR tags. The 40-byte
+    // value encodes the float in its first 4 bytes (same convention the
+    // pre-P1 code used).
     for (const auto& prop : material.properties) {
         const std::string& name = prop.name;
         if (name.find("Roughness") != std::string::npos || name.find("roughness") != std::string::npos) {
-            // The 40-byte value encodes a float; take the first 4 bytes as big-endian float.
-            // In practice AC packs the roughness value into the first 4 bytes of the property.
             if (prop.value.size() >= 4) {
-                roughness = *reinterpret_cast<const float*>(prop.value.data());
-                if (roughness < 0.0f) roughness = 0.0f;
-                if (roughness > 1.0f) roughness = 1.0f;
+                float v = *reinterpret_cast<const float*>(prop.value.data());
+                if (v < 0.0f) v = 0.0f;
+                if (v > 1.0f) v = 1.0f;
+                pbr.roughness = v;
+                pbr.hasRoughness = true;
             }
         } else if (name.find("Metalness") != std::string::npos || name.find("metalness") != std::string::npos) {
             if (prop.value.size() >= 4) {
-                metalness = *reinterpret_cast<const float*>(prop.value.data());
-                if (metalness < 0.0f) metalness = 0.0f;
-                if (metalness > 1.0f) metalness = 1.0f;
+                float v = *reinterpret_cast<const float*>(prop.value.data());
+                if (v < 0.0f) v = 0.0f;
+                if (v > 1.0f) v = 1.0f;
+                pbr.metalness = v;
+                pbr.hasMetalness = true;
             }
         }
     }
 
-    // Also check texture mappings for a normal map reference
+    // Texture mappings: first match per slot wins (an empty guard keeps the
+    // first, exactly like the old per-category loops with break).
     for (const auto& mapping : material.mappings) {
-        if (nameIsNormalMap(mapping.name)) {
-            normal_tex = mapping.texture;
-            break;
+        if (pbr.normalTex.empty() && nameIsNormalMap(mapping.name)) {
+            pbr.normalTex = mapping.texture;
+        }
+        if (pbr.roughTex.empty() && nameIsRoughnessMap(mapping.name)) {
+            pbr.roughTex = mapping.texture;
+        }
+        if (pbr.metalTex.empty() && nameIsMetalnessMap(mapping.name)) {
+            pbr.metalTex = mapping.texture;
+        }
+        if (pbr.albedoTex.empty() && nameIsAlbedoMap(mapping.name)) {
+            pbr.albedoTex = mapping.texture;
         }
     }
+    return pbr;
 }
+
+// One materials.txt row, assembled while visiting meshes (brief P1: the
+// rough/metal cells carry a texture name when a map is authored — see
+// writeMaterialsTxt).
+struct MaterialRow {
+    std::string mesh; // sanitized, unique manifest name
+    std::string albedo;
+    std::string normal;
+    std::string roughTex; // non-empty = emit the name in the rough cell
+    std::string metalTex; // non-empty = emit the name in the metal cell
+    float roughness = 0.35f;
+    float metalness = 0.0f;
+};
 
 // -------------------------------------------------------------------
 // Extract PBR properties from the mesh's material and collect them.
@@ -148,11 +226,7 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
               std::ofstream& manifest, std::unordered_set<std::string>& used_names,
               Kn5BakeResult& result,
               const std::vector<Kn5Material>* kn5_materials,
-              std::vector<std::string>& mesh_names,
-              std::vector<std::string>& albedo_tex_names,
-              std::vector<float>& roughness_vals,
-              std::vector<float>& metalness_vals,
-              std::vector<std::string>& normal_tex_names) {
+              std::vector<MaterialRow>& rows) {
     if (mesh.positions.empty()) {
         ++result.meshes_skipped;
         return;
@@ -212,36 +286,32 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
 
     // -------------------------------------------------------------------
     // Extract PBR properties from the mesh's material and collect them.
+    // Brief P1: maps win over scalars (the materials.txt cell holds only
+    // one), and absent scalars fall back to the paint/carbon heuristic.
     // -------------------------------------------------------------------
     if (mesh.material_id >= 0 && static_cast<std::size_t>(mesh.material_id) <
         (kn5_materials ? kn5_materials->size() : 0)) {
         const auto& mat = (*kn5_materials)[mesh.material_id];
-        float roughness = 0.0f;
-        float metalness = 0.0f;
-        std::string normal_tex;
-        extractPbrProperties(mat, roughness, metalness, normal_tex);
+        const MaterialPbr pbr = extractPbr(mat);
 
-        // Use albedo texture name from the first texture mapping, or empty
-        std::string albedo_tex = "";
-        for (const Kn5TextureMapping& m : mat.mappings) {
-            if (nameIsAlbedoMap(m.name)) {
-                albedo_tex = m.texture;
-                break;
-            }
-        }
-
-        mesh_names.push_back(safe_name);
-        albedo_tex_names.push_back(albedo_tex);
-        roughness_vals.push_back(roughness);
-        metalness_vals.push_back(metalness);
-        normal_tex_names.push_back(normal_tex);
+        MaterialRow row;
+        row.mesh = safe_name;
+        row.albedo = pbr.albedoTex;
+        row.normal = pbr.normalTex;
+        row.roughTex = pbr.roughTex;
+        row.metalTex = pbr.metalTex;
+        row.roughness = pbr.hasRoughness
+                            ? pbr.roughness
+                            : heuristicMaterialRoughness(mat.name, mat.shader);
+        row.metalness = pbr.hasMetalness ? pbr.metalness : 0.0f;
+        rows.push_back(std::move(row));
     } else {
-        // No material assigned; use heuristic defaults
-        mesh_names.push_back(safe_name);
-        albedo_tex_names.push_back("");
-        roughness_vals.push_back(0.35f); // paint default
-        metalness_vals.push_back(0.0f);
-        normal_tex_names.push_back("");
+        // No material assigned; brief P1 heuristic defaults (paint-like).
+        MaterialRow row;
+        row.mesh = safe_name;
+        row.roughness = heuristicMaterialRoughness("", "");
+        row.metalness = 0.0f;
+        rows.push_back(std::move(row));
     }
 }
 
@@ -249,23 +319,17 @@ void visitNodes(const std::vector<Kn5Node>& nodes, const std::string& output_dir
                 std::ofstream& manifest, std::unordered_set<std::string>& used_names,
                 Kn5BakeResult& result,
                 const std::vector<Kn5Material>* kn5_materials,
-                std::vector<std::string>& mesh_names,
-                std::vector<std::string>& albedo_tex_names,
-                std::vector<float>& roughness_vals,
-                std::vector<float>& metalness_vals,
-                std::vector<std::string>& normal_tex_names) {
+                std::vector<MaterialRow>& rows) {
     for (const Kn5Node& node : nodes) {
         if (!result.success) return; // a mesh bake failed; stop early
         if (node.node_class == Kn5NodeClass::skinned_mesh) {
             ++result.meshes_skipped;
         } else if (node.has_mesh) {
             bakeMesh(node.mesh, output_dir, manifest, used_names, result,
-                     kn5_materials, mesh_names, albedo_tex_names,
-                     roughness_vals, metalness_vals, normal_tex_names);
+                     kn5_materials, rows);
         }
         visitNodes(node.children, output_dir, manifest, used_names, result,
-                   kn5_materials, mesh_names, albedo_tex_names,
-                   roughness_vals, metalness_vals, normal_tex_names);
+                   kn5_materials, rows);
     }
 }
 
@@ -309,34 +373,32 @@ void writeTextures(const Kn5File& kn5, const std::string& output_dir,
 
 // -------------------------------------------------------------------
 // Write a materials.txt summarising per-mesh PBR properties extracted
-// from the parsed KN5 materials.  Each line has the format:
-//   mesh_name  albedo_tex_name  roughness  metalness  normal_tex_name
+// from the parsed KN5 materials.  Each line has the format (tab-separated,
+// five cells — unchanged since Roadmap 2.3):
+//   mesh_name \t albedo_tex_name \t roughness \t metalness \t normal_tex_name
+// Brief P1: the roughness/metalness cells are dual-typed — an authored map
+// goes in as its texture name (first match per slot wins, maps beat the
+// scalar properties), otherwise the scalar. MaterialCache reads both forms
+// fail-open, so old bakes keep parsing unchanged.
 // Values are the baked texture names (as stored in Kn5Material.mappings) or
-// heuristic defaults when the mesh has no explicit material definition.
+// heuristic defaults (paint/carbon, see heuristicMaterialRoughness) when the
+// mesh has no explicit material definition.
 // The file is optional — the runtime can fall back to the per-mesh defaults
 // stored in the NMS2 header (lodIn/lodOut only, no PBR).
 // -------------------------------------------------------------------
 static void writeMaterialsTxt(const std::string& output_dir,
-                              const std::vector<std::string>& mesh_names,
-                              const std::vector<std::string>& albedo_tex_names,
-                              const std::vector<float>& roughness_vals,
-                              const std::vector<float>& metalness_vals,
-                              const std::vector<std::string>& normal_tex_names) {
+                              const std::vector<MaterialRow>& rows) {
     std::string txt_path = output_dir + "/materials.txt";
     std::ofstream file(txt_path);
     if (!file.is_open()) return;
-    for (std::size_t i = 0; i < mesh_names.size(); ++i) {
-        float roughness = roughness_vals[i];
-        float metalness = metalness_vals[i];
-        // Heuristic defaults when no explicit material maps are authored:
-        // paint: rough ~0.35 metal ~0 ; carbon: rough ~0.5 metal ~0
-        if (roughness <= 0.0f) roughness = 0.35f;
-        if (metalness <= 0.0f) metalness = 0.0f;
-        file << mesh_names[i] << '\t'
-             << albedo_tex_names[i] << '\t'
-             << roughness << '\t'
-             << metalness << '\t'
-             << normal_tex_names[i] << '\n';
+    for (const MaterialRow& row : rows) {
+        file << row.mesh << '\t' << row.albedo << '\t';
+        if (!row.roughTex.empty()) file << row.roughTex;
+        else file << row.roughness;
+        file << '\t';
+        if (!row.metalTex.empty()) file << row.metalTex;
+        else file << row.metalness;
+        file << '\t' << row.normal << '\n';
     }
     file.close();
 }
@@ -363,30 +425,22 @@ Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir) {
         return result;
     }
 
-    // Collect per-mesh PBR property data for materials.txt
-    std::vector<std::string> mesh_names;
-    std::vector<std::string> albedo_tex_names;
-    std::vector<float> roughness_vals;
-    std::vector<float> metalness_vals;
-    std::vector<std::string> normal_tex_names;
+    // Per-mesh PBR rows for materials.txt (brief P1: dual-typed cells)
+    std::vector<MaterialRow> rows;
 
-    // Pass KN5 materials through the bake chain so extractPbrProperties can read them
+    // Pass KN5 materials through the bake chain so extractPbr can read them
     const std::vector<Kn5Material>* kn5_materials = &kn5.materials;
 
     std::unordered_set<std::string> used_names;
     visitNodes(kn5.nodes, output_dir, manifest, used_names, result,
-               kn5_materials, mesh_names, albedo_tex_names,
-               roughness_vals, metalness_vals, normal_tex_names);
+               kn5_materials, rows);
     manifest.flush();
     if (!manifest.good() && result.success) {
         result.success = false;
         result.error = "failed writing manifest.txt";
     }
     if (result.success) writeTextures(kn5, output_dir, result);
-    if (result.success) writeMaterialsTxt(output_dir,
-                                          mesh_names, albedo_tex_names,
-                                          roughness_vals, metalness_vals,
-                                          normal_tex_names);
+    if (result.success) writeMaterialsTxt(output_dir, rows);
     return result;
 }
 

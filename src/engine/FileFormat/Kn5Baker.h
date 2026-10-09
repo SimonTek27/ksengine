@@ -14,6 +14,12 @@
 //                                  layout the runtime still accepts.
 //   <output_dir>/textures/<name>   each embedded texture payload, byte for
 //                                  byte (normally a complete .dds)
+//   <output_dir>/materials.txt     "mesh \t albedo \t roughness \t
+//                                  metalness \t normal" per mesh. Brief P1:
+//                                  the roughness/metalness cells hold a
+//                                  texture name instead of a number when
+//                                  the KN5 material authors a map — both
+//                                  forms parse fail-open in MaterialCache.
 //
 // matching NativeRenderer::loadMeshFromFile()/loadMeshesFromManifest().
 //
@@ -50,5 +56,13 @@ Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir);
 // Convenience: parse from disk (keeping texture payloads), then bake.
 Kn5BakeResult bakeKn5ToNativeMeshes(const std::string& kn5_path,
                                     const std::string& output_dir);
+
+// Brief P1 — default roughness for a KN5 material with no authored
+// ksRoughness property and no roughness map: carbon fibre (name or shader
+// contains "carbon", case-insensitive) reads 0.5, paint and everything
+// else 0.35. Metalness has no heuristic — it stays 0 unless authored.
+// Declared for kn5_test; bakeKn5() applies it internally.
+float heuristicMaterialRoughness(const std::string& materialName,
+                                 const std::string& shaderName);
 
 } // namespace ks::engine::fileformat

@@ -1035,9 +1035,10 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
 
 bool NativeRenderer::createMaterialDescriptorResources() {
     // Set layout: binding 0 = albedo sampler, binding 1 = normal sampler,
-    // binding 2 = MaterialUBO. Must match MaterialData/sampler declarations
-    // in native_forward.frag and gbuffer.frag.
-    VkDescriptorSetLayoutBinding bindings[3]{};
+    // binding 2 = MaterialUBO, binding 3/4 = roughness/metalness map
+    // samplers (brief P1). Must match MaterialData/sampler declarations in
+    // native_forward.frag (bindings 0..2 only) and gbuffer.frag (0..4).
+    VkDescriptorSetLayoutBinding bindings[5]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1;
@@ -1050,10 +1051,18 @@ bool NativeRenderer::createMaterialDescriptorResources() {
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[2].descriptorCount = 1;
     bindings[2].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[3].binding = 3;
+    bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount = 1;
+    bindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[4].binding = 4;
+    bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[4].descriptorCount = 1;
+    bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo dslCi{};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 3;
+    dslCi.bindingCount = 5;
     dslCi.pBindings = bindings;
     VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_materialSetLayout);
     if (res != VK_SUCCESS) {
@@ -1063,11 +1072,11 @@ bool NativeRenderer::createMaterialDescriptorResources() {
 
     // One set per mesh plus headroom for reload cycles; FREE bit so
     // destroyMesh() can hand sets back on track switch instead of leaking
-    // them until pool reset. 2 samplers per set.
+    // them until pool reset. 4 samplers per set (albedo, normal, rough, metal).
     constexpr uint32_t kMaxMaterialSets = 4096;
     VkDescriptorPoolSize poolSizes[3]{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = kMaxMaterialSets * 2;
+    poolSizes[0].descriptorCount = kMaxMaterialSets * 4;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[1].descriptorCount = kMaxMaterialSets;
 
@@ -1093,9 +1102,10 @@ bool NativeRenderer::createMaterialDescriptorResources() {
         fprintf(stderr, "[NativeRenderer] material descriptors: default set failed (%d)\n", int(res));
         return false;
     }
-    // Default = no textures (white albedo / flat normal), heuristic
-    // roughness — i.e. exactly the pre-2.3 look for unauthored meshes.
-    if (!writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {})) {
+    // Default = no textures (white albedo / flat normal / white PBR maps),
+    // heuristic roughness — i.e. exactly the pre-2.3 look for unauthored
+    // meshes, with the P1 map multipliers at identity.
+    if (!writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {})) {
         fprintf(stderr, "[NativeRenderer] material descriptors: texture fallback unavailable "
                         "(TextureRuntime white fallback not ready)\n");
         return false;
@@ -1114,17 +1124,25 @@ void NativeRenderer::destroyMaterialDescriptorResources() {
 
 bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
                                                 const std::string& albedoPath,
-                                                const std::string& normalPath) {
+                                                const std::string& normalPath,
+                                                const std::string& roughnessPath,
+                                                const std::string& metalnessPath) {
     if (!set || !m_textureRuntime) return false;
 
     VkSampler albedoSampler = VK_NULL_HANDLE;
     VkSampler normalSampler = VK_NULL_HANDLE;
+    VkSampler roughSampler = VK_NULL_HANDLE;
+    VkSampler metalSampler = VK_NULL_HANDLE;
     // Empty or missing paths resolve to TextureRuntime's fallbacks (white
-    // albedo, flat normal), so the descriptor is always valid to bind.
+    // albedo, flat normal, white PBR maps), so the descriptor is always
+    // valid to bind and a lost map degrades to the authored scalar.
     const VkImageView albedoView = m_textureRuntime->get(albedoPath, albedoSampler);
     const VkImageView normalView = m_textureRuntime->get(normalPath, normalSampler,
                                                          /*flatNormalFallback=*/true);
-    if (!albedoView || !normalView || !albedoSampler || !normalSampler) return false;
+    const VkImageView roughView = m_textureRuntime->get(roughnessPath, roughSampler);
+    const VkImageView metalView = m_textureRuntime->get(metalnessPath, metalSampler);
+    if (!albedoView || !normalView || !roughView || !metalView ||
+        !albedoSampler || !normalSampler || !roughSampler || !metalSampler) return false;
 
     VkDescriptorImageInfo albedoInfo{};
     albedoInfo.sampler = albedoSampler;
@@ -1134,8 +1152,16 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     normalInfo.sampler = normalSampler;
     normalInfo.imageView = normalView;
     normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo roughInfo{};
+    roughInfo.sampler = roughSampler;
+    roughInfo.imageView = roughView;
+    roughInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo metalInfo{};
+    metalInfo.sampler = metalSampler;
+    metalInfo.imageView = metalView;
+    metalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[2]{};
+    VkWriteDescriptorSet writes[4]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = set;
     writes[0].dstBinding = 0;
@@ -1148,7 +1174,19 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     writes[1].descriptorCount = 1;
     writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[1].pImageInfo = &normalInfo;
-    vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = set;
+    writes[2].dstBinding = 3;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[2].pImageInfo = &roughInfo;
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = set;
+    writes[3].dstBinding = 4;
+    writes[3].descriptorCount = 1;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[3].pImageInfo = &metalInfo;
+    vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
     return true;
 }
 
@@ -1157,6 +1195,9 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     destroyMaterialDescriptor(mesh);   // re-create path: previous set + UBO go
 
     // 16-byte std140 material block, static per mesh: map, fill, unmap.
+    // When a PBR map drives a field, MaterialCache already stored the
+    // identity 1.0 there (shader: scalar * map.r, white fallback = *1), so
+    // the scalar and the map paths need no branch here.
     MaterialUBO ubo;
     ubo.roughness = mesh.roughness;
     ubo.metalness = mesh.metalness;
@@ -1192,7 +1233,9 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
 
     // Sampler bindings first — if texture resolution fails the set stays
     // incomplete, so drop it entirely and let the draw path bind the default.
-    if (!writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture, mesh.normalTexture)) {
+    if (!writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture,
+                                    mesh.normalTexture, mesh.roughnessTexture,
+                                    mesh.metalnessTexture)) {
         destroyMaterialDescriptor(mesh);
         return false;
     }
@@ -1226,10 +1269,12 @@ void NativeRenderer::rewriteMaterialDescriptors() {
     // clearTextureCache() destroyed images whose views are still written
     // into live sets: re-resolve (DDS reloads lazily on the next get()) so
     // no descriptor points at a freed image.
-    if (m_defaultMaterialSet) writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {});
+    if (m_defaultMaterialSet) writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {});
     for (auto& [name, mesh] : m_meshes) {
         if (mesh.materialSet) {
-            writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture, mesh.normalTexture);
+            writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture,
+                                       mesh.normalTexture, mesh.roughnessTexture,
+                                       mesh.metalnessTexture);
         }
     }
 }
@@ -1296,12 +1341,16 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
     // Texture references are raw KN5 names; resolveTexturePath applies the
     // same sanitization the baker used when writing the DDS files.
     if (material) {
-        mesh.roughness = material->roughness;
+        mesh.roughness = material->roughness; // 1.0 when the map below is set
         mesh.metalness = material->metalness;
         mesh.albedoTexture =
             MaterialCache::resolveTexturePath(textureDir, material->albedo);
         mesh.normalTexture =
             MaterialCache::resolveTexturePath(textureDir, material->normal);
+        mesh.roughnessTexture =
+            MaterialCache::resolveTexturePath(textureDir, material->roughnessMap);
+        mesh.metalnessTexture =
+            MaterialCache::resolveTexturePath(textureDir, material->metalnessMap);
     }
 
     setMesh(name, mesh);
@@ -2597,7 +2646,8 @@ constexpr uint32_t kParticlePushConstantSize = 112;
 
 // Builds one of the two sprite pipelines. They share every piece of state
 // except the render pass (and the colour-blend state, which the deferred
-// GBuffer cannot have: RT0.a is ambient occlusion there, not sprite alpha).
+// GBuffer cannot have: RT0.a is the metalness channel there — brief P1 —
+// not sprite alpha).
 VkPipeline createParticlePipeline(VkDevice device, VkPipelineLayout layout, VkRenderPass renderPass,
                                   uint32_t colorAttachmentCount, bool alphaBlend,
                                   VkShaderModule vert, VkShaderModule frag) {

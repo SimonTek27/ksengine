@@ -4,7 +4,9 @@
 # app both consume:
 #
 #   content/baked/               track-like scene: textured "sign" quad,
-#                                "smooth"/"rough" roughness pair, "lodable"
+#                                "smooth"/"rough" roughness pair, "metal"
+#                                quad (brief P1: metalness cell is a map,
+#                                textures/metal_mask.dds), "lodable"
 #                                quad with a [0..1] m NMS2 window, "plain"
 #                                fallback quad (no materials.txt row), and a
 #                                40x40 m textured ground plane;
@@ -20,8 +22,10 @@
 #              parameterised by colour;
 #   - materials.txt = "mesh \t albedo \t roughness \t metalness" rows — the
 #              raw KN5 texture name goes in albedo (the runtime sanitises it
-#              into textures/, MaterialCache.h), "plain" intentionally has
-#              no row so the fallback path stays covered.
+#              into textures/, MaterialCache.h); roughness/metalness are
+#              dual-typed (brief P1): a number is the scalar, a dotted name
+#              a map texture. "plain" intentionally has no row so the
+#              fallback path stays covered.
 #
 # Idempotent: wipes the two output trees before writing. BinaryWriter is
 # little-endian on every platform PowerShell runs on (ECMA-334), which is
@@ -147,23 +151,29 @@ $track = Join-Path $ContentRoot "baked"
 if (Test-Path $track) { Remove-Item -Recurse -Force $track }
 
 Write-Lines (Join-Path $track "manifest.txt") @(
-    "plain", "sign", "smooth", "rough", "lodable", "ground"
+    "plain", "sign", "smooth", "rough", "metal", "lodable", "ground"
 )
 
 # Tabs are the format (MaterialCache.h). "plain" has NO row on purpose:
 # defaults + white albedo fallback must stay covered. "skin:paint.dds" is
 # written raw on purpose: the colon is invalid on disk, so the runtime has
 # to sanitise it to textures/skin_paint.dds exactly like the baker did.
+# "metal" (brief P1) shares smooth's geometry and roughness 0.05 but its
+# metalness cell is a *texture* name: metal_mask.dds is solid red, i.e.
+# mask.r = 1.0 -> a fully metallic dielectric-turned-metal surface whose
+# GBuffer RT0.a must reach deferred_lighting.frag's F0.
 Write-Lines (Join-Path $track "materials.txt") @(
-    "# reference bake (roadmap 2.4/2.5) - regenerate with tools/make_reference_content.ps1",
+    "# reference bake (roadmap 2.4/2.5, brief P1) - regenerate with tools/make_reference_content.ps1",
     "sign`tskin:paint.dds`t0.35`t0.00",
     "smooth`tskin:paint.dds`t0.05`t0.00",
     "rough`tskin:paint.dds`t0.95`t0.00",
+    "metal`tskin:paint.dds`t0.05`tmetal_mask.dds",
     "lodable`tskin:paint.dds`t0.35`t0.00",
     "ground`tskin:paint.dds`t0.60`t0.00"
 )
 
 Write-Dds (Join-Path $track "textures/skin_paint.dds") 220 80 30
+Write-Dds (Join-Path $track "textures/metal_mask.dds") 255 0 0
 
 # Quads sit at y = 2..4 (centre 3) with staggered z; the test aims its own
 # camera at (0, 3, 0). LOD windows: only "lodable" carries one ([0..1] m),
@@ -174,6 +184,7 @@ foreach ($q in @(
     @{ File = "sign.nmsh";    Z = -0.02 },
     @{ File = "smooth.nmsh";  Z = -0.04 },
     @{ File = "rough.nmsh";   Z = -0.06 },
+    @{ File = "metal.nmsh";   Z = -0.10 },
     @{ File = "lodable.nmsh"; Z = -0.08 }
 )) {
     $faces = [System.Collections.ArrayList]::new()

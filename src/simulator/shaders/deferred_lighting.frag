@@ -213,7 +213,10 @@ void main() {
     vec4 normalRough = texture(gbufNormal, vUV);
 
     vec3 albedo = albedoAO.rgb;
-    float ao = albedoAO.a;
+    // RT0.a is the metalness channel (brief P1). The old constant "ao = 1"
+    // multiply is gone with it — real AO maps come back as an albedo
+    // multiply in gbuffer.frag, and SSAO below still runs from depth.
+    float metalness = clamp(albedoAO.a, 0.0, 1.0);
     vec3 N = normalize(normalRough.xyz);
     float roughness = clamp(normalRough.w, 0.05, 1.0);
 
@@ -226,8 +229,11 @@ void main() {
     float NdotL = max(dot(N, L), 0.0);
     float shadow = sampleShadow(worldPos, cascadeFor(viewDist));
 
-    vec3 ambient = albedo * 0.25 * ao * ssao(worldPos, N);
-    vec3 diffuse = albedo * sunRad * NdotL * shadow;
+    vec3 ambient = albedo * 0.25 * ssao(worldPos, N);
+    // Metals have no diffuse lobe (energy goes into the specular term
+    // below, coloured by F0) — this is what makes paint, matte floor and
+    // bare exhaust read as different materials under the same light.
+    vec3 diffuse = albedo * (1.0 - metalness) * sunRad * NdotL * shadow;
 
     float a = roughness * roughness;
     vec3 H = normalize(L + V);
@@ -237,7 +243,7 @@ void main() {
     float D = (a * a) / (PI * dd * dd);
     float k = a * 0.5;
     float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
-    vec3 F0 = vec3(0.04);
+    vec3 F0 = mix(vec3(0.04), albedo, metalness); // dielectric 0.04 / metal albedo
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
     vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) * NdotL * shadow;
 
@@ -265,11 +271,12 @@ void main() {
     vec3 lit = ambient + diffuse + specular + specular_cc;
 
     // Screen-space reflections on top of the specular term: fresnel-weighted
-    // (metals are the only strong reflectors this GBuffer can express, and it
-    // has no metallic channel, so roughness gates it instead) and faded out
-    // as roughness rises because there is no mip chain to blur with.
+    // with the GBuffer's metalness (RT0.a — metals reflect nearly
+    // everything, dielectrics start at 0.04) and faded out as roughness
+    // rises because there is no mip chain to blur with.
     vec3 refl = ssr(worldPos, N, V, L, roughness);
-    float fres = 0.04 + 0.96 * pow(1.0 - max(dot(N, V), 0.0), 5.0);
+    float f0 = mix(0.04, 1.0, metalness);
+    float fres = f0 + (1.0 - f0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
     lit += refl * fres * (1.0 - roughness);
 
     float fogT = clamp(1.0 - exp(-heightFogAmount(camPos, worldPos)), 0.0, frame.fogParams.w);

@@ -90,12 +90,17 @@ struct NativeMesh {
     ks::scene::LodWindow lod;
     // Roadmap 2.3 — per-mesh PBR material resolved from materials.txt at
     // load time (defaults when no row exists). The renderer creates
-    // descriptor set 1 (albedo + normal samplers + MaterialUBO) from these
-    // in setMesh(); empty texture paths bind TextureRuntime's fallbacks.
-    std::string albedoTexture; // resolved path, "" = none authored
-    std::string normalTexture; // resolved path, "" = none authored
-    float roughness = 0.35f;
-    float metalness = 0.0f;
+    // descriptor set 1 (albedo/normal/roughness/metalness samplers +
+    // MaterialUBO) from these in setMesh(); empty texture paths bind
+    // TextureRuntime's fallbacks.
+    std::string albedoTexture;   // resolved path, "" = none authored
+    std::string normalTexture;   // resolved path, "" = none authored
+    // P1 — resolved PBR map paths ("" = the materials.txt cell held a
+    // scalar; the shader then multiplies by the white fallback = identity).
+    std::string roughnessTexture;
+    std::string metalnessTexture;
+    float roughness = 0.35f; // identity 1.0 when roughnessTexture is set
+    float metalness = 0.0f;  // identity 1.0 when metalnessTexture is set
     // Descriptor set 1 for this mesh + its 16-byte std140 material block.
     // Null until createMaterialDescriptor() succeeds (or after it fails);
     // the draw path then binds the default material set instead.
@@ -445,13 +450,16 @@ private:
     VkDeviceMemory m_frameUBOMemory = VK_NULL_HANDLE;
     void* m_frameUBOMapped = nullptr;
 
-    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo + normal sampler and
-    // the std140 MaterialUBO (roughness, metalness, normalScale). Bound
-    // inside recordDrawList() for every mesh of both the forward and the
-    // GBuffer pass — they share m_pipelineLayout, which therefore carries
-    // both set layouts. One pool serves every mesh set plus the default set
-    // bound when a mesh has none (created without FREE bit would prevent
-    // per-mesh frees on track switch, hence the flag).
+    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo + normal samplers and
+    // the std140 MaterialUBO (roughness, metalness, normalScale) — plus the
+    // two PBR map samplers (roughness, metalness) the rendering brief P1
+    // added at bindings 3/4. Bound inside recordDrawList() for every mesh of
+    // both the forward and the GBuffer pass — they share m_pipelineLayout,
+    // which therefore carries both set layouts (the forward shader only
+    // declares bindings 0..2, a layout superset is legal). One pool serves
+    // every mesh set plus the default set bound when a mesh has none
+    // (created without FREE bit would prevent per-mesh frees on track
+    // switch, hence the flag).
     VkDescriptorSetLayout m_materialSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_materialPool = VK_NULL_HANDLE;
     VkDescriptorSet m_defaultMaterialSet = VK_NULL_HANDLE;
@@ -459,12 +467,16 @@ private:
     void destroyMaterialDescriptorResources();
     bool createMaterialDescriptor(NativeMesh& mesh);
     void destroyMaterialDescriptor(NativeMesh& mesh);
-    // (Re)writes a set's three bindings from the given texture paths,
-    // resolving them through TextureRuntime (white/flat fallbacks when a
-    // path is empty or missing).
+    // (Re)writes a set's four texture bindings from the given paths,
+    // resolving them through TextureRuntime (white fallbacks when a path is
+    // empty or missing — the missing-map case must degrade to the authored
+    // scalar, i.e. multiply by 1.0). The MaterialUBO binding is written by
+    // createMaterialDescriptor(), not here.
     bool writeMaterialDescriptorSet(VkDescriptorSet set,
                                     const std::string& albedoPath,
-                                    const std::string& normalPath);
+                                    const std::string& normalPath,
+                                    const std::string& roughnessPath,
+                                    const std::string& metalnessPath);
     // After clearTextureCache() drops images that live descriptor sets still
     // reference: re-resolve every set (lazy DDS reload on next use).
     void rewriteMaterialDescriptors();

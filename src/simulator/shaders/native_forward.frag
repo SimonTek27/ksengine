@@ -33,6 +33,9 @@ layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
 // already resolved by TextureRuntime to a white albedo and a flat (0,0,255)
 // normal, so every descriptor is valid to sample: a mesh without authored
 // textures renders exactly like before (white × vertex colour, normalScale 0).
+// The layout also carries the P1 roughness/metalness map samplers at
+// bindings 3/4 — only gbuffer.frag samples them; this forward path stays
+// ambient + diffuse (specular terms land with brief P3).
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
 layout(set = 1, binding = 1) uniform sampler2D normalMap;
 layout(set = 1, binding = 2) uniform MaterialData {

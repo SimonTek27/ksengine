@@ -22,7 +22,9 @@
 // same device: manifest -> materials.txt (raw "skin:paint.dds" name,
 // sanitised into textures/) -> DDS upload -> descriptor set 1 -> pixels,
 // the NMS2 [0..1] m LOD window through the culled/drawn counters, the
-// deferred GGX highlight for roughness 0.05 vs 0.95, the reference car bake
+// deferred GGX highlight for roughness 0.05 vs 0.95, the brief P1
+// metalness pair (scalar dielectric vs metalness *map*, metal_mask.dds ->
+// GBuffer RT0.a -> metallic F0), the reference car bake
 // through loadMeshFromFile(), and the "useful message" contract for a
 // missing manifest / mesh / texture / shader (captured stderr).
 //
@@ -675,8 +677,8 @@ int main()
     const int refLoaded = renderer.loadMeshesFromManifest(refBake);
     std::printf("test_renderer: reference bake loaded %d mesh(es) from %s\n",
                 refLoaded, refBake.c_str());
-    KS_CHECK(refLoaded >= 5);                      // plain sign smooth rough lodable ground
-    KS_CHECK(renderer.cachedTextureCount() == 1);  // only textures/skin_paint.dds
+    KS_CHECK(refLoaded >= 6);                       // plain sign smooth rough metal lodable ground
+    KS_CHECK(renderer.cachedTextureCount() == 2);   // skin_paint.dds + metal_mask.dds
 
     const mat4 projRef =
         mat4::perspective(60.0f * kPi / 180.0f, float(kW) / float(kH), 0.1f, 100.0f);
@@ -713,6 +715,13 @@ int main()
     };
     auto centrePx = [](const RefShot& s) -> const unsigned char* {
         return s.px.data() + ((size_t(kH) / 2) * kW + kW / 2) * 4;
+    };
+    // Fractional (0..1) pixel probe — used off-centre where the GGX spike
+    // of a 0.05-roughness surface cannot saturate the comparison (P1).
+    auto pxAt = [](const RefShot& s, float fx, float fy) -> const unsigned char* {
+        const size_t x = std::min(static_cast<size_t>(float(kW) * fx), size_t(kW) - 1);
+        const size_t y = std::min(static_cast<size_t>(float(kH) * fy), size_t(kH) - 1);
+        return s.px.data() + (y * size_t(kW) + x) * 4;
     };
     auto redDominant = [](const unsigned char* c) {
         return int(c[2]) > int(c[1]) + 40 && int(c[2]) > int(c[0]) + 40;
@@ -806,6 +815,36 @@ int main()
         std::printf("test_renderer: deferred roughness blue smooth=%u rough=%u\n",
                     static_cast<unsigned>(sm[0]), static_cast<unsigned>(rg[0]));
     }
+
+    // (e2) Brief P1 metalness: "metal" is the same quad, same albedo and
+    //     same roughness 0.05 as "smooth", but its materials.txt metalness
+    //     cell is a *texture* (metal_mask.dds, red = mask 1.0) — so this
+    //     proves the whole map chain: dual-typed cell -> resolved DDS ->
+    //     descriptor binding 3/4 -> shader sample -> GBuffer RT0.a ->
+    //     metallic F0. Under the identical light the dielectric keeps
+    //     ambient + diffuse while the metal loses the diffuse lobe, so off
+    //     the highlight centre the metal quad must read clearly darker.
+    //     Probe at (0.40, 0.35): inside the 2x2 m quad (which spans about
+    //     x 0.31..0.69, y 0.21..0.79 at this camera) and ~20 px off the
+    //     sub-pixel GGX spike at screen centre.
+    RefShot metalShot;
+    capture("metal", mat4(), metalShot);
+    KS_CHECK(metalShot.ok);
+    if (metalShot.ok) {
+        KS_CHECK(metalShot.stats.drawn == 1);
+        const unsigned char* m = pxAt(metalShot, 0.40f, 0.35f);
+        const unsigned char* d = pxAt(smoothShot, 0.40f, 0.35f);
+        const int mSum = int(m[0]) + int(m[1]) + int(m[2]);
+        const int dSum = int(d[0]) + int(d[1]) + int(d[2]);
+        std::printf("test_renderer: deferred metalness off-lobe BGRA metal=%u,%u,%u "
+                    "dielectric=%u,%u,%u\n",
+                    static_cast<unsigned>(m[0]), static_cast<unsigned>(m[1]),
+                    static_cast<unsigned>(m[2]), static_cast<unsigned>(d[0]),
+                    static_cast<unsigned>(d[1]), static_cast<unsigned>(d[2]));
+        KS_CHECK(!isClearPixel(m));                 // probe really on the quad
+        KS_CHECK(dSum > mSum + 60);                 // dielectric lit, metal darker
+        KS_CHECK(int(d[2]) > int(m[2]) + 20);       // red: diffuse present vs gone
+    }
     renderer.setDeferred(false);
 
     // (f) Reference car bake: the loadMeshFromFile() call shape
@@ -821,7 +860,7 @@ int main()
     if (carMaterial) {
         KS_CHECK(renderer.loadMeshFromFile("car_body", refCar + "/body.nmsh",
                                            carMaterial, refCar + "/textures"));
-        KS_CHECK(renderer.cachedTextureCount() == 2); // + textures/car_paint.dds
+        KS_CHECK(renderer.cachedTextureCount() == 3); // track pair + car_paint.dds
         aimAt(0, 0.3f, -4.5f, 0, 0.3f, 0, vec3(0, 1, 0));
         RefShot carShot;
         capture("car_body", mat4(), carShot);
@@ -891,14 +930,16 @@ int main()
         if (!said) std::printf("test_renderer: missing-mesh stderr:\n%s\n", log.c_str());
         KS_CHECK(said);
     }
-    { // materials.txt row pointing at a texture that does not exist
+    { // materials.txt rows pointing at textures that do not exist — albedo
+        // and (brief P1) a roughness *map* cell, both must name themselves
+        // on stderr and still load the mesh.
         const std::filesystem::path dir = broken / "notex";
         std::filesystem::create_directories(dir);
         {
             std::ofstream m(dir / "manifest.txt");
             m << "t\n";
             std::ofstream mat(dir / "materials.txt");
-            mat << "t\tgone.dds\t0.35\t0.00\n";
+            mat << "t\tgone.dds\tgone_rough.dds\t0.00\t\n";
         }
         writeNmsh(dir / "t.nmsh", makeQuad(false));
         StderrCapture cap;
@@ -906,7 +947,8 @@ int main()
         const std::string log = cap.stop();
         KS_CHECK(n == 1);
         bool said = log.find("cannot open texture") != std::string::npos &&
-                    log.find("gone.dds") != std::string::npos;
+                    log.find("gone.dds") != std::string::npos &&
+                    log.find("gone_rough.dds") != std::string::npos;
         if (!said) std::printf("test_renderer: missing-texture stderr:\n%s\n", log.c_str());
         KS_CHECK(said);
     }
