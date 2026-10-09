@@ -42,6 +42,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ricompilazione SPIR-V da GLSL erano già in place: S1 li verifica senza
   ritocchi. Verifica: 52/52 ctest (`test_renderer` pixel su bake di
   riferimento), gate Qt-free 0/907
+- **Roadmap 2A block C (2.8/2.9) — identità squadra e upgrade end-to-end**:
+  `TeamSessionBridge` porta `TeamInfo` (roster, livrea, numero, garage) dal
+  `team.ini` nel selettore e a `SimulationLoop`; `MultiCarManager` cresce
+  delle carri `GridCar` e di `spawnGrid` (griglia da roster, auto AI
+  incluse), `RaceSessionManager` gestisce la vita della sessione e
+  `GarageSpawnPolicy` assegna box/parcheggio. Il menu espone la riga TEAM
+  (`GameMenuOverlay`) e `SimulatorApp` le variabili `KS_TEAM`, `KS_TRACK`,
+  `KS_SESSION`, `KS_AI_CARS`, `KS_UPGRADES` per partire senza interazione;
+  le scelte upgrade passano da `cycleUpgradeRow` a `ApplyVehicleUpgrades`
+  (fisica via getter `VehicleSimulator`, nodi render, texture/livrea) e la
+  banca audio segue il `SoundPack` ora dichiarato in CMake. Verifica:
+  52/52 ctest (`menu_session_gate_test` copre il bridge); il collaudo con
+  contenuto AC reale resta un gate umano (ROADMAP, gate di uscita)
 - **Roadmap 2A block A (2.2/2.3) — texture + materiali end-to-end**:
   `MaterialCache.h` legge `materials.txt` e risolve i path texture
   (`resolveTexturePath`, specchio di `Kn5Baker::sanitizeFileName`);

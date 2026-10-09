@@ -1,4 +1,4 @@
-# Parity status — 2026-10-07
+# Parity status — 2026-10-09
 
 ## Wired + hardened
 
@@ -47,6 +47,10 @@
 | **Rendering 2A texture + materiali (TextureRuntime DDS + `MaterialCache` materials.txt → descriptor set 1 albedo/normal/UBO → shader forward/GBuffer)** | Done |
 | **Roadmap 2.4 Contenuto di riferimento (bake commitati `content/baked` + `content/cars/refcar` via `tools/make_reference_content.ps1`; `test_renderer` su manifest→materiali→DDS→pixel; sessione windowed `KS_AUTOSTART`+`KS_CAR`+`KS_SCREENSHOT`)** | Done |
 | **Roadmap 2.5 Verifica GPU (artifact PNG `test_renderer_reference.png` + `KS_SCREENSHOT` in SimulatorApp, contatori `submitted/drawn/culled`, messaggi stderr per manifesto/mesh/DDS/shader mancanti)** | Done |
+| **Rendering AI brief S1 (P0) (mip chain CPU a runtime in `TextureRuntime` + feature `samplerAnisotropy` con `maxLod=mipLevels-1`)** | Done |
+| **Rendering AI brief S2 (P1) (`materials.txt` celle roughness/metalness dual-typed numero O mappa → binding 3/4 del set 1 → `gbuffer.frag` RT0.a = metalness → F0 = mix(0.04, albedo, metalness) + diffuse ×(1−metalness) in `deferred_lighting.frag`; `Kn5Baker` emette mappe + euristica paint/carbon)** | Done |
+| **Roadmap 2.8 Team + grid (`TeamSessionBridge` → `MultiCarManager` GridCar/`spawnGrid` → `RaceSessionManager`, menu TEAM, `KS_TEAM`/`KS_TRACK`/`KS_SESSION`, `GarageSpawnPolicy`; `menu_session_gate_test`)** | Done (wire-up; collaudo AC reale = gate umano ROADMAP) |
+| **Roadmap 2.9 Upgrade + audio (menu upgrade → `cycleUpgradeRow` → `ApplyVehicleUpgrades` su fisica/render/livrea + `SoundPack`, `KS_UPGRADES`; `menu_session_gate_test`)** | Done (wire-up; collaudo AC reale = gate umano ROADMAP) |
 
 See `docs/SECURITY_HARDENING.md`.
 

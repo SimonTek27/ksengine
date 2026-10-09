@@ -107,6 +107,9 @@ validazione.
 - [x] Contenuto di riferimento: `test_renderer` verde + sessione windowed fotografata.
 - [ ] Sessione windowed manuale con pista e vettura reali (cache AC):
       texture, LOD e materiali visibili, nessun fallback inatteso.
+- [ ] Sessione windowed Block C: `KS_AUTOSTART=1 KS_SESSION=race` con
+      `KS_TEAM`, `KS_AI_CARS` e `KS_UPGRADES` su contenuto reale → roster,
+      numero, livrea, fisica upgrade e audio applicati (2.8/2.9).
 
 ### 2B — Gara, box e identità della vettura
 
@@ -114,13 +117,14 @@ validazione.
 |---|---|---|---|
 | 2.6 | Piano pit nella UI | ✅ | Fuel e lavori di riparazione sono modificabili e copiati in `PitRepairInput`; il piano non richiede automaticamente il servizio. |
 | 2.7 | Servizio box end-to-end | 🟡 | Conferma piano → richiesta esplicita in box → tempi di servizio → stato, danni e fuel aggiornati nel HUD. Vedi [WIREUP_GAPS.md](WIREUP_GAPS.md). |
-| 2.8 | Team, numero e box assegnati | 🟡 | `team.ini` determina roster, livrea/numero e garage/grid. `loadTeam` + `buildFieldFromTeam` + menu `onTeamChosen` sono cablati; resta collaudo end-to-end. |
-| 2.9 | Upgrade, livrea e sound pack | 🟡 | Menu `upgradeRowLabels` / `onUpgradeRowCycled` → `cycleUpgradeRow` cablato; resta collaudo con contenuto reale. |
+| 2.8 | Team, numero e box assegnati | ✅ | `team.ini` determina roster, livrea/numero e garage/grid. `TeamSessionBridge` porta `TeamInfo` in `MultiCarManager` (carri `GridCar` + `spawnGrid`), `RaceSessionManager` e `GarageSpawnPolicy`; menu `TEAM` e variabili `KS_TEAM`/`KS_TRACK`/`KS_SESSION` cablate, verificate da `menu_session_gate_test`. Collaudo con contenuto AC reale: vedi gate di uscita. |
+| 2.9 | Upgrade, livrea e sound pack | ✅ | Menu `upgradeRowLabels` / `onUpgradeRowCycled` → `cycleUpgradeRow` → `ApplyVehicleUpgrades` (fisica via getter `VehicleSimulator`, nodi render, texture/livrea) + banca audio (`SoundPack` in CMake), fallback = contenuto base; `KS_UPGRADES` per riga di comando, verificato da `menu_session_gate_test`. Collaudo con contenuto AC reale: vedi gate di uscita. |
 | 2.10 | Menu racing coerente | 🟡 | Garage, pit, risultati e multiplayer espongono lo stesso stato di sessione. |
 
-I modelli dati di 2.8 e 2.9 sono già presenti (`TeamInfo`, `GarageSpawn`,
-`VehicleAppearanceBundle`, `ApplyVehicleUpgrades`); il lavoro rimanente è il
-wire-up residuale e il collaudo, non la loro riscrittura.
+I modelli dati di 2.8 e 2.9 erano già presenti (`TeamInfo`, `GarageSpawn`,
+`VehicleAppearanceBundle`, `ApplyVehicleUpgrades`); il wire-up descritto
+sopra è consegnato con `menu_session_gate_test`. Resta solo il collaudo
+con contenuto AC reale (gate di uscita sopra), non riscritture.
 
 ### 2C — Accettazione e qualità
 
@@ -128,7 +132,7 @@ wire-up residuale e il collaudo, non la loro riscrittura.
 |---|---|---|---|
 | 2.11 | Gara asciutto/bagnato ripetibile | ⬜ | Gara 10–15 min, 8+ auto; grip, spray, audio e risultati coerenti. |
 | 2.12 | Stabilità lunga | ⬜ | Run di un'ora senza NaN o recovery; log e telemetria ispezionabili. |
-| 2.13 | Regressione automatica | 🟡 | CTest Qt-free e standalone restano verdi; aggiungere test per manifest materiali, fallback texture e bridge team/upgrades. |
+| 2.13 | Regressione automatica | 🟡 | CTest Qt-free (52/52) e standalone verdi; test per manifest materiali (`material_cache_test`), fallback texture (`test_renderer`) e bridge team/upgrades (`menu_session_gate_test`) presenti. Resta il collaudo umano di Fase 2. |
 | 2.14 | Profilo di frame reale | ⬜ | Misurare CPU fisica e GPU su hardware target con la scena di riferimento. |
 
 ### Ordine di esecuzione consigliato
