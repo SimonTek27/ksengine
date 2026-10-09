@@ -197,7 +197,15 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
     }
 
     const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    // RENDERING_AI_BRIEF P0: anisotropic filtering on the material samplers.
+    // The feature must be enabled here or sampler anisotropyEnable=TRUE is
+    // invalid, so the same flag is handed to TextureRuntime below — support
+    // and enable can never drift apart (a device without the feature keeps
+    // the old isotropic sampler, fail-open).
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
     VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
 
     VkDeviceCreateInfo devCi{};
     devCi.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -214,8 +222,12 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
     vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
 
     if (!createCommandPoolAndBuffer() || !createSyncObjects()) return false;
+    // The samplerAnisotropy flag handed here must equal what devCi enabled
+    // above — it is the only thing that keeps TextureRuntime's samplers
+    // valid (anisotropyEnable without the feature is a VUID violation).
     m_textureRuntime = std::make_unique<TextureRuntime>(
-        m_device, m_physicalDevice, m_commandPool, m_graphicsQueue);
+        m_device, m_physicalDevice, m_commandPool, m_graphicsQueue,
+        features.samplerAnisotropy == VK_TRUE);
     return true;
 }
 

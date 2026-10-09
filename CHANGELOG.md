@@ -9,6 +9,20 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Rendering AI brief — Sprint S1 (P0)** (`RENDERING_AI_BRIEF.md`):
+  percorso texture reso affidabile sul path Vulkan Qt-free.
+  `TextureRuntime` genera ora la catena mip a runtime (box filter CPU
+  2×2, ripiego del resto sul bordo per dimensioni dispari, upload
+  multi-livello in un'unica staging buffer; i livelli a 1 px restano
+  identici) e crea lo sampler con `maxLod = mipLevels-1`;
+  `NativeRenderer::createDevice` abilita la feature `samplerAnisotropy`
+  (se supportata) e la passa a `TextureRuntime`, che usa il limite
+  `maxSamplerAnisotropy` del device (tipicamente 16, ≥ 8) — feature e
+  sampler non possono divergere. I descriptor set 1
+  (albedo/normal/`MaterialUBO`), il fallback bianco 1×1 e la
+  ricompilazione SPIR-V da GLSL erano già in place: S1 li verifica senza
+  ritocchi. Verifica: 52/52 ctest (`test_renderer` pixel su bake di
+  riferimento), gate Qt-free 0/907
 - **Roadmap 2A block A (2.2/2.3) — texture + materiali end-to-end**:
   `MaterialCache.h` legge `materials.txt` e risolve i path texture
   (`resolveTexturePath`, specchio di `Kn5Baker::sanitizeFileName`);

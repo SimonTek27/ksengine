@@ -23,7 +23,8 @@ constexpr VkFormat kTextureFormat = VK_FORMAT_R8G8B8A8_UNORM;
 void transitionImage(VkCommandBuffer commandBuffer, VkImage image,
                      VkImageLayout oldLayout, VkImageLayout newLayout,
                      VkAccessFlags srcAccessMask, VkAccessFlags dstAccessMask,
-                     VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage) {
+                     VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                     std::uint32_t baseMipLevel = 0, std::uint32_t levelCount = 1) {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
@@ -32,8 +33,8 @@ void transitionImage(VkCommandBuffer commandBuffer, VkImage image,
     barrier.dstAccessMask = dstAccessMask;
     barrier.image = image;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseMipLevel = baseMipLevel;
+    barrier.subresourceRange.levelCount = levelCount;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 1;
     vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, nullptr,
@@ -42,12 +43,57 @@ void transitionImage(VkCommandBuffer commandBuffer, VkImage image,
 
 } // namespace
 
+// Box-filter one mip level: dst(x,y) = average of the source box
+// [2x, min(2x+2, srcW)) x [2y, min(2y+2, srcH)). The *last* box extends to
+// the source edge, so an odd source size folds its remainder into the final
+// row/column instead of dropping it, while every destination dimension stays
+// max(1, floor(src/2)) as the Vulkan mip layout requires. Averaging RGBA
+// (not RGB) keeps alpha coherent for cutout foliage.
+void TextureRuntime::downsampleBox(const std::uint8_t* src, std::uint32_t srcW,
+                                   std::uint32_t srcH, std::uint8_t* dst,
+                                   std::uint32_t dstW, std::uint32_t dstH) {
+    for (std::uint32_t y = 0; y < dstH; ++y) {
+        const std::uint32_t y0 = y * 2;
+        const std::uint32_t y1 = (y + 1 == dstH) ? srcH : std::min(srcH, y0 + 2);
+        for (std::uint32_t x = 0; x < dstW; ++x) {
+            const std::uint32_t x0 = x * 2;
+            const std::uint32_t x1 = (x + 1 == dstW) ? srcW : std::min(srcW, x0 + 2);
+            std::uint32_t sum[4] = {0, 0, 0, 0};
+            std::uint32_t count = 0;
+            for (std::uint32_t sy = y0; sy < y1; ++sy) {
+                for (std::uint32_t sx = x0; sx < x1; ++sx) {
+                    const std::uint8_t* p = src + (static_cast<std::size_t>(sy) * srcW + sx) * 4;
+                    sum[0] += p[0];
+                    sum[1] += p[1];
+                    sum[2] += p[2];
+                    sum[3] += p[3];
+                    ++count;
+                }
+            }
+            std::uint8_t* q = dst + (static_cast<std::size_t>(y) * dstW + x) * 4;
+            // count >= 1 always (dst dims derive from non-zero src dims).
+            for (std::uint32_t c = 0; c < 4; ++c)
+                q[c] = static_cast<std::uint8_t>((sum[c] + count / 2) / count);
+        }
+    }
+}
+
 TextureRuntime::TextureRuntime(VkDevice device, VkPhysicalDevice physicalDevice,
-                               VkCommandPool commandPool, VkQueue transferQueue)
+                               VkCommandPool commandPool, VkQueue transferQueue,
+                               bool anisotropyEnabled)
     : m_device(device),
       m_physicalDevice(physicalDevice),
       m_commandPool(commandPool),
-      m_transferQueue(transferQueue) {
+      m_transferQueue(transferQueue),
+      m_anisotropyEnabled(anisotropyEnabled) {
+    // Device limit drives maxAnisotropy: use all of it (16 on desktop GPUs,
+    // never below 8 in practice), and never more than the limit allows.
+    // Queried before the fallbacks below, which create samplers too.
+    if (m_physicalDevice) {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        m_maxAnisotropy = std::max(1.0f, properties.limits.maxSamplerAnisotropy);
+    }
     if (!createFallback(m_fallback, 255, 255, 255, 255)) {
         std::fprintf(stderr, "[TextureRuntime] white fallback creation failed\n");
     }
@@ -148,6 +194,44 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     if (pixelCount > std::numeric_limits<std::size_t>::max() / 4) return false;
     const VkDeviceSize byteCount = static_cast<VkDeviceSize>(pixelCount * 4);
 
+    // RENDERING_AI_BRIEF P0: CPU mip chain (box filter) so minification
+    // samples a real LOD instead of aliasing mip 0. The DDS reader hands us
+    // top level only, so every level below is derived here and the whole
+    // chain uploads in one staging call. Textures smaller than 2px yield a
+    // 1-level chain — byte-identical to the old path.
+    const std::uint32_t maxDim = std::max(width, height);
+    std::uint32_t mipLevels = 1;
+    for (std::uint32_t dim = maxDim; dim > 1; dim >>= 1) ++mipLevels;
+
+    std::vector<std::uint8_t> chain;
+    std::vector<VkDeviceSize> levelOffsets(mipLevels);
+    std::vector<std::uint32_t> levelW(mipLevels);
+    std::vector<std::uint32_t> levelH(mipLevels);
+    {
+        // Geometric series converges to < 2x the base level; pre-reserve to
+        // avoid realloc churn while the base pointer is being read.
+        chain.reserve(static_cast<std::size_t>(byteCount) * 2);
+        chain.resize(static_cast<std::size_t>(byteCount));
+        std::memcpy(chain.data(), rgba, static_cast<std::size_t>(byteCount));
+        levelOffsets[0] = 0;
+        levelW[0] = width;
+        levelH[0] = height;
+        for (std::uint32_t level = 1; level < mipLevels; ++level) {
+            const std::uint32_t srcW = levelW[level - 1];
+            const std::uint32_t srcH = levelH[level - 1];
+            const std::uint32_t dstW = std::max(1u, srcW / 2);
+            const std::uint32_t dstH = std::max(1u, srcH / 2);
+            const std::size_t dstOffset = chain.size();
+            chain.resize(dstOffset + static_cast<std::size_t>(dstW) * dstH * 4);
+            downsampleBox(chain.data() + levelOffsets[level - 1], srcW, srcH,
+                          chain.data() + dstOffset, dstW, dstH);
+            levelOffsets[level] = static_cast<VkDeviceSize>(dstOffset);
+            levelW[level] = dstW;
+            levelH[level] = dstH;
+        }
+    }
+    const VkDeviceSize chainBytes = static_cast<VkDeviceSize>(chain.size());
+
     VkFormatProperties formatProperties{};
     vkGetPhysicalDeviceFormatProperties(m_physicalDevice, kTextureFormat, &formatProperties);
     if ((formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) == 0) {
@@ -161,7 +245,7 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.format = kTextureFormat;
     imageInfo.extent = {width, height, 1};
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -192,7 +276,7 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = byteCount;
+    bufferInfo.size = chainBytes;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &stagingBuffer) != VK_SUCCESS) {
@@ -227,12 +311,12 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     }
 
     void* mapped = nullptr;
-    if (vkMapMemory(m_device, stagingMemory, 0, byteCount, 0, &mapped) != VK_SUCCESS || !mapped) {
+    if (vkMapMemory(m_device, stagingMemory, 0, chainBytes, 0, &mapped) != VK_SUCCESS || !mapped) {
         destroyStaging();
         destroyTexture(texture);
         return false;
     }
-    std::memcpy(mapped, rgba, static_cast<std::size_t>(byteCount));
+    std::memcpy(mapped, chain.data(), static_cast<std::size_t>(chainBytes));
     vkUnmapMemory(m_device, stagingMemory);
 
     VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
@@ -258,21 +342,31 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
         return false;
     }
 
+    // Whole chain in one transition, one multi-region copy, one transition
+    // out: the layout covers every level, so no per-level barrier dance.
     transitionImage(commandBuffer, texture.image, VK_IMAGE_LAYOUT_UNDEFINED,
                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
-    VkBufferImageCopy copy{};
-    copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    copy.imageSubresource.mipLevel = 0;
-    copy.imageSubresource.baseArrayLayer = 0;
-    copy.imageSubresource.layerCount = 1;
-    copy.imageExtent = {width, height, 1};
+                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    0, mipLevels);
+    std::vector<VkBufferImageCopy> copies(mipLevels);
+    for (std::uint32_t level = 0; level < mipLevels; ++level) {
+        VkBufferImageCopy& copy = copies[level];
+        copy.bufferOffset = levelOffsets[level];
+        copy.bufferRowLength = 0;   // tightly packed: derived from extent
+        copy.bufferImageHeight = 0;
+        copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy.imageSubresource.mipLevel = level;
+        copy.imageSubresource.baseArrayLayer = 0;
+        copy.imageSubresource.layerCount = 1;
+        copy.imageExtent = {levelW[level], levelH[level], 1};
+    }
     vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture.image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                           mipLevels, copies.data());
     transitionImage(commandBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                     VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, mipLevels);
 
     if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
         vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
@@ -301,11 +395,11 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     viewInfo.format = kTextureFormat;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
     if (vkCreateImageView(m_device, &viewInfo, nullptr, &texture.view) != VK_SUCCESS ||
-        !createSampler(texture.sampler)) {
+        !createSampler(texture.sampler, mipLevels)) {
         destroyTexture(texture);
         return false;
     }
@@ -314,7 +408,7 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     return true;
 }
 
-bool TextureRuntime::createSampler(VkSampler& outSampler) const {
+bool TextureRuntime::createSampler(VkSampler& outSampler, std::uint32_t mipLevels) const {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -324,11 +418,16 @@ bool TextureRuntime::createSampler(VkSampler& outSampler) const {
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.mipLodBias = 0.0f;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
+    // P0 anisotropy: only when the owning device enabled samplerAnisotropy
+    // (mirrored in the ctor arg) — otherwise VUID forbids anisotropyEnable.
+    // maxAnisotropy is the device limit queried at construction (>= 1).
+    samplerInfo.anisotropyEnable = m_anisotropyEnabled ? VK_TRUE : VK_FALSE;
+    samplerInfo.maxAnisotropy = m_anisotropyEnabled ? m_maxAnisotropy : 1.0f;
     samplerInfo.compareEnable = VK_FALSE;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    // Reach the last generated level; clamps to what the view actually has,
+    // so a 1-mip fallback behaves exactly as before (maxLod effectively 0).
+    samplerInfo.maxLod = mipLevels > 0 ? static_cast<float>(mipLevels - 1) : 0.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     return vkCreateSampler(m_device, &samplerInfo, nullptr, &outSampler) == VK_SUCCESS;
