@@ -1,0 +1,87 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "Arcade",
+  "description": "Colori saturi, glow forte e vignetta minima per un gameplay arcade e veloce.",
+  "category": "performance",
+  "autoExposure": {
+    "enabled": false,
+    "delay": 0.0,
+    "min": 0.2,
+    "max": 0.5,
+    "target": 0.32,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": false
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.30,
+    "gamma": 1.0,
+    "function": -1,
+    "mappingFactor": 32.0,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": false,
+    "quality": 1,
+    "apertureFNumber": 4.0,
+    "imageSensorHeight": 0.035,
+    "baseFOV": 55.0,
+    "adaptiveApertureFactor": 0.5,
+    "apertureParameter": 2.0,
+    "apertureFrontLevels": -1,
+    "apertureBackLevels": -1,
+    "backgroundMaskThreshold": 0.1,
+    "edgeQuality": 1,
+    "apertureShape": 3
+  },
+  "chromaticAberration": {
+    "enabled": true,
+    "samples": 5,
+    "lateralDispersion": [0.01, 0.01],
+    "uniformDispersion": [0.001, 0.001]
+  },
+  "vignetting": {
+    "strength": 0.02,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 1,
+    "ghost": true,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 3.0,
+    "shape": 15,
+    "blur": false,
+    "threshold": 2.0,
+    "brightPass": true
+  },
+  "godRays": {
+    "enabled": false,
+    "useSunLight": true,
+    "diffractionRing": 0.25,
+    "diffractionRingRadius": 5.0,
+    "diffractionRingAttenuation": 0.1,
+    "diffractionRingOuterColor": [0.5, 0.5, 0.5, 0.5],
+    "color": [1.0, 1.0, 1.0, 1.0],
+    "length": 11.0,
+    "glareRatio": 0.005,
+    "angleAttenuation": 5.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 1.4,
+    "brightness": 1.1,
+    "contrast": 1.1,
+    "sepia": 0.0,
+    "colorTemp": 6500,
+    "whiteBalance": 6500
+  }
+}

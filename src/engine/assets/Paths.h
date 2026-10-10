@@ -17,5 +17,18 @@ public:
     static std::string systemCfgFile(const std::string& file) {
         return systemCfg() + "/" + file;
     }
+    // Post-processing filters (JSON, one file per preset): system/ppfilters/
+    // Each file follows the schema "ksengine.ppfilter/1" (see system/ppfilters/*.json)
+    static std::string ppFilters() { return "system/ppfilters"; }
+    /** system/ppfilters/<file> */
+    static std::string ppFiltersFile(const std::string& file) {
+        return ppFilters() + "/" + file;
+    }
+    // Game strings per language (system/i18n/<lang>.json): see Config/Locale.h
+    static std::string i18n() { return "system/i18n"; }
+    /** system/i18n/<lang>.json */
+    static std::string i18nFile(const std::string& lang) {
+        return i18n() + "/" + lang + ".json";
+    }
 };
 }}} // namespace

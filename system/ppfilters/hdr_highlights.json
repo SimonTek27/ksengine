@@ -1,0 +1,87 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "HDR Highlights",
+  "description": "Massimo range dinamico, highlights brillanti e tono mapping aggressivo per un realismo cinematografico elevato.",
+  "category": "cinematic",
+  "autoExposure": {
+    "enabled": true,
+    "delay": 0.5,
+    "min": 0.1,
+    "max": 0.8,
+    "target": 0.40,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": true
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.45,
+    "gamma": 1.0,
+    "function": 0,
+    "mappingFactor": 64.0,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": true,
+    "quality": 3,
+    "apertureFNumber": 2.8,
+    "imageSensorHeight": 0.025,
+    "baseFOV": 50.0,
+    "adaptiveApertureFactor": 0.5,
+    "apertureParameter": 2.0,
+    "apertureFrontLevels": -1,
+    "apertureBackLevels": -1,
+    "backgroundMaskThreshold": 0.1,
+    "edgeQuality": 3,
+    "apertureShape": 3
+  },
+  "chromaticAberration": {
+    "enabled": true,
+    "samples": 7,
+    "lateralDispersion": [0.012, 0.012],
+    "uniformDispersion": [0.001, 0.001]
+  },
+  "vignetting": {
+    "strength": 0.20,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 2,
+    "ghost": true,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 2.8,
+    "shape": 15,
+    "blur": true,
+    "threshold": 3.0,
+    "brightPass": true
+  },
+  "godRays": {
+    "enabled": true,
+    "useSunLight": true,
+    "diffractionRing": 0.40,
+    "diffractionRingRadius": 8.0,
+    "diffractionRingAttenuation": 0.15,
+    "diffractionRingOuterColor": [0.9, 0.8, 0.5, 0.7],
+    "color": [1.0, 0.9, 0.7, 1.0],
+    "length": 15.0,
+    "glareRatio": 0.01,
+    "angleAttenuation": 8.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 1.1,
+    "brightness": 1.05,
+    "contrast": 1.15,
+    "sepia": 0.0,
+    "colorTemp": 5000,
+    "whiteBalance": 5000
+  }
+}

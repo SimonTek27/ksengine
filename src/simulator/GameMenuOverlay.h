@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+namespace ks { namespace engine { namespace config { class Locale; } } }
+
 namespace ks::sim {
 
 struct SimPoint { int x = 0; int y = 0; };

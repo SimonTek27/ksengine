@@ -1,0 +1,264 @@
+{
+  "common": {
+    "back": {
+      "desc": "Return",
+      "label": "BACK"
+    }
+  },
+  "confirm": {
+    "cancel": {
+      "label": "CANCEL"
+    },
+    "dev": {
+      "cancel": {
+        "desc": "Stay in ksim"
+      },
+      "desc": "Open editor"
+    },
+    "label": "CONFIRM",
+    "quit": {
+      "cancel": {
+        "desc": "Return"
+      },
+      "desc": "Exit ksim"
+    }
+  },
+  "content": {
+    "cars": {
+      "desc": "Browse vehicles",
+      "label": "CARS"
+    },
+    "tracks": {
+      "desc": "Browse circuits",
+      "label": "TRACKS"
+    }
+  },
+  "controls": {
+    "keyboard": {
+      "desc": "Driving bindings",
+      "label": "KEYBOARD"
+    },
+    "wheel": {
+      "desc": "Device and FFB",
+      "label": "WHEEL"
+    }
+  },
+  "garage": {
+    "pit": {
+      "desc": "Fuel, tyres and repair plan for next stop",
+      "label": "PIT STRATEGY"
+    },
+    "setup": {
+      "desc": "Aero, gears, brakes and dampers",
+      "label": "SETUP"
+    },
+    "upgrade": {
+      "desc": "Cycle to the next level"
+    }
+  },
+  "menu": {
+    "content": {
+      "desc": "Cars, tracks and packages",
+      "label": "CONTENT"
+    },
+    "driver": {
+      "desc": "Profile and career stats",
+      "label": "DRIVER"
+    },
+    "editor": {
+      "desc": "Leave simulator and open the editor",
+      "label": "EDITOR"
+    },
+    "garage": {
+      "desc": "Setup, tyres and vehicle options",
+      "label": "GARAGE"
+    },
+    "multiplayer": {
+      "desc": "Online and LAN sessions",
+      "label": "MULTI PLAYER"
+    },
+    "quit": {
+      "desc": "Exit ksim",
+      "label": "QUIT"
+    },
+    "replay": {
+      "desc": "Playback and recording",
+      "label": "REPLAY"
+    },
+    "settings": {
+      "desc": "Display, audio and input",
+      "label": "SETTINGS"
+    },
+    "singleplayer": {
+      "desc": "Practice, race and time attack",
+      "label": "SINGLE PLAYER"
+    }
+  },
+  "mp": {
+    "disconnect": {
+      "desc": "Leave the current session or stop the server",
+      "label": "DISCONNECT"
+    },
+    "host": {
+      "desc": "Run a server on this machine (LAN/online)",
+      "label": "HOST SESSION"
+    },
+    "join": {
+      "desc": "Open the server browser, F2 also brings it up",
+      "label": "JOIN SESSION"
+    }
+  },
+  "pit": {
+    "aero": {
+      "desc": "Repair wings / aero",
+      "label": "AERO"
+    },
+    "body": {
+      "desc": "Repair bodywork",
+      "label": "BODY"
+    },
+    "confirm": {
+      "desc": "Apply strategy for next pit stop",
+      "label": "CONFIRM PLAN"
+    },
+    "engine": {
+      "desc": "Engine service",
+      "label": "ENGINE"
+    },
+    "fuelMinus": {
+      "desc": "Reduce target",
+      "label": "FUEL -5 L"
+    },
+    "fuelPlus": {
+      "desc": "Increase target",
+      "label": "FUEL +5 L"
+    },
+    "fuelTarget": {
+      "desc": "Target fuel after stop",
+      "label": "FUEL TARGET"
+    },
+    "state": {
+      "off": "OFF",
+      "on": "ON"
+    },
+    "suspension": {
+      "desc": "Repair suspension",
+      "label": "SUSPENSION"
+    },
+    "tyres": {
+      "desc": "Change all four tyres",
+      "label": "TYRES"
+    }
+  },
+  "profile": {
+    "name": {
+      "label": "NAME"
+    },
+    "nationality": {
+      "label": "NATIONALITY"
+    },
+    "number": {
+      "label": "NUMBER"
+    }
+  },
+  "replay": {
+    "load": {
+      "desc": "Open a saved session",
+      "label": "LOAD"
+    }
+  },
+  "results": {
+    "empty": {
+      "desc": "Finish or open a session first",
+      "label": "(no results yet)"
+    }
+  },
+  "section": {
+    "content": "CONTENT",
+    "controls": "CONTROLS",
+    "driver": "DRIVER",
+    "editor": "EDITOR",
+    "garage": "GARAGE",
+    "main": "MAIN MENU",
+    "menu": "MENU",
+    "multiplayer": "MULTI PLAYER",
+    "pit": "PIT STRATEGY",
+    "quit": "QUIT",
+    "replay": "REPLAY",
+    "results": "RESULTS",
+    "selectCar": "SELECT CAR",
+    "selectTeam": "SELECT TEAM",
+    "selectTrack": "SELECT TRACK",
+    "settings": "SETTINGS",
+    "singleplayer": "SINGLE PLAYER"
+  },
+  "select": {
+    "cars": {
+      "empty": {
+        "desc": "Put car folders in content/cars",
+        "label": "(no cars found)"
+      }
+    },
+    "teams": {
+      "empty": {
+        "desc": "Put team folders (team.ini) in content/teams",
+        "label": "(no teams found)"
+      }
+    },
+    "tracks": {
+      "empty": {
+        "desc": "Put track folders in content/tracks",
+        "label": "(no tracks found)"
+      }
+    }
+  },
+  "settings": {
+    "audio": {
+      "desc": "Volumes and devices",
+      "label": "AUDIO"
+    },
+    "controls": {
+      "desc": "Bindings and devices",
+      "label": "CONTROLS"
+    },
+    "graphics": {
+      "desc": "Resolution and quality",
+      "label": "GRAPHICS"
+    }
+  },
+  "sp": {
+    "car": {
+      "hint": "Select a car",
+      "label": "CAR"
+    },
+    "hint": {
+      "both": "Select a car and a track first",
+      "car": "Select a car first",
+      "track": "Select a track first"
+    },
+    "practice": {
+      "desc": "Open session on the selected circuit",
+      "label": "PRACTICE"
+    },
+    "quickrace": {
+      "desc": "Grid start against AI",
+      "label": "QUICK RACE"
+    },
+    "results": {
+      "desc": "Session standings",
+      "label": "RESULTS"
+    },
+    "team": {
+      "hint": "Select a team (optional)",
+      "label": "TEAM"
+    },
+    "timeattack": {
+      "desc": "Clean laps against the clock",
+      "label": "TIME ATTACK"
+    },
+    "track": {
+      "hint": "Select a track",
+      "label": "TRACK"
+    }
+  }
+}

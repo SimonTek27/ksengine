@@ -1,0 +1,264 @@
+{
+  "common": {
+    "back": {
+      "desc": "Torna indietro",
+      "label": "INDIETRO"
+    }
+  },
+  "confirm": {
+    "cancel": {
+      "label": "ANNULLA"
+    },
+    "dev": {
+      "cancel": {
+        "desc": "Resta in ksim"
+      },
+      "desc": "Apri l'editor"
+    },
+    "label": "CONFERMA",
+    "quit": {
+      "cancel": {
+        "desc": "Torna indietro"
+      },
+      "desc": "Chiudi ksim"
+    }
+  },
+  "content": {
+    "cars": {
+      "desc": "Sfoglia le vetture",
+      "label": "AUTO"
+    },
+    "tracks": {
+      "desc": "Sfoglia i circuiti",
+      "label": "CIRCUITI"
+    }
+  },
+  "controls": {
+    "keyboard": {
+      "desc": "Comandi di guida",
+      "label": "TASTIERA"
+    },
+    "wheel": {
+      "desc": "Dispositivo e FFB",
+      "label": "VOLANTE"
+    }
+  },
+  "garage": {
+    "pit": {
+      "desc": "Carburante, gomme e riparazioni per il prossimo stop",
+      "label": "STRATEGIA BOX"
+    },
+    "setup": {
+      "desc": "Aero, marce, freni e ammortizzatori",
+      "label": "ASSETTO"
+    },
+    "upgrade": {
+      "desc": "Passa al livello successivo"
+    }
+  },
+  "menu": {
+    "content": {
+      "desc": "Auto, circuiti e pacchetti",
+      "label": "CONTENUTI"
+    },
+    "driver": {
+      "desc": "Profilo e statistiche di carriera",
+      "label": "PILOTA"
+    },
+    "editor": {
+      "desc": "Lascia il simulatore e apri l'editor",
+      "label": "EDITOR"
+    },
+    "garage": {
+      "desc": "Assetto, gomme e opzioni della vettura",
+      "label": "GARAGE"
+    },
+    "multiplayer": {
+      "desc": "Sessioni online e in LAN",
+      "label": "MULTIGIOCATORE"
+    },
+    "quit": {
+      "desc": "Chiudi ksim",
+      "label": "ESCI"
+    },
+    "replay": {
+      "desc": "Riproduzione e registrazione",
+      "label": "REPLAY"
+    },
+    "settings": {
+      "desc": "Schermo, audio e ingresso",
+      "label": "IMPOSTAZIONI"
+    },
+    "singleplayer": {
+      "desc": "Allenamento, gara e time attack",
+      "label": "SINGOLO"
+    }
+  },
+  "mp": {
+    "disconnect": {
+      "desc": "Lascia la sessione corrente o ferma il server",
+      "label": "DISCONNETTI"
+    },
+    "host": {
+      "desc": "Avvia un server su questa macchina (LAN/online)",
+      "label": "OSPITA SESSIONE"
+    },
+    "join": {
+      "desc": "Apri il browser dei server, F2 fa lo stesso",
+      "label": "UNISCITI"
+    }
+  },
+  "pit": {
+    "aero": {
+      "desc": "Ripara ali e aero",
+      "label": "AERO"
+    },
+    "body": {
+      "desc": "Ripara la carrozzeria",
+      "label": "CARROZZERIA"
+    },
+    "confirm": {
+      "desc": "Applica la strategia al prossimo box",
+      "label": "CONFERMA PIANO"
+    },
+    "engine": {
+      "desc": "Revisione motore",
+      "label": "MOTORE"
+    },
+    "fuelMinus": {
+      "desc": "Riduci l'obiettivo",
+      "label": "CARBURANTE -5 L"
+    },
+    "fuelPlus": {
+      "desc": "Aumenta l'obiettivo",
+      "label": "CARBURANTE +5 L"
+    },
+    "fuelTarget": {
+      "desc": "Carburante dopo lo stop",
+      "label": "CARBURANTE"
+    },
+    "state": {
+      "off": "OFF",
+      "on": "ON"
+    },
+    "suspension": {
+      "desc": "Ripara le sospensioni",
+      "label": "SOSPENSIONI"
+    },
+    "tyres": {
+      "desc": "Cambia tutte e quattro le gomme",
+      "label": "GOMME"
+    }
+  },
+  "profile": {
+    "name": {
+      "label": "NOME"
+    },
+    "nationality": {
+      "label": "NAZIONALITÀ"
+    },
+    "number": {
+      "label": "NUMERO"
+    }
+  },
+  "replay": {
+    "load": {
+      "desc": "Apri una sessione salvata",
+      "label": "CARICA"
+    }
+  },
+  "results": {
+    "empty": {
+      "desc": "Finisci o apri prima una sessione",
+      "label": "(nessun risultato)"
+    }
+  },
+  "section": {
+    "content": "CONTENUTI",
+    "controls": "COMANDI",
+    "driver": "PILOTA",
+    "editor": "EDITOR",
+    "garage": "GARAGE",
+    "main": "MENU PRINCIPALE",
+    "menu": "MENU",
+    "multiplayer": "MULTIGIOCATORE",
+    "pit": "STRATEGIA BOX",
+    "quit": "ESCI",
+    "replay": "REPLAY",
+    "results": "RISULTATI",
+    "selectCar": "SCEGLI VETTURA",
+    "selectTeam": "SCEGLI TEAM",
+    "selectTrack": "SCEGLI CIRCUITO",
+    "settings": "IMPOSTAZIONI",
+    "singleplayer": "SINGOLO"
+  },
+  "select": {
+    "cars": {
+      "empty": {
+        "desc": "Metti le cartelle delle auto in content/cars",
+        "label": "(nessuna vettura trovata)"
+      }
+    },
+    "teams": {
+      "empty": {
+        "desc": "Metti le cartelle dei team (team.ini) in content/teams",
+        "label": "(nessun team trovato)"
+      }
+    },
+    "tracks": {
+      "empty": {
+        "desc": "Metti le cartelle dei circuiti in content/tracks",
+        "label": "(nessun circuito trovato)"
+      }
+    }
+  },
+  "settings": {
+    "audio": {
+      "desc": "Volumi e dispositivi",
+      "label": "AUDIO"
+    },
+    "controls": {
+      "desc": "Tasti e dispositivi",
+      "label": "COMANDI"
+    },
+    "graphics": {
+      "desc": "Risoluzione e qualità",
+      "label": "GRAFICA"
+    }
+  },
+  "sp": {
+    "car": {
+      "hint": "Seleziona una vettura",
+      "label": "VETTURA"
+    },
+    "hint": {
+      "both": "Seleziona prima una vettura e un circuito",
+      "car": "Seleziona prima una vettura",
+      "track": "Seleziona prima un circuito"
+    },
+    "practice": {
+      "desc": "Apri la sessione sul circuito selezionato",
+      "label": "ALLENAMENTO"
+    },
+    "quickrace": {
+      "desc": "Partenza in griglia contro l'IA",
+      "label": "GARA RAPIDA"
+    },
+    "results": {
+      "desc": "Classifica della sessione",
+      "label": "RISULTATI"
+    },
+    "team": {
+      "hint": "Seleziona un team (facoltativo)",
+      "label": "TEAM"
+    },
+    "timeattack": {
+      "desc": "Giri veloci contro il cronometro",
+      "label": "TIME ATTACK"
+    },
+    "track": {
+      "hint": "Seleziona un circuito",
+      "label": "CIRCUITO"
+    }
+  }
+}

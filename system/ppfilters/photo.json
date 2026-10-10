@@ -1,0 +1,87 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "Photo",
+  "description": "Natural photography look with realistic color balance and subtle vignette.",
+  "category": "natural",
+  "autoExposure": {
+    "enabled": true,
+    "delay": 0.0,
+    "min": 0.2,
+    "max": 0.5,
+    "target": 0.32,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": false
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.25,
+    "gamma": 2.2,
+    "function": -1,
+    "mappingFactor": 32.0,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": false,
+    "quality": 2,
+    "apertureFNumber": 2.8,
+    "imageSensorHeight": 0.025,
+    "baseFOV": 50.0,
+    "adaptiveApertureFactor": 0.5,
+    "apertureParameter": 2.0,
+    "apertureFrontLevels": -1,
+    "apertureBackLevels": -1,
+    "backgroundMaskThreshold": 0.1,
+    "edgeQuality": 3,
+    "apertureShape": 3
+  },
+  "chromaticAberration": {
+    "enabled": false,
+    "samples": 3,
+    "lateralDispersion": [0.0, 0.0],
+    "uniformDispersion": [0.0, 0.0]
+  },
+  "vignetting": {
+    "strength": 0.15,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 2,
+    "ghost": false,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 1.2,
+    "shape": 9,
+    "blur": true,
+    "threshold": 4.0,
+    "brightPass": false
+  },
+  "godRays": {
+    "enabled": false,
+    "useSunLight": true,
+    "diffractionRing": 0.25,
+    "diffractionRingRadius": 5.0,
+    "diffractionRingAttenuation": 0.1,
+    "diffractionRingOuterColor": [0.5, 0.5, 0.5, 0.5],
+    "color": [1.0, 1.0, 1.0, 1.0],
+    "length": 11.0,
+    "glareRatio": 0.005,
+    "angleAttenuation": 5.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 1.0,
+    "brightness": 1.0,
+    "contrast": 1.0,
+    "sepia": 0.0,
+    "colorTemp": 5500,
+    "whiteBalance": 5500
+  }
+}

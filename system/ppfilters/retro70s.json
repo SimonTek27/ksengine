@@ -1,0 +1,87 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "Retro 70s",
+  "description": "Warm amber tones with soft contrast reminiscent of 1970s film.",
+  "category": "vintage",
+  "autoExposure": {
+    "enabled": true,
+    "delay": 0.0,
+    "min": 0.3,
+    "max": 0.6,
+    "target": 0.35,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": true
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.25,
+    "gamma": 1.3,
+    "function": -1,
+    "mappingFactor": 32.0,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": true,
+    "quality": 3,
+    "apertureFNumber": 2.8,
+    "imageSensorHeight": 0.025,
+    "baseFOV": 50.0,
+    "adaptiveApertureFactor": 0.5,
+    "apertureParameter": 2.0,
+    "apertureFrontLevels": -1,
+    "apertureBackLevels": -1,
+    "backgroundMaskThreshold": 0.1,
+    "edgeQuality": 3,
+    "apertureShape": 3
+  },
+  "chromaticAberration": {
+    "enabled": true,
+    "samples": 5,
+    "lateralDispersion": [0.003, 0.003],
+    "uniformDispersion": [0.0005, 0.0005]
+  },
+  "vignetting": {
+    "strength": 0.12,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 2,
+    "ghost": true,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 1.8,
+    "shape": 11,
+    "blur": true,
+    "threshold": 4.0,
+    "brightPass": false
+  },
+  "godRays": {
+    "enabled": true,
+    "useSunLight": true,
+    "diffractionRing": 0.25,
+    "diffractionRingRadius": 5.0,
+    "diffractionRingAttenuation": 0.1,
+    "diffractionRingOuterColor": [0.6, 0.55, 0.45, 0.5],
+    "color": [1.0, 0.95, 0.85, 1.0],
+    "length": 11.0,
+    "glareRatio": 0.005,
+    "angleAttenuation": 5.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 0.65,
+    "brightness": 1.0,
+    "contrast": 0.9,
+    "sepia": 0.08,
+    "colorTemp": 4500,
+    "whiteBalance": 4500
+  }
+}

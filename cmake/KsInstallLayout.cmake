@@ -12,6 +12,9 @@
 #   server/            kssimserver startup configuration
 #   system/cfg/        engine settings as JSON (shipped empty, see
 #                      src/engine/Config/EngineSettings.h)
+#   system/ppfilters/  post-processing filter presets as JSON
+#   system/i18n/       game strings per language (system/i18n/<lang>.json,
+#                      src/engine/Config/Locale.h)
 #   system/shaders/    precompiled SPIR-V
 #
 # Entry points:
@@ -41,6 +44,11 @@ set(KS_LAYOUT_SERVER_CONFIG "${CMAKE_SOURCE_DIR}/server/kssimserver.ini")
 # user's file gains them when edited.
 set(KS_LAYOUT_ENGINE_CONFIG "${CMAKE_SOURCE_DIR}/system/cfg/ksengine.json")
 
+# Game strings shipped with the install: system/i18n/en.json (the English
+# table every key falls back to) and one file per translation on top of it.
+# The Qt-free runtime reads them through src/engine/Config/Locale.h.
+set(KS_LAYOUT_I18N "${CMAKE_SOURCE_DIR}/system/i18n")
+
 # ---------------------------------------------------------------------------
 # Build-tree staging.
 # ---------------------------------------------------------------------------
@@ -64,6 +72,16 @@ function(ks_stage_install_layout _target)
 			COMMAND ${CMAKE_COMMAND} -E copy_if_different
 				"${KS_LAYOUT_ENGINE_CONFIG}" "$<TARGET_FILE_DIR:${_target}>/system/cfg/"
 			COMMENT "Staging system/cfg/ksengine.json next to $<TARGET_FILE_NAME:${_target}>"
+			VERBATIM)
+	endif()
+
+	# system/i18n/ — game strings per language (en.json + one file per
+	# translation). copy_directory keeps the directory itself in the target.
+	if(EXISTS "${KS_LAYOUT_I18N}")
+		add_custom_command(TARGET ${_target} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${KS_LAYOUT_I18N}" "$<TARGET_FILE_DIR:${_target}>/system/i18n"
+			COMMENT "Staging system/i18n/ next to $<TARGET_FILE_NAME:${_target}>"
 			VERBATIM)
 	endif()
 
@@ -139,6 +157,11 @@ function(ks_install_layout)
 	# --- system/cfg/ -------------------------------------------------------
 	if(EXISTS "${KS_LAYOUT_ENGINE_CONFIG}")
 		install(FILES "${KS_LAYOUT_ENGINE_CONFIG}" DESTINATION system/cfg)
+	endif()
+
+	# --- system/i18n/ ------------------------------------------------------
+	if(EXISTS "${KS_LAYOUT_I18N}")
+		install(DIRECTORY "${KS_LAYOUT_I18N}" DESTINATION system)
 	endif()
 
 	# --- system/shaders/ ---------------------------------------------------
