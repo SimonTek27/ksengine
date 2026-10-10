@@ -101,6 +101,9 @@ struct NativeMesh {
     std::string metalnessTexture;
     float roughness = 0.35f; // identity 1.0 when roughnessTexture is set
     float metalness = 0.0f;  // identity 1.0 when metalnessTexture is set
+    // P3 — clear-coat flag from materials.txt cell 6 (>= 0.5 = coated).
+    // Static per mesh, rides the same std140 block as the scalars above.
+    float clearcoat = 0.0f;
     // Descriptor set 1 for this mesh + its 16-byte std140 material block.
     // Null until createMaterialDescriptor() succeeds (or after it fails);
     // the draw path then binds the default material set instead.

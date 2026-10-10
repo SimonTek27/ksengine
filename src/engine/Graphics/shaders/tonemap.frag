@@ -43,6 +43,14 @@ layout(push_constant) uniform ToneMapPC {
                          //     OS SDR-white for parity — default 80, see
                          //     NativeRenderer::m_hdrWhiteNits / KS_HDR_WHITE_NITS)
     float peakNits;      // 44  HDR highlight ceiling
+    // Brief P4 — light sharpen, appended at the END of the block (the
+    // add-only rule): one HDR texel step + the unsharp amount. 0 = off;
+    // NativeRenderer only raises it when TAA is on (its history blend is
+    // what softens the frame), and the four extra taps are skipped then.
+    float sharpenTexelX; // 48
+    float sharpenTexelY; // 52
+    float sharpenAmount; // 56
+    float sharpenPad;    // 60
 } pc;
 
 layout(location = 0) in vec2 fragUV;
@@ -118,6 +126,18 @@ void main() {
     // pre-exposure, so exposure lands on their sum (same order the old
     // shader used).
     vec3 color = texture(hdrBuffer, fragUV).rgb;
+    // Brief P4 — light sharpen: unsharp mask on the scene HDR, applied
+    // BEFORE the bloom glow is folded in so the glow itself stays soft
+    // ("small radius, no foggy glow"). Amount 0 (non-TAA frames) skips
+    // the four taps entirely — byte-identical to the pre-P4 image.
+    if (pc.sharpenAmount > 0.0) {
+        vec2 t = vec2(pc.sharpenTexelX, pc.sharpenTexelY);
+        vec3 blur = (texture(hdrBuffer, fragUV + vec2( t.x, 0.0)).rgb +
+                     texture(hdrBuffer, fragUV + vec2(-t.x, 0.0)).rgb +
+                     texture(hdrBuffer, fragUV + vec2(0.0,  t.y)).rgb +
+                     texture(hdrBuffer, fragUV + vec2(0.0, -t.y)).rgb) * 0.25;
+        color += (color - blur) * pc.sharpenAmount;
+    }
     color += texture(bloomBuffer, fragUV).rgb * 0.3;
     vec3 exposed = color * pc.exposure;
 

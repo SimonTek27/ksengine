@@ -50,6 +50,44 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **ksengine.dll con API esportato esplicito** (roadmap 2.4/2.5):
   `src/engine/KsExport.h` introduce la macro `KSENGINE_API` (dllexport/dllimport in base alla definizione di `KSENGINE_BUILDING_DLL` / `KSENGINE_USE_DLL`) e `option(KSENGINE_SHARED ... ON)` in `src/engine/CMakeLists.txt` rende `ksengine` una shared library; sono stati annotati 29 classi e 32 funzioni libere in 38 header `src/engine/` con la macro `KSENGINE_API`. I simboli di superficie export sono misurati staticamente via dumpbin: 187 entità in `ksengine_export_surface.csv`, nessuna template. La DLL carica `vulkan-1.dll` in modalità delay-load.
   Si noti: passandone `-DKSENGINE_SHARED=OFF` si ricostruisce il vecchio archivio statico `ksengine.lib`, con macro vuote e nessuna modifica ai file fonte.
+- **Rendering AI brief — Sprint S4 (P3 + P4)** (`RENDERING_AI_BRIEF.md`):
+  clear-coat su vernice da gara e sharpen del display pass sul path
+  Qt-free. P3: la finitura multistrato è un secondo lobo speculare
+  semplificato (F0 0.04, roughness fissa 0.07, energia accoppiata in
+  debolezza — sommato al lobo base GGX) **sia in
+  `deferred_lighting.frag` sia in `native_forward.frag`** (che finora
+  non aveva alcun termine speculare); il vecchio blocco clear-coat
+  morto di deferred (`clearcoat = 0` ma `Fcc = 0.25` costante) è stato
+  sostituito. Il flag è author-only: sesta cella opzionale di
+  `materials.txt` (numero → clamp [0,1]; assente o non numerico → 0,
+  quindi le righe legacy rendono identico), `MaterialData.pad` diventa
+  `clearcoat` nello stesso blocco std140 da 16 byte, e nel GBuffer il
+  flag viaggia nel **segno di RT1.w** (nessun canale cambia formato:
+  `gbuffer.frag` scrive −max(roughness,1e−6) per i mesh verniciati,
+  `deferred_lighting.frag` — unico lettore — decodifica con `abs(w)`).
+  `Kn5Baker.cpp` emette la cella solo per righe dielettriche lucide
+  (metalness < 0.5 e roughness ≤ 0.4, con euristica nome/scalar per le
+  righe con mappa): le altre restano byte-identiche al formato a 5
+  celle. Correzione correlata: il lobo speculare base è ora
+  moltiplicato per `sunRad` (colore × intensità), sparizione del
+  *phantom specular* — un frame con sole a intensità 0 è davvero
+  solo-ambiente (per questo l'A/B IBL deferred di S3 ha spostato i
+  numeri, off 202→165 / on 231→223, tutti i pin verdi). Contenuto di
+  riferimento: nuova quad "coated" (stessa geometria, albedo e
+  roughness 0.95 di "rough", differisce solo la cella clear-coat) e
+  A/B in `test_renderer`: centro +209 (deferred) / +371 (forward) sul
+  lobo sharp, sonda fuori dall'highlight ≈ invariata — il done-when
+  "sharp specular highlight distinct from broader base reflection".
+  P4: sharpen leggero (unsharp a 4 tap sull'HDR pre-bloom, amount 0.2
+  segue lo stato TAA, 0 con TAA spento → le immagini non-TAA restano
+  byte-identiche) appendito **in coda** di `TonemapPC` (48→64 byte,
+  range push-constant `sizeof` cresce da solo) e in `tonemap.frag`;
+  exposure (`KS_EXPOSURE` → `setExposure`) e curve (default ACES) già
+  cablate dalla Block C, ora verificate esplicitamente: A/B exposure
+  3× su quad rough — senza curva il verde è ritagliato a 255, con
+  ACES la spalla lo tiene a 236 ("speculars roll off cleanly").
+  Bloom (extract + blur a metà risoluzione) e vignette restano
+  opzionali/non richiesti. 53/53 ctest, gate Qt-free 0/913
 - **Rendering AI brief — Sprint S3 (P2)** (`RENDERING_AI_BRIEF.md`):
   IBL split-sum sul path Vulkan Qt-free, generata interamente a CPU a
   runtime (`src/simulator/IblGenerator.h`, deterministica — sequenza

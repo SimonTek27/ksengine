@@ -677,7 +677,7 @@ int main()
     const int refLoaded = renderer.loadMeshesFromManifest(refBake);
     std::printf("test_renderer: reference bake loaded %d mesh(es) from %s\n",
                 refLoaded, refBake.c_str());
-    KS_CHECK(refLoaded >= 6);                       // plain sign smooth rough metal lodable ground
+    KS_CHECK(refLoaded >= 7); // plain sign smooth rough coated metal lodable ground
     KS_CHECK(renderer.cachedTextureCount() == 2);   // skin_paint.dds + metal_mask.dds
 
     const mat4 projRef =
@@ -921,6 +921,98 @@ int main()
         renderer.setDeferred(false);
         renderer.setIblEnabled(false);
         renderer.setSun(sunRef); // restore the lit sun for (f)
+    }
+
+    // (e4) Brief P3 — clear-coat A/B. "coated" shares "rough"'s geometry,
+    //     albedo (skin_paint) and base roughness 0.95: the ONLY difference
+    //     in materials.txt is the optional 6th cell (1 vs absent). Under
+    //     the head-on sun both get the identical broad base lobe, so the
+    //     centre delta is purely the coat's sharp 0.07 GGX spike, and a
+    //     probe ~12° off the highlight — where a 0.07 lobe has already
+    //     collapsed to nothing — must show both quads sitting on the same
+    //     broad base. That is the P3 done-when: "sharp specular highlight
+    //     distinct from the broader base reflection". Both paths: forward
+    //     reads the flag from MaterialData, deferred decodes it from
+    //     GBuffer RT1.w's sign bit.
+    {
+        aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+        auto coatSum = [](const unsigned char* p) {
+            return int(p[0]) + int(p[1]) + int(p[2]); // BGRA readback
+        };
+        auto coatPair = [&](RefShot& base, RefShot& coat) {
+            capture("rough", mat4(), base);
+            capture("coated", mat4(), coat);
+            KS_CHECK(base.ok && coat.ok);
+            if (!base.ok || !coat.ok) return;
+            KS_CHECK(base.stats.drawn == 1 && coat.stats.drawn == 1);
+            const unsigned char* cCentre = centrePx(coat);
+            const unsigned char* bCentre = centrePx(base);
+            const unsigned char* cOff = pxAt(coat, 0.40f, 0.35f);
+            const unsigned char* bOff = pxAt(base, 0.40f, 0.35f);
+            const int cSum = coatSum(cCentre), bSum = coatSum(bCentre);
+            const int cOffSum = coatSum(cOff), bOffSum = coatSum(bOff);
+            std::printf("test_renderer: clear-coat centre base=%d coat=%d "
+                        "off-probe base=%d coat=%d\n",
+                        bSum, cSum, bOffSum, cOffSum);
+            KS_CHECK(!isClearPixel(cCentre) && !isClearPixel(bCentre));
+            KS_CHECK(!isClearPixel(cOff) && !isClearPixel(bOff));
+            // Centre: the coat spike saturates the highlight (observed
+            // margin ~+230 deferred / ~+370 forward), so +100 leaves
+            // room for tonemap roll-off without going soft.
+            KS_CHECK(cSum > bSum + 100);
+            // Off-centre: coat lobe gone, base shared -> deltas are
+            // rounding/AA only (observed ~0).
+            KS_CHECK(cOffSum <= bOffSum + 12);
+        };
+
+        renderer.setDeferred(true); // flag rides GBuffer RT1.w's sign here
+        RefShot dBase, dCoat;
+        coatPair(dBase, dCoat);
+        renderer.setDeferred(false);
+        RefShot fBase, fCoat; // flag rides MaterialData.clearcoat here
+        coatPair(fBase, fCoat);
+    }
+
+    // (e5) Brief P4 — exposure + ACES roll-off. Exposure is a display-pass
+    //     multiplier (setExposure -> TonemapPC.exposure; the app wires
+    //     KS_EXPOSURE to it) applied before the tone curve. At 3x the rough
+    //     quad's broad highlight sits well above 1.0 linear in red/green:
+    //     mode=0 (no curve) clips those channels to 255, while the default
+    //     ACES shoulder (mode 2) rolls them off cleanly below clip — the
+    //     P4 done-when ("speculars roll off cleanly"). Blue of the red
+    //     paint stays under 1.0 linear even at 3x, so GREEN is the
+    //     discriminating channel. TAA is off here, which also pins
+    //     sharpenAmount = 0: none of the other deferred pins move.
+    {
+        aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+        renderer.setDeferred(true);
+        RefShot e1, e3clip, e3aces;
+        capture("rough", mat4(), e1);
+        renderer.setExposure(3.0f);
+        renderer.setTonemapMode(0); // no curve: highlight clips at white
+        capture("rough", mat4(), e3clip);
+        renderer.setTonemapMode(2); // ACES: shoulder rolls off below clip
+        capture("rough", mat4(), e3aces);
+        renderer.setExposure(1.0f); // restore the defaults for the rest
+        renderer.setDeferred(false);
+        renderer.setTonemapMode(2);
+        KS_CHECK(e1.ok && e3clip.ok && e3aces.ok);
+        if (e1.ok && e3clip.ok && e3aces.ok) {
+            const unsigned char* p1 = centrePx(e1);
+            const unsigned char* pClip = centrePx(e3clip);
+            const unsigned char* pAces = centrePx(e3aces);
+            auto g8 = [](const unsigned char* p) { return int(p[1]); }; // BGRA
+            std::printf("test_renderer: P4 exposure rough centre G 1x=%d "
+                        "3x-clip=%d 3x-aces=%d\n",
+                        g8(p1), g8(pClip), g8(pAces));
+            KS_CHECK(!isClearPixel(p1) && !isClearPixel(pClip) &&
+                     !isClearPixel(pAces));
+            KS_CHECK(g8(pClip) > g8(p1));  // exposure reaches the image
+            KS_CHECK(g8(pAces) > g8(p1));  // ACES keeps the lift
+            KS_CHECK(g8(pClip) == 255);    // the clip is real at 3x
+            // Observed gap ~15 (255 vs ~240): ACES stays under clip.
+            KS_CHECK(g8(pAces) < g8(pClip) - 8);
+        }
     }
 
     // (f) Reference car bake: the loadMeshFromFile() call shape

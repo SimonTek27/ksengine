@@ -88,7 +88,7 @@ Decisioni esplicite dalla roadmap:
 - [ ] **Non** riscrivere fisica, sessione o `ksnet` (fondazioni già funzionali)
 - [ ] **Non** aggiungere domini moto / barca / aereo
 - [ ] **Non** fare ranked globale prima del loop offline/LAN
-- [ ] **Non** promuovere il clear-coat come “finito” (resta infrastruttura — S4/P3; l'IBL è consegnato dallo sprint S3)
+- [x] **Non** promuovere il clear-coat come “finito” senza deliverable — ora consegnato dallo sprint S4/P3 (A/B su contenuto di riferimento, secondo lobo in deferred e forward); l'IBL è consegnato dallo sprint S3
 - [ ] **Non** riattivare l’editor Qt per compensare un gap del runtime Qt-free
 
 ---

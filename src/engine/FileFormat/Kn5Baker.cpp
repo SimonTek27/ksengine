@@ -207,7 +207,7 @@ static MaterialPbr extractPbr(const Kn5Material& material) {
 
 // One materials.txt row, assembled while visiting meshes (brief P1: the
 // rough/metal cells carry a texture name when a map is authored — see
-// writeMaterialsTxt).
+// writeMaterialsTxt; brief P3 appends clearcoat as an optional 6th cell).
 struct MaterialRow {
     std::string mesh; // sanitized, unique manifest name
     std::string albedo;
@@ -216,6 +216,11 @@ struct MaterialRow {
     std::string metalTex; // non-empty = emit the name in the metal cell
     float roughness = 0.35f;
     float metalness = 0.0f;
+    // Brief P3 — clear-coat flag: 1 for glossy dielectric paint-look rows
+    // (the material that gets the sharp coat lobe), 0 otherwise. The cell
+    // is only appended when non-zero, so non-coated rows stay byte-equal
+    // to the legacy 5-cell format.
+    float clearcoat = 0.0f;
 };
 
 // -------------------------------------------------------------------
@@ -304,6 +309,17 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
                             ? pbr.roughness
                             : heuristicMaterialRoughness(mat.name, mat.shader);
         row.metalness = pbr.hasMetalness ? pbr.metalness : 0.0f;
+        // Brief P3 — clear-coat for glossy dielectric paint: non-metal and
+        // paint-look roughness (<= 0.4, i.e. the paint heuristic 0.35 or an
+        // authored smooth value; carbon 0.5 stays matte). For a row whose
+        // rough cell holds a MAP the stored scalar is the identity 1.0, so
+        // decide from the value the shader would see without the map —
+        // authored scalar or the name-based heuristic — because real paint
+        // often ships with a roughness map and must still get its coat.
+        const float visualRough = pbr.hasRoughness
+                                      ? pbr.roughness
+                                      : heuristicMaterialRoughness(mat.name, mat.shader);
+        row.clearcoat = (row.metalness < 0.5f && visualRough <= 0.4f) ? 1.0f : 0.0f;
         rows.push_back(std::move(row));
     } else {
         // No material assigned; brief P1 heuristic defaults (paint-like).
@@ -311,6 +327,7 @@ void bakeMesh(const Kn5Mesh& mesh, const std::string& output_dir,
         row.mesh = safe_name;
         row.roughness = heuristicMaterialRoughness("", "");
         row.metalness = 0.0f;
+        row.clearcoat = row.roughness <= 0.4f ? 1.0f : 0.0f;
         rows.push_back(std::move(row));
     }
 }
@@ -398,7 +415,13 @@ static void writeMaterialsTxt(const std::string& output_dir,
         file << '\t';
         if (!row.metalTex.empty()) file << row.metalTex;
         else file << row.metalness;
-        file << '\t' << row.normal << '\n';
+        file << '\t' << row.normal;
+        // Brief P3 — append the clear-coat cell only for coated rows, so
+        // every other row stays byte-identical to the legacy 5-cell format
+        // (an old parser rejects rows wider than 5 fields; only painted,
+        // coated meshes actually need the new reader).
+        if (row.clearcoat > 0.0f) file << '\t' << row.clearcoat;
+        file << '\n';
     }
     file.close();
 }

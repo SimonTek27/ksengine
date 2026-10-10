@@ -2,6 +2,7 @@ plain
 sign
 smooth
 rough
+coated
 metal
 lodable
 ground

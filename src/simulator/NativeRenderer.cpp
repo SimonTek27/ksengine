@@ -700,13 +700,18 @@ struct MaterialUBO {
     // perturbation strength. Also gates the derivative-TBN blend so a mesh
     // without a normal map never reads its fallback texel as a normal.
     float normalScale = 0.0f;
-    float pad = 0.0f;
+    // Brief P3 — clear-coat flag (materials.txt cell 6, >= 0.5 = coated).
+    // Formerly the pad slot: the block stays 16 bytes std140.
+    float clearcoat = 0.0f;
 };
 static_assert(sizeof(MaterialUBO) == 16, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
 // after it packs on 4) — spirv-dis confirms offsets 0/12/16/20/24/28/32/36/40/44.
+// Brief P4 appends the sharpen fields at the END (same add-only rule as
+// FrameData); the display layout's push-constant range is sizeof(TonemapPC),
+// so it grows with the struct.
 struct TonemapPC {
     float colorFilter[3]; // 0
     float exposure;       // 12
@@ -718,8 +723,17 @@ struct TonemapPC {
     int32_t hdrOutput;    // 36  1 = PQ / Rec.2020
     float whiteNits;      // 40
     float peakNits;       // 44
+    // Brief P4 — light sharpen (unsharp mask on the scene HDR, tonemap.frag):
+    // one HDR texel step + the amount. Derived from the TAA state at record
+    // time — TAA's history blend is the only thing that softens the frame,
+    // so TAA off keeps the amount at 0 and the shader skips its four taps,
+    // leaving every non-TAA image byte-identical.
+    float sharpenTexelX;  // 48
+    float sharpenTexelY;  // 52
+    float sharpenAmount;  // 56  0 = off
+    float sharpenPad;     // 60
 };
-static_assert(sizeof(TonemapPC) == 48, "TonemapPC must match tonemap.frag's ToneMapPC");
+static_assert(sizeof(TonemapPC) == 64, "TonemapPC must match tonemap.frag's ToneMapPC");
 
 // Bright-pass push constants (glareExtract.frag): threshold + soft knee in
 // scene-linear units, i.e. 1.0 is "already brighter than SDR paper white".
@@ -1463,6 +1477,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.roughness = mesh.roughness;
     ubo.metalness = mesh.metalness;
     ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
+    ubo.clearcoat = mesh.clearcoat;
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1604,6 +1619,7 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
     if (material) {
         mesh.roughness = material->roughness; // 1.0 when the map below is set
         mesh.metalness = material->metalness;
+        mesh.clearcoat = material->clearcoat;
         mesh.albedoTexture =
             MaterialCache::resolveTexturePath(textureDir, material->albedo);
         mesh.normalTexture =
@@ -2274,6 +2290,11 @@ void NativeRenderer::endFrame() {
             t.hdrOutput = m_hdrOutput ? 1 : 0;
             t.whiteNits = m_hdrWhiteNits;
             t.peakNits = kHdrPeakNits;
+            // Brief P4 — light sharpen follows the TAA state (see TonemapPC).
+            t.sharpenTexelX = 1.0f / float(m_swapChainExtent.width);
+            t.sharpenTexelY = 1.0f / float(m_swapChainExtent.height);
+            t.sharpenAmount = m_taa ? 0.2f : 0.0f;
+            t.sharpenPad = 0.0f;
             vkCmdPushConstants(m_commandBuffer, m_displayLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(t), &t);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);

@@ -232,7 +232,11 @@ void main() {
     // multiply in gbuffer.frag, and SSAO below still runs from depth.
     float metalness = clamp(albedoAO.a, 0.0, 1.0);
     vec3 N = normalize(normalRough.xyz);
-    float roughness = clamp(normalRough.w, 0.05, 1.0);
+    // Brief P3: gbuffer.frag signs RT1.w to smuggle the clear-coat flag
+    // through the GBuffer (every channel is full) — this shader is the
+    // only reader of RT1.w, so the magnitude decodes back to roughness.
+    float coated = normalRough.w < 0.0 ? 1.0 : 0.0;
+    float roughness = clamp(abs(normalRough.w), 0.05, 1.0);
 
     vec3 camPos = frame.cameraPos.xyz;
     float viewDist = length(worldPos - camPos);
@@ -275,30 +279,32 @@ void main() {
     float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
     vec3 F0 = mix(vec3(0.04), albedo, metalness); // dielectric 0.04 / metal albedo
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
-    vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) * NdotL * shadow;
+    // Base GGX lobe, scaled by sunRad (colour x intensity) so the sun
+    // stays the dominant hard light: intensity 0 means no highlight at
+    // all — an unscaled specular would keep glowing in an ambient-only
+    // frame and would never track the sun's tint.
+    vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) * NdotL * shadow * sunRad;
 
     // -------------------------------------------------------------------
-    // Clear-coat (P4) — secondary specular layer on top of the base paint.
-    // Simulates a clear clear-coated finish (e.g. factory clear coat over base paint).
+    // Clear-coat (brief P3) — second specular lobe over the base paint:
+    // fixed sharp coat roughness 0.07 (brief: 0.05-0.1), Schlick F0 0.04,
+    // energy weakly coupled (added on top, no base attenuation — the
+    // brief allows a simplified two-lobe sum). Authored per mesh in
+    // materials.txt cell 6 (>= 0.5 = coated); legacy rows keep coated = 0
+    // and skip this term entirely, so their pixels are unchanged.
+    // Same math as native_forward.frag — keep the two paths in sync.
     // -------------------------------------------------------------------
-    float clearcoat = 0.0f;           // authored per-mesh or fallback 0
-    float clearcoat_roughness = 0.05f;// default very sharp clear coat
-    float Fcc = 0.25;                 // clear coat Fresnel at normal incidence
-    // Simple heuristic: if mesh has no explicit clearcoat, stay at 0.
-    // Future: read from Kn5Material or materials.txt.
+    float acc = 0.07 * 0.07;                       // coat alpha = roughness^2
+    float ccdd = NdotH * NdotH * (acc * acc - 1.0) + 1.0;
+    float ccD = (acc * acc) / (PI * ccdd * ccdd);
+    float cck = acc * 0.5;
+    float ccG = (NdotL / (NdotL * (1.0 - cck) + cck)) *
+                (NdotV / (NdotV * (1.0 - cck) + cck));
+    vec3 ccF = vec3(0.04) + (1.0 - 0.04) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+    vec3 specularCoat = ((ccD * ccG * ccF) / (4.0 * NdotL * NdotV + 1e-4)) *
+                        NdotL * shadow * sunRad * coated;
 
-    // Clear-coat GGX about H, with its own roughness
-    float a_cc = clearcoat_roughness;
-    float a_cc2 = a_cc * a_cc;
-    float NdotH2 = max(dot(N, H), 0.0);
-    float NdotV2 = max(dot(N, V), 1e-4);
-    float ccD = a_cc2 / (PI * pow(max(NdotH2, 1e-4), 3.0) * (1.0 - (a_cc2) * (1.0 - NdotH2) + 1e-4));
-    float ccG = (NdotL * (1.0 - (a_cc2) / 3.0 + (a_cc2) * NdotL) + NdotV * (1.0 - (a_cc2) / 3.0 + (a_cc2) * NdotV)) / (2.0 * (NdotL + NdotV + 1e-4));
-    vec3 Fcc_vec = vec3(Fcc);
-    vec3 specular_cc = (ccD * ccG * Fcc_vec) / (4.0 * NdotL * NdotV2 + 1e-4) * NdotL * shadow;
-
-    // Blend clear-coat with base specular (clear coat on top)
-    vec3 lit = ambient + diffuse + specular + specular_cc;
+    vec3 lit = ambient + diffuse + specular + specularCoat;
 
     // Screen-space reflections on top of the specular term: fresnel-weighted
     // with the GBuffer's metalness (RT0.a — metals reflect nearly

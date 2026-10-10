@@ -3,7 +3,14 @@
 // Roadmap 2.3 — reader for materials.txt, the optional sidecar the kn5baker
 // tool writes next to manifest.txt, one row per baked mesh:
 //
-//     mesh_name \t albedo_tex \t roughness \t metalness \t normal_tex \n
+//     mesh_name \t albedo_tex \t roughness \t metalness \t normal_tex [\t clearcoat] \n
+//
+// Rendering brief P3: the optional 6th cell carries the clear-coat flag
+// (0 = off, >= 0.5 = the second sharp specular lobe). It is appended at
+// the END of the row exactly like every other additive extension: rows
+// without it parse unchanged and default to 0, so every old bake renders
+// byte-identically. A non-numeric cell keeps the default (coat off) —
+// fail-open, same degradation rule as the P1 cells.
 //
 // Rendering brief P1: the roughness and metalness cells are dual-typed —
 // either a scalar in [0,1] (the Roadmap 2.3 format, still what every old
@@ -62,6 +69,10 @@ struct MeshMaterial {
     //   - no map        -> the authored scalar (or the default below).
     float roughness = 0.35f;
     float metalness = 0.0f;
+    // Brief P3 — clear-coat flag from the optional 6th cell: >= 0.5 means
+    // the renderer adds the sharp coat specular lobe (roughness ~0.07,
+    // F0 0.04) over the base paint. 0 for every legacy row.
+    float clearcoat = 0.0f;
     // True when a materials.txt row supplied these values; false = defaults
     // (the renderer treats that as "no authored material" for logging).
     bool authored = false;
@@ -87,11 +98,11 @@ public:
             if (!line.empty() && line.back() == '\r') line.pop_back(); // CRLF bake
             if (line.empty() || line[0] == '#') continue;
 
-            std::string fields[5];
-            const int fieldCount = splitTabs(line, fields, 5);
-            // A row must at least name the mesh; more than 5 fields means a
+            std::string fields[6];
+            const int fieldCount = splitTabs(line, fields, 6);
+            // A row must at least name the mesh; more than 6 fields means a
             // tab inside a field — a foreign/corrupt row we cannot trust.
-            if (fieldCount < 1 || fields[0].empty() || fieldCount > 5) {
+            if (fieldCount < 1 || fields[0].empty() || fieldCount > 6) {
                 ++m_skippedRows;
                 continue;
             }
@@ -108,6 +119,8 @@ public:
                              material.metalnessMap, 0.0f);
             }
             if (fieldCount >= 5) material.normal = trim(fields[4]);
+            if (fieldCount >= 6) applyCoatCell(trim(fields[5]),
+                                               material.clearcoat);
 
             m_entries[fields[0]] = std::move(material);
         }
@@ -204,6 +217,19 @@ private:
         if (cell.find('.') == std::string::npos) { scalar = fallback; return; }
         map = cell;
         scalar = 1.0f;
+    }
+
+    // Brief P3 — the clear-coat cell is a plain scalar (no map variant):
+    // a finite number clamps to [0,1], anything else (empty already
+    // handled by the caller's fieldCount, garbage, "nan") keeps the 0
+    // default, so a malformed cell can only ever leave the coat off.
+    static void applyCoatCell(const std::string& cell, float& coat) {
+        if (cell.empty()) return;
+        char* end = nullptr;
+        const float value = std::strtof(cell.c_str(), &end);
+        if (end != cell.c_str() && *end == '\0' && std::isfinite(value)) {
+            coat = clamp01(value);
+        }
     }
 
     static float clamp01(float v) {

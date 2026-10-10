@@ -45,16 +45,18 @@ vec2 equirectUv(vec3 d) {
 // normal, so every descriptor is valid to sample: a mesh without authored
 // textures renders exactly like before (white × vertex colour, normalScale 0).
 // The layout also carries the P1 roughness/metalness map samplers at
-// bindings 3/4 — only gbuffer.frag samples them; this forward path stays
-// ambient + diffuse (specular terms land with brief P3).
+// bindings 3/4 — only gbuffer.frag samples them; this forward path adds
+// its sun specular with brief P3 (same two-lobe math as deferred).
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
 layout(set = 1, binding = 1) uniform sampler2D normalMap;
 layout(set = 1, binding = 2) uniform MaterialData {
     float roughness;
     float metalness;
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
-    float pad;
+    float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
 } material;
+
+const float PI = 3.14159265;
 
 // Derivative-based TBN: KN5 bakes no tangents, so the tangent frame is
 // reconstructed from screen-space position/UV derivatives. The derivatives
@@ -125,13 +127,14 @@ void main() {
 
     float shadow = sampleShadow(fragWorldPos, cascadeIndex);
 
+    vec3 V = normalize(frame.cameraPos.xyz - fragWorldPos);
+
     // Ambient: split-sum IBL when enabled (brief P2), legacy flat albedo *
     // 0.25 otherwise. Diffuse lobe from the irradiance map, specular from
     // the prefiltered sky weighted by the BRDF LUT — that is what puts the
     // sky/horizon on a glossy car body in the forward path too.
     vec3 ambient;
     if (frame.iblParams.x > 0.5) {
-        vec3 V = normalize(frame.cameraPos.xyz - fragWorldPos);
         float NdotV = max(dot(N, V), 1e-4);
         vec3 F0 = mix(vec3(0.04), albedo, material.metalness);
         vec2 brdf = texture(iblBrdfLut, vec2(NdotV, material.roughness)).rg;
@@ -145,7 +148,40 @@ void main() {
         ambient = albedo * 0.25;
     }
     vec3 diffuse = albedo * frame.sunColor.rgb * frame.sunColor.a * NdotL * shadow;
-    vec3 lit = ambient + diffuse;
+
+    // Brief P3 — sun specular, same two-lobe math as deferred_lighting.frag
+    // (base GGX over the paint + optional sharp clear-coat lobe), scaled by
+    // sunRad so the highlight tracks the sun's intensity and tint and
+    // vanishes when the sun does. The coat flag comes straight from the
+    // per-mesh MaterialData — the forward path never touches the GBuffer.
+    vec3 sunRad = frame.sunColor.rgb * frame.sunColor.a;
+    float NdotV = max(dot(N, V), 1e-4);
+    vec3 H = normalize(L + V);
+    float NdotH = max(dot(N, H), 0.0);
+
+    float a = material.roughness * material.roughness;
+    float dd = NdotH * NdotH * (a * a - 1.0) + 1.0;
+    float D = (a * a) / (PI * dd * dd);
+    float k = a * 0.5;
+    float G = (NdotL / (NdotL * (1.0 - k) + k)) *
+              (NdotV / (NdotV * (1.0 - k) + k));
+    vec3 F0 = mix(vec3(0.04), albedo, material.metalness);
+    vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+    vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) *
+                    NdotL * shadow * sunRad;
+
+    float coated = material.clearcoat >= 0.5 ? 1.0 : 0.0;
+    float acc = 0.07 * 0.07; // coat alpha = 0.07^2, brief P3 sharp lobe
+    float ccdd = NdotH * NdotH * (acc * acc - 1.0) + 1.0;
+    float ccD = (acc * acc) / (PI * ccdd * ccdd);
+    float cck = acc * 0.5;
+    float ccG = (NdotL / (NdotL * (1.0 - cck) + cck)) *
+                (NdotV / (NdotV * (1.0 - cck) + cck));
+    vec3 ccF = vec3(0.04) + (1.0 - 0.04) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
+    vec3 specularCoat = ((ccD * ccG * ccF) / (4.0 * NdotL * NdotV + 1e-4)) *
+                        NdotL * shadow * sunRad * coated;
+
+    vec3 lit = ambient + diffuse + specular + specularCoat;
 
     // Height fog, same model the deferred path uses, so switching between
     // the two paths does not change the atmosphere. The clear colour is set

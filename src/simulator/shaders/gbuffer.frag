@@ -30,7 +30,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float roughness;
     float metalness;
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
-    float pad;
+    float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -71,6 +71,14 @@ void main() {
     // authored ksRoughness — scalar or map — finally reaches the lit frame.
     vec3 mapN = texture(normalMap, fragUV).xyz * 2.0 - 1.0;
     N = perturbNormal(N, fragWorldPos, fragUV, mapN, material.normalScale);
-    outNormalRoughness = vec4(N, roughness);
+    // Brief P3: the clear-coat flag rides in RT1.w's SIGN (the channel has
+    // no free channel left: albedo/metalness, normal/roughness,
+    // pos/coverage are all full). The flag is binary (>= 0.5 authored) and
+    // the roughness magnitude is written as -max(roughness, 1e-6) so even
+    // a perfectly smooth coated surface keeps a negative zero out of the
+    // decode; deferred_lighting.frag is the only reader of RT1.w.
+    float signedRough = material.clearcoat >= 0.5 ? -max(roughness, 1e-6)
+                                                   : roughness;
+    outNormalRoughness = vec4(N, signedRough);
     outWorldPosCoverage = vec4(fragWorldPos, 1.0);
 }

@@ -170,6 +170,37 @@ int main() {
         KS_CHECK_NEAR(tiny->roughness, 1.0f, 1e-6f);
     }
 
+    // --- Brief P3: optional 6th clear-coat cell ------------------------------
+    // Appended at the end of the row like every additive extension: rows
+    // without it parse exactly as before and keep clearcoat = 0 (legacy
+    // renders unchanged), a finite number clamps to [0,1], and every
+    // malformed variant — dotless garbage, a dotted map-style name (the
+    // coat cell has NO map variant), nan — fails open to coat off.
+    writeFile(tmp,
+              "legacy\tL.dds\t0.35\t0\t\n"     // 5 cells → clearcoat 0
+              "coated\tC.dds\t0.35\t0\t\t1\n"  // explicit on
+              "graded\tG.dds\t0.35\t0\t\t0.7\n"// mid value kept as authored
+              "over\tO.dds\t0.35\t0\t\t2.0\n"  // clamps to 1
+              "under\tU.dds\t0.35\t0\t\t-1\n"  // clamps to 0
+              "junky\tJ.dds\t0.35\t0\t\tabc\n" // dotless garbage → default
+              "dotted\tD.dds\t0.35\t0\t\t0.5.dds\n" // no map variant → default
+              "naney\tN.dds\t0.35\t0\t\tnan\n");// non-finite → default
+    KS_CHECK(cache.load(tmp));
+    KS_CHECK(cache.size() == 8);
+    KS_CHECK(cache.skippedRows() == 0);
+    auto coatOf = [&](const char* name) {
+        const MeshMaterial* m = cache.find(name);
+        return m ? m->clearcoat : -1.0f;
+    };
+    KS_CHECK_NEAR(coatOf("legacy"), 0.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("coated"), 1.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("graded"), 0.7f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("over"), 1.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("under"), 0.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("junky"), 0.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("dotted"), 0.0f, 1e-6f);
+    KS_CHECK_NEAR(coatOf("naney"), 0.0f, 1e-6f);
+
     // --- Missing / empty file ------------------------------------------------
     MaterialCache missing;
     KS_CHECK(!missing.load("material_cache_test_does_not_exist.txt"));

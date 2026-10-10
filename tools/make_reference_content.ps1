@@ -4,7 +4,8 @@
 # app both consume:
 #
 #   content/baked/               track-like scene: textured "sign" quad,
-#                                "smooth"/"rough" roughness pair, "metal"
+#                                "smooth"/"rough" roughness pair, "coated"
+#                                clear-coat quad (brief P3), "metal"
 #                                quad (brief P1: metalness cell is a map,
 #                                textures/metal_mask.dds), "lodable"
 #                                quad with a [0..1] m NMS2 window, "plain"
@@ -25,7 +26,8 @@
 #              into textures/, MaterialCache.h); roughness/metalness are
 #              dual-typed (brief P1): a number is the scalar, a dotted name
 #              a map texture. "plain" intentionally has no row so the
-#              fallback path stays covered.
+#              fallback path stays covered. Brief P3 appends an optional
+#              6th clear-coat cell (only "coated" uses it here).
 #
 # Idempotent: wipes the two output trees before writing. BinaryWriter is
 # little-endian on every platform PowerShell runs on (ECMA-334), which is
@@ -151,7 +153,7 @@ $track = Join-Path $ContentRoot "baked"
 if (Test-Path $track) { Remove-Item -Recurse -Force $track }
 
 Write-Lines (Join-Path $track "manifest.txt") @(
-    "plain", "sign", "smooth", "rough", "metal", "lodable", "ground"
+    "plain", "sign", "smooth", "rough", "coated", "metal", "lodable", "ground"
 )
 
 # Tabs are the format (MaterialCache.h). "plain" has NO row on purpose:
@@ -162,11 +164,16 @@ Write-Lines (Join-Path $track "manifest.txt") @(
 # metalness cell is a *texture* name: metal_mask.dds is solid red, i.e.
 # mask.r = 1.0 -> a fully metallic dielectric-turned-metal surface whose
 # GBuffer RT0.a must reach deferred_lighting.frag's F0.
+# "coated" (brief P3) is "rough" with ONE difference: the optional 6th
+# cell clears the clear-coat flag to 1 (normal cell 5 left empty), so the
+# test A/B isolates the coat lobe against an identical broad base. Every
+# other row stays the legacy width it had before P3.
 Write-Lines (Join-Path $track "materials.txt") @(
-    "# reference bake (roadmap 2.4/2.5, brief P1) - regenerate with tools/make_reference_content.ps1",
+    "# reference bake (roadmap 2.4/2.5, brief P1/P3) - regenerate with tools/make_reference_content.ps1",
     "sign`tskin:paint.dds`t0.35`t0.00",
     "smooth`tskin:paint.dds`t0.05`t0.00",
     "rough`tskin:paint.dds`t0.95`t0.00",
+    "coated`tskin:paint.dds`t0.95`t0.00`t`t1",
     "metal`tskin:paint.dds`t0.05`tmetal_mask.dds",
     "lodable`tskin:paint.dds`t0.35`t0.00",
     "ground`tskin:paint.dds`t0.60`t0.00"
@@ -184,6 +191,7 @@ foreach ($q in @(
     @{ File = "sign.nmsh";    Z = -0.02 },
     @{ File = "smooth.nmsh";  Z = -0.04 },
     @{ File = "rough.nmsh";   Z = -0.06 },
+    @{ File = "coated.nmsh";  Z = -0.12 },
     @{ File = "metal.nmsh";   Z = -0.10 },
     @{ File = "lodable.nmsh"; Z = -0.08 }
 )) {

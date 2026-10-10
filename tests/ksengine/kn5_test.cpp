@@ -544,19 +544,22 @@ int main() {
         KS_CHECK(manifest[2] == "triangle_2");
     }
 
-    // --- materials.txt (brief P1 dual-typed cells) -------------------------
+    // --- materials.txt (brief P1 dual-typed cells, P3 clear-coat) -----------
     // triangle/bad_name share material "body": the rough cell carries the
     // authored map name (maps beat the scalar), the metal cell the
     // ksMetalness property float, albedo the ksDiffuse mapping, normal is
     // empty. triangle_2 references material_id 1 (out of range) → the
-    // paint heuristic defaults with no textures.
+    // paint heuristic defaults with no textures. Brief P3: both rows are
+    // glossy dielectric paint (non-metal, roughness 0.35 ≤ 0.4) so the
+    // baker appends the clear-coat cell "1" — the only rows that gain a
+    // 6th field are coated ones, non-coated rows stay legacy 5-cell.
     const std::vector<std::string> material_rows =
         readLines(out_dir / "materials.txt");
     KS_CHECK(material_rows.size() == 3);
     if (material_rows.size() == 3) {
-        KS_CHECK(material_rows[0] == "triangle\tdiffuse.dds\trough.dds\t0.25\t");
-        KS_CHECK(material_rows[1] == "bad_name\tdiffuse.dds\trough.dds\t0.25\t");
-        KS_CHECK(material_rows[2] == "triangle_2\t\t0.35\t0\t");
+        KS_CHECK(material_rows[0] == "triangle\tdiffuse.dds\trough.dds\t0.25\t\t1");
+        KS_CHECK(material_rows[1] == "bad_name\tdiffuse.dds\trough.dds\t0.25\t\t1");
+        KS_CHECK(material_rows[2] == "triangle_2\t\t0.35\t0\t\t1");
     }
 
     const NmshData triangle_nmsh = readNmsh(out_dir / "triangle.nmsh");
