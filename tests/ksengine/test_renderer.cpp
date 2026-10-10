@@ -38,6 +38,9 @@
 
 #include "KsTest.h"
 #include "NativeRenderer.h"
+// (f2) Brief P6: the cascade stack itself — the test initializes and
+// attaches a real CascadedShadowMap exactly like SimulatorApp does.
+#include "ShadowSystem.h"
 // Roadmap P1: the sprite quads fed to the renderer below come from the real
 // CPU particle system, so this test also pins the buildQuads() byte layout
 // to what particle.vert actually reads.
@@ -697,13 +700,19 @@ int main()
         std::vector<unsigned char> px;
         NativeRenderer::FrameStats stats{};
     };
-    auto capture = [&](const char* mesh, const mat4& model, RefShot& out) {
+    // capture() takes an optional second mesh (both queued with the same
+    // identity matrix) — the (f2) shadow A/B needs a caster and its
+    // receiver in one frame. Default stays single-mesh, so every pin
+    // calibrated on stats.drawn == 1 is untouched.
+    auto capture = [&](const char* mesh, const mat4& model, RefShot& out,
+                       const char* mesh2 = nullptr) {
         renderer.requestScreenshot();
         if (!renderer.beginFrame()) {
             std::printf("test_renderer: beginFrame failed\n");
             return;
         }
         renderer.drawMesh(mesh, model);
+        if (mesh2) renderer.drawMesh(mesh2, model);
         renderer.endFrame();
         if (!renderer.screenshotReady()) {
             std::printf("test_renderer: no screenshot readback\n");
@@ -1159,6 +1168,131 @@ int main()
             KS_CHECK(!isClearPixel(c));
             KS_CHECK(greenDominant(c));
             KS_CHECK(carShot.stats.drawn == 1);
+        }
+    }
+
+    // (f2) Brief P6 — shadow contact for thin casters. Until now this
+    //     harness NEVER attached a real CascadedShadowMap (the renderer
+    //     falls back to a 1x1 always-lit dummy), so cascaded shadows had
+    //     no pixel-level pin anywhere: every calibrated number above runs
+    //     unshadowed. Here the stack is initialized exactly the way
+    //     SimulatorApp does it and a thin zero-thickness caster ("plain",
+    //     a 2x2 m vertical quad — the brief's wing stand-in) sits between
+    //     a 45-degree sun and the ground plane:
+    //       - ground alone vs ground+wing, both with the stack attached:
+    //         the caster's shadow band must darken the ground — a thin,
+    //         zero-thickness caster that cannot shadow is exactly the
+    //         contact defect the brief calls out;
+    //       - the caster alone, stack detached vs attached: its own
+    //         stored depth must NOT shadow it (no self-shadow acne);
+    //       - ground alone, stack detached vs attached: merely attaching
+    //         the system must not perturb an uncasted frame.
+    // Fail-open like the app: a stack that will not initialize is
+    // reported and the windowed app continues unshadowed — here it fails
+    // the section loudly instead of passing pins that never ran.
+    {
+        aimAt(0, 2.4f, -7.0f, 0, 1.0f, -1.0f, vec3(0, 1, 0));
+        DirectionalLight sunShadow;
+        sunShadow.color = vec3(1, 1, 1);
+        sunShadow.intensity = 1.0f;
+        // L = -direction = (0, .707, .707): sun 45 degrees up-front. Light
+        // travels (0,-.707,-.707), so the wing at z=0, y=2..4 drops its
+        // band onto the ground at z = -y -> z in [-2,-4], mid-frame.
+        sunShadow.direction = vec3(0.0f, -0.70710678f, -0.70710678f);
+        renderer.setSun(sunShadow);
+        renderer.setDeferred(true);
+
+        // Baselines against the dummy (always-lit) shadow texture.
+        RefShot gBase, wBase;
+        capture("ground", mat4(), gBase);
+        capture("plain", mat4(), wBase);
+
+        ks::sim::CascadedShadowMap shadow;
+        const bool shadowOk =
+            shadow.initialize(renderer.physicalDevice(), renderer.device(),
+                              renderer.commandPool(), renderer.graphicsQueue(),
+                              KS_TEST_SHADER_DIR);
+        KS_CHECK(shadowOk);
+        if (shadowOk) renderer.attachShadowMap(&shadow);
+
+        RefShot gLit, wLit, gShadowed;
+        capture("ground", mat4(), gLit);
+        capture("plain", mat4(), wLit);
+        capture("ground", mat4(), gShadowed, "plain");
+
+        // Same A/B on the forward path: native_forward.frag samples the
+        // same cascades through its own copy of sampleShadow(), which
+        // until now was as unpinned as the deferred one.
+        renderer.setDeferred(false);
+        RefShot fLit, fShadowed;
+        capture("ground", mat4(), fLit);
+        capture("ground", mat4(), fShadowed, "plain");
+
+        if (shadowOk) renderer.attachShadowMap(nullptr);
+        shadow.shutdown();
+        DirectionalLight sunRestore = sunShadow;
+        sunRestore.direction = vec3(0, 0, 1); // the state every pin above calibrated with
+        renderer.setSun(sunRestore);
+
+        KS_CHECK(gBase.ok && wBase.ok && gLit.ok && wLit.ok && gShadowed.ok &&
+                 fLit.ok && fShadowed.ok);
+        if (gBase.ok && wBase.ok && gLit.ok && wLit.ok && gShadowed.ok &&
+            fLit.ok && fShadowed.ok) {
+            KS_CHECK(gShadowed.stats.drawn == 2); // caster + receiver in one frame
+            KS_CHECK(gLit.stats.drawn == 1);
+            KS_CHECK(fShadowed.stats.drawn == 2 && fLit.stats.drawn == 1);
+            auto sum3 = [](const unsigned char* p) {
+                return int(p[0]) + int(p[1]) + int(p[2]); // BGRA readback
+            };
+            int dark = 0, bright = 0, attachChanged = 0, wingPx = 0;
+            long long shadowOn = 0, shadowOff = 0, acneAbs = 0;
+            for (size_t i = 0; i + 3 < gLit.px.size(); i += 4) {
+                const int lit = sum3(&gLit.px[i]);
+                const int both = sum3(&gShadowed.px[i]);
+                if (lit - both >= 40) {            // ground got darker: the band
+                    ++dark; shadowOn += both; shadowOff += lit;
+                }
+                if (both - lit >= 40) ++bright;    // wing now covers ground/sky
+                if (std::abs(lit - sum3(&gBase.px[i])) >= 40) ++attachChanged;
+                // Caster's own pixels (bright in the unshadowed baseline):
+                // shadow-attached vs detached must not move them (acne test).
+                if (sum3(&wBase.px[i]) >= 300) {
+                    ++wingPx;
+                    acneAbs += std::abs(sum3(&wLit.px[i]) - sum3(&wBase.px[i]));
+                }
+            }
+            // Forward twin of the band count (raw UNORM write, no tone
+            // curve — the linear 0.35 sun multiplier shows through more
+            // directly than on the ACES path).
+            int fDark = 0;
+            long long fOn = 0, fOff = 0;
+            for (size_t i = 0; i + 3 < fLit.px.size(); i += 4) {
+                const int lit = sum3(&fLit.px[i]);
+                const int both = sum3(&fShadowed.px[i]);
+                if (lit - both >= 40) { ++fDark; fOn += both; fOff += lit; }
+            }
+            const double acneMean = wingPx ? double(acneAbs) / wingPx : 0.0;
+            const double bandRatio =
+                dark ? double(shadowOn) / double(shadowOff) : 0.0;
+            const double fBandRatio = fDark ? double(fOn) / double(fOff) : 0.0;
+            std::printf("test_renderer: P6 shadow band dark=%d bright=%d "
+                        "ratio=%.3f attachDelta=%d acneMean=%.1f (wingPx=%d) "
+                        "forward dark=%d ratio=%.3f\n",
+                        dark, bright, bandRatio, attachChanged, acneMean, wingPx,
+                        fDark, fBandRatio);
+            KS_CHECK(shadowOk);
+            KS_CHECK(dark > 800);      // the thin caster really shadows the ground
+            KS_CHECK(bright > 800);    // and really is in the combined frame
+            // Shadowed ground keeps ambient + 0.35 x sun (observed ~0.5x of
+            // the lit value through ACES): a dead or over-dark band fails.
+            KS_CHECK(bandRatio > 0.20 && bandRatio < 0.90);
+            // Attaching the stack alone changed nothing outside the band.
+            KS_CHECK(attachChanged < 300);
+            // Zero acne on the thin caster: its own depth never shadows it.
+            KS_CHECK(wingPx > 2000 && acneMean <= 6.0);
+            // Forward path: same band, linear ratio (~0.5 observed).
+            KS_CHECK(fDark > 800);
+            KS_CHECK(fBandRatio > 0.20 && fBandRatio < 0.90);
         }
     }
 

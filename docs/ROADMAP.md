@@ -51,10 +51,16 @@ clipperebbe il segno come invece regge `RT1.w` float per il coat), nel
 forward da `MaterialData`; emissivo `(1.0,0.25,0.03)×1.5×glow` in
 entrambi i lighting shader prima della fog-mix. Contenuto di riferimento
 con quad "disc" (riga legacy 4 celle) + A/B (e7) su entrambi i path
-(deferred +227, forward +268, quad di controllo byte-identico). Il
-resto di P6 (marcature pneumatici, heat haze, scarichi, contact shadow
-per ali sottili) resta opzionale/non eseguito: va verificato a schermo
-con contenuto AC reale. |
+(deferred +227, forward +268, quad di controllo byte-identico).
+Sempre P6: prima allocazione di una `CascadedShadowMap` reale nel
+test (lo harness usava il dummy sempre-illuminata) e sezione (f2) che
+pinna il contact shadow di un caster sottile a spessore zero su
+entrambi i path — banda 3698 px (ratio 0.770 deferred / 0.507
+forward), acne 0.0 sul caster, attachDelta 0: col bias attuale il
+caso sintetico è già corretto, quindi nessuna modifica cieca al
+bias e il fix reale resta gated al contenuto AC reale. Restano
+opzionali/non eseguiti (visual): marcature pneumatici, heat haze,
+scarichi. |
 | UX racing completa | 🟡 | Menu, garage, risultati e piano pit esistono; va completato il flusso di gara con team, servizi box e contenuto selezionato. |
 | Contenuto e presentazione | 🟡 | Parser per team/upgrades/livree/sound pack e cache texture esistono, ma non sono ancora risolti e applicati in una sessione di gara end-to-end. |
 

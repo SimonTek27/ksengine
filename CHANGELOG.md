@@ -82,10 +82,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   forward +268 (verde 95→191), quad di controllo "sign" byte-identico
   (ctrlDelta 0) e swing R−B +101/+147: il flag è per-mesh e
   l'emissivo è davvero rosso-dominante. Multiplayer/AI: il bagliore
-  segue la telemetria del player (documentato). 53/53 ctest, gate
-  Qt-free 0/913. Il resto di P6 (marcature pneumatici, heat haze,
-  scarichi, contact shadow per ali sottili) resta opzionale/non
-  eseguito: richiede gate visivi con contenuto AC reale.
+  segue la telemetria del player (documentato).
+  Secondo item P6 agganciabile a synth — **contact shadow per ali
+  sottili**: lo harness non aveva MAI agganciato una
+  `CascadedShadowMap` reale (il renderer cade sul dummy 1×1
+  sempre-illuminata), quindi le ombre a cascades non avevano alcun
+  pin pixel-level. La nuova sezione (f2) inizializza lo stack come fa
+  `SimulatorApp`, pone un caster sottile a spessore zero (quad
+  "plain" 2×2 m — lo stand-in dell'ala del brief) tra un sole a 45°
+  e il terreno, e fa l'A/B su entrambi i path: terreno solo vs
+  terreno+ala con stack agganciato → banda d'ombra di 3698 px
+  (ratio 0.770 deferred ACES / 0.507 forward lineare), il caster da
+  solo con vs senza stack è byte-identico (acne 0.0), e il semplice
+  attach non muove un pixel fuori dalla banda (attachDelta 0). Esito:
+  col bias attuale (0.0015) il caso sintetico NON riproduce il
+  difetto — nessuna modifica al bias alla cieca, il fix resta gated
+  all'osservazione a schermo su contenuto AC reale; il pin garantisce
+  che la catena cascades non regredisca in silenzio. 53/53 ctest,
+  gate Qt-free 0/913. Restano opzionali/non eseguiti (tutti visual):
+  marcature pneumatici, heat haze, scarichi — servono nuove pass,
+  segnali scena e tuning sul contenuto reale.
 - **Rendering AI brief — Sprint S5 (P5)** (`RENDERING_AI_BRIEF.md`):
   materiali track + AO "che poggia la vettura", chiusura del brief.
   Surface family nell'euristica del baker
