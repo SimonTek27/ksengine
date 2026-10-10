@@ -60,8 +60,8 @@ public:
         const uint32_t* fptr = ci.fragSpv;
         size_t fwords = ci.fragSpvWords;
         if (!vptr || !fptr) {
-            if (!loadSpirvFile(ci.vertSpvPath.empty() ? "shaders/ui.vert.spv" : ci.vertSpvPath, vert) ||
-                !loadSpirvFile(ci.fragSpvPath.empty() ? "shaders/ui.frag.spv" : ci.fragSpvPath, frag)) {
+            if (!loadSpirvFile(ci.vertSpvPath.empty() ? "system/shaders/ui.vert.spv" : ci.vertSpvPath, vert) ||
+                !loadSpirvFile(ci.fragSpvPath.empty() ? "system/shaders/ui.frag.spv" : ci.fragSpvPath, frag)) {
                 std::fprintf(stderr,
                     "VulkanUiPipeline: need SPIR-V (CreateInfo::vertSpv/fragSpv or .spv files)\n");
                 return false;

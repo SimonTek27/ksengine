@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include <cstdint>
 #include <string>
@@ -8,7 +9,7 @@ namespace ks {
 namespace device {
 
 /** Qt-free generic DirectInput joystick/wheel. Feeds InputManager::injectAxes. */
-class DirectInputJoystick {
+class KSENGINE_API DirectInputJoystick {
 public:
     static constexpr int AXIS_COUNT = 8;
 

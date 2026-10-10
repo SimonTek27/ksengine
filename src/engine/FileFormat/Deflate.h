@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,11 +16,11 @@ namespace ks::engine::fileformat {
 //
 // Returns false and points `error` at a reason when the stream is truncated,
 // corrupt, or not DEFLATE at all.
-bool inflateZlib(std::string_view src, std::vector<std::uint8_t>& out,
+KSENGINE_API bool inflateZlib(std::string_view src, std::vector<std::uint8_t>& out,
                  std::string* error = nullptr);
 
 // Same, for a stream with no 2-byte zlib header and no trailing adler32.
-bool inflateRaw(std::string_view src, std::vector<std::uint8_t>& out,
+KSENGINE_API bool inflateRaw(std::string_view src, std::vector<std::uint8_t>& out,
                 std::string* error = nullptr);
 
 } // namespace ks::engine::fileformat

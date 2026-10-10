@@ -207,6 +207,81 @@ cmake --build build -j
 
 `HAS_KSNET` is enabled when the in-tree `ksnet` target is present (default).
 
+The engine itself builds as `ksengine.dll` by default; the export surface is
+explicit — every class and free function an executable imports carries
+`KSENGINE_API` (`src/engine/KsExport.h`). Pass `-DKSENGINE_SHARED=OFF` to get
+the old static archive back (the macro expands to nothing, so the same headers
+work in both modes).
+
+## Install
+
+```bash
+cmake --build build --target ks_dist    # -> <source>/dist/ksim
+# or, for any other prefix:
+cmake --install build --prefix <dir> --config Release
+```
+
+Both produce the same tree (`cmake/KsInstallLayout.cmake` is the single
+definition of it; the build tree stages it next to the binaries, so a
+build-tree run behaves like an installed one):
+
+```
+ksim.exe            the simulator            (CMake target SimulatorApp)
+kssimserver.exe     the headless host        (CMake target SimulatorServer)
+ksengine.dll        the engine, shared       (CMake target ksengine)
+content/            reference content read at runtime
+user/               per-user data written at runtime (created empty; the
+                    runtime builds user/<player>/ in it on the first start)
+server/             kssimserver startup configuration (server/kssimserver.ini)
+system/cfg/         engine settings as JSON (system/cfg/ksengine.json)
+system/shaders/     precompiled SPIR-V
+```
+
+Everything the runtime reads (`content/`, `user/`, `server/`, `system/cfg/`,
+`system/shaders/`) is resolved relative to the working directory, which for a
+normally launched executable is the directory holding it — see
+`src/engine/assets/Paths.h`.
+
+`kssimserver.exe` reads `server/kssimserver.ini` on start-up and every key
+there has a command line equivalent (`--help`), the flag always winning. Pass
+`--config <path>` to read a different file.
+
+### Settings and per-player data
+
+Both settings files are JSON and shipped as `{}` — nothing is configured
+until somebody edits them, and the compiled-in defaults apply either way
+(`src/engine/Config/EngineSettings.h`):
+
+| file | who writes it | keys it understands |
+| --- | --- | --- |
+| `system/cfg/ksengine.json` | the install (defaults for every player) | `physics.fixedDt`, `audio.master`, `assist.tc`, `assist.abs` |
+| `user/<player>/settings.json` | the player (overrides, per player) | same keys |
+
+They are merged in that order, later wins per key, and the player's file is
+written back with exactly the keys it carried — a default that only exists in
+`system/cfg/` never leaks into it. `physics.fixedDt` is the fixed simulation
+step in seconds (1e-5..1), `audio.master` the master gain (0..2), and
+`assist.tc`/`assist.abs` the traction-control/ABS levels (0..12) pushed into
+the vehicle setup at start-up.
+
+On the first start the runtime creates `user/<player>/` — `<player>` is the
+driver profile name, `Driver` when it is empty or unusable as a folder name:
+
+```
+user/<player>/controls.json     keyboard bindings (replaces user/keyboard.ini,
+                                which is migrated once and then ignored)
+user/<player>/settings.json     the per-player overrides from the table above
+user/<player>/stats.json        career stats: wins, poles, podiums, races,
+                                best lap, personal-best record count
+user/<player>/screenshots/      captures
+user/<player>/replay/           replay recordings
+user/<player>/telemetry/        telemetry dumps
+```
+
+`user/pb/` (the per-track/car personal bests) predates the per-player folder
+and stays where it is; `stats.json` carries its record count alongside the
+driver's own numbers.
+
 ## Multiplayer (ksnet)
 
 - Transport: `src/core/engine/Network/ksnet` — official name **ksnet**

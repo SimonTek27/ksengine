@@ -1,5 +1,15 @@
 #pragma once
 
+// NOTE: this whole system is dead code in the Qt-free build (nothing includes
+// this header) and it is excluded from ksengine's source list — see the
+// "physics/BrakeWearSystem" entry in src/engine/CMakeLists.txt. The reason is
+// that ks::physics::BrakeThermalConfig / ks::physics::BrakeThermalState are
+// also declared in BrakeThermalModel.h with a different layout: two inline
+// definitions of the same type name share one mangled constructor, so linking
+// both translation units into one module makes the linker pick one definition
+// for everything. If this system is ever revived, rename the types below
+// (e.g. BrakeWearThermalConfig / BrakeWearThermalState) before re-enabling it.
+
 #include "PhysicsCoreTypes.h"
 #include <array>
 #include <cmath>

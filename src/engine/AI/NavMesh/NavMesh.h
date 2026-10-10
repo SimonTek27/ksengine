@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -41,7 +42,7 @@ struct NavBuildParams {
 // agent never paths through a box even when its top face is flat.
 //
 // Single-threaded: build/save/load mutate the instance, queries are const.
-class NavMesh {
+class KSENGINE_API NavMesh {
 public:
     NavMesh() = default;
 

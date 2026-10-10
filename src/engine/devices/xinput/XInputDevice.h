@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /** Qt-free Xbox controller via XInput (Windows). Polled API, no QObject. */
 
@@ -13,7 +14,7 @@
 namespace ks {
 namespace device {
 
-class XInputDevice {
+class KSENGINE_API XInputDevice {
 public:
     XInputDevice() = default;
     ~XInputDevice() { shutdown(); }

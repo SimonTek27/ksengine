@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file TireNormalizeTool.h
@@ -16,7 +17,7 @@
 namespace ks {
 namespace physics {
 
-class TireNormalizeTool {
+class KSENGINE_API TireNormalizeTool {
 public:
     struct Metrics {
         float fz0 = 4000.f;

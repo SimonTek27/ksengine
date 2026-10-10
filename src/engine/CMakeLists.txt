@@ -76,6 +76,18 @@ foreach(_pat
     "physics/ACModelManager\\."
     "physics/ErsDrsController\\."
     "physics/ChassisSimulator\\."
+    # Dead code that never made it into the qt-free rewrite: nothing includes
+    # BrakeWearSystem.h, so nothing can ever call it. It is kept out of the
+    # build on purpose because it redefines ks::physics::BrakeThermalConfig
+    # and ks::physics::BrakeThermalState with a DIFFERENT layout than
+    # BrakeThermalModel.h. Both are inline/COMDAT types, so the two default
+    # constructors share one mangled name (?..BrakeThermalConfig..) and the
+    # linker silently picks one of them for the whole module: with the file
+    # linked in, every BrakeThermalModel got the other definition's defaults
+    # (std::clamp "invalid bounds" assert in the physics tests). A static
+    # ksengine.lib never showed it because an unreferenced object file is not
+    # pulled in; a shared library links every listed object.
+    "physics/BrakeWearSystem\\."
     # Orphan source with no header of its own.
     "assets/KsPathDetector\\."
     "\\.ui$"
@@ -119,7 +131,37 @@ if(EXISTS "${KSENGINE_LUA_DIR}/lua.h")
 	endif()
 endif()
 
-add_library(ksengine STATIC ${KSENGINE_SOURCES})
+# ============================================================================
+# Shared or static. The shipped layout runs ksim.exe / kssimserver.exe
+# against ksengine.dll (see cmake/KsInstallLayout.cmake), so shared is the
+# default; -DKSENGINE_SHARED=OFF restores the historical static archive when
+# some consumer wants every engine object linked in directly.
+#
+# Sharing only works together with the explicit export API: KsExport.h turns
+# KSENGINE_BUILDING_DLL (here, PRIVATE) into dllexport and KSENGINE_USE_DLL
+# (here, PUBLIC, so every consumer inherits it) into dllimport. Without
+# KSENGINE_SHARED the macros expand to nothing and the same headers build a
+# plain static library.
+# ============================================================================
+option(KSENGINE_SHARED "Build ksengine as ksengine.dll (shared)" ON)
+
+if(KSENGINE_SHARED)
+	add_library(ksengine SHARED ${KSENGINE_SOURCES})
+else()
+	add_library(ksengine STATIC ${KSENGINE_SOURCES})
+endif()
+
+if(KSENGINE_SHARED)
+	# dllexport while compiling the DLL, dllimport for everything linking it.
+	target_compile_definitions(ksengine
+		PRIVATE KSENGINE_BUILDING_DLL
+		PUBLIC   KSENGINE_USE_DLL)
+	# ksengine.dll is a runtime dependency of every executable in this build:
+	# keep it beside them (bin/<config>, where ksim.exe and kssimserver.exe
+	# land too), so the loader finds it without PATH tricks.
+	set_target_properties(ksengine PROPERTIES
+		RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
 
 # ============================================================================
 # Self-sufficiency — everything ksengine needs to build standalone
@@ -185,6 +227,24 @@ elseif(DEFINED ENV{VULKAN_SDK})
 	target_include_directories(ksengine PUBLIC "$ENV{VULKAN_SDK}/Include")
 endif()
 target_compile_definitions(ksengine PUBLIC HAS_VULKAN=$<BOOL:${Vulkan_FOUND}>)
+
+# 3b. A shared ksengine has to resolve its own imports. Nearly all engine
+#     code reaches Vulkan through the table loaded above, but two TUs
+#     (sim/GpuProfiler.cpp, devices/XrViewportRenderer.cpp) call vk*
+#     directly; with a static archive those references were satisfied by the
+#     *final executable's* link against ${Vulkan_LIBRARIES}, but ksengine.dll
+#     now links on its own. Take the import library and delay-bind it: the
+#     DLL keeps loading on a machine without Vulkan and vulkan-1.dll arrives
+#     on the first vk* call, i.e. when the renderer is actually used. A plain
+#     (non-delayed) import would put vulkan-1.dll into the DLL's import
+#     table and every test executable would stop starting without it.
+if(KSENGINE_SHARED AND Vulkan_FOUND AND Vulkan_LIBRARIES)
+	target_link_libraries(ksengine PRIVATE ${Vulkan_LIBRARIES})
+	if(MSVC)
+		target_link_options(ksengine PRIVATE "/DELAYLOAD:vulkan-1.dll")
+		target_link_libraries(ksengine PRIVATE delayimp)
+	endif()
+endif()
 
 # 4. Platform libraries pulled in by engine sources. Each source also carries
 #    a #pragma comment(lib, ...), but declaring them on the target means a

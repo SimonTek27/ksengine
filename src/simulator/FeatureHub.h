@@ -14,6 +14,7 @@
 #include "RaceSessionManager.h"
 #include "MathTypes.h"
 #include <string>
+#include <cstdint>
 #include <cstdio>
 #include <cctype>
 #include <functional>
@@ -37,6 +38,16 @@ public:
     bool discoveryStarted = false;
     bool controlStarted = false;
 
+    /**
+     * Ports the two bundled services bind to. Both must be set before
+     * startServices(), which is what actually opens the sockets — see
+     * server/kssimserver.ini (discovery-port / control-port).
+     */
+    void setDiscoveryPort(uint16_t port) { discovery.setPort(port); }
+    void setControlPort(uint16_t port) { m_controlPort = port; }
+    uint16_t discoveryPort() const { return discovery.port(); }
+    uint16_t controlPort() const { return m_controlPort; }
+
     std::function<void(GameSessionMode, const SessionStartParams&)> onBeginSession;
     std::function<void(int, int, float, const std::string&)> onPenalty;
     std::function<void(const std::string&)> onSetWeather;
@@ -48,7 +59,7 @@ public:
     void startServices(bool hostAnnounce = false) {
         if (!discoveryStarted) discoveryStarted = discovery.start(hostAnnounce);
         if (!controlStarted) {
-            controlStarted = control.start(ExternalControlApi::kDefaultPort);
+            controlStarted = control.start(m_controlPort);
             wireDefaultControlHandlers();
         }
         pb.setDirectory("user/pb");
@@ -103,6 +114,8 @@ public:
     bool loadReplay(const std::string& path) { return replay.loadReplay(path); }
 
 private:
+    uint16_t m_controlPort = ExternalControlApi::kDefaultPort;
+
     void wireDefaultControlHandlers() {
         control.onCommand = [this](const ControlCommand& cmd) { handleControl(cmd); };
     }

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include "PhysicsCoreTypes.h"
 #include "EngineModel.h"
@@ -29,7 +30,7 @@ struct VehicleFFBSample {
     float aligningMomentNm = 0;
 };
 
-class VehicleSimulator {
+class KSENGINE_API VehicleSimulator {
 public:
     VehicleSimulator();
     ~VehicleSimulator() = default;

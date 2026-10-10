@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include <cstddef>
 #include <string>
@@ -46,7 +47,7 @@ struct AiSpline {
  * Falls back to a comma separated text file (x,y,z[,curvature[,speed]])
  * when the magic does not match.
  */
-class AiFileReader {
+class KSENGINE_API AiFileReader {
 public:
     static AiSpline readSpline(const std::string& path);
 };

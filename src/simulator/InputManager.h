@@ -1,5 +1,11 @@
 #pragma once
 
+// controls.json (per-player folder) is parsed with the engine's JSON reader
+// and written with its file helpers — see engine/Config/Json.h and
+// engine/assets/UserData.h.
+#include "engine/Config/Json.h"
+#include "engine/assets/UserData.h"
+
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -63,7 +69,8 @@ struct JoystickMapping {
 };
 
 // Roadmap 1.4 / GAP P2.7: rebindable keyboard driving bindings. The primary
-// keys persist to user/keyboard.ini; the arrow keys stay fixed as alternates
+// keys persist to user/<player>/controls.json (the legacy user/keyboard.ini
+// is read once for migration); the arrow keys stay fixed as alternates
 // so a profile can never lock the player out of throttle/brake/steer.
 struct KeyboardMapping {
     int throttle = 'W';
@@ -128,7 +135,8 @@ inline int keyFromName(std::string name) {
     return -1;
 }
 
-/** Persist to a Key=Value ini (user/keyboard.ini). False if unwritable. */
+/** Persist to the legacy Key=Value ini (user/keyboard.ini). False if
+ *  unwritable. Kept for migration: loading it once feeds controls.json. */
 inline bool saveKeyboardMapping(const std::string& path, const KeyboardMapping& m) {
     // Mirror PersonalBestStore: create the containing directory (user/) first.
     {
@@ -181,6 +189,64 @@ inline bool loadKeyboardMapping(const std::string& path, KeyboardMapping& m) {
     }
     std::fclose(f);
     return true;
+}
+
+// --- controls.json ---------------------------------------------------------
+// The installed layout's per-player file (user/<player>/controls.json, see
+// assets::UserData): same key names as the ini above, values are the same
+// key names keyName() produces. JSON so the whole user/ surface reads the
+// same way, and per-player so two profiles never share bindings.
+
+/** Persist to controls.json. False if unwritable. */
+inline bool saveKeyboardMappingJson(const std::string& path, const KeyboardMapping& m) {
+    namespace json = ks::engine::json;
+    json::Value root = json::Value::object();
+    root.set("throttle", json::Value::string(keyName(m.throttle)));
+    root.set("brake", json::Value::string(keyName(m.brake)));
+    root.set("steerLeft", json::Value::string(keyName(m.steerLeft)));
+    root.set("steerRight", json::Value::string(keyName(m.steerRight)));
+    root.set("shiftUp", json::Value::string(keyName(m.shiftUp)));
+    root.set("shiftDown", json::Value::string(keyName(m.shiftDown)));
+    root.set("handbrake", json::Value::string(keyName(m.handbrake)));
+    return ks::engine::assets::UserData::writeFile(path, json::dump(root));
+}
+
+/**
+ * Load over an existing mapping. Missing file, malformed JSON and a
+ * populated-but-keyless "{}" (the state UserData::ensure() ships) all return
+ * false with `m` untouched; a recognised binding applies only if
+ * keyFromName() understands its value, and the result is true only when at
+ * least one binding was applied — that is how the caller tells "no bindings
+ * here yet" from "here are the bindings", and migrates user/keyboard.ini.
+ */
+inline bool loadKeyboardMappingJson(const std::string& path, KeyboardMapping& m) {
+    namespace json = ks::engine::json;
+    std::string text;
+    if (!ks::engine::assets::UserData::readFile(path, text)) return false;
+    json::Value root;
+    std::string error;
+    if (!json::parse(text, root, &error)) {
+        std::fprintf(stderr, "controls.json: %s: %s\n", path.c_str(), error.c_str());
+        return false;
+    }
+    if (!root.isObject()) return false;
+    int applied = 0;
+    const auto apply = [&](const char* key, int& field) {
+        const json::Value* v = root.find(key);
+        if (!v || !v->isString()) return;
+        const int vk = keyFromName(v->asString());
+        if (vk < 0) return;
+        field = vk;
+        ++applied;
+    };
+    apply("throttle", m.throttle);
+    apply("brake", m.brake);
+    apply("steerLeft", m.steerLeft);
+    apply("steerRight", m.steerRight);
+    apply("shiftUp", m.shiftUp);
+    apply("shiftDown", m.shiftDown);
+    apply("handbrake", m.handbrake);
+    return applied > 0;
 }
 
 class InputManager {

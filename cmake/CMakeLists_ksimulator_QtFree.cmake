@@ -53,10 +53,13 @@ foreach(f ${KSIM_SOURCES})
 endforeach()
 
 add_executable(SimulatorApp WIN32 ${_ksim_existing})
+# Installed name: the shipped binary is ksim.exe, the CMake target keeps its
+# historical name (cmake/KsInstallLayout.cmake).
 set_target_properties(SimulatorApp PROPERTIES
 	AUTOMOC OFF
 	AUTOUIC OFF
 	AUTORCC OFF
+	OUTPUT_NAME ksim
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 target_compile_definitions(SimulatorApp PRIVATE
@@ -87,28 +90,14 @@ include("${CMAKE_CURRENT_LIST_DIR}/KsShaders.cmake")
 ks_add_shader_target(ks_shaders "${CMAKE_SOURCE_DIR}/src")
 if(TARGET ks_shaders)
 	add_dependencies(SimulatorApp ks_shaders)
-	add_custom_command(TARGET SimulatorApp POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:SimulatorApp>/shaders"
-		COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_BINARY_DIR}/shaders" "$<TARGET_FILE_DIR:SimulatorApp>/shaders"
-		COMMENT "Installing .spv shaders next to SimulatorApp.exe")
 endif()
 
-# Roadmap 2.4 — reference content: content/baked and the reference car are
-# read relative to the working directory, which for a normally launched app
-# is the exe directory (the shaders get the same treatment above). Only the
-# committed reference trees are copied, never a user's local content/cars.
-if(EXISTS "${CMAKE_SOURCE_DIR}/content/baked/manifest.txt")
-	add_custom_command(TARGET SimulatorApp POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-			"${CMAKE_SOURCE_DIR}/content/baked" "$<TARGET_FILE_DIR:SimulatorApp>/content/baked"
-		COMMENT "Installing reference bake next to SimulatorApp.exe")
-endif()
-if(EXISTS "${CMAKE_SOURCE_DIR}/content/cars/refcar/baked/manifest.txt")
-	add_custom_command(TARGET SimulatorApp POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_directory
-			"${CMAKE_SOURCE_DIR}/content/cars/refcar" "$<TARGET_FILE_DIR:SimulatorApp>/content/cars/refcar"
-		COMMENT "Installing reference car next to SimulatorApp.exe")
-endif()
+# The installed layout (ksim.exe, content/, user/, server/, system/shaders/)
+# is defined once in cmake/KsInstallLayout.cmake and staged here so a
+# build-tree run behaves exactly like an installed copy. The shader stage
+# above is part of it; content/user/server staging lives there too.
+include("${CMAKE_CURRENT_LIST_DIR}/KsInstallLayout.cmake")
+ks_stage_install_layout(SimulatorApp)
 
 message(STATUS "SimulatorApp: Qt-free runtime (src/simulator, render=src/engine)")
 

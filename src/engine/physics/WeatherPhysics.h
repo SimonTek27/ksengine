@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file WeatherPhysics.h
@@ -28,7 +29,7 @@ struct WeatherEffects {
  * Lightweight weather simulator: evolves WeatherState over time and
  * exposes grip / wind / density for the vehicle loop.
  */
-class WeatherSimulator {
+class KSENGINE_API WeatherSimulator {
 public:
     WeatherSimulator() = default;
 

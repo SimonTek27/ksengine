@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free image codec used by the material module.
 //
@@ -70,6 +71,6 @@ bool encodeImage(const RawImage& image, const std::string& path,
 
 // Whole-file helpers used by Image::load()/Image::save().
 bool loadImageFile(const std::string& path, RawImage* out, std::string* err = nullptr);
-bool saveImageFile(const std::string& path, const RawImage& image, std::string* err = nullptr);
+KSENGINE_API bool saveImageFile(const std::string& path, const RawImage& image, std::string* err = nullptr);
 
 } // namespace ks::image

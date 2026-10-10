@@ -67,7 +67,7 @@ public:
 #endif
         sockaddr_in addr{}; addr.sin_family = AF_INET;
         addr.sin_addr.s_addr = INADDR_ANY;
-        addr.sin_port = htons(kDiscoveryPort);
+        addr.sin_port = htons(m_port);
         if (bind(m_sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
 #ifdef _WIN32
             closesocket((SOCKET)m_sock);
@@ -95,6 +95,9 @@ public:
         m_hostSession = sessionType; m_hostPlayers = players; m_hostMax = maxPlayers;
         m_hostMode = true;
     }
+    /** UDP port used both to bind and to broadcast. Must be set before start(). */
+    void setPort(uint16_t port) { m_port = port; }
+    uint16_t port() const { return m_port; }
     void queryLan() {
         DiscoveryPacket p{}; p.magic = kDiscoveryMagic; p.msg = (uint8_t)DiscoveryMsg::Query;
         sendBroadcast(p);
@@ -160,7 +163,7 @@ private:
     }
     void sendBroadcast(const DiscoveryPacket& p) {
         sockaddr_in b{}; b.sin_family = AF_INET;
-        b.sin_port = htons(kDiscoveryPort);
+        b.sin_port = htons(m_port);
         b.sin_addr.s_addr = htonl(INADDR_BROADCAST);
         sendto(m_sock, (const char*)&p, sizeof(p), 0, (sockaddr*)&b, sizeof(b));
     }
@@ -175,6 +178,7 @@ private:
     int m_sock = -1;
     bool m_hostMode = false;
     std::string m_hostName, m_hostTrack;
+    uint16_t m_port = kDiscoveryPort;
     uint16_t m_hostPort = 40000;
     uint8_t m_hostSession = 0;
     int m_hostPlayers = 0, m_hostMax = 16;

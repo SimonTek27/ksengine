@@ -25,6 +25,19 @@ endif()
 
 enable_testing()
 
+# ksengine.dll must sit next to every executable that loads it: ctest starts
+# a test from its own directory, and the Windows loader only searches the
+# directory of the exe (plus PATH). Point the test binaries at bin/<config>,
+# where ksengine.dll and ksim.exe already are. Static builds are left alone —
+# nothing extra has to be found there.
+if(TARGET ksengine)
+    get_target_property(_ksengine_type ksengine TYPE)
+    if(_ksengine_type STREQUAL "SHARED_LIBRARY" OR _ksengine_type STREQUAL "MODULE_LIBRARY")
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    endif()
+    unset(_ksengine_type)
+endif()
+
 set(KS_QT_FREE_TESTS
     ecs_test
     engine_tick_test
@@ -55,6 +68,7 @@ set(KS_QT_FREE_TESTS
     wet_physics_test
     rain_effects_test
     lod_window_test
+    user_data_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

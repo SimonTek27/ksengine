@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file MomentMethodTool.h
@@ -26,7 +27,7 @@
 namespace ks {
 namespace physics {
 
-class MomentMethodTool {
+class KSENGINE_API MomentMethodTool {
 public:
     struct VehicleSpec {
         float massKg = 1200.f;

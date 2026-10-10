@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free reader for the Assetto Corsa .ksanim node animation container.
 //
@@ -50,7 +51,7 @@ inline constexpr std::int32_t kKsAnimMaxVersion = 2;
 inline constexpr std::size_t kKsAnimMatrixFloats = 16;
 inline constexpr std::size_t kKsAnimKeyframeFloats = 10;
 
-struct KsAnimKeyframe {
+struct KSENGINE_API KsAnimKeyframe {
     std::array<float, 4> rotation{0.0f, 0.0f, 0.0f, 1.0f}; // x, y, z, w
     std::array<float, 3> translation{0.0f, 0.0f, 0.0f};
     std::array<float, 3> scale{1.0f, 1.0f, 1.0f};
@@ -70,7 +71,7 @@ struct KsAnimEntry {
     }
 };
 
-struct KsAnimFile {
+struct KSENGINE_API KsAnimFile {
     std::int32_t version = 0;
     std::vector<KsAnimEntry> entries;
 
@@ -94,12 +95,12 @@ struct KsAnimParseResult {
 };
 
 // True when the first 4 bytes are a plausible ksanim version (0..2).
-bool isKsAnim(std::string_view bytes);
+KSENGINE_API bool isKsAnim(std::string_view bytes);
 
 // Parses an in-memory ksanim image (binary-safe).
-KsAnimParseResult parseKsAnim(std::string_view bytes);
+KSENGINE_API KsAnimParseResult parseKsAnim(std::string_view bytes);
 
 // Reads the whole file into memory, then parses it.
-KsAnimParseResult parseKsAnimFile(const std::string& path);
+KSENGINE_API KsAnimParseResult parseKsAnimFile(const std::string& path);
 
 } // namespace ks::engine::fileformat

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 namespace ks {
 namespace physics {
@@ -20,7 +21,7 @@ struct FFBInputs {
     float steerAngle = 0;
 };
 
-class FFBBridge {
+class KSENGINE_API FFBBridge {
 public:
     static float computeSteeringTorque(const FFBInputs& in,
         const physics::PacejkaTireModel* tireFL,

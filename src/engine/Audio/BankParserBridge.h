@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -61,7 +62,7 @@ struct ParsedBank {
  *
  * Non-RIFF/FEV, unreadable, or missing input yields `valid = false`.
  */
-ParsedBank parseBankFile(const std::string& path);
+KSENGINE_API ParsedBank parseBankFile(const std::string& path);
 
 /**
  * Writes sample `index` of the FSB5 block in `path` to a RIFF/WAVE file.
@@ -69,7 +70,7 @@ ParsedBank parseBankFile(const std::string& path);
  * Returns false for an out-of-range index, an unreadable file, or a codec
  * that is not raw PCM/float (Vorbis, ADPCM, XMA, ... need a full decoder).
  */
-bool extractBankSampleToWav(const std::string& path, std::size_t index,
+KSENGINE_API bool extractBankSampleToWav(const std::string& path, std::size_t index,
                             const std::string& outPath);
 
 }} // namespace ks::audio

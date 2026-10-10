@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free DirectDraw Surface (.dds) reader — the format every Assetto Corsa
 // KN5 embeds as its texture payload. std-only, no dependencies, binary-safe.
@@ -83,14 +84,14 @@ struct DdsImage {
 };
 
 // True when the buffer starts with the 4-byte DDS magic.
-bool isDds(std::string_view bytes);
+KSENGINE_API bool isDds(std::string_view bytes);
 
 // Header-only inspection: no pixel data is touched, so it is cheap enough to
 // run on every extracted KN5 texture payload.
-DdsInfo readDdsInfo(std::string_view bytes);
+KSENGINE_API DdsInfo readDdsInfo(std::string_view bytes);
 
 // Decodes mip 0 to top-down RGBA8. `info.error` is set on failure and
 // `rgba` stays empty.
-DdsImage decodeDds(std::string_view bytes);
+KSENGINE_API DdsImage decodeDds(std::string_view bytes);
 
 } // namespace ks::engine::fileformat

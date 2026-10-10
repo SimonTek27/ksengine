@@ -13,10 +13,17 @@
 #include "simulator/NetworkManager.h"
 #include "simulator/ShadowSystem.h"
 #include "simulator/NativeRenderer.h"
+#include "simulator/SimulatorAudio.h" // setMasterVolume (settings.json audio)
+// Phase 3 — per-player data folder + the two JSON settings files
+// (user/<player>/stats.json lives here too).
+#include "simulator/UserStats.h"
 // Roadmap 2.4/2.5 — KS_SCREENSHOT writes the readback with this Qt-free
 // encoder (same PNG writer the material module uses).
 #include "engine/material/PngCodec.h"
 #include "engine/physics/VehicleSimulator.h"
+#include "engine/Config/EngineSettings.h"
+#include "engine/Engine.h"
+#include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
 #include <cstdio>
 #include <cstdlib>
@@ -37,6 +44,14 @@ static VkSurfaceKHR g_surface = VK_NULL_HANDLE;
 static ks::sim::NativeRenderer* g_nativeRenderer = nullptr;
 static ks::sim::CascadedShadowMap g_shadowMap;
 static std::unique_ptr<ks::sim::SimulationLoop> g_simulation;
+
+// Phase 3 — the per-player data folder (user/<player>/, created on the first
+// start) and the settings merged from system/cfg/ksengine.json (install
+// defaults) + user/<player>/settings.json (per-player overrides). File
+// scope because the teardown path writes both back after the frame loop is
+// gone; see engine/Config/EngineSettings.h and engine/assets/UserData.h.
+static ks::engine::assets::UserLayout g_userLayout;
+static ks::engine::config::EngineSettings g_engineSettings;
 
 static bool g_throttle = false, g_brake = false;
 static bool g_steerLeft = false, g_steerRight = false;
@@ -523,6 +538,37 @@ static void initVulkanAndSimulation() {
     initSimulation();
 }
 
+// --- settings.json -> engine -----------------------------------------------
+// Fixed step + master audio: safe to push at any time (idempotent, and audio
+// may not exist yet — SimulationLoop builds it lazily on the first car load,
+// which is why this runs again after every loadCar()).
+static void applyRuntimeSettings() {
+    if (!g_simulation) return;
+    ks::Engine::instance().setFixedDt(g_engineSettings.physicsFixedDt);
+    if (auto* audio = g_simulation->audio())
+        audio->setMasterVolume(g_engineSettings.audioMaster);
+}
+
+// Assist levels can only reach physics through VehicleSimulator::applySetup(),
+// which rebuilds mass/aero/suspension out of the setup — running it after a
+// car's own data files were loaded would throw those values away, so this
+// happens once at start-up (nothing else in ksim calls applySetup). An
+// untouched settings.json asks for the vehicle's own defaults and is skipped
+// outright, so the shipped "{}" changes nothing.
+static void applyAssistSettings() {
+    if (!g_simulation) return;
+    auto* vehicle = g_simulation->vehicle();
+    if (!vehicle) return;
+    const auto& current = vehicle->setupParams();
+    if (current.tcLevel == g_engineSettings.assistTc &&
+        current.absLevel == g_engineSettings.assistAbs)
+        return;
+    auto p = current;
+    p.tcLevel = g_engineSettings.assistTc;
+    p.absLevel = g_engineSettings.assistAbs;
+    vehicle->applySetup(p);
+}
+
 // Shared tail of init: SimulationLoop + menu + AI grid + autostart. Runs in
 // both modes; g_nativeRenderer is nullptr when headless.
 static void initSimulation() {
@@ -532,6 +578,50 @@ static void initSimulation() {
     // Discovery + external control API (port 20780). The FeatureHub callbacks
     // are wired inside startFeatureServices(), see SimulationLoop.cpp.
     g_simulation->startFeatureServices(false);
+
+    // --- Phase 3: per-player folder (first run) + settings ---------------
+    // The install ships user/ empty: user/<player>/ is created here, named
+    // after the driver profile, with its three JSON files ({} until the
+    // runtime writes keys) and the screenshots/replay/telemetry folders.
+    g_userLayout = ks::engine::assets::UserData::ensure(
+        g_simulation->ui().menu().profile().name);
+    if (g_userLayout.created)
+        printf("[INIT] Created %s/ (controls.json, settings.json, stats.json, "
+               "screenshots/, replay/, telemetry/)\n",
+               g_userLayout.player.c_str());
+    else if (!g_userLayout.ok)
+        printf("[INIT] User folder not writable: %s\n", g_userLayout.player.c_str());
+
+    // Settings, in precedence order: install-wide defaults from
+    // system/cfg/ksengine.json, then the player's own overrides. Presence is
+    // cleared in between so the write-back at exit only ever reports keys the
+    // *player's* file carried (a system default must not leak into it).
+    g_engineSettings.load(ks::engine::assets::Paths::systemCfgFile("ksengine.json"));
+    const bool sysFixedDt = g_engineSettings.hasPhysicsFixedDt;
+    const bool sysAudio = g_engineSettings.hasAudioMaster;
+    const bool sysAssist = g_engineSettings.hasAssistTc || g_engineSettings.hasAssistAbs;
+    g_engineSettings.clearPresence();
+    g_engineSettings.load(g_userLayout.settings);
+    applyRuntimeSettings();
+    applyAssistSettings();
+    const auto where = [](bool user, bool system) -> const char* {
+        return user ? " (settings.json)" : (system ? " (system/cfg)" : "");
+    };
+    printf("[INIT] Settings: fixedDt=%.6f%s audio=%.2f%s assist TC=%d ABS=%d%s\n",
+           g_engineSettings.physicsFixedDt,
+           where(g_engineSettings.hasPhysicsFixedDt, sysFixedDt),
+           static_cast<double>(g_engineSettings.audioMaster),
+           where(g_engineSettings.hasAudioMaster, sysAudio), g_engineSettings.assistTc,
+           g_engineSettings.assistAbs,
+           where(g_engineSettings.hasAssistTc || g_engineSettings.hasAssistAbs, sysAssist));
+
+    // Career stats (wins/poles/podiums/races/best lap + PB record count)
+    // seed the profile; they are written back on change and at exit.
+    {
+        ks::sim::DriverStats stats;
+        if (ks::sim::loadDriverStats(g_userLayout.stats, stats))
+            ks::sim::applyDriverStats(stats, g_simulation->ui().menu().profile());
+    }
 
     if (!g_headless) {
     const int bakedMeshes = g_simulation->loadBakedScene("content/baked");
@@ -545,7 +635,9 @@ static void initSimulation() {
     // scriptable way to photograph a cached car (roadmap 2.4). Same loadCar()
     // path SELECT CAR uses; headless mode never reaches this block.
     if (const char* car = std::getenv("KS_CAR"); car && car[0]) {
-        if (!g_simulation->loadCar(car))
+        if (g_simulation->loadCar(car))
+            applyRuntimeSettings(); // audio is created with the car
+        else
             printf("[INIT] KS_CAR load failed: %s\n", car);
     }
     // KS_TRACK=<dir>: pick a track before the first frame (same path SELECT
@@ -582,10 +674,12 @@ static void initSimulation() {
     };
     uiMenu->onCarChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
-        if (g_simulation->loadCar(dir))
+        if (g_simulation->loadCar(dir)) {
+            applyRuntimeSettings(); // audio only exists from the first car on
             printf("Car loaded: %s\n", dir.c_str());
-        else
+        } else {
             printf("Car load failed: %s\n", dir.c_str());
+        }
     };
     // Roadmap 2.8: TEAM row -> load the roster (applies immediately; the next
     // beginRaceSession builds the field from it).
@@ -647,21 +741,36 @@ static void initSimulation() {
     uiMenu->onDevModeRequested = []() {
         printf("Dev mode request\n");
     };
+    // Career stats follow the profile straight into stats.json. Session
+    // results are written on the profile without a profile edit, so the exit
+    // path writes them as well — this hook keeps the file current while the
+    // menu is being used.
+    uiMenu->onProfileChanged = [](const ks::sim::DriverProfile& p) {
+        ks::sim::saveDriverStats(
+            g_userLayout.stats,
+            ks::sim::driverStatsFromProfile(
+                p, static_cast<int>(g_simulation->features().pb.size())));
+    };
 
     // --- Roadmap 1.4 / P2.7: keyboard bindings ---------------------------
-    // Load the persisted mapping (Key=Value, same user/ pattern as user/pb)
-    // and wire the rebind panel: every capture is applied immediately and
-    // written back.
+    // controls.json in the player's own folder replaces the shared
+    // user/keyboard.ini: load it, fall back to the legacy ini once (and
+    // migrate what it held), and send every rebind to controls.json only.
     if (auto* im = g_simulation->inputManager()) {
         ks::sim::KeyboardMapping kb;
-        if (ks::sim::loadKeyboardMapping("user/keyboard.ini", kb))
+        if (ks::sim::loadKeyboardMappingJson(g_userLayout.controls, kb)) {
             im->setKeyboardMapping(kb);
+        } else if (ks::sim::loadKeyboardMapping("user/keyboard.ini", kb)) {
+            im->setKeyboardMapping(kb);
+            if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, kb))
+                printf("Migrated user/keyboard.ini -> %s\n", g_userLayout.controls.c_str());
+        }
         g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
     }
     g_simulation->ui().keyRebind().onMappingChanged = [](const ks::sim::KeyboardMapping& m) {
         if (auto* im = g_simulation->inputManager()) im->setKeyboardMapping(m);
-        if (ks::sim::saveKeyboardMapping("user/keyboard.ini", m))
-            printf("Keyboard bindings saved (user/keyboard.ini)\n");
+        if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, m))
+            printf("Keyboard bindings saved (%s)\n", g_userLayout.controls.c_str());
     };
 
     // --- Roadmap 3.1: menu <-> transport ---------------------------------
@@ -889,6 +998,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
     // gone when ~SimulationLoop touched m_modules -> access violation.
     // Close the discovery socket + control API before the loop goes away.
     if (g_simulation) g_simulation->features().stopServices();
+    // Persist the per-player files while the simulation still owns the
+    // profile and the PB store: stats.json (career record + PB record count)
+    // and settings.json (only the keys the player's own file carried — see
+    // EngineSettings::clearPresence() above).
+    if (g_simulation) {
+        ks::sim::saveDriverStats(
+            g_userLayout.stats,
+            ks::sim::driverStatsFromProfile(
+                g_simulation->ui().menu().profile(),
+                static_cast<int>(g_simulation->features().pb.size())));
+        g_engineSettings.save(g_userLayout.settings);
+    }
     g_simulation.reset();
     g_shadowMap.shutdown();
     delete g_nativeRenderer;

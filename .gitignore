@@ -2,6 +2,7 @@
 build/
 build_*/
 build/Release/
+dist/
 Release/
 Debug/
 MinSizeRel/
@@ -93,6 +94,14 @@ build_output*.txt
 IntegrationSummary.txt
 SimulatorApp.vcxproj
 SimulatorApp.vcxproj.filters
+
+# Runtime data + one-off verification output: ksim writes user/ at start-up
+# (user/pb, user/<player>/) and the layout ships it empty — nothing here is
+# ever source. See cmake/KsInstallLayout.cmake.
+/user/
+/ctest_phase1_status.txt
+/ks_dist_log.txt
+/tools/__pycache__/
 
 # External dependencies (submodules/third-party source)
 external/openxr/

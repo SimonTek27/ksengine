@@ -9,6 +9,47 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Layout `system/cfg/` + cartella per-giocatore `user/<player>/`** (Fase 3;
+  `cmake/KsInstallLayout.cmake`, `src/engine/Config/Json.h`,
+  `src/engine/Config/EngineSettings.h`, `src/engine/assets/UserData.h`,
+  `src/simulator/UserStats.h`): il runtime Qt-free non aveva alcun supporto
+  JSON, e ora ce l'ha in `src/engine/Config/Json.h` — header-only, parser
+  ricorsivo + writer con ordine di inserimento preservato, escape e
+  `\uXXXX` (con surrogate) in UTF-8, errori con offset, nessuno stato
+  statico (nessun dato condiviso fra exe e DLL). Il layout installato
+  aggiunge `system/cfg/ksengine.json`, spedito come `{}` e letto da
+  `Paths::systemCfg()`.
+  All'avvio la runtime crea `user/<player>/` — `<player>` è il nome del
+  profilo guida, `Driver` quando è vuoto o inutilizzabile come cartella
+  (caratteri illegali, `.`/`..`, nomi riservati `CON`/`COM1`/... vengono
+  normalizzati) — con `controls.json`, `settings.json`, `stats.json`
+  (tutti `{}` alla prima creazione) e le cartelle `screenshots/`,
+  `replay/`, `telemetry/`.
+  Le due impostazioni condividono la stessa forma e vengono unite in
+  ordine, il secondo file vince chiave per chiave:
+  `system/cfg/ksengine.json` (default dell'install) e
+  `user/<player>/settings.json` (override del giocatore). Chiavi
+  effettive: `physics.fixedDt` (passo fisso, applicato con
+  `Engine::setFixedDt`), `audio.master` (`SimulatorAudio::setMasterVolume`,
+  riprovato anche dopo il primo `loadCar()` perché l'audio viene costruito
+  in modo lazy lì) e `assist.tc`/`assist.abs` (`VehicleSimulator::applySetup`,
+  solo all'avvio: `applySetup` ricostruisce massa/aero dalla setup, quindi
+  dopo il load di una vettura cancellerebbe i dati del modello). La
+  riscrittura in uscita riporta solo le chiavi che il file del giocatore
+  conteneva: un default presente soltanto in `system/cfg/` non finisce
+  mai nel file dell'utente, e un file malformato non azzera ciò che era
+  già stato unito.
+  `stats.json` conserva la carriera del pilota (vittorie, pole, podi,
+  gare, miglior giro e il numero di record PB in `user/pb`): caricato su
+  `DriverProfile` all'avvio, riscritto a ogni cambio profilo e in uscita.
+  Test `user_data_test` (round trip JSON, sanitizzazione dei nomi,
+  prima esecuzione, precedenza system/cfg → settings.json, stats).
+  Verifica: 53/53 ctest; `ks_dist` produce `system/cfg/ksengine.json` e
+  una prima esecuzione da `dist/ksim` crea `user/Player/` con i tre file
+  e le tre cartelle.
+- **ksengine.dll con API esportato esplicito** (roadmap 2.4/2.5):
+  `src/engine/KsExport.h` introduce la macro `KSENGINE_API` (dllexport/dllimport in base alla definizione di `KSENGINE_BUILDING_DLL` / `KSENGINE_USE_DLL`) e `option(KSENGINE_SHARED ... ON)` in `src/engine/CMakeLists.txt` rende `ksengine` una shared library; sono stati annotati 29 classi e 32 funzioni libere in 38 header `src/engine/` con la macro `KSENGINE_API`. I simboli di superficie export sono misurati staticamente via dumpbin: 187 entità in `ksengine_export_surface.csv`, nessuna template. La DLL carica `vulkan-1.dll` in modalità delay-load.
+  Si noti: passandone `-DKSENGINE_SHARED=OFF` si ricostruisce il vecchio archivio statico `ksengine.lib`, con macro vuote e nessuna modifica ai file fonte.
 - **Rendering AI brief — Sprint S3 (P2)** (`RENDERING_AI_BRIEF.md`):
   IBL split-sum sul path Vulkan Qt-free, generata interamente a CPU a
   runtime (`src/simulator/IblGenerator.h`, deterministica — sequenza
@@ -108,6 +149,35 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - POST_BUILD copia `content/baked` e `content/cars/refcar` accanto a
   `SimulatorApp.exe` (come già accade per gli shader), così una build
   installata riproduce la sessione di riferimento
+
+### Changed
+- **`user/keyboard.ini` sostituito da `user/<player>/controls.json`**: la
+  mappatura tasti resta `KeyboardMapping` (stessi nomi chiave, stessi nomi
+  tastiera), ma il salvataggio avviene nel file JSON della cartella del
+  giocatore. Un `user/keyboard.ini` legacy viene letto una volta sola,
+  migrato in `controls.json` e ignorato da allora in poi; un `controls.json`
+  vuoto (`{}`, lo stato di prima creazione) o malformato restituisce
+  "nessun binding letto" senza toccare la mappatura corrente: è proprio
+  questo il segnale che fa scattare la migrazione.
+
+### Fixed
+- **Collisone ODR tra `BrakeThermalModel.h` e `BrakeWearSystem.h`** (regressione
+  della conversione a DLL): `ks::physics::BrakeThermalConfig` e
+  `ks::physics::BrakeThermalState` erano dichiarati due volte nello stesso
+  namespace con layout diversi. Essendo tipi inline/COMDAT, i due costruttori
+  impliciti condividono lo stesso nome mangiato e il linkitore ne sceglie uno
+  solo per il modulo: con la libreria statica non si vedeva (un .obj non
+  referenziato non viene mai estratto), mentre `ksengine.dll` linka tutti gli
+  oggetti elencati e ogni `BrakeThermalModel` finiva con i default
+  dell'altra definizione (`ambientTemp`=900 > `maxTemp`=45). Il sintomo era
+  l'assert di debug CRT `invalid bounds arguments passed to std::clamp`
+  (stop del processo con dialogo) su 8 test su 52 (`wet_physics_test`,
+  `test_determinism`, `test_PhysicsGolden`, `test_GoldenExport`,
+  `ai_race_test`, `ks_server_smoke`, `sim_headless_smoke`,
+  `scene_bridge_test`). `BrakeWearSystem.*` è dead code (nessuno include
+  l'header) ed è escluso dal source list con un commento che spiega il
+  meccanismo; il warning in testa a `BrakeWearSystem.h` ricorda di
+  rinominare i tipi prima di riattivarlo. 52/52 ctest.
 
 ---
 

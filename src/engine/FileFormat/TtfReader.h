@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 /**
  * TrueType (sfnt) font reader, std-only.
  *
@@ -39,7 +40,7 @@ struct TtfGlyphOutline {
     void clear() { contours.clear(); }
 };
 
-class TtfReader {
+class KSENGINE_API TtfReader {
 public:
     /** True if `data` starts with a supported sfnt scaler type. */
     static bool isTrueType(const std::uint8_t* data, std::size_t size);

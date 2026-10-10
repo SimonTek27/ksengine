@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include <string>
 
@@ -21,7 +22,7 @@ struct AiSpline;
  * distance/lap are runtime-derived (AiFileReader::finishSpline), never
  * stored on disk.
  */
-class AiFileWriter {
+class KSENGINE_API AiFileWriter {
 public:
     static bool writeSpline(const std::string& path, const AiSpline& spline);
 };

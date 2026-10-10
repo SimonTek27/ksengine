@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 #include "LogitechFFB.h"
 #include "FanatecFFB.h"
 #include "SimucubeFFB.h"
@@ -105,7 +106,7 @@ private:
 // FFBSDKFactory — Creates the appropriate FFB wrapper based on detected hardware
 // ============================================================================
 
-class FFBSDKFactory {
+class KSENGINE_API FFBSDKFactory {
 public:
     enum class WheelBrand { None, Logitech, Thrustmaster, Fanatec, Simucube, Moza };
 

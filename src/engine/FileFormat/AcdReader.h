@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free reader for the Assetto Corsa `data.acd` car data archive.
 //
@@ -57,11 +58,11 @@ inline constexpr std::uint32_t kAcdMaxFiles = 4096;
 // and a `.../<car>/data.acd` path are both accepted and reduce to the car
 // folder name. The result is the dash-joined
 // "%d-%d-%d-%d-%d-%d-%d-%d" string that the rotation indexes into.
-std::string createAcdKey(std::string_view folderName);
+KSENGINE_API std::string createAcdKey(std::string_view folderName);
 
 // Decrypts `charCount` cipher words starting at `cipher` using `key`.
 // `cipherBytes` must be >= charCount * 4.
-std::string decryptAcdData(const std::uint8_t* cipher, std::size_t cipherBytes,
+KSENGINE_API std::string decryptAcdData(const std::uint8_t* cipher, std::size_t cipherBytes,
                            std::size_t charCount, std::string_view key);
 
 struct AcdEntry {
@@ -69,7 +70,7 @@ struct AcdEntry {
     std::string data; // decrypted plaintext bytes (not necessarily NUL-terminated)
 };
 
-struct AcdArchive {
+struct KSENGINE_API AcdArchive {
     std::vector<AcdEntry> files;
     std::string error; // empty on success, "offset N: ..." on failure
 
@@ -79,11 +80,11 @@ struct AcdArchive {
 
 // True when the bytes walk as an acd record list and end exactly on EOF.
 // Purely structural — no key required, since none is needed to parse.
-bool looksLikeAcd(std::string_view bytes);
+KSENGINE_API bool looksLikeAcd(std::string_view bytes);
 
 // Parses and decrypts. `folderName` is the car directory name; pass the name,
 // not the path.
-AcdArchive parseAcd(std::string_view bytes, std::string_view folderName);
+KSENGINE_API AcdArchive parseAcd(std::string_view bytes, std::string_view folderName);
 
 // Reads the whole file into memory, then parses it.
 AcdArchive parseAcdFile(const std::string& path, std::string_view folderName);

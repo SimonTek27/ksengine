@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Offline KN5 -> NativeMesh (.nmsh) baker, Qt-free counterpart of the editor
 // tool in src/sdk/kseditor/.../KN5Baker. Same output contract the native
@@ -51,10 +52,10 @@ struct Kn5BakeResult {
 };
 
 // Bakes an already-parsed KN5 image into output_dir.
-Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir);
+KSENGINE_API Kn5BakeResult bakeKn5(const Kn5File& kn5, const std::string& output_dir);
 
 // Convenience: parse from disk (keeping texture payloads), then bake.
-Kn5BakeResult bakeKn5ToNativeMeshes(const std::string& kn5_path,
+KSENGINE_API Kn5BakeResult bakeKn5ToNativeMeshes(const std::string& kn5_path,
                                     const std::string& output_dir);
 
 // Brief P1 — default roughness for a KN5 material with no authored
@@ -62,7 +63,7 @@ Kn5BakeResult bakeKn5ToNativeMeshes(const std::string& kn5_path,
 // contains "carbon", case-insensitive) reads 0.5, paint and everything
 // else 0.35. Metalness has no heuristic — it stays 0 unless authored.
 // Declared for kn5_test; bakeKn5() applies it internally.
-float heuristicMaterialRoughness(const std::string& materialName,
+KSENGINE_API float heuristicMaterialRoughness(const std::string& materialName,
                                  const std::string& shaderName);
 
 } // namespace ks::engine::fileformat

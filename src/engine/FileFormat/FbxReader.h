@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free binary FBX importer.
 //
@@ -81,7 +82,7 @@ struct FbxNode {
     }
 };
 
-class FbxReader {
+class KSENGINE_API FbxReader {
 public:
     bool loadFromFile(const std::string& path);
     bool load(std::string_view data, const std::string& sourcePath = {});

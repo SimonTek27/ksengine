@@ -33,10 +33,13 @@ foreach(f ${_ksim_existing})
 endforeach()
 
 add_executable(SimulatorServer ${_ksrv_sources})
+# Installed name: the shipped binary is kssimserver.exe, the CMake target
+# keeps its historical name (cmake/KsInstallLayout.cmake).
 set_target_properties(SimulatorServer PROPERTIES
 	AUTOMOC OFF
 	AUTOUIC OFF
 	AUTORCC OFF
+	OUTPUT_NAME kssimserver
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 target_compile_definitions(SimulatorServer PRIVATE
@@ -61,3 +64,6 @@ if(WIN32)
 endif()
 
 message(STATUS "SimulatorServer (headless) configured - disc :20779, ctrl :20780")
+
+# Same installed layout as ksim.exe (server/kssimserver.ini is staged here too).
+ks_stage_install_layout(SimulatorServer)

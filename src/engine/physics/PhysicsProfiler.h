@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file PhysicsProfiler.h
@@ -19,7 +20,7 @@
 namespace ks {
 namespace physics {
 
-class PhysicsProfiler {
+class KSENGINE_API PhysicsProfiler {
 public:
     enum Subsystem {
         Engine = 0,

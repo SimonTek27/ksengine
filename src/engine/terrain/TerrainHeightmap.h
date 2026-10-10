@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free, deterministic heightmap synthesis for TerrainMesh: the simulator
 // has no terrain asset to load (the only real heightmaps live inside the Qt
@@ -18,6 +19,6 @@ struct FbmHeightmapParams {
     float gain = 0.5f;
 };
 
-std::vector<float> generateFbmHeightmap(int gridW, int gridH, const FbmHeightmapParams& params);
+KSENGINE_API std::vector<float> generateFbmHeightmap(int gridW, int gridH, const FbmHeightmapParams& params);
 
 } // namespace ks::engine::terrain

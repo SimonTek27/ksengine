@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free Wavefront OBJ / MTL importer.
 //
@@ -45,7 +46,7 @@ using ObjMaterial = ModelMaterial;
 using ObjMesh = ModelMesh;
 using ObjScene = ModelScene;
 
-class CADOBJParser {
+class KSENGINE_API CADOBJParser {
 public:
     CADOBJParser() = default;
 

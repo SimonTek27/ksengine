@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 #include "KsQtFreeGuard.h"
 #include "EngineModule.h"
 #include "scene/Registry.h"
@@ -21,7 +22,7 @@ namespace ks {
  * Core engine — Qt-free.
  * Fixed-timestep tick + module registry + callback events (no QObject).
  */
-class Engine {
+class KSENGINE_API Engine {
 public:
     static Engine& instance() {
         static Engine s;

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file TireSimulator.h
@@ -42,7 +43,7 @@ struct TireWheelState {
     float flatSpotSeverity = 0.0f;
 };
 
-class TireSimulator {
+class KSENGINE_API TireSimulator {
 public:
     TireSimulator();
 

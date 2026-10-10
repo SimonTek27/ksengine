@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 /**
  * KsTireModel — ksengine Magic Formula tire (project-branded successor to PacejkaTireModel).
  *
@@ -17,7 +18,7 @@
 namespace ks {
 namespace physics {
 
-class KsTireModel {
+class KSENGINE_API KsTireModel {
 public:
     struct TireCoefficients {
         float a1 = -22.1f, a2 = 1011.0f, a3 = 1078.0f, a4 = 1.82f, a5 = 0.208f;

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 /**
  * @file PacejkaTireModel.h
@@ -24,7 +25,7 @@ namespace physics {
 using PacejkaTireModel = KsTireModel;
 
 /** Four-wheel tire-set manager sharing one compound (INI round-trip helper). */
-class TireModelManager {
+class KSENGINE_API TireModelManager {
 public:
     TireModelManager();
 

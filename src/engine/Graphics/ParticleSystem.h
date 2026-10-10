@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 // CPU particle simulation (roadmap ksengine-vs-cryengine P1 - the old
 // GPUParticleSystem was an empty stub and has been deleted).
 //
@@ -50,7 +51,7 @@ struct Particle {
     float size = 0.1f;
 };
 
-class ParticleSystem {
+class KSENGINE_API ParticleSystem {
 public:
     static constexpr int kMaxParticles = 4096;
     static constexpr float kFixedStep = 1.0f / 120.0f;

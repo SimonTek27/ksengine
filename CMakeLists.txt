@@ -265,6 +265,14 @@ if(KS_QT_FREE_BUILD)
 	if(KSIMULATOR_QT_FREE)
 		include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CMakeLists_ksimulator_QtFree.cmake")
 	endif()
+	# Installed layout: ksim.exe, kssimserver.exe, content/, user/, server/,
+	# system/shaders/ — rules live in cmake/KsInstallLayout.cmake (the same
+	# module stages the layout into the build tree, see above). Only the
+	# Qt-free path is wired up: it is the one that builds both shipped
+	# executables.
+	include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KsInstallLayout.cmake")
+	ks_install_layout()
+	ks_add_dist_target()
 	enable_testing()
 	add_subdirectory(tests/ksengine)
 	return()

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Engine-level terrain mesh generation — deliberately Qt-free (plain
 // std::vector in, plain std::vector out) so it can be called from both:
@@ -54,20 +55,20 @@ struct TerrainMeshData {
 // differences (falling back to a forward/backward difference at the grid
 // edges), not carried over from any editor-side normal cache, so this
 // function is self-contained and correct given heights alone.
-TerrainMeshData generateTerrainMesh(const std::vector<float>& heights, int gridW, int gridH,
+KSENGINE_API TerrainMeshData generateTerrainMesh(const std::vector<float>& heights, int gridW, int gridH,
                                     float worldW, float worldH, float uvScale = 10.0f);
 
 // Same as generateTerrainMesh, but samples every `stride` grid cells for a
 // cheaper, lower-detail mesh (stride=1 is identical to generateTerrainMesh;
 // stride=2 is quarter the triangle count, etc.). Useful for a simplified
 // SimulatorApp draw distance without needing a full LOD/tessellation system.
-TerrainMeshData generateTerrainMeshLOD(const std::vector<float>& heights, int gridW, int gridH,
+KSENGINE_API TerrainMeshData generateTerrainMeshLOD(const std::vector<float>& heights, int gridW, int gridH,
                                        float worldW, float worldH, int stride, float uvScale = 10.0f);
 
 // Writes mesh data directly to the "NMSH" binary format (magic "NMSH",
 // uint32 vertexCount, uint32 indexCount, raw vertex array, raw uint32 index
 // array) that ks::sim::NativeRenderer::loadMeshFromFile() reads. Returns
 // false if the file could not be opened for writing.
-bool writeTerrainNMSH(const std::string& path, const TerrainMeshData& mesh);
+KSENGINE_API bool writeTerrainNMSH(const std::string& path, const TerrainMeshData& mesh);
 
 } // namespace ks::engine::terrain

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 #include <string>
 #include <vector>
 
@@ -7,7 +8,7 @@ namespace ks { namespace scripting {
 // Facade over the concrete script host. Everything else in the engine talks
 // to this type only, so swapping in another backend (or a HAS_LUA=0 build)
 // never ripples past Scripting/.
-class ScriptHost {
+class KSENGINE_API ScriptHost {
 public:
     static ScriptHost& instance() { static ScriptHost s; return s; }
 

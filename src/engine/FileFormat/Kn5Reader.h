@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 // Qt-free reader for the Assetto Corsa KN5 mesh container.
 //
@@ -166,11 +167,11 @@ struct Kn5ParseOptions {
 };
 
 // Parses an in-memory KN5 image (binary-safe).
-Kn5ParseResult parseKn5(std::string_view bytes,
+KSENGINE_API Kn5ParseResult parseKn5(std::string_view bytes,
                         const Kn5ParseOptions& options = {});
 
 // Reads the whole file into memory, then parses it.
-Kn5ParseResult parseKn5File(const std::string& path,
+KSENGINE_API Kn5ParseResult parseKn5File(const std::string& path,
                             const Kn5ParseOptions& options = {});
 
 } // namespace ks::engine::fileformat

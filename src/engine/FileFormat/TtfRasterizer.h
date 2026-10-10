@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 /**
  * Quadratic-outline rasterizer for TtfReader.
  *
@@ -18,7 +19,7 @@ namespace ks {
 namespace engine {
 namespace fileformat {
 
-struct TtfGlyphBitmap {
+struct KSENGINE_API TtfGlyphBitmap {
     int width = 0;
     int height = 0;
     int left = 0;  // bitmap left edge relative to pen origin, px
@@ -37,11 +38,11 @@ struct TtfRasterOptions {
     int maxAtlasWidth = 1024;    // shelf-packing row limit
 };
 
-bool rasterizeGlyph(const TtfReader& font, std::uint16_t gid, const TtfRasterOptions& options,
+KSENGINE_API bool rasterizeGlyph(const TtfReader& font, std::uint16_t gid, const TtfRasterOptions& options,
                     TtfGlyphBitmap& out, std::string* error = nullptr);
 
 /** Rasterizes ASCII `firstChar`..`lastChar` (defaults 32..126) into a packed atlas. */
-bool buildTtfAtlas(const TtfReader& font, const TtfRasterOptions& options, TtfAtlas& out,
+KSENGINE_API bool buildTtfAtlas(const TtfReader& font, const TtfRasterOptions& options, TtfAtlas& out,
                    std::string* error = nullptr);
 
 }  // namespace fileformat

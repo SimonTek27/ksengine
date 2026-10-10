@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include "PhysicsCoreTypes.h"
 #include <string>
@@ -10,7 +11,7 @@
 namespace ks {
 namespace physics {
 
-class EngineModel {
+class KSENGINE_API EngineModel {
 public:
     EngineModel();
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "KsExport.h"
 
 #include "PhysicsCoreTypes.h"
 #include <array>
@@ -65,7 +66,7 @@ inline bool hasFlag(DamageType flags, DamageType flag) {
 // Per-Zone Damage Data
 // ============================================================================
 
-struct DamageZoneData {
+struct KSENGINE_API DamageZoneData {
     float structural = 0.0f;    // Structural integrity (0 = destroyed, 1 = perfect)
     float cosmetic = 0.0f;      // Cosmetic damage (0 = perfect, 1 = destroyed)
     float deformation = 0.0f;   // Visual deformation amount (0-1)
@@ -88,7 +89,7 @@ struct DamageZoneData {
 // Suspension Damage Data (per wheel)
 // ============================================================================
 
-struct SuspensionDamageData {
+struct KSENGINE_API SuspensionDamageData {
     float geometry = 1.0f;      // Geometry integrity (1 = perfect alignment)
     float armStrength = 1.0f;   // Control arm strength (1 = perfect)
     float dampingLoss = 0.0f;   // Damping effectiveness loss (0 = none, 1 = total)
@@ -232,7 +233,7 @@ struct DamageConfig {
 // - Visual damage: mesh deformation, particle effects
 // - Repair system: pit stop time and cost
 
-class DamageSystem {
+class KSENGINE_API DamageSystem {
 
 public:
     DamageSystem();
