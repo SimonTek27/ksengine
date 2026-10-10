@@ -1849,6 +1849,24 @@ void SimulationLoop::tick() {
     broadcastLocalCarState();
     if (m_network) m_network->update(elapsed);
 #if HAS_VEHICLE_SIM
+    // Brief P6 — brake glow: the hottest disc temperature drives the
+    // renderer's emissive on brake-disc meshes (setBrakeGlow). Normalized
+    // on the same 400..800 C anchor the physics brake-fade uses, so the
+    // glow only ever shows what the thermal model computed — a cold disc
+    // (or no vehicle at all) means signal 0, never a faked glow. Player
+    // car only; AI cars reuse the same meshes and stay inert. No renderer
+    // (headless/menu) or no vehicle: explicit 0 so a stale value can't
+    // keep glowing after despawn.
+    if (m_vulkanRenderer) {
+        float glow = 0.0f;
+        if (m_vehicle) {
+            float maxDisc = 0.0f;
+            for (int w = 0; w < 4; ++w)
+                maxDisc = std::max(maxDisc, m_vehicle->brakes().discTemp(w));
+            glow = std::clamp((maxDisc - 400.0f) / 400.0f, 0.0f, 1.0f);
+        }
+        m_vulkanRenderer->setBrakeGlow(glow);
+    }
     // Roadmap 1.1: hand the mixer the same vehicle snapshot the HUD reads.
     // The per-wheel telemetry the mixer needs exists since the milliken
     // G-package: slip ratio/angle drive the skid layer, the hottest brake

@@ -104,7 +104,14 @@ struct NativeMesh {
     // P3 — clear-coat flag from materials.txt cell 6 (>= 0.5 = coated).
     // Static per mesh, rides the same std140 block as the scalars above.
     float clearcoat = 0.0f;
-    // Descriptor set 1 for this mesh + its 16-byte std140 material block.
+    // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
+    // ("disc" appears, case-insensitive; fail-open: no match = no glow).
+    // Static per mesh, same std140 block; the per-frame heat intensity is
+    // FrameData.brakeGlow (setBrakeGlow), so old bakes simply never match
+    // and render exactly as before.
+    float brakeDisc = 0.0f;
+    // Descriptor set 1 for this mesh + its 32-byte std140 material block
+    // (grew 16 -> 32 when the P6 brake-disc flag joined the scalars).
     // Null until createMaterialDescriptor() succeeds (or after it fails);
     // the draw path then binds the default material set instead.
     VkDescriptorSet materialSet = VK_NULL_HANDLE;
@@ -323,6 +330,16 @@ public:
     // 2 ACES, 3 Uncharted2, 4 Filmic.
     void setExposure(float e) { m_exposure = e; }
     float exposure() const { return m_exposure; }
+
+    // Brief P6 — brake glow. [0..1] radiance multiplier for meshes flagged
+    // as brake discs (NativeMesh::brakeDisc, name heuristic in setMesh()):
+    // SimulationLoop maps the hottest disc temperature onto this range
+    // (the physics 400..800 C fade anchor), the shaders add a fixed
+    // blackbody-ish emissive scaled by it. 0 = truly off (cold discs,
+    // no vehicle, headless builds); clamped so a bad caller can't push
+    // HDR values through this signal.
+    void setBrakeGlow(float g) { m_brakeGlow = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g); }
+    float brakeGlow() const { return m_brakeGlow; }
     void setTonemapMode(int mode) { m_tonemapMode = mode; }
     void setHdrWhiteNits(float nits) { if (nits > 0.0f) m_hdrWhiteNits = nits; }
     float hdrWhiteNits() const { return m_hdrWhiteNits; }
@@ -548,6 +565,7 @@ private:
     bool m_swapchainColorSpaceExt = false; // VK_EXT_swapchain_colorspace (instance ext) present
     VkColorSpaceKHR m_swapChainColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     float m_exposure = 1.0f;
+    float m_brakeGlow = 0.0f;              // brief P6: hottest-disc heat [0..1]
     int m_tonemapMode = 2;              // 0 none, 1 Reinhard, 2 ACES, 3 Uncharted2, 4 Filmic
     static constexpr float kHdrPeakNits = 1000.0f; // highlight ceiling for the PQ shoulder
     // Nits given to the graded SDR-range signal (1.0) in the PQ encode. This

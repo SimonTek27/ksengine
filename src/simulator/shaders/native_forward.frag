@@ -25,6 +25,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssrParams;         // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled
     vec4 motionBlurParams;  // x = strength, y = sample count, z = max length, w = 1 when enabled
     vec4 iblParams;         // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD
+    vec4 brakeGlow;         // brief P6: x = normalized hottest-disc temperature [0..1]
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
@@ -54,6 +55,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float metalness;
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
     float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
+    float brakeDisc;   // brief P6: >= 0.5 = brake disc (glow below)
 } material;
 
 const float PI = 3.14159265;
@@ -182,6 +184,12 @@ void main() {
                         NdotL * shadow * sunRad * coated;
 
     vec3 lit = ambient + diffuse + specular + specularCoat;
+
+    // Brief P6 — brake glow, same emissive term as deferred_lighting.frag
+    // (keep the two paths in sync): the flag comes from this mesh's own
+    // MaterialData, the heat from FrameData.brakeGlow.x (setBrakeGlow).
+    lit += vec3(1.0, 0.25, 0.03) * (frame.brakeGlow.x * 1.5) *
+           (material.brakeDisc >= 0.5 ? 1.0 : 0.0);
 
     // Height fog, same model the deferred path uses, so switching between
     // the two paths does not change the atmosphere. The clear colour is set

@@ -46,7 +46,9 @@ layout(set = 0, binding = 3) uniform sampler2D history;
 vec3 motionBlur(vec3 cur, vec2 uv) {
     if (frame.motionBlurParams.w < 0.5) return cur;
     vec4 coverage = texture(gbufWorldPos, uv);
-    if (coverage.w < 0.5) return cur;              // sky does not smear
+    // abs(): brief P6 signs coverage to -1 on brake-disc pixels; the
+    // "drawn?" test must decode the magnitude (legacy pixels are +1).
+    if (abs(coverage.w) < 0.5) return cur;           // sky does not smear
 
     vec4 curClip = frame.viewProj * vec4(coverage.xyz, 1.0);
     vec4 prevClip = frame.prevViewProj * vec4(coverage.xyz, 1.0);
@@ -80,7 +82,7 @@ void main() {
 
     vec4 coverage = texture(gbufWorldPos, vUV);
     vec2 histUV = vUV;
-    if (coverage.w > 0.5 && feedback > 0.0) {
+    if (abs(coverage.w) > 0.5 && feedback > 0.0) {   // abs(): brief P6 disc flag in the sign
         vec4 curClip = frame.viewProj * vec4(coverage.xyz, 1.0);
         vec4 prevClip = frame.prevViewProj * vec4(coverage.xyz, 1.0);
         vec2 curUV = curClip.xy / curClip.w * 0.5 + 0.5;

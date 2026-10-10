@@ -1,14 +1,17 @@
 #version 450
 
 // GBuffer MRT. Three render targets, all cleared to zero, with coverage
-// encoded in RT2.w (geometry always writes 1.0 there) so the deferred
-// lighting pass can tell "no geometry here" from a real surface.
+// encoded in RT2.w (geometry writes 1.0 there, -1 on brake-disc pixels —
+// brief P6) so the deferred lighting pass can tell "no geometry here"
+// from a real surface; every reader decodes abs(w).
 //
 //   RT0  R8G8B8A8_UNORM    rgb = albedo, a = metalness (brief P1; an AO
 //                          map, when it ships, multiplies into rgb here —
 //                          the channel no longer holds a constant 1.0)
-//   RT1  R16G16B16A16_SF   xyz = world normal, w = roughness
-//   RT2  R16G16B16A16_SF   xyz = world position, w = coverage (1 = drawn)
+//   RT1  R16G16B16A16_SF   xyz = world normal, w = roughness (sign = coat)
+//   RT2  R16G16B16A16_SF   xyz = world position, w = coverage (1 = drawn,
+//                          brief P6: -1 = drawn AND a brake disc — every
+//                          reader decodes abs(w) for "drawn")
 
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
@@ -31,6 +34,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float metalness;
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
     float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
+    float brakeDisc;   // brief P6: >= 0.5 = brake disc (glow rides FrameData)
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -80,5 +84,12 @@ void main() {
     float signedRough = material.clearcoat >= 0.5 ? -max(roughness, 1e-6)
                                                    : roughness;
     outNormalRoughness = vec4(N, signedRough);
-    outWorldPosCoverage = vec4(fragWorldPos, 1.0);
+    // Brief P6: brake-disc flag in RT2.w's SIGN (RT0.a is 8-bit UNORM and
+    // would clamp a sign away — RT2 is float). Coverage becomes -1 for
+    // disc pixels instead of 1: every reader ("drawn?") decodes abs(w),
+    // which is a no-op for all legacy pixels (always +1), and
+    // deferred_lighting.frag reads the sign as the glow flag. Exact -1.0,
+    // no epsilon needed: coverage is always authored as exactly 1.0.
+    outWorldPosCoverage = vec4(fragWorldPos,
+                               material.brakeDisc >= 0.5 ? -1.0 : 1.0);
 }

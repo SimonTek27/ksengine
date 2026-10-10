@@ -38,7 +38,23 @@ carbon e default invariati), prime righe di riferimento con la cella 5
 (normal) — quad "asphalt" grigio freddo + gemella "asphalt_tilt" con
 N⊥ sole che collassa a sola ambiente (pin della catena normal-map fino
 a NdotL) — e SSAO di default quando il deferred è già richiesto
-(`KS_SSAO=0` opt-out, immagine forward intoccata). |
+(`KS_SSAO=0` opt-out, immagine forward intoccata).
+Sprint S6 (brief P6 opzionale, item 1: bagliore freni): il segnale
+`brakeDiscTemp[4]` (già nello stato fisico) arriva al frame —
+`SimulationLoop::tick` mappa il disco più caldo con lo stesso anchor
+400..800 °C del brake-fade → `setBrakeGlow` → `brakeGlow[4]` appendito
+in coda a `FrameDataUBO` (496→512); flag per-mesh dall'euristica del
+nome in `setMesh` ("disc", case-insensitive, fail-open → `MaterialUBO`
+16→32 byte), nel deferred il flag viaggia nel **segno di `RT2.w`**
+(coverage −1; `abs(w)` in tutti e 5 i lettori — `RT0.a` è UNORM 8-bit e
+clipperebbe il segno come invece regge `RT1.w` float per il coat), nel
+forward da `MaterialData`; emissivo `(1.0,0.25,0.03)×1.5×glow` in
+entrambi i lighting shader prima della fog-mix. Contenuto di riferimento
+con quad "disc" (riga legacy 4 celle) + A/B (e7) su entrambi i path
+(deferred +227, forward +268, quad di controllo byte-identico). Il
+resto di P6 (marcature pneumatici, heat haze, scarichi, contact shadow
+per ali sottili) resta opzionale/non eseguito: va verificato a schermo
+con contenuto AC reale. |
 | UX racing completa | 🟡 | Menu, garage, risultati e piano pit esistono; va completato il flusso di gara con team, servizi box e contenuto selezionato. |
 | Contenuto e presentazione | 🟡 | Parser per team/upgrades/livree/sound pack e cache texture esistono, ma non sono ancora risolti e applicati in una sessione di gara end-to-end. |
 

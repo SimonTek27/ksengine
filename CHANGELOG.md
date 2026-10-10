@@ -50,6 +50,42 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **ksengine.dll con API esportato esplicito** (roadmap 2.4/2.5):
   `src/engine/KsExport.h` introduce la macro `KSENGINE_API` (dllexport/dllimport in base alla definizione di `KSENGINE_BUILDING_DLL` / `KSENGINE_USE_DLL`) e `option(KSENGINE_SHARED ... ON)` in `src/engine/CMakeLists.txt` rende `ksengine` una shared library; sono stati annotati 29 classi e 32 funzioni libere in 38 header `src/engine/` con la macro `KSENGINE_API`. I simboli di superficie export sono misurati staticamente via dumpbin: 187 entità in `ksengine_export_surface.csv`, nessuna template. La DLL carica `vulkan-1.dll` in modalità delay-load.
   Si noti: passandone `-DKSENGINE_SHARED=OFF` si ricostruisce il vecchio archivio statico `ksengine.lib`, con macro vuote e nessuna modifica ai file fonte.
+- **Rendering AI brief — Sprint S6 (brief P6 opzionale, item 1: bagliore
+  freni)** (`RENDERING_AI_BRIEF.md`): il segnale esisteva già
+  (`brakeDiscTemp[4]` in `PhysicsCoreTypes.h`, alimentato da
+  `BrakeThermalModel`/`BrakeWearSystem`); ora arriva al frame.
+  `SimulationLoop::tick` prende il disco più caldo dei 4 e lo mappa su
+  [0,1] con lo stesso anchor 400..800 °C del brake-fade fisico — quindi
+  il bagliore mostra solo ciò che il termico ha davvero calcolato,
+  segnale mai finto; senza veicolo → 0 esplicito, così un valore stale
+  non resta acceso dopo il despawn — e chiama il nuovo
+  `NativeRenderer::setBrakeGlow` (clamp [0,1]); il valore è appendito
+  **in coda** a `FrameDataUBO` (`brakeGlow[4]`, 496→512 byte,
+  static_assert aggiornato). Flag per-mesh: euristica sul **nome** in
+  `setMesh()` (unico choke point di ogni caricamento: sottostringa
+  "disc", case-insensitive, fail-open — le vecchie bakes senza nomi
+  disc-like rendono byte-identico) → `NativeMesh.brakeDisc` → quinto
+  scalare di `MaterialUBO` (16→32 byte std140). Nel path deferred il
+  flag viaggia nel **segno di RT2.w** (coverage −1 sui pixel disco
+  invece di +1) — non RT0.a come per il coat: RT0 è `R8G8B8A8_UNORM` e
+  clipperebbe qualsiasi segno — e tutti e 5 i lettori di coverage
+  decodificano `abs(w)` (no-op per ogni pixel legacy, sempre +1):
+  early-out di `deferred_lighting`, SSR, SSAO e i due siti di
+  `taa.frag` (motion blur + reproject). Il forward legge
+  `MaterialData.brakeDisc`. L'emissivo è `vec3(1.0, 0.25, 0.03) × 1.5 ×
+  glow`, sommato a `lit` prima della fog-mix in entrambi i lighting
+  shader (i due path restano in sync). Contenuto di riferimento: quad
+  "disc" — il cui NOME è ciò che attiva l'euristica — con riga legacy a
+  4 celle (`disc.dds` grigio scuro 60,60,64, roughness 0.70, metalness
+  1.00): nessun cambio di formato. Test (e7) A/B su entrambi i path:
+  deferred somma centro 368→595 (+227; BGRA 126,121,121 → 146,207,242),
+  forward +268 (verde 95→191), quad di controllo "sign" byte-identico
+  (ctrlDelta 0) e swing R−B +101/+147: il flag è per-mesh e
+  l'emissivo è davvero rosso-dominante. Multiplayer/AI: il bagliore
+  segue la telemetria del player (documentato). 53/53 ctest, gate
+  Qt-free 0/913. Il resto di P6 (marcature pneumatici, heat haze,
+  scarichi, contact shadow per ali sottili) resta opzionale/non
+  eseguito: richiede gate visivi con contenuto AC reale.
 - **Rendering AI brief — Sprint S5 (P5)** (`RENDERING_AI_BRIEF.md`):
   materiali track + AO "che poggia la vettura", chiusura del brief.
   Surface family nell'euristica del baker

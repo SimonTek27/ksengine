@@ -11,8 +11,11 @@
 #                                quad with a [0..1] m NMS2 window, "plain"
 #                                fallback quad (no materials.txt row),
 #                                "asphalt"/"asphalt_tilt" normal-map pair
-#                                (brief P5, cool-grey track surface), and a
-#                                40x40 m textured ground plane;
+#                                (brief P5, cool-grey track surface), "disc"
+#                                brake-disc quad (brief P6: its manifest
+#                                name is the one that trips the renderer's
+#                                disc heuristic), and a 40x40 m textured
+#                                ground plane;
 #   content/cars/refcar/baked/   reference car: a single textured body box
 #                                with an authored [0..1000] m window.
 #
@@ -156,7 +159,7 @@ if (Test-Path $track) { Remove-Item -Recurse -Force $track }
 
 Write-Lines (Join-Path $track "manifest.txt") @(
     "plain", "sign", "smooth", "rough", "coated", "metal", "lodable",
-    "asphalt", "asphalt_tilt", "ground"
+    "asphalt", "asphalt_tilt", "disc", "ground"
 )
 
 # Tabs are the format (MaterialCache.h). "plain" has NO row on purpose:
@@ -176,8 +179,13 @@ Write-Lines (Join-Path $track "manifest.txt") @(
 # normal, and the same material with a tangent-space +x texel (255,128,
 # 128) whose N sits perpendicular to the test sun — the pair pins the
 # normal-map chain down to NdotL.
+# "disc" (brief P6) is a dark-grey fully metallic brake-disc quad at a
+# broad roughness 0.70: the base stays dim (no diffuse lobe on metal) so
+# the heat glow has headroom, and its manifest NAME is what flags it as a
+# disc in NativeRenderer::setMesh — the row itself is a plain legacy 4-cell
+# row, no format change.
 Write-Lines (Join-Path $track "materials.txt") @(
-    "# reference bake (roadmap 2.4/2.5, brief P1/P3/P5) - regenerate with tools/make_reference_content.ps1",
+    "# reference bake (roadmap 2.4/2.5, brief P1/P3/P5/P6) - regenerate with tools/make_reference_content.ps1",
     "sign`tskin:paint.dds`t0.35`t0.00",
     "smooth`tskin:paint.dds`t0.05`t0.00",
     "rough`tskin:paint.dds`t0.95`t0.00",
@@ -186,6 +194,7 @@ Write-Lines (Join-Path $track "materials.txt") @(
     "lodable`tskin:paint.dds`t0.35`t0.00",
     "asphalt`tasphalt.dds`t0.70`t0.00`tasphalt_n.dds",
     "asphalt_tilt`tasphalt.dds`t0.70`t0.00`ttilt_n.dds",
+    "disc`tdisc.dds`t0.70`t1.00",
     "ground`tskin:paint.dds`t0.60`t0.00"
 )
 
@@ -194,6 +203,7 @@ Write-Dds (Join-Path $track "textures/metal_mask.dds") 255 0 0
 Write-Dds (Join-Path $track "textures/asphalt.dds") 86 88 92
 Write-Dds (Join-Path $track "textures/asphalt_n.dds") 128 128 255   # flat +z
 Write-Dds (Join-Path $track "textures/tilt_n.dds") 255 128 128      # +x: N _|_ sun
+Write-Dds (Join-Path $track "textures/disc.dds") 60 60 64           # dark brake-disc metal
 
 # Quads sit at y = 2..4 (centre 3) with staggered z; the test aims its own
 # camera at (0, 3, 0). LOD windows: only "lodable" carries one ([0..1] m),
@@ -208,7 +218,8 @@ foreach ($q in @(
     @{ File = "metal.nmsh";   Z = -0.10 },
     @{ File = "lodable.nmsh"; Z = -0.08 },
     @{ File = "asphalt.nmsh";      Z = -0.14 },
-    @{ File = "asphalt_tilt.nmsh"; Z = -0.16 }
+    @{ File = "asphalt_tilt.nmsh"; Z = -0.16 },
+    @{ File = "disc.nmsh";         Z = -0.18 }   # brief P6: brake-disc glow quad
 )) {
     $faces = [System.Collections.ArrayList]::new()
     Add-QuadMinusZ $faces ([float]$q.Z) 3.0

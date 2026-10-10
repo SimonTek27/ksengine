@@ -677,8 +677,8 @@ int main()
     const int refLoaded = renderer.loadMeshesFromManifest(refBake);
     std::printf("test_renderer: reference bake loaded %d mesh(es) from %s\n",
                 refLoaded, refBake.c_str());
-    KS_CHECK(refLoaded >= 7); // plain sign smooth rough coated metal lodable asphalt asphalt_tilt ground
-    KS_CHECK(renderer.cachedTextureCount() == 5);   // skin_paint + metal_mask + asphalt + 2 normals
+    KS_CHECK(refLoaded >= 7); // plain sign smooth rough coated metal lodable asphalt asphalt_tilt disc ground
+    KS_CHECK(renderer.cachedTextureCount() == 6);   // skin_paint + metal_mask + asphalt + 2 normals + disc
 
     const mat4 projRef =
         mat4::perspective(60.0f * kPi / 180.0f, float(kW) / float(kH), 0.1f, 100.0f);
@@ -1052,6 +1052,89 @@ int main()
         }
     }
 
+    // (e7) Brief P6 — brake glow. "disc" is the only reference quad whose
+    //     manifest NAME trips NativeRenderer::setMesh()'s disc heuristic
+    //     ("disc" substring, case-insensitive, fail-open); its materials
+    //     row is a plain legacy 4-cell row, so the whole feature is name
+    //     flag + setBrakeGlow signal — no format change anywhere. The
+    //     renderer gets a red-dominant emissive (glow colour
+    //     (1.0, 0.25, 0.03) x 1.5 HDR) on flagged meshes only: A/B the
+    //     disc at glow 0 vs 1 on both paths, with a non-disc control quad
+    //     ("sign", same sun/camera) that must stay byte-identical — the
+    //     flag is per-mesh, not global — and the gain must be red-first
+    //     (the base is grey metal), i.e. the pixels prove the emissive
+    //     came from the heat term. Signal wiring (SimulationLoop maps the
+    //     hottest disc's 400..800 C onto [0..1]) is app-side and outside
+    //     this harness; here setBrakeGlow drives the renderer directly.
+    {
+        aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+        RefShot dOff, dOn, dCtrlOff, dCtrlOn, fOff, fOn, fCtrlOff, fCtrlOn;
+
+        renderer.setDeferred(true);
+        renderer.setBrakeGlow(0.0f);
+        capture("disc", mat4(), dOff);
+        capture("sign", mat4(), dCtrlOff);
+        renderer.setBrakeGlow(1.0f);
+        capture("disc", mat4(), dOn);
+        capture("sign", mat4(), dCtrlOn);
+        renderer.setDeferred(false);
+
+        renderer.setBrakeGlow(0.0f);
+        capture("disc", mat4(), fOff);
+        capture("sign", mat4(), fCtrlOff);
+        renderer.setBrakeGlow(1.0f);
+        capture("disc", mat4(), fOn);
+        capture("sign", mat4(), fCtrlOn);
+        renderer.setBrakeGlow(0.0f); // cold again before the car bake (f)
+
+        KS_CHECK(dOff.ok && dOn.ok && dCtrlOff.ok && dCtrlOn.ok);
+        KS_CHECK(fOff.ok && fOn.ok && fCtrlOff.ok && fCtrlOn.ok);
+        if (dOff.ok && dOn.ok && dCtrlOff.ok && dCtrlOn.ok &&
+            fOff.ok && fOn.ok && fCtrlOff.ok && fCtrlOn.ok) {
+            auto sum3 = [](const unsigned char* p) {
+                return int(p[0]) + int(p[1]) + int(p[2]); // BGRA readback
+            };
+            // Deferred (ACES): base ~0.14 linear on the grey metal disc,
+            // glow adds 1.5 to red — expect a jump of hundreds of counts
+            // (calibration below pins the observed value).
+            const unsigned char* dOffPx = centrePx(dOff);
+            const unsigned char* dOnPx = centrePx(dOn);
+            const int dDelta = sum3(dOnPx) - sum3(dOffPx);
+            const int dCtrlDelta =
+                std::abs(sum3(centrePx(dCtrlOn)) - sum3(centrePx(dCtrlOff)));
+            std::printf("test_renderer: P6 brake glow deferred off BGRA=%d,%d,%d "
+                        "on=%d,%d,%d ctrlDelta=%d\n",
+                        dOffPx[0], dOffPx[1], dOffPx[2],
+                        dOnPx[0], dOnPx[1], dOnPx[2], dCtrlDelta);
+            KS_CHECK(dDelta > 120);   // observed 227: emissive reaches the image
+            KS_CHECK(dCtrlDelta <= 2); // non-disc: byte-identical (TAA off here)
+            // Red-first gain: readback is BGRA, so R-B is [2]-[0]. The grey
+            // metal base sits at R-B ~ -5 (observed off 126,121,121 =
+            // B,G,R); the glow (0.03 blue vs 1.0 red) swings it to +96
+            // (on 146,207,242) — a ~100-count flip the light term alone
+            // could never make.
+            KS_CHECK(int(dOnPx[2]) - int(dOnPx[0]) >
+                     int(dOffPx[2]) - int(dOffPx[0]) + 50);
+
+            // Forward (raw UNORM, no tone curve): red clips at 255, green
+            // climbs from ~35 to ~130 — the sum margin is the biggest here.
+            const unsigned char* fOffPx = centrePx(fOff);
+            const unsigned char* fOnPx = centrePx(fOn);
+            const int fDelta = sum3(fOnPx) - sum3(fOffPx);
+            const int fCtrlDelta =
+                std::abs(sum3(centrePx(fCtrlOn)) - sum3(centrePx(fCtrlOff)));
+            std::printf("test_renderer: P6 brake glow forward off G=%d on G=%d "
+                        "delta=%d ctrlDelta=%d\n",
+                        fOffPx[1], fOnPx[1], fDelta, fCtrlDelta);
+            KS_CHECK(fDelta > 150);   // observed 268
+            KS_CHECK(fCtrlDelta <= 2);
+            // Same red-first swing on the raw forward path: R clips at 255
+            // while B only crawls with its 0.03 glow coefficient.
+            KS_CHECK(int(fOnPx[2]) - int(fOnPx[0]) >
+                     int(fOffPx[2]) - int(fOffPx[0]) + 50);
+        }
+    }
+
     // (f) Reference car bake: the loadMeshFromFile() call shape
     //     SimulationLoop::ensureCarVisual() now makes (materials.txt row +
     //     textureDir) — green paint on the -z face, authored [0..1000] window.
@@ -1065,7 +1148,7 @@ int main()
     if (carMaterial) {
         KS_CHECK(renderer.loadMeshFromFile("car_body", refCar + "/body.nmsh",
                                            carMaterial, refCar + "/textures"));
-        KS_CHECK(renderer.cachedTextureCount() == 6); // track five + car_paint.dds
+        KS_CHECK(renderer.cachedTextureCount() == 7); // track six + car_paint.dds
         aimAt(0, 0.3f, -4.5f, 0, 0.3f, 0, vec3(0, 1, 0));
         RefShot carShot;
         capture("car_body", mat4(), carShot);

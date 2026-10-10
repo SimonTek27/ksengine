@@ -21,6 +21,7 @@
 #include <cstring>
 #include <fstream>
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 
 // No Qt anywhere in this file. Unlike ks::VulkanRenderer::createDevice()
@@ -686,13 +687,18 @@ struct FrameDataUBO {
     float ssrParams[4];       // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled (KS_SSR)
     float motionBlurParams[4]; // x = strength, y = sample count, z = max length, w = 1 when enabled (KS_MOTIONBLUR)
     float iblParams[4];       // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD (mips-1)
+    // Brief P6 — brake glow: x = normalized hottest-disc temperature
+    // (setBrakeGlow), driving the emissive on brake-disc-flagged meshes in
+    // both lighting shaders. Appended at the END (add-only rule), yzw unused.
+    float brakeGlow[4];
 };
-static_assert(sizeof(FrameDataUBO) == 496, "FrameDataUBO is read as a std140 uniform block");
+static_assert(sizeof(FrameDataUBO) == 512, "FrameDataUBO is read as a std140 uniform block");
 
 // Per-mesh material block of descriptor set 1 (set 1 binding 2), read as
-// `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs four
-// scalars at 0/4/8/12 — no padding surprises. Values are static per mesh and
-// written once when the mesh's descriptor is created.
+// `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs five
+// scalars at 0/4/8/12/16 — no padding surprises, and the 3 trailing pad
+// floats keep the struct on the block's 16-byte stride. Values are static
+// per mesh and written once when the mesh's descriptor is created.
 struct MaterialUBO {
     float roughness = 0.35f;  // matches Kn5Baker's paint heuristic default
     float metalness = 0.0f;
@@ -701,10 +707,15 @@ struct MaterialUBO {
     // without a normal map never reads its fallback texel as a normal.
     float normalScale = 0.0f;
     // Brief P3 — clear-coat flag (materials.txt cell 6, >= 0.5 = coated).
-    // Formerly the pad slot: the block stays 16 bytes std140.
     float clearcoat = 0.0f;
+    // Brief P6 — brake-disc flag from the mesh NAME (setMesh heuristic,
+    // >= 0.5 = disc). The heat itself rides FrameData.brakeGlow per frame;
+    // this stays static per mesh. std140 rounds the block up to 16 anyway,
+    // so the pad costs nothing.
+    float brakeDisc = 0.0f;
+    float pad3[3] = {0.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(MaterialUBO) == 16, "MaterialUBO is read as a std140 uniform block");
+static_assert(sizeof(MaterialUBO) == 32, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -1469,7 +1480,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     if (!m_materialPool) return false; // pipelines not loaded yet; swept later
     destroyMaterialDescriptor(mesh);   // re-create path: previous set + UBO go
 
-    // 16-byte std140 material block, static per mesh: map, fill, unmap.
+    // 32-byte std140 material block, static per mesh: map, fill, unmap.
     // When a PBR map drives a field, MaterialCache already stored the
     // identity 1.0 there (shader: scalar * map.r, white fallback = *1), so
     // the scalar and the map paths need no branch here.
@@ -1478,6 +1489,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.metalness = mesh.metalness;
     ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
     ubo.clearcoat = mesh.clearcoat;
+    ubo.brakeDisc = mesh.brakeDisc; // brief P6, name heuristic in setMesh()
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1677,6 +1689,15 @@ void NativeRenderer::drawStaticScene() {
 void NativeRenderer::setMesh(const std::string& name, const NativeMesh& meshIn) {
     destroyMesh(name);
     NativeMesh mesh = meshIn;
+    // Brief P6 — brake-disc flag from the mesh name (single choke point for
+    // every load path: manifest bakes, loadMeshFromFile, placeholders).
+    // KN5/AC brake-disc meshes carry "disc" in their name ("disc", "F_disc",
+    // "disco"...); case-insensitive substring. Fail-open: anything else
+    // keeps brakeDisc = 0 and renders exactly as before, so legacy bakes
+    // without disc-like names are byte-identical.
+    std::string lower = name;
+    for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    mesh.brakeDisc = lower.find("disc") != std::string::npos ? 1.0f : 0.0f;
     computeBounds(mesh); // before upload: culling needs the local-space AABB
     uploadMesh(mesh);
     // Roadmap 2.3: descriptor set 1 for this mesh (albedo/normal samplers +
@@ -2050,6 +2071,9 @@ void NativeRenderer::endFrame() {
     // `albedo * 0.25` ambient, so a missing/failed env costs nothing.
     frameData.iblParams[0] = (m_iblWanted && m_iblReady) ? 1.0f : 0.0f;
     frameData.iblParams[1] = static_cast<float>(ibl::kPrefilterMips - 1);
+    // Brief P6 — brake glow heat (0 = cold/off, drives the emissive on
+    // brake-disc-flagged meshes in both lighting shaders).
+    frameData.brakeGlow[0] = m_brakeGlow;
 
     // Either the real shadow cascade array or the 1x1 dummy (always-lit)
     // texture if no shadow map is attached/initialized yet.

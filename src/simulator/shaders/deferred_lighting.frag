@@ -11,7 +11,8 @@
 //      Greenstein phase function — i.e. real light shafts / volumetric
 //      shadows, not a flat fog colour.
 //
-// Coverage test: geometry writes w = 1.0 into RT2, cleared pixels keep 0,
+// Coverage test: geometry writes w = 1.0 into RT2 (-1 on brake-disc
+// pixels, brief P6 — abs() below decodes both), cleared pixels keep 0,
 // so background pixels take the early-out and reproduce the forward
 // path's clear colour exactly.
 
@@ -33,6 +34,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssrParams;         // x = max distance, y = intensity, z = roughness cutoff, w = 1 when enabled
     vec4 motionBlurParams;  // declared to reach iblParams below (std140 offsets must be walked member by member)
     vec4 iblParams;         // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD
+    vec4 brakeGlow;         // brief P6: x = normalized hottest-disc temperature [0..1]
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
@@ -159,7 +161,7 @@ float ssao(vec3 worldPos, vec3 N) {
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
 
         vec4 scene = texture(gbufWorldPos, uv);
-        if (scene.w < 0.5) continue;                // sky: never occludes
+        if (abs(scene.w) < 0.5) continue;           // sky: never occludes
         float sceneDist = length(scene.xyz - camPos);
         float sampleDist = length(sp - camPos);
         // Occluded when the scene at that pixel is closer to the camera than
@@ -202,7 +204,7 @@ vec3 ssr(vec3 worldPos, vec3 N, vec3 V, vec3 L, float roughness) {
         vec2 uv = clip.xy / clip.w * 0.5 + 0.5;
         if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
         vec4 scene = texture(gbufWorldPos, uv);
-        if (scene.w < 0.5) continue;    // sky: nothing to reflect off
+        if (abs(scene.w) < 0.5) continue;    // sky: nothing to reflect off
         if (distance(scene.xyz, p) < thickness) { hitUV = uv; hit = true; break; }
     }
     if (!hit) return vec3(0.0);
@@ -217,7 +219,11 @@ vec3 ssr(vec3 worldPos, vec3 N, vec3 V, vec3 L, float roughness) {
 
 void main() {
     vec4 coverage = texture(gbufWorldPos, vUV);
-    if (coverage.w < 0.5) {
+    // Brief P6: coverage is +1 for ordinary geometry, -1 for brake-disc
+    // pixels (gbuffer.frag signs it) — "drawn?" decodes the magnitude
+    // (a no-op for every legacy pixel), the sign is the glow flag.
+    float brakeDisc = coverage.w < 0.0 ? 1.0 : 0.0;
+    if (abs(coverage.w) < 0.5) {
         outColor = vec4(frame.fogColor.rgb, 1.0);
         return;
     }
@@ -314,6 +320,16 @@ void main() {
     float f0 = mix(0.04, 1.0, metalness);
     float fres = f0 + (1.0 - f0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
     lit += refl * fres * (1.0 - roughness);
+
+    // Brief P6 — brake glow: emissive on disc pixels only, driven by the
+    // hottest disc temperature the physics reports (FrameData.brakeGlow.x,
+    // SimulationLoop -> setBrakeGlow; the 400..800 C fade anchor means the
+    // glow only shows what the thermal model actually computed). Blackbody-
+    // is orange-red, scaled 1.5 HDR so ACES rolls it into a hot orange
+    // instead of clipping. Emissive ignores sun/shadow/SSAO by definition
+    // and joins the fog mix below like any other radiance at that point.
+    // Same term as native_forward.frag — keep the two paths in sync.
+    lit += vec3(1.0, 0.25, 0.03) * (frame.brakeGlow.x * 1.5) * brakeDisc;
 
     float fogT = clamp(1.0 - exp(-heightFogAmount(camPos, worldPos)), 0.0, frame.fogParams.w);
     vec3 inscatter = volumetricInscatter(camPos, worldPos, sunRad);

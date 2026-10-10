@@ -7,4 +7,5 @@ metal
 lodable
 asphalt
 asphalt_tilt
+disc
 ground
