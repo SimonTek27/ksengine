@@ -9,7 +9,9 @@
 #                                quad (brief P1: metalness cell is a map,
 #                                textures/metal_mask.dds), "lodable"
 #                                quad with a [0..1] m NMS2 window, "plain"
-#                                fallback quad (no materials.txt row), and a
+#                                fallback quad (no materials.txt row),
+#                                "asphalt"/"asphalt_tilt" normal-map pair
+#                                (brief P5, cool-grey track surface), and a
 #                                40x40 m textured ground plane;
 #   content/cars/refcar/baked/   reference car: a single textured body box
 #                                with an authored [0..1000] m window.
@@ -153,7 +155,8 @@ $track = Join-Path $ContentRoot "baked"
 if (Test-Path $track) { Remove-Item -Recurse -Force $track }
 
 Write-Lines (Join-Path $track "manifest.txt") @(
-    "plain", "sign", "smooth", "rough", "coated", "metal", "lodable", "ground"
+    "plain", "sign", "smooth", "rough", "coated", "metal", "lodable",
+    "asphalt", "asphalt_tilt", "ground"
 )
 
 # Tabs are the format (MaterialCache.h). "plain" has NO row on purpose:
@@ -168,19 +171,29 @@ Write-Lines (Join-Path $track "manifest.txt") @(
 # cell clears the clear-coat flag to 1 (normal cell 5 left empty), so the
 # test A/B isolates the coat lobe against an identical broad base. Every
 # other row stays the legacy width it had before P3.
+# "asphalt"/"asphalt_tilt" (brief P5) are the first reference rows to use
+# cell 5 (normal tex): cool-grey asphalt at roughness 0.70 with a flat
+# normal, and the same material with a tangent-space +x texel (255,128,
+# 128) whose N sits perpendicular to the test sun — the pair pins the
+# normal-map chain down to NdotL.
 Write-Lines (Join-Path $track "materials.txt") @(
-    "# reference bake (roadmap 2.4/2.5, brief P1/P3) - regenerate with tools/make_reference_content.ps1",
+    "# reference bake (roadmap 2.4/2.5, brief P1/P3/P5) - regenerate with tools/make_reference_content.ps1",
     "sign`tskin:paint.dds`t0.35`t0.00",
     "smooth`tskin:paint.dds`t0.05`t0.00",
     "rough`tskin:paint.dds`t0.95`t0.00",
     "coated`tskin:paint.dds`t0.95`t0.00`t`t1",
     "metal`tskin:paint.dds`t0.05`tmetal_mask.dds",
     "lodable`tskin:paint.dds`t0.35`t0.00",
+    "asphalt`tasphalt.dds`t0.70`t0.00`tasphalt_n.dds",
+    "asphalt_tilt`tasphalt.dds`t0.70`t0.00`ttilt_n.dds",
     "ground`tskin:paint.dds`t0.60`t0.00"
 )
 
 Write-Dds (Join-Path $track "textures/skin_paint.dds") 220 80 30
 Write-Dds (Join-Path $track "textures/metal_mask.dds") 255 0 0
+Write-Dds (Join-Path $track "textures/asphalt.dds") 86 88 92
+Write-Dds (Join-Path $track "textures/asphalt_n.dds") 128 128 255   # flat +z
+Write-Dds (Join-Path $track "textures/tilt_n.dds") 255 128 128      # +x: N _|_ sun
 
 # Quads sit at y = 2..4 (centre 3) with staggered z; the test aims its own
 # camera at (0, 3, 0). LOD windows: only "lodable" carries one ([0..1] m),
@@ -193,7 +206,9 @@ foreach ($q in @(
     @{ File = "rough.nmsh";   Z = -0.06 },
     @{ File = "coated.nmsh";  Z = -0.12 },
     @{ File = "metal.nmsh";   Z = -0.10 },
-    @{ File = "lodable.nmsh"; Z = -0.08 }
+    @{ File = "lodable.nmsh"; Z = -0.08 },
+    @{ File = "asphalt.nmsh";      Z = -0.14 },
+    @{ File = "asphalt_tilt.nmsh"; Z = -0.16 }
 )) {
     $faces = [System.Collections.ArrayList]::new()
     Add-QuadMinusZ $faces ([float]$q.Z) 3.0

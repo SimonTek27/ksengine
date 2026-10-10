@@ -13,12 +13,14 @@ namespace ks::engine::fileformat {
 
 // Brief P1 — default roughness for a KN5 material that authors neither a
 // ksRoughness property nor a roughness map. Carbon fibre reads rougher
-// than paint; every other surface (paint, plastic, unknown shaders) starts
-// at the paint value. Matched case-insensitively against the material name
-// AND the shader, because real AC carbon materials carry "carbon" in one of
-// the two. Metalness has no counterpart: without an authored value paint,
-// carbon and bare metal alike default to 0 (metalness is 1 only when a
-// property or map says so). Exposed for kn5_test.
+// than paint; the track-surface families of brief P5 (asphalt, grass,
+// gravel, sand, dirt — english and italian names) get their own duller
+// values; every other surface (paint, plastic, unknown shaders) starts
+// at the paint value. Matched case-insensitively against the material
+// name AND the shader, because real AC materials carry those words in
+// one of the two. Metalness has no counterpart: without an authored value
+// paint, carbon and bare metal alike default to 0 (metalness is 1 only
+// when a property or map says so). Exposed for kn5_test.
 float heuristicMaterialRoughness(const std::string& materialName,
                                  const std::string& shaderName) {
     const auto lower = [](std::string s) {
@@ -31,6 +33,27 @@ float heuristicMaterialRoughness(const std::string& materialName,
     if (name.find("carbon") != std::string::npos ||
         shader.find("carbon") != std::string::npos) {
         return 0.5f;
+    }
+    // Brief P5 — track-surface families. Real track bakes name their
+    // surfaces in english or italian, and the paint fallback below (0.35)
+    // would leave asphalt, grass and gravel far too glossy for the
+    // documentary trackside look ("car sits in the scene"). Checked after
+    // carbon so carbon-named trackside props keep their material; every
+    // unmatched name keeps the 0.35 paint default, exactly as before.
+    // Roughness only: albedo/normal come from the authored maps.
+    struct TrackSurface { const char* key; float roughness; };
+    static const TrackSurface kTrackSurfaces[] = {
+        {"asphalt", 0.70f}, {"asfalt", 0.70f}, // asphalt / asfalto
+        {"grass", 0.80f},   {"erba", 0.80f},   // grass / erba
+        {"gravel", 0.85f},  {"ghiaia", 0.85f}, // gravel runoff
+        {"sand", 0.85f},    {"sabbia", 0.85f}, // sand trap
+        {"dirt", 0.85f},    {"mud", 0.85f},    // dirt / mud
+    };
+    for (const TrackSurface& t : kTrackSurfaces) {
+        if (name.find(t.key) != std::string::npos ||
+            shader.find(t.key) != std::string::npos) {
+            return t.roughness;
+        }
     }
     return 0.35f;
 }

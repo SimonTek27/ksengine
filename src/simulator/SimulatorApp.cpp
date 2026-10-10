@@ -382,13 +382,18 @@ static void initVulkanAndSimulation() {
     // something calls setDeferred/setTaa, so they could rot without anyone
     // noticing — KS_RENDER=deferred|taa makes them opt-in without changing
     // the default forward image.
+    // deferredRequested also gates the brief P5 SSAO default below: AO is
+    // part of the deferred look, never of the default forward image.
+    bool deferredRequested = false;
     if (const char* mode = std::getenv("KS_RENDER")) {
         if (std::strcmp(mode, "deferred") == 0) {
             g_nativeRenderer->setDeferred(true);
+            deferredRequested = true;
             printf("[INIT] Render path: deferred\n");
         } else if (std::strcmp(mode, "taa") == 0) {
             g_nativeRenderer->setDeferred(true);
             g_nativeRenderer->setTaa(true);
+            deferredRequested = true;
             printf("[INIT] Render path: deferred + TAA\n");
         }
     }
@@ -400,6 +405,7 @@ static void initVulkanAndSimulation() {
         if (std::strcmp(hdr, "0") != 0) {
             g_nativeRenderer->setHdrOutput(true);
             g_nativeRenderer->setDeferred(true);   // HDR needs the display pass
+            deferredRequested = true;
             printf("[INIT] HDR10 output: requested (PQ/Rec.2020, SDR fallback logged if unsupported)\n");
         }
     }
@@ -432,8 +438,17 @@ static void initVulkanAndSimulation() {
         }
     }
 
-    if (const char* ssao = std::getenv("KS_SSAO")) {
-        if (std::strcmp(ssao, "0") != 0) {
+    // Brief P5 — contact-friendly AO. SSAO lives in the deferred lighting
+    // pass, so it rides along by DEFAULT whenever deferred was already
+    // requested (KS_RENDER=deferred|taa or KS_HDR): the default forward
+    // image stays untouched, per the KS_RENDER comment above. KS_SSAO=0
+    // opts out of the deferred default; an explicit KS_SSAO=1 still forces
+    // the deferred path on by itself, exactly like before.
+    {
+        const char* ssaoEnv = std::getenv("KS_SSAO");
+        const bool ssaoOff = ssaoEnv && std::strcmp(ssaoEnv, "0") == 0;
+        const bool ssaoForced = ssaoEnv && !ssaoOff;
+        if ((ssaoForced || deferredRequested) && !ssaoOff) {
             float radius = 0.5f, intensity = 1.0f;
             if (const char* r = std::getenv("KS_SSAO_RADIUS")) {
                 const float v = std::strtof(r, nullptr);
@@ -444,9 +459,14 @@ static void initVulkanAndSimulation() {
                 if (v > 0.0f) intensity = v;
             }
             g_nativeRenderer->setSsao(true, radius, intensity);
-            g_nativeRenderer->setDeferred(true);   // SSAO lives in the deferred pass
-            printf("[INIT] SSAO: on (radius %.2f, intensity %.2f)\n",
-                   static_cast<double>(radius), static_cast<double>(intensity));
+            if (ssaoForced && !deferredRequested) {
+                g_nativeRenderer->setDeferred(true); // SSAO lives in the deferred pass
+            }
+            printf("[INIT] SSAO: on (radius %.2f, intensity %.2f)%s\n",
+                   static_cast<double>(radius), static_cast<double>(intensity),
+                   ssaoForced ? "" : " - deferred default (KS_SSAO=0 opts out)");
+        } else if (ssaoOff) {
+            printf("[INIT] SSAO: off (KS_SSAO=0)\n");
         }
     }
 

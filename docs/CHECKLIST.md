@@ -108,7 +108,7 @@ Decisioni esplicite dalla roadmap:
 
 ### Backlog visivo non bloccante
 
-Terrain, acqua, vegetazione instanced, skinning, IBL completo e clear-coat: avviare solo con brief che definisca contenuto sorgente, budget GPU, fallback e test immagine.
+Terrain, acqua, vegetazione instanced, skinning (IBL e clear-coat sono invece consegnati dai brief S3/S4): avviare solo con brief che definisca contenuto sorgente, budget GPU, fallback e test immagine.
 
 ---
 

@@ -50,6 +50,27 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **ksengine.dll con API esportato esplicito** (roadmap 2.4/2.5):
   `src/engine/KsExport.h` introduce la macro `KSENGINE_API` (dllexport/dllimport in base alla definizione di `KSENGINE_BUILDING_DLL` / `KSENGINE_USE_DLL`) e `option(KSENGINE_SHARED ... ON)` in `src/engine/CMakeLists.txt` rende `ksengine` una shared library; sono stati annotati 29 classi e 32 funzioni libere in 38 header `src/engine/` con la macro `KSENGINE_API`. I simboli di superficie export sono misurati staticamente via dumpbin: 187 entità in `ksengine_export_surface.csv`, nessuna template. La DLL carica `vulkan-1.dll` in modalità delay-load.
   Si noti: passandone `-DKSENGINE_SHARED=OFF` si ricostruisce il vecchio archivio statico `ksengine.lib`, con macro vuote e nessuna modifica ai file fonte.
+- **Rendering AI brief — Sprint S5 (P5)** (`RENDERING_AI_BRIEF.md`):
+  materiali track + AO "che poggia la vettura", chiusura del brief.
+  Surface family nell'euristica del baker
+  (`heuristicMaterialRoughness`): i nomi inglesi/italiani dei
+  superfici di pista (asphalt/asfalto → 0.70, grass/erba → 0.80,
+  gravel/ghiaia, sand/sabbia, dirt/mud → 0.85) ricevono una
+  rugosità opaca da documentario invece del fallback vernice 0.35
+  (carbon rimane 0.5 e vince per primo; ogni nome non
+  corrispondente è invariato). Contenuto di riferimento: prime righe
+  con la **cella 5 (normal)** — quad "asphalt" grigio freddo
+  (86,88,92) roughness 0.70 con normal piatta e gemella
+  "asphalt_tilt" con solo il texel normal diverso ((255,128,128) =
+  tangente +x, cioè N⊥ sole): il pin al centro
+  (BGRA 202,200,199 = grigio desaturato, non il rosso delle altre
+  quad) più il collasso a sola ambiente della tilt (somma 274 vs
+  601) dimostrano la catena riga → normalScale 1 → TBN derivato →
+  NdotL fino al pixel. AO: `KS_SSAO` passa da opt-in a **default
+  on quando il deferred è già richiesto** (`KS_RENDER=deferred|taa`
+  o `KS_HDR`) — l'immagine forward di default resta intoccata —
+  con opt-out `KS_SSAO=0` e `KS_SSAO=1` che forza ancora il
+  deferred da solo come prima. 53/53 ctest, gate Qt-free 0/913
 - **Rendering AI brief — Sprint S4 (P3 + P4)** (`RENDERING_AI_BRIEF.md`):
   clear-coat su vernice da gara e sharpen del display pass sul path
   Qt-free. P3: la finitura multistrato è un secondo lobo speculare

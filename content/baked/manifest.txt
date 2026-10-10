@@ -5,4 +5,6 @@ rough
 coated
 metal
 lodable
+asphalt
+asphalt_tilt
 ground

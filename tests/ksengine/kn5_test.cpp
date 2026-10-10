@@ -517,6 +517,17 @@ int main() {
     KS_CHECK_NEAR(heuristicMaterialRoughness("body", "ksCarbonPaint"), 0.5f, 1e-6);
     KS_CHECK_NEAR(heuristicMaterialRoughness("CARBON", "ksMultilayer"), 0.5f, 1e-6);
     KS_CHECK_NEAR(heuristicMaterialRoughness("", ""), 0.35f, 1e-6);
+    // --- brief P5 track-surface families (english + italian names, the
+    // --- order keeps carbon first: carbon-named props stay carbon)
+    KS_CHECK_NEAR(heuristicMaterialRoughness("asphalt_a", "ksPerPixel"), 0.70f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("asfalto_main", "ksPerPixel"), 0.70f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("grass_1", "ksPerPixel"), 0.80f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("erba_verde", "ksPerPixel"), 0.80f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("gravel_runoff", "ksPerPixel"), 0.85f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("ghiaia_2", "ksPerPixel"), 0.85f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("sabbia_bunk", "ksPerPixel"), 0.85f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("carbon_armco", "asphalt"), 0.5f, 1e-6);
+    KS_CHECK_NEAR(heuristicMaterialRoughness("kerb_red", "ksPerPixel"), 0.35f, 1e-6);
 
     // --- bake: parse from disk, check NMSH bytes + manifest ---------------
     const fs::path temp_dir = fs::temp_directory_path() / "ks_qtfree_kn5_test";

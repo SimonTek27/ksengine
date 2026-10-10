@@ -677,8 +677,8 @@ int main()
     const int refLoaded = renderer.loadMeshesFromManifest(refBake);
     std::printf("test_renderer: reference bake loaded %d mesh(es) from %s\n",
                 refLoaded, refBake.c_str());
-    KS_CHECK(refLoaded >= 7); // plain sign smooth rough coated metal lodable ground
-    KS_CHECK(renderer.cachedTextureCount() == 2);   // skin_paint.dds + metal_mask.dds
+    KS_CHECK(refLoaded >= 7); // plain sign smooth rough coated metal lodable asphalt asphalt_tilt ground
+    KS_CHECK(renderer.cachedTextureCount() == 5);   // skin_paint + metal_mask + asphalt + 2 normals
 
     const mat4 projRef =
         mat4::perspective(60.0f * kPi / 180.0f, float(kW) / float(kH), 0.1f, 100.0f);
@@ -1015,6 +1015,43 @@ int main()
         }
     }
 
+    // (e6) Brief P5 — track materials + AO. "asphalt" is a cool-grey quad
+    //     whose materials.txt row is the first reference row to use cell 5
+    //     (normal tex): the centre must read as desaturated asphalt grey
+    //     (blue >= red, tiny spread — every paint quad sits at R >> B),
+    //     which pins row -> normalScale 1 -> descriptor -> sampled normal
+    //     on committed content. "asphalt_tilt" shares albedo and
+    //     roughness; only its normal texel differs — (255,128,128) is a
+    //     tangent-space +x normal, i.e. N _|_ sun — so NdotL collapses
+    //     and the frame falls back to the ambient term: pixel-level proof
+    //     the normal map really drives the lighting (a decorative bind
+    //     would leave both quads identical). AO side of P5 is the SSAO
+    //     default in SimulatorApp (deferred-only) — here SSAO stays off,
+    //     the flat quads carry no creases for it anyway.
+    {
+        aimAt(0, 3, -3, 0, 3, 0, vec3(0, 1, 0));
+        renderer.setDeferred(true);
+        RefShot asph, tilt;
+        capture("asphalt", mat4(), asph);
+        capture("asphalt_tilt", mat4(), tilt);
+        renderer.setDeferred(false);
+        KS_CHECK(asph.ok && tilt.ok);
+        if (asph.ok && tilt.ok) {
+            const unsigned char* a = centrePx(asph);
+            const unsigned char* t = centrePx(tilt);
+            const int aSum = int(a[0]) + int(a[1]) + int(a[2]);
+            const int tSum = int(t[0]) + int(t[1]) + int(t[2]);
+            std::printf("test_renderer: P5 asphalt BGRA=%d,%d,%d tilt sum=%d\n",
+                        a[0], a[1], a[2], tSum);
+            KS_CHECK(!isClearPixel(a) && !isClearPixel(t));
+            KS_CHECK(int(a[0]) >= int(a[2]));        // cool grey, not red paint
+            KS_CHECK(std::abs(int(a[0]) - int(a[2])) <= 12);
+            KS_CHECK(std::max<int>(a[0], std::max<int>(a[1], a[2])) >= 120);
+            // Tilted texel kills the sun lobe (observed ~600 vs ~270).
+            KS_CHECK(aSum > tSum + 40);
+        }
+    }
+
     // (f) Reference car bake: the loadMeshFromFile() call shape
     //     SimulationLoop::ensureCarVisual() now makes (materials.txt row +
     //     textureDir) — green paint on the -z face, authored [0..1000] window.
@@ -1028,7 +1065,7 @@ int main()
     if (carMaterial) {
         KS_CHECK(renderer.loadMeshFromFile("car_body", refCar + "/body.nmsh",
                                            carMaterial, refCar + "/textures"));
-        KS_CHECK(renderer.cachedTextureCount() == 3); // track pair + car_paint.dds
+        KS_CHECK(renderer.cachedTextureCount() == 6); // track five + car_paint.dds
         aimAt(0, 0.3f, -4.5f, 0, 0.3f, 0, vec3(0, 1, 0));
         RefShot carShot;
         capture("car_body", mat4(), carShot);
