@@ -33,12 +33,29 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     sull'etichetta di uscita garage.
   - `RaceSessionManager::playerStanding()` (nuovo, const): la riga del giocatore
     da cui HUD, RESULTS e API leggono tutti.
+- **Roadmap 2.7 — coda box multi-auto cablata** (`PitLaneQueue.h`, prima mai
+  compilata né usata): `SimulationLoop_Pit.cpp::updateGarageExit()` alimenta la
+  coda con il giocatore e con tutte le auto del campo, e passa
+  `shouldBlockGarageExit()` a `GarageExitInput.pathBlocked`, così `BoxClear`
+  aspetta che la corsia sia libera. L'asse è lo stesso box/heading del garage
+  exit (legato da `placePlayerForSession()`); con una sola auto in pista non
+  c'è chi possa occupare la corsia, quindi il comportamento è invariato.
+  `KS_PIT_QUEUE=0` disattiva tutto.
 
 ### Removed
 - **`src/simulator/ui/PitLaneOverlay.h`**: secondo overlay pit, non compilato e
   non usato, con tempi e semantica propri (`fuelLitres * 0.12f`, riparazioni
   istantanee) in deriva rispetto a `PitLaneRepair` / `PitStrategyBridge`.
   `docs/PIT_LANE_UI.md` resta come design, con nota.
+
+### Fixed
+- **Pit lane queue — release gap calcolato al contrario**: la seconda auto in
+  coda non sarebbe mai stata libera di uscire (due auto dallo stesso box
+  condividono la stessa posizione sull'asse, e un leader che si allontana
+  allargava la differenza nel verso sbagliato). Ora il confronto è
+  `lastReleasedAlong - e.alongPit >= releaseGapM`, come intendono sia
+  `docs/PIT_LANE_QUEUE.md` sia il motivo per cui esiste `releaseGapM`.
+  Coperto dal nuovo `pit_queue_test` (test #52 della suite Qt-free).
 
 ### Added
 - **Roadmap 2.7 — servizio box end-to-end** (`src/simulator/SimulationLoop_Pit.cpp`,

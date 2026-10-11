@@ -80,6 +80,42 @@ void SimulationLoop::updateGarageExit(float dt) {
             in.requestReturn = true;
     }
 
+    // Roadmap 2.7 — multi-car pit-lane order (docs/PIT_LANE_QUEUE.md): the
+    // queue decides who rolls out first and holds the others in their box
+    // while the lane ahead is taken. The player's queue id is fixed because
+    // the local car is not part of the MultiCarManager field. Clearance only
+    // is taken from the queue — the limiter itself stays GarageExit's
+    // (pitLimiterMaxMs), so there is exactly one place that caps the speed.
+    if (m_pitQueueEnabled) {
+        m_pitQueue.setSimTime(static_cast<float>(m_simTime));
+        if (in.requestLeave) // one-shot intent for this step
+            m_pitQueue.requestLeave(kPitQueuePlayer, /*raceNumber*/ 0,
+                                    /*garageIndex*/ 0, true, in.posX, in.posZ);
+        m_pitQueue.updateCar(kPitQueuePlayer, in.posX, in.posZ, in.speedMs);
+        if (m_multiCar) {
+            for (const auto& c : m_multiCar->cars()) {
+                if (!c || !c->vehicle) continue;
+                const auto cs = c->vehicle->getState();
+                m_pitQueue.updateCar(c->id, static_cast<float>(cs.position.x),
+                                     static_cast<float>(cs.position.z),
+                                     static_cast<float>(cs.speed));
+            }
+        }
+        m_pitQueue.update(dt);
+
+        const GarageExitPhase now = m_garageExit.phase();
+        if (now == GarageExitPhase::Preparing ||
+            now == GarageExitPhase::EngineStart ||
+            now == GarageExitPhase::BoxClear)
+            in.pathBlocked = m_pitQueue.shouldBlockGarageExit(kPitQueuePlayer);
+        if (now == GarageExitPhase::RollingOut ||
+            now == GarageExitPhase::PitLane ||
+            now == GarageExitPhase::TrackEntry)
+            m_pitQueue.markMoving(kPitQueuePlayer);
+        if (now == GarageExitPhase::OnTrack)
+            m_pitQueue.markDone(kPitQueuePlayer);
+    }
+
     const GarageExitPhase before = m_garageExit.phase();
     const GarageExitOutput out = m_garageExit.update(dt, in);
 

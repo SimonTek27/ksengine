@@ -170,6 +170,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
 endif()
 
+# Roadmap 2.7 - pit lane queue: order of box exits (release gap + spacing).
+# PitLaneQueue.h is header-only, so this target compiles just the test TU.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_queue_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/PitLaneQueue.h")
+    add_executable(pit_queue_test pit_queue_test.cpp)
+    target_include_directories(pit_queue_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(pit_queue_test PRIVATE ksengine)
+    add_test(NAME pit_queue_test COMMAND pit_queue_test)
+endif()
+
 # Roadmap 2.3 — materials.txt: parse/format/degradation + the texture path
 # resolution that mirrors the baker's sanitizeFileName. Header-only
 # MaterialCache.h, so this target compiles just the test TU.

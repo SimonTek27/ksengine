@@ -184,9 +184,17 @@ public:
                 continue;
             }
 
-            // Can clear if gap from previous released/moving car
-            const bool gapOk = (e.alongPit - lastReleasedAlong) >= m_cfg.releaseGapM
-                            || lastReleasedAlong < -1e8f;
+            // Can clear if the car released before this one is at least
+            // releaseGapM ahead of it (a car still on the box has nobody in
+            // front: lastReleasedAlong is still the -1e9 sentinel).
+            //
+            // The comparison used to run the other way round
+            // (e.alongPit - lastReleasedAlong), which blocked the second car
+            // forever: two cars leaving adjacent boxes share the same
+            // alongPit, and a leader moving away down the lane only grew that
+            // difference in the wrong direction.
+            const bool gapOk = lastReleasedAlong < -1e8f ||
+                               (lastReleasedAlong - e.alongPit) >= m_cfg.releaseGapM;
             // Also check no entering car immediately ahead on axis
             bool conflict = false;
             for (const auto& o : m_entries) {

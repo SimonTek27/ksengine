@@ -1,9 +1,19 @@
 # Pit lane queue
 
-> **Stato integrazione (2026-10-11): NON cablata.** `GarageExit.h` è guidato
-> dal loop (`SimulationLoop_Pit.cpp`), ma `PitLaneQueue.h` no: `pathBlocked`
-> è sempre false, quindi l'uscita in corsia non aspetta altre auto. Da
-> cablare insieme a più veicoli in box (priorità e spaziamento qui sotto).
+> **Stato integrazione (2026-10-11): CABLATA.** `SimulationLoop_Pit.cpp::
+> updateGarageExit()` alimenta la coda con il giocatore (id fisso
+> `kPitQueuePlayer`, perché la vettura locale non è nel campo MultiCar) e con
+> tutte le auto del campo, e passa `shouldBlockGarageExit()` a
+> `GarageExitInput.pathBlocked`: chi non è ancora libero resta nel box.
+> L'asse è lo stesso box/heading del garage exit, legato da
+> `placePlayerForSession()`. **KS_PIT_QUEUE=0** disattiva tutto. Con una sola
+> auto in pista non c'è nessuno che possa occupare la corsia, quindi il
+> comportamento resta identico a prima.
+> Con questa integrazione è stato corretto il **release gap**: il confronto
+> era calcolato al contrario (`e.alongPit - lastReleasedAlong`), per cui la
+> seconda auto in coda non sarebbe mai stata libera di uscire. Ora è
+> `lastReleasedAlong - e.alongPit >= releaseGapM` (coperto da
+> `pit_queue_test`).
 
 ## Roles
 

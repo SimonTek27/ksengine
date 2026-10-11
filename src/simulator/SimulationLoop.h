@@ -24,6 +24,7 @@
 #include "PitStrategyBridge.h"  // roadmap 2.7: menu pit plan -> PitRepairInput
                              // (pulls in PitLaneRepair.h -> GarageExit.h /
                              // GarageSpawn.h, all self-contained)
+#include "PitLaneQueue.h"    // roadmap 2.7: multi-car pit-lane order
 
 #include <memory>
 #include <chrono>
@@ -474,6 +475,14 @@ private:
     bool m_requestLeaveGarage = false;
     bool m_requestReturnBox = false;
     std::string m_garageStatus;
+
+    // Roadmap 2.7 — multi-car pit-lane order (PitLaneQueue.h): with one car
+    // on track nothing ever blocks, so the behaviour is unchanged; with a
+    // field it decides who rolls out first and holds the others in the box.
+    // KS_PIT_QUEUE=0 turns it off (same env-var style as the rest of ksim).
+    PitLaneQueue m_pitQueue;
+    bool m_pitQueueEnabled = false; // true once placePlayerForSession binds
+    static constexpr int kPitQueuePlayer = -1; // player's id in the queue
 };
 
 } // namespace ks::sim

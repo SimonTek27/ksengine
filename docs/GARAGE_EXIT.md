@@ -5,10 +5,11 @@
 > della fisica) guida `GarageExitController` sullo stesso box del servizio in
 > box: partenza in garage = tenuta finché il giocatore non chiede di uscire
 > (`P` o riga **LEAVE GARAGE** del menu GARAGE), rientro = entrare lentamente
-> nel proprio box. La coda box multi-auto (`PitLaneQueue.h`) **non** è ancora
-> cablata: `pathBlocked` resta false, quindi BoxClear non aspetta nessuno.
-> Il limiter di corsia usa `pitLaneOpen = true` sempre: la finestra box in
-> gara va presa da `RaceSessionManager`.
+> nel proprio box. La coda box multi-auto (`PitLaneQueue.h`) **è** cablata:
+> `pathBlocked` arriva da `shouldBlockGarageExit()`, quindi BoxClear aspetta
+> che la corsia sia libera (`KS_PIT_QUEUE=0` per disattivarla). Il limiter di
+> corsia usa `pitLaneOpen = true` sempre: la finestra box in gara va presa da
+> `RaceSessionManager`.
 
 ## State machine
 

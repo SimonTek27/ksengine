@@ -48,8 +48,12 @@ rimosse da quel file con una nota che rimanda ai TU compilati.
 
 ### Rimane aperto (fuori dal perimetro di questa patch)
 
-- **Coda box multi-auto**: `PitLaneQueue.h` non è cablata, quindi `pathBlocked`
-  è sempre false e BoxClear non aspetta altri veicoli.
+- ~~**Coda box multi-auto**~~ → **cablata (11/10)**: `updateGarageExit()`
+  alimenta `PitLaneQueue` con giocatore e campo, `pathBlocked` arriva da
+  `shouldBlockGarageExit()` (`KS_PIT_QUEUE=0` per disattivare). Corretto nel
+  frattempo il release gap, calcolato al contrario: la seconda auto in coda
+  non sarebbe mai uscita (`pit_queue_test`). Resta da cablare l'ingresso in
+  corsia (`requestEnter`) per le auto AI che rientrano.
 - **Finestra box in gara**: `pitLaneOpen` è sempre true; va presa da
   `RaceSessionManager`.
 - ~~**Cambio pneumatici**~~ → **chiuso (11/10)**: `out.tyresChanged` ora azzera

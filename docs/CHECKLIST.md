@@ -66,15 +66,19 @@ veicolo. Dettaglio in `docs/WIREUP_GAPS.md` (sezione 2.7 aggiornata).
 - [x] Serbatoio reale: `fuelCapacityL` = `fuelTankCapacityL()` (default 150 L,
       override `FUEL_CAPACITY` in `data/engine.ini`) e `PitLaneRepair::plan()`
       plafona il target — "riempi" non supera più il serbatoio
+- [x] Coda box multi-auto: `PitLaneQueue` → `pathBlocked` in `BoxClear`
+      (release gap + spaziamento; `KS_PIT_QUEUE=0` per disattivare; release
+      gap corretto — era calcolato al contrario)
 - [x] Uscita/rientro box: `updateGarageExit()` guidato dal loop, tasto `P` +
       righe **LEAVE GARAGE** / **RETURN TO BOX**, pit limiter in corsia
 - [x] `SimulationLoop_FeatureMethods.cpp`: rimosse le duplicazioni non compilate
 - [x] Test: `pit_strategy_menu_test` copre riga, hook, job confermati, servizio completo, righe garage
 - [ ] Gate umano: tempi realistici, HUD, esperienza di box (uscita → corsia → rientro → servizio)
 
-Restano fuori da questa patch (vedi WIREUP_GAPS): coda box multi-auto
-(`PitLaneQueue`), finestra box in gara, parser AC `powertrain.ini` per la
-capacità del serbatoio (oggi `FUEL_CAPACITY` in `engine.ini`).
+Restano fuori da questa patch (vedi WIREUP_GAPS): ingresso in corsia per le
+AI che rientrano (`requestEnter`), finestra box in gara, parser AC
+`powertrain.ini` per la capacità del serbatoio (oggi `FUEL_CAPACITY` in
+`engine.ini`).
 
 **Criterio di accettazione 2.7**
 

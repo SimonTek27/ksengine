@@ -628,6 +628,20 @@ void SimulationLoop::placePlayerForSession() {
     if (m_hasPlayerBox) {
         m_garageExit.bindBox(req.garageIndex, m_playerBox, assigned.pitLaneHeading);
         m_garageExitEnabled = true;
+        // Roadmap 2.7 — multi-car pit-lane order (PitLaneQueue): runs on the
+        // same box and heading as the garage exit. With a single car on track
+        // nothing can occupy the lane, so those sessions behave exactly as
+        // before; KS_PIT_QUEUE=0 opts out entirely.
+        {
+            PitAxis pitAxis;
+            pitAxis.originX = m_playerBox.x;
+            pitAxis.originZ = m_playerBox.z;
+            pitAxis.heading = assigned.pitLaneHeading;
+            m_pitQueue = PitLaneQueue(); // fresh queue for this session
+            m_pitQueue.setAxis(pitAxis);
+            const char* pitQueueEnv = std::getenv("KS_PIT_QUEUE");
+            m_pitQueueEnabled = !(pitQueueEnv && pitQueueEnv[0] == '0');
+        }
         if (GarageSpawnPolicy::locationForSession(st) != SpawnLocation::Garage)
             m_garageExit.forceOnTrack();
         else
