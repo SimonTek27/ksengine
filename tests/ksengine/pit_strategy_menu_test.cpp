@@ -10,7 +10,10 @@
  *    request the SimulationLoop turns into a queued pit service);
  *  - applyStrategyToRepairInput() maps the strategy into PitRepairInput and
  *    never queues service by itself — requestService is a separate intent
- *    gated on box position in updatePitRepair().
+ *    gated on box position in updatePitRepair();
+ *  - roadmap 2.7: the screen has a REQUEST SERVICE row separate from
+ *    CONFIRM PLAN, the bridge reports it through its own hook, and the plan
+ *    only ever queues the confirmed jobs (tyres/refuel on an undamaged car).
  *
  * Compiles the GameMenuOverlay TU directly (menu_session_gate_test pattern).
  */
@@ -33,7 +36,7 @@ namespace {
 // Row order built by buildPitStrategyMenu().
 constexpr int kFuelDisplay = 0, kFuelMinus = 1, kFuelPlus = 2, kTyres = 4,
               kBody = 5, kSuspension = 6, kAero = 7, kEngine = 8,
-              kConfirm = 10, kBack = 11;
+              kConfirm = 10, kRequestService = 11, kBack = 12;
 } // namespace
 
 int main() {
@@ -86,6 +89,10 @@ int main() {
             KS_CHECK(pit[kAero].text == "AERO  [OFF]");
             KS_CHECK(pit[kEngine].text == "ENGINE  [OFF]");
             KS_CHECK(pit[kConfirm].text == "CONFIRM PLAN");
+            // Roadmap 2.7: the plan and the request are separate rows.
+            KS_CHECK(pit[kRequestService].text == "REQUEST SERVICE");
+            KS_CHECK(pit[kRequestService].description ==
+                     "Start the confirmed jobs in the box");
             KS_CHECK(pit[kBack].text == "BACK");
         }
     }
@@ -147,6 +154,16 @@ int main() {
     KS_CHECK(engine == true);
     KS_CHECK(menu.state() == MenuState::PitStrategy); // stays open
 
+    // --- REQUEST SERVICE is a separate intent from CONFIRM PLAN -------------
+    {
+        int requested = 0;
+        menu.onPitServiceRequested = [&]() { ++requested; };
+        KS_CHECK(menu.handleKeyPress(0x28)); // DOWN -> REQUEST SERVICE
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(requested == 1);
+        KS_CHECK(confirms == 1); // the plan is not re-sent
+    }
+
     // --- ESC returns to GARAGE ----------------------------------------------
     KS_CHECK(menu.handleKeyPress(0x1B));
     KS_CHECK(menu.state() == MenuState::Garage);
@@ -162,7 +179,9 @@ int main() {
     st.aero = true;
     st.engine = false;
     int applied = 0;
-    wirePitStrategyMenu(menu2, st, [&]() { ++applied; });
+    int requested2 = 0;
+    wirePitStrategyMenu(menu2, st, [&]() { ++applied; },
+                        [&]() { ++requested2; });
 
     KS_CHECK(menu2.handleKeyPress(0x28)); // MAIN: DOWN
     KS_CHECK(menu2.handleKeyPress(0x28)); // DOWN -> GARAGE
@@ -203,6 +222,14 @@ int main() {
     KS_CHECK(st.aero == true);
     KS_CHECK(st.engine == false);
 
+    // REQUEST SERVICE reports through the bridge hook and never rewrites the
+    // stored plan.
+    KS_CHECK(menu2.handleKeyPress(0x28)); // DOWN -> REQUEST SERVICE
+    KS_CHECK(menu2.handleKeyPress(0x0D));
+    KS_CHECK(requested2 == 1);
+    KS_CHECK(applied == 1); // the plan was not re-sent
+    KS_CHECK_NEAR(st.fuelTargetL, 80.f, 1e-6);
+
     // --- strategy mapping: fields only, no service queued --------------------
     PitRepairInput in;
     applyStrategyToRepairInput(st, in);
@@ -214,6 +241,69 @@ int main() {
     KS_CHECK(in.wantEngine == false);
     KS_CHECK(!in.requestService); // a plan alone queues nothing
 
-    std::printf("pit_strategy: screen, fuel steps, toggles, confirm + bridge OK\n");
+    // --- roadmap 2.7: the plan queues only the confirmed jobs ---------------
+    // Undamaged car: repair toggles add nothing (no repair time), so the stop
+    // is TYRES + the refuel the plan asked for (80 - 30 = 50 L).
+    {
+        ks::physics::DamageSystem dmg;
+        ks::sim::PitLaneRepair repair;
+        PitRepairInput svc;
+        svc.fuelL = 30.f;
+        applyStrategyToRepairInput(st, svc);
+        KS_CHECK(!svc.requestService);
+        repair.plan(dmg, svc);
+        KS_CHECK(repair.jobs().size() == 2);
+        if (repair.jobs().size() == 2) {
+            KS_CHECK(repair.jobs()[0].type == ks::sim::PitJobType::Tyres);
+            KS_CHECK(repair.jobs()[1].type == ks::sim::PitJobType::Fuel);
+            KS_CHECK_NEAR(repair.jobs()[1].fuelAddL, 50.f, 1e-3);
+        }
+
+        // A plan with everything off except tyres (and a tank already at the
+        // target) queues exactly one job.
+        PitStrategyState minimal;
+        minimal.fuelTargetL = 30.f;
+        minimal.tyres = true;
+        minimal.body = minimal.suspension = minimal.aero = minimal.engine = false;
+        PitRepairInput only;
+        only.fuelL = 30.f;
+        applyStrategyToRepairInput(minimal, only);
+        repair.plan(dmg, only);
+        KS_CHECK(repair.jobs().size() == 1);
+        if (!repair.jobs().empty())
+            KS_CHECK(repair.jobs()[0].type == ks::sim::PitJobType::Tyres);
+
+        // Stopped in the box + REQUEST SERVICE -> service runs, holds the car
+        // and ends on the plan's fuel target.
+        PitRepairInput run = svc;
+        run.requestService = true;
+        run.speedMs = 0.f;
+        run.inGarageBox = true;
+        const ks::sim::GarageExitPhase box = ks::sim::GarageExitPhase::InGarage;
+        {
+            const ks::sim::PitRepairOutput first =
+                repair.update(1.f / 60.f, run, dmg, box);
+            KS_CHECK(first.serviceActive);
+            KS_CHECK(first.holdCar);
+            KS_CHECK(!first.completedThisFrame);
+        }
+        bool completed = false;
+        for (int i = 0; i < 3000 && !completed; ++i) {
+            const ks::sim::PitRepairOutput o =
+                repair.update(1.f / 60.f, run, dmg, box);
+            if (!o.serviceActive) { // the whole stop ended, not just one job
+                KS_CHECK(o.completedThisFrame);
+                KS_CHECK_NEAR(o.fuelL, 80.f, 0.5f); // the plan's fuel target
+                completed = true;
+                break;
+            }
+            KS_CHECK(o.holdCar); // the car never rolls away mid-service
+        }
+        KS_CHECK(completed);
+        KS_CHECK(!repair.isBusy());
+    }
+
+    std::printf("pit_strategy: screen, fuel steps, toggles, confirm, request "
+                "service + plan-driven jobs OK\n");
     return 0;
 }

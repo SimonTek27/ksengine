@@ -253,6 +253,13 @@ void GameMenuOverlay::buildPitStrategyMenu()
                     m_pitFuelTargetL, m_pitWantTyres, m_pitWantBody,
                     m_pitWantSuspension, m_pitWantAero, m_pitWantEngine);
         } });
+    // Roadmap 2.7: the plan alone queues nothing. This is the player's
+    // separate "I am stopped in the box, do the confirmed work now" signal;
+    // the loop accepts it only inside the garage box (updatePitRepair).
+    m_items.push_back({ "REQUEST SERVICE", "Start the confirmed jobs in the box",
+        [this]() {
+            if (onPitServiceRequested) onPitServiceRequested();
+        } });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 

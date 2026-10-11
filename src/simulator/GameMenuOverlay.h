@@ -149,6 +149,10 @@ public:
     std::function<void()> onOpenSetupGarageRequested;
     // Roadmap 2.5 (Sprint 8 / P1.8): pit strategy screen actions.
     std::function<void(float, bool, bool, bool, bool, bool)> onPitStrategyConfirmRequested;
+    // Roadmap 2.7: REQUEST SERVICE is deliberately separate from CONFIRM
+    // PLAN — the plan only says what the next stop should do, this fires the
+    // "do it now, I am stopped in the box" intent (SimulationLoop gates it).
+    std::function<void()> onPitServiceRequested;
     std::function<void()> onOpenPitStrategyRequested;
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;

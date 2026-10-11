@@ -9,6 +9,30 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Roadmap 2.7 — servizio box end-to-end** (`src/simulator/SimulationLoop_Pit.cpp`,
+  `GameMenuOverlay`, `PitStrategyBridge.h`, `VehicleSimulator::setFuelL`,
+  `src/adapters/assetto_corsa/TrackDataJsonLoader.h`): il piano PIT STRATEGY
+  governa davvero la sosta in box. `updatePitRepair()` esiste ora nel TU
+  compilato — prima viveva solo in `SimulationLoop_FeatureMethods.cpp`, che
+  nessun target compila e che referenziava membri inesistenti (`m_garageExit`,
+  `m_pitQueue`, `m_damage`) — ed è chiamata da `tick()` alla frequenza della
+  fisica, così il blocco controlli regge contro il prossimo input del
+  pilota. Legge `m_pitStrategy`, parte solo su **REQUEST SERVICE** (riga
+  nuova del menu, distinta da `CONFIRM PLAN`) mentre la vettura è ferma nel
+  proprio box (bound in `placePlayerForSession()`, footprint 8 m) e ferma
+  l'auto durante i job. Il carburante torna al veicolo tramite il nuovo
+  `VehicleSimulator::setFuelL()` (serbatoio clampato + massa coerente, senza
+  resettare l'intera setup) mentre viene rifornito, quindi HUD, shared
+  memory e telemetria seguono la sosta in tempo reale; le riparazioni
+  toccano solo i job confermati (niente più `repairPartial(1.f)` a fine
+  servizio). Le penalità Stop-Go impostano lo stesso flag. Test
+  `pit_strategy_menu_test` esteso: riga/ hook della richiesta, piano che
+  accoda solo i job confermati, servizio che finisce sul target carburante.
+  Aggiunto `TrackDataJsonLoader.h` (header-only): manifest `data/data.json`
+  di AC — nome e lunghezza pista — che `loadTrackFolder()` preferisce a
+  `surfaces.ini`, il quale resta il path di compatibilità (l'include era già
+  nel working tree ma l'header non esisteva: la build non compilava).
+
 - **Layout `system/cfg/` + cartella per-giocatore `user/<player>/`** (Fase 3;
   `cmake/KsInstallLayout.cmake`, `src/engine/Config/Json.h`,
   `src/engine/Config/EngineSettings.h`, `src/engine/assets/UserData.h`,

@@ -87,6 +87,17 @@ void VehicleSimulator::setFrontalArea(double m2) {
 void VehicleSimulator::setWheelBase(double m) { m_wheelBase = std::max(1.5, m); }
 void VehicleSimulator::setTrackWidth(double m) { m_trackWidth = std::max(1.0, m); }
 
+void VehicleSimulator::setFuelL(float liters) {
+    const float f = std::clamp(liters, 0.f, 150.f);
+    m_state.fuel = f;
+    m_setup.fuelL = f;
+    m_baseMass = (m_baseMass > 100.0) ? m_baseMass : m_mass;
+    m_mass = std::max(200.0, m_baseMass +
+                                 static_cast<double>(m_setup.ballastKg) +
+                                 static_cast<double>(f) * 0.74);
+    m_state.mass = static_cast<float>(m_mass);
+}
+
 void VehicleSimulator::applySetup(const SetupParams& p) {
     m_setup = p;
     for (int i = 0; i < 4; ++i)

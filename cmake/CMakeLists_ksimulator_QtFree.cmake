@@ -12,6 +12,8 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorApp.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_NetSync.cpp
+	# roadmap 2.7 — box service (plan -> PitLaneRepair -> refuel/damage)
+	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_Pit.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/InputManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/CameraController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp

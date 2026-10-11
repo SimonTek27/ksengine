@@ -31,7 +31,8 @@ inline void applyStrategyToRepairInput(const PitStrategyState& s, PitRepairInput
 }
 
 inline void wirePitStrategyMenu(GameMenuOverlay& menu, PitStrategyState& state,
-                                std::function<void()> onApplied = {}) {
+                                std::function<void()> onApplied = {},
+                                std::function<void()> onRequestService = {}) {
     menu.setPitStrategy(state.fuelTargetL, state.tyres, state.body,
                         state.suspension, state.aero, state.engine);
     menu.onPitStrategyConfirmRequested =
@@ -48,6 +49,13 @@ inline void wirePitStrategyMenu(GameMenuOverlay& menu, PitStrategyState& state,
                 fuel, tyres, body, susp, aero, engine);
             if (onApplied) onApplied();
         };
+    // Roadmap 2.7: REQUEST SERVICE is a separate intent from the plan above —
+    // SimulationLoop turns it into PitRepairInput::requestService only while
+    // the car is stopped inside its box (updatePitRepair).
+    menu.onPitServiceRequested = [onRequestService]() {
+        std::fprintf(stderr, "PitStrategy: REQUEST SERVICE\n");
+        if (onRequestService) onRequestService();
+    };
 }
 
 } // namespace sim

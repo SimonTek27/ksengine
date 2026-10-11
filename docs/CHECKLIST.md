@@ -1,8 +1,8 @@
 # Checklist operativa — ksengine / ksim
 
 **Fonte:** `docs/ROADMAP.md`, `docs/PARITY_STATUS.md`, `docs/WIREUP_GAPS.md`, codice su `master`  
-**Aggiornata:** 2026-10-10  
-**HEAD di riferimento:** `ffb77d32`  
+**Aggiornata:** 2026-10-11  
+**HEAD di riferimento:** `f78e795` + lavoro locale 2.7 (vedi sezione B)  
 **Ambito:** runtime Qt-free (SimulatorApp / ksim). Non include il piano completo di ksEditor.
 
 ---
@@ -48,17 +48,25 @@ Eseguire su **build pulito Windows**. Non chiudibili da commit di documentazione
 
 ## B. Sviluppo ancora aperto (codice)
 
-### Priorità alta — 2.7 Servizio box end-to-end 🟡
+### Priorità alta — 2.7 Servizio box end-to-end 🟡 (cablato 2026-10-11)
 
-Gap principale documentato in `docs/WIREUP_GAPS.md`.
+Gap tecnico chiuso: il servizio esiste nel runtime compilato
+(`src/simulator/SimulationLoop_Pit.cpp`, chiamata da `tick()`), il piano del
+menu lo guida, la richiesta è una riga separata e il rifornimento arriva al
+veicolo. Dettaglio in `docs/WIREUP_GAPS.md` (sezione 2.7 aggiornata).
 
-- [ ] Stato piano sul loop: `PitStrategyState m_pitStrategy` + accessor
-- [ ] `void requestPitService(bool on = true)` pubblico sul loop
-- [ ] `updatePitRepair`: usare `applyStrategyToRepairInput(m_pitStrategy, in)` al posto dei valori hardcoded (`targetFuelL = 100`, tutti i want* = true)
-- [ ] `SimulatorApp.cpp`: cablare `wirePitStrategyMenu` / `onPitStrategyConfirmRequested`
-- [ ] Azione giocatore **REQUEST SERVICE** (distinta da CONFIRM PLAN) → `requestPitService(true)`
-- [ ] Verificare HUD fuel/danni dopo `out.completedThisFrame`
-- [ ] Allineare `SimulationLoop.h` ai membri pit usati in `SimulationLoop_FeatureMethods.cpp` (se la build locale lo richiede)
+- [x] Stato piano sul loop: `PitStrategyState m_pitStrategy` + accessor
+- [x] `void requestPitService(bool on = true)` pubblico sul loop
+- [x] `updatePitRepair`: usa `applyStrategyToRepairInput(m_pitStrategy, in)`
+- [x] `SimulatorApp.cpp`: cablato `wirePitStrategyMenu` (+ hook REQUEST SERVICE)
+- [x] Azione giocatore **REQUEST SERVICE** distinta da CONFIRM PLAN
+- [x] Fuel aggiornato sul veicolo durante il rifornimento (`setFuelL`)
+- [x] `SimulationLoop_FeatureMethods.cpp`: rimosse le duplicazioni non compilate
+- [x] Test: `pit_strategy_menu_test` copre riga, hook, job confermati, servizio completo
+- [ ] Gate umano: tempi realistici, HUD, esperienza di box
+
+Restano fuori da questa patch (vedi WIREUP_GAPS): uscita/rientro garage guidata
+da `GarageExit.h`, cambio gomme applicato al modello, capacità serbatoio reale.
 
 **Criterio di accettazione 2.7**
 
@@ -100,7 +108,7 @@ Gap principale documentato in `docs/WIREUP_GAPS.md`.
 |---|--------|------------|--------|
 | 1 | Gate umani Fase 1 (A) | Build Windows | [ ] |
 | 2 | Gate umani 2A / Block C (A) | Contenuto AC | [ ] |
-| 3 | **2.7** Servizio box end-to-end | — | [ ] |
+| 3 | **2.7** Servizio box end-to-end | — | [x] cablato (gate umano) |
 | 4 | **2.10** Menu coerente | 2.7 | [ ] |
 | 5 | **2.11–2.14** Soak / gara / profilo / test | 2.7 + gate | [ ] |
 | — | Team 2.8 + Upgrade 2.9 (wire-up) | — | [x] |
@@ -189,5 +197,6 @@ Qt solo per ksEditor.
 
 ---
 
-*Prossimo passo più utile: (1) gate umani su Windows, (2) patch 2.7 box end-to-end.  
+*Prossimo passo più utile: (1) gate umani su Windows, (2) **2.10** menu coerente  
+(dopo 2.7 cablato il 11/10), (3) uscita/rientro garage guidata da `GarageExit.h`.  
 Aggiornare stato e data a ogni gate superato; non cambiare stato senza test o misura.*

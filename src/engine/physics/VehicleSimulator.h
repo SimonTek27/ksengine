@@ -52,6 +52,14 @@ public:
 
     SimulationState getState() const { return m_state; }
     SimulationState& state() { return m_state; }
+
+    /**
+     * Tank level (L), clamped like applySetup(). Refuelling in the box needs
+     * this: applySetup() would reset the whole setup, and the pit service
+     * (SimulationLoop_Pit.cpp) only moves fuel. Mass is recomputed the same
+     * way applySetup does, so a full tank still weighs more than an empty one.
+     */
+    void setFuelL(float liters);
     const VehicleFFBSample& ffbSample() const { return m_ffb; }
 
     void setMass(double kg);

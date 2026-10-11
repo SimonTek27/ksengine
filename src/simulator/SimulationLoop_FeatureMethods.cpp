@@ -76,47 +76,9 @@ void SimulationLoop::beginSession(GameSessionMode mode) {
     }
 }
 
-void SimulationLoop::startFeatureServices(bool hostAnnounce) {
-    m_features.startServices(hostAnnounce);
-    m_features.onBeginSession = [this](GameSessionMode mode, const SessionStartParams&) {
-        beginSession(mode);
-    };
-    m_features.onSetFlag = [this](uint8_t f) {
-        RaceFlag rf = RaceFlag::Green;
-        if (f == 2) rf = RaceFlag::Yellow;
-        else if (f >= 4) rf = RaceFlag::Checkered;
-        setRaceFlag(rf);
-    };
-    m_features.onPenalty = [this](int car, int kind, float value, const std::string& reason) {
-        using PT = Penalty::Type;
-        PT ty = PT::TimeAdded;
-        if (kind == 1) ty = PT::DriveThrough;
-        else if (kind == 2) ty = PT::StopGo;
-        m_raceSession.addPenalty(car, ty, value, reason);
-        if (kind == 2) m_requestPitService = true;
-    };
-    m_features.onSetTimeOfDay = [this](float h) { setTimeOfDay(h); };
-    m_features.onSetWeather = [this](const std::string& name) {
-        auto wp = presetByName(name);
-        ks::physics::WeatherState ws;
-        ws.ambientTemp = wp.ambientC;
-        ws.trackTemp = wp.trackC;
-        ws.trackWetness = wp.wetness;
-        ws.rainIntensity = wp.rain;
-        setWeatherPreset(ws);
-        m_features.weatherCtrl.applyPreset(name);
-    };
-    m_features.onSetupLoad = [this](const std::string& path) {
-        if (!m_setupGarage || !isSafePath(path)) return;
-        SetupData s = m_setupGarage->setup();
-        loadSetupFromFile(s, path);
-        m_setupGarage->setSetup(s);
-    };
-    m_features.onSetupSave = [this](const std::string& path) {
-        if (!m_setupGarage || !isSafePath(path)) return;
-        saveSetupToFile(m_setupGarage->setup(), path);
-    };
-}
+// NOTE: startFeatureServices is defined in SimulationLoop.cpp (the
+// compiled TU). This file previously carried a duplicate definition that
+// would collide at link time once the file is added to the build.
 
 bool SimulationLoop::loadReplayFile(const std::string& path) {
     if (!isSafePath(path)) return false;
@@ -333,33 +295,11 @@ void SimulationLoop::updateGarageExit(float dt) {
 #endif
 }
 
-void SimulationLoop::updatePitRepair(float dt) {
-#if HAS_VEHICLE_SIM
-    if (!m_vehicle) return;
-    applyDamageEffects();
-    const auto st = m_vehicle->getState();
-    const auto phase = m_garageExit.phase();
-    PitRepairInput in;
-    in.inGarageBox = (phase == GarageExitPhase::InGarage || phase == GarageExitPhase::Returning);
-    in.speedMs = static_cast<float>(st.speed);
-    in.fuelL = static_cast<float>(st.fuel);
-    in.fuelCapacityL = 100.f;
-    in.targetFuelL = 100.f;
-    in.wantTyres = true; in.wantBody = true; in.wantSuspension = true; in.wantAero = true;
-    in.requestService = m_requestPitService && in.inGarageBox;
-    PitRepairOutput out = m_pitRepair.update(dt, in, m_damage, phase);
-    if (out.holdCar) {
-        m_vehicle->setThrottle(0); m_vehicle->setBrake(1.0); m_vehicle->setSteering(0);
-    }
-    if (out.completedThisFrame) {
-        m_requestPitService = false;
-        m_vehicle->damage().repairPartial(1.f);
-        std::fprintf(stderr, "SimulationLoop: pit service COMPLETE\n");
-    }
-#else
-    (void)dt;
-#endif
-}
+// NOTE: updatePitRepair is defined in SimulationLoop_Pit.cpp (the compiled
+// TU). Like startFeatureServices above, this file used to carry a duplicate
+// — written against members (m_garageExit, m_damage) that SimulationLoop.h
+// does not declare — that would both fail to compile and collide at link
+// time if this file were ever added to the build.
 
 void SimulationLoop::spawnAiGrid(int count) {
     if (count <= 0) return;

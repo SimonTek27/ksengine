@@ -8,6 +8,7 @@
 #include "simulator/DashboardOverlay.h"
 #include "simulator/TelemetryOverlay.h"
 #include "simulator/GameMenuOverlay.h"
+#include "simulator/PitStrategyBridge.h" // roadmap 2.7: menu pit plan -> loop state
 #include "simulator/InputManager.h"
 #include "simulator/SetupGarage.h"
 #include "simulator/NetworkManager.h"
@@ -713,6 +714,12 @@ static void initSimulation() {
     // selects the next level and re-applies physics/nodes/livery/sound.
     uiMenu->upgradeRowLabels = []() { return g_simulation->upgradeRowLabels(); };
     uiMenu->onUpgradeRowCycled = [](int row) { g_simulation->cycleUpgradeRow(row); };
+    // Roadmap 2.7: PIT STRATEGY menu -> loop state. CONFIRM PLAN writes the
+    // player's fuel/job choices into m_pitStrategy; the service itself only
+    // runs when the player explicitly requests it (REQUEST SERVICE) while
+    // stationary in the box — the plan alone queues nothing.
+    ks::sim::wirePitStrategyMenu(*uiMenu, g_simulation->pitStrategy(), {},
+        [sim = g_simulation.get()]() { sim->requestPitService(true); });
     uiMenu->onToggleFullscreenRequested = []() {
         SendMessageW(g_hWnd, WM_KEYDOWN, VK_F11, 0);
     };

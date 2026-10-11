@@ -16,90 +16,48 @@ Obiettivo: non riscrivere modelli già presenti; chiudere i collegamenti mancant
 
 ---
 
-## 2.7 — Servizio box end-to-end (GAP PRINCIPALE)
+## 2.7 — Servizio box end-to-end
 
-### Cosa esiste già
+### Cosa esiste (aggiornato 2026-10-11 — cablaggio fatto)
 
-| Pezzo | Dove |
-|-------|------|
-| UI piano pit (fuel, tyres, body, susp, aero, engine) | `GameMenuOverlay` — `MenuState::PitStrategy`, `setPitStrategy`, `onPitStrategyConfirmRequested` |
-| Mapper menu → `PitRepairInput` | `PitStrategyBridge.h` — `PitStrategyState`, `applyStrategyToRepairInput`, `wirePitStrategyMenu` |
-| Motore riparazione | `PitLaneRepair.h` + `SimulationLoop::updatePitRepair` in `SimulationLoop_FeatureMethods.cpp` |
-| Flag richiesta servizio | `m_requestPitService` (oggi impostato soprattutto da penalità Stop-Go) |
+| Pezzo | Dove | Stato |
+|-------|------|-------|
+| UI piano pit (fuel, tyres, body, susp, aero, engine) | `GameMenuOverlay` — `MenuState::PitStrategy` | ✅ |
+| Riga **REQUEST SERVICE** distinta da CONFIRM PLAN | `GameMenuOverlay::buildPitStrategyMenu` + `onPitServiceRequested` | ✅ |
+| Mapper menu → `PitRepairInput` | `PitStrategyBridge.h` (4° argomento: hook della richiesta) | ✅ |
+| Stato del piano sul loop | `SimulationLoop::m_pitStrategy` + accessor `pitStrategy()` | ✅ |
+| Motore riparazione | `PitLaneRepair.h` | ✅ |
+| Servizio effettivo | `SimulationLoop_Pit.cpp` — `updatePitRepair()`, chiamata da `tick()` a 1 kHz | ✅ |
+| Test "in box" | footprint 8 m attorno al box bound da `placePlayerForSession()` | ✅ |
+| Carburante nel veicolo | `VehicleSimulator::setFuelL()` (serbatoio + massa) — segue il rifornimento mentre gira | ✅ |
+| Riparazioni | solo sui job confermati (`PitLaneRepair::completeJob`), niente riparazione totale implicita | ✅ |
+| Stop-Go | `onPenalty(kind == 2)` imposta `m_requestPitService` (stesso flag, stesso gate) | ✅ |
+| Gate umano (tempi, HUD, esperienza) | — | ⬜ |
 
-### Cosa manca
+### Cosa è mancato davvero (perché la checklist sembrava quasi pronta)
 
-1. **`SimulatorApp.cpp` non cablare `wirePitStrategyMenu` / `onPitStrategyConfirmRequested`.**
-   - Car, track, team e upgrade sono cablati (~righe 558–588).
-   - Pit strategy confirm **non** compare in quel blocco.
+`SimulationLoop_FeatureMethods.cpp` — da cui proveniva l'analisi precedente —
+**non è compiles da nessun target** (non è in
+`cmake/CMakeLists_ksimulator_QtFree.cmake`) e non compilerebbe nemmeno:
+referenzia `m_garageExit`, `m_pitQueue`, `m_pitCollision`, `m_garageLayout`,
+`m_damage`, membri assenti da `SimulationLoop.h`. Il 2.7 quindi non era
+"quasi cablato": il piano finiva in uno stato che nessuno leggeva. Le due
+definizioni duplicate (`startFeatureServices`, `updatePitRepair`) sono state
+rimosse da quel file con una nota che rimanda ai TU compilati.
 
-2. **`updatePitRepair` ignora il piano del giocatore** (`SimulationLoop_FeatureMethods.cpp` ~336–360):
+### Rimane aperto (fuori dal perimetro di questa patch)
 
-```cpp
-in.targetFuelL = 100.f;
-in.wantTyres = true; in.wantBody = true; in.wantSuspension = true; in.wantAero = true;
-in.requestService = m_requestPitService && in.inGarageBox;
-```
-
-   I valori sono hardcoded; non leggono uno `PitStrategyState` persistito.
-
-3. **Richiesta esplicita di servizio** distinta da “CONFIRM PLAN”.
-   - La roadmap e `PitStrategyBridge` dicono: il piano da solo non accoda nulla.
-   - Serve un’azione giocatore (tasto / riga menu) che setti `m_requestPitService = true`
-     quando l’auto è in box (oltre al path Stop-Go già presente).
-
-4. **HUD fuel/danni post-servizio** — verificare che `syncUiFromVehicle` / damage HUD
-   riflettano `out.completedThisFrame` (repair + fuel). Se già leggono lo stato veicolo,
-   basta far aggiornare fuel/damage in `updatePitRepair` (repairPartial c’è già).
-
-### Patch consigliata (ordine)
-
-**A. Stato del piano sul loop**
-
-- Aggiungere a `SimulationLoop` (header + cpp):
-  - `PitStrategyState m_pitStrategy;`
-  - `void requestPitService(bool on = true);` → setta `m_requestPitService`
-  - accessor `PitStrategyState& pitStrategy()`
-
-**B. `updatePitRepair`**
-
-```cpp
-applyStrategyToRepairInput(m_pitStrategy, in); // invece degli hardcode
-in.requestService = m_requestPitService && in.inGarageBox;
-// on complete: aggiornare fuel del veicolo se PitLaneRepair non lo fa già
-```
-
-**C. `SimulatorApp.cpp` (blocco menu, dopo upgrade)**
-
-```cpp
-#include "simulator/PitStrategyBridge.h"
-
-static ks::sim::PitStrategyState g_pitStrategy; // oppure stato sul loop
-
-ks::sim::wirePitStrategyMenu(*uiMenu, g_simulation->pitStrategy(),
-    []{ /* opzionale: log */ });
-
-// Se il menu ha una riga "REQUEST SERVICE":
-// uiMenu->onRequestPitService = []{ g_simulation->requestPitService(true); };
-```
-
-(Se preferisci lo stato solo sul loop, fai `wirePitStrategyMenu` scrivere su
-`g_simulation->pitStrategy()`.)
-
-**D. Header sync**
-
-`SimulationLoop_FeatureMethods.cpp` usa già `m_requestPitService`, `m_pitRepair`,
-`m_garageExit`, `m_damage`, … ma **`SimulationLoop.h` su master non dichiara
-questi membri** (verificato 2026-10-08). Prima di ogni patch 2.7, allineare
-l’header ai membri effettivamente usati dai `.cpp` / verificare che la build
-Windows li veda (macro, include multipli, branch locale).
-
-### Criterio di accettazione 2.7
-
-1. Apri PIT STRATEGY → imposta fuel 40 L, solo tyres+body → CONFIRM PLAN.
-2. Entra in box, fermo → REQUEST SERVICE (o equivalente).
-3. Log: job avviati con i soli flag confermati; tempi realistici.
-4. A fine servizio: HUD danni/fuel aggiornati; `m_requestPitService` false.
+- **Uscita/rientro garage**: `GarageExit.h` ha la macchina a stati completa
+  ma il loop compilato non la guida ancora (nessuna richiesta di uscita, nessun
+  pit limiter, nessun ritorno in box guidato). Conseguenza: il servizio si
+  richiede fermando la vettura nel proprio box, non c'è ancora il flusso
+  "entro in p box dall'esterno → mi viene chiesto il servizio".
+- **Cambio pneumatici**: `PitLaneRepair` segnala `tyresChanged` ma non azzera
+  l'usura del modello pneumatici (API dedicata da collegare).
+- **Capacità serbatoio reale**: `in.fuelCapacityL` è ancora la costante 100 L.
+- **HUD dedicato**: lo stato è esposto (`pitServiceStatus()`, `pitServiceBusy()`)
+  e compare nei log; non c'è ancora una riga nel dashboard.
+- **Capacità/durata**: gate umano su tempi realistici.
 
 ---
 
@@ -139,16 +97,17 @@ niente overlay duplicati per risultati/pit/garage. Verificare che
 
 ---
 
-## Nota strutturale (build)
+## Nota strutturale (build) — aggiornata 2026-10-11
 
-`SimulationLoop_FeatureMethods.cpp` referenzia membri pit/garage non elencati in
-`src/simulator/SimulationLoop.h` del tree remoto. Prima di grandi patch:
+`SimulationLoop_FeatureMethods.cpp` **non fa parte di nessun target** e va
+trattato come documentazione, non come codice: le sue funzioni esistono nei
+TU compilati (`SimulationLoop.cpp`, `SimulationLoop_NetSync.cpp`,
+`SimulationLoop_Pit.cpp`). La lista sorgenti è in
+`cmake/CMakeLists_ksimulator_QtFree.cmake` e SimulatorServer la riusa.
 
-```text
-1. Compilare su Windows il path Qt-free.
-2. Se fallisce per membri mancanti, allineare l'header ai .cpp.
-3. Solo dopo applicare la patch 2.7 sopra.
-```
+Regola operativa: **prima** di scrivere una funzione di `SimulationLoop`,
+verificare che il `.cpp` che la contiene sia elencato lì; se un file non è
+compilato, non usare i suoi membri come "requisiti dell'header".
 
 ---
 

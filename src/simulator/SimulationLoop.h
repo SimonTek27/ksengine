@@ -21,6 +21,9 @@
 #include "CarStateSync.h"
 #include "CarStateSyncBridge.h"
 #include "TeamSessionBridge.h" // roadmap 2.8: team.ini roster -> session field
+#include "PitStrategyBridge.h"  // roadmap 2.7: menu pit plan -> PitRepairInput
+                             // (pulls in PitLaneRepair.h -> GarageExit.h /
+                             // GarageSpawn.h, all self-contained)
 
 #include <memory>
 #include <chrono>
@@ -172,6 +175,24 @@ public:
     // Starts discovery + the external control API and wires the FeatureHub
     // callbacks back into this loop (see SimulationLoop.cpp).
     void startFeatureServices(bool hostAnnounce = false);
+
+    // Roadmap 2.7: pit strategy + explicit box-service request. The plan
+    // itself queues nothing (see PitStrategyBridge.h): requestPitService is
+    // the player's "I am in the box, do the confirmed work now" signal,
+    // gated on stationary-in-pit by updatePitRepair.
+    void requestPitService(bool on = true) { m_requestPitService = on; }
+    PitStrategyState& pitStrategy() { return m_pitStrategy; }
+    /**
+     * Roadmap 2.7: box service (SimulationLoop_Pit.cpp). Called from tick()
+     * at the physics rate; a plan alone queues nothing, the service only
+     * starts on requestPitService() while the car is stopped inside its box.
+     */
+    void updatePitRepair(float dt);
+    /** Last PitLaneRepair status ("READY FOR SERVICE", "FUEL 62%", …) for HUD/log. */
+    const char* pitServiceStatus() const { return m_pitStatus.c_str(); }
+    bool pitServiceBusy() const { return m_pitRepair.isBusy(); }
+    /** Box the player's service is bound to (roadmap 2.7 in-box test). */
+    void bindPlayerBox(const WorldPose& box) { m_playerBox = box; m_hasPlayerBox = true; }
     // FeatureHub pump (discovery, control API, track limits, weather).
     // withSession=false freezes track limits - used while the world is
     // paused or the session has not started yet.
@@ -411,6 +432,18 @@ private:
     uint32_t m_ownNetCarId = kNoNetCarId;
 
     int m_mpServerClients = -1;
+
+    // Roadmap 2.7: pit strategy + box-service state. updatePitRepair() lives
+    // in SimulationLoop_Pit.cpp (compiled); it reads the plan, gates the
+    // service on the car being stopped inside m_playerBox and feeds
+    // PitLaneRepair, which is self-contained.
+    PitStrategyState m_pitStrategy;
+    bool m_requestPitService = false;
+    PitLaneRepair m_pitRepair;
+    WorldPose m_playerBox{};     // garage box the service is bound to
+    bool m_hasPlayerBox = false; // false until placePlayerForSession binds it
+    float m_pitBoxRadiusM = 8.f; // "inside the box" footprint
+    std::string m_pitStatus;     // last PitLaneRepair status text
 };
 
 } // namespace ks::sim

@@ -1,5 +1,5 @@
 /**
- * SimulationLoop.cpp — std-only / Qt-free
+ * SimulationLoop.cpp — std-only
  * 1 kHz physics + LapSectorTimer + SM + UDP + TCP telemetry
  */
 
@@ -38,6 +38,7 @@
 
 #include "adapters/assetto_corsa/AcSharedMemoryPublisher.h"
 #include "adapters/assetto_corsa/AcSurfacesLoader.h"
+#include "adapters/assetto_corsa/TrackDataJsonLoader.h"
 
 #include <algorithm>
 #include <cctype>
@@ -314,9 +315,24 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
     // AI racing line (roadmap 3.5): load it at track-load time so the grid
     // can be spawned when the session starts. No file = spawnGrid is a no-op.
     if (m_multiCar) m_multiCar->loadAiSpline(trackDirectory);
-    fs::path surf = fs::path(trackDirectory) / "data" / "surfaces.ini";
-    if (!fs::exists(surf)) surf = fs::path(trackDirectory) / "surfaces.ini";
-    if (fs::exists(surf)) { ks::ac::AcSurfacesLoader loader; loader.load(surf.string()); }
+    // Native JSON manifest (data/data.json) preferred; surfaces.ini remains
+    // the AC compatibility path when JSON is absent or fails to parse.
+    {
+        ks::ac::TrackDataJsonLoader trackJson;
+        if (trackJson.loadForTrackDir(trackDirectory)) {
+            if (!trackJson.meta().name.empty())
+                m_trackData.name = trackJson.meta().name;
+            if (trackJson.meta().lengthM > 1.f)
+                m_trackData.splineLength = trackJson.meta().lengthM;
+        } else {
+            fs::path surf = fs::path(trackDirectory) / "data" / "surfaces.ini";
+            if (!fs::exists(surf)) surf = fs::path(trackDirectory) / "surfaces.ini";
+            if (fs::exists(surf)) {
+                ks::ac::AcSurfacesLoader loader;
+                loader.load(surf.string());
+            }
+        }
+    }
     ks::physics::TrackSurface::instance().syncFromWeather(m_weather.trackWetness, m_weather.trackTemp);
     std::string kn5;
     for (auto& e : fs::directory_iterator(trackDirectory))
@@ -596,6 +612,14 @@ void SimulationLoop::placePlayerForSession() {
                      ? "garage box"
                      : GarageSpawnPolicy::locationForSession(st) == SpawnLocation::Grid
                            ? "grid" : "line");
+    // Roadmap 2.7: remember where the player's box is, so updatePitRepair()
+    // knows what "stopped inside the box" means later in the session. Bound
+    // to the garage row (not to the spawn pose): a car that starts on the
+    // grid can still drive back to its own box for service.
+    if (const GarageBox* pb = assigned.find(req.garageIndex))
+        bindPlayerBox(pb->pose);
+    else if (!assigned.boxes.empty())
+        bindPlayerBox(assigned.boxes.front().pose);
 #endif
 }
 
@@ -790,6 +814,9 @@ void SimulationLoop::startFeatureServices(bool hostAnnounce) {
         if (kind == 1) ty = Penalty::Type::DriveThrough;
         else if (kind == 2) ty = Penalty::Type::StopGo;
         m_raceSession.addPenalty(car, ty, value, reason);
+        // Roadmap 2.7: a stop-go is served by the same box service the player
+        // requests manually — same flag, same gate (stopped inside the box).
+        if (kind == 2) m_requestPitService = true;
         std::fprintf(stderr, "SimulationLoop: penalty car %d (%s)\n", car,
                      reason.c_str());
     };
@@ -1740,6 +1767,10 @@ void SimulationLoop::tick() {
 #if HAS_VEHICLE_SIM
         if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
 #endif
+        // Roadmap 2.7: box service at the physics rate, so the control hold
+        // (PitLaneRepair::holdCar) wins over the driver's next input instead
+        // of being overwritten by applyInput() in the same step.
+        updatePitRepair(static_cast<float>(m_physicsDt));
         // AI cars freeze on the grid during the countdown and race once it
         // is over; physics runs at the same fixed 1 kHz as the player's.
         if (m_multiCar && !m_raceSession.isCountingDown())
