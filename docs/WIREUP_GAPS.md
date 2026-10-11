@@ -24,6 +24,7 @@ Obiettivo: non riscrivere modelli già presenti; chiudere i collegamenti mancant
 |-------|------|-------|
 | UI piano pit (fuel, tyres, body, susp, aero, engine) | `GameMenuOverlay` — `MenuState::PitStrategy` | ✅ |
 | Riga **REQUEST SERVICE** distinta da CONFIRM PLAN | `GameMenuOverlay::buildPitStrategyMenu` + `onPitServiceRequested` | ✅ |
+| Uscita/rientro box | `updateGarageExit()` + righe **LEAVE GARAGE** / **RETURN TO BOX** nel menu GARAGE, tasto `P` | ✅ |
 | Mapper menu → `PitRepairInput` | `PitStrategyBridge.h` (4° argomento: hook della richiesta) | ✅ |
 | Stato del piano sul loop | `SimulationLoop::m_pitStrategy` + accessor `pitStrategy()` | ✅ |
 | Motore riparazione | `PitLaneRepair.h` | ✅ |
@@ -47,17 +48,17 @@ rimosse da quel file con una nota che rimanda ai TU compilati.
 
 ### Rimane aperto (fuori dal perimetro di questa patch)
 
-- **Uscita/rientro garage**: `GarageExit.h` ha la macchina a stati completa
-  ma il loop compilato non la guida ancora (nessuna richiesta di uscita, nessun
-  pit limiter, nessun ritorno in box guidato). Conseguenza: il servizio si
-  richiede fermando la vettura nel proprio box, non c'è ancora il flusso
-  "entro in p box dall'esterno → mi viene chiesto il servizio".
+- **Coda box multi-auto**: `PitLaneQueue.h` non è cablata, quindi `pathBlocked`
+  è sempre false e BoxClear non aspetta altri veicoli.
+- **Finestra box in gara**: `pitLaneOpen` è sempre true; va presa da
+  `RaceSessionManager`.
 - **Cambio pneumatici**: `PitLaneRepair` segnala `tyresChanged` ma non azzera
   l'usura del modello pneumatici (API dedicata da collegare).
 - **Capacità serbatoio reale**: `in.fuelCapacityL` è ancora la costante 100 L.
-- **HUD dedicato**: lo stato è esposto (`pitServiceStatus()`, `pitServiceBusy()`)
-  e compare nei log; non c'è ancora una riga nel dashboard.
-- **Capacità/durata**: gate umano su tempi realistici.
+- **HUD dedicato**: lo stato è esposto (`pitServiceStatus()`,
+  `pitServiceBusy()`, `garageStatus()`) e compare nei log; non c'è ancora una
+  riga nel dashboard.
+- **Gate umano**: tempi realistici, esperienza di box, FFB/audio reali.
 
 ---
 

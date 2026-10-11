@@ -193,6 +193,26 @@ public:
     bool pitServiceBusy() const { return m_pitRepair.isBusy(); }
     /** Box the player's service is bound to (roadmap 2.7 in-box test). */
     void bindPlayerBox(const WorldPose& box) { m_playerBox = box; m_hasPlayerBox = true; }
+
+    // Roadmap 2.7 — garage exit / pit entry: the GarageExit.h state machine
+    // (InGarage → Preparing → … → OnTrack, and back) driven from
+    // SimulationLoop_Pit.cpp. The player leaves with requestLeaveGarage()
+    // (menu row or the P key) and comes back by driving slowly into the box,
+    // which is what arms the box service.
+    void requestLeaveGarage(bool on = true) { m_requestLeaveGarage = on; }
+    void requestReturnToBox(bool on = true) { m_requestReturnBox = on; }
+    void updateGarageExit(float dt);
+    GarageExitPhase garagePhase() const { return m_garageExit.phase(); }
+    /** True while the loop keeps the car in its garage box (held or blocked). */
+    bool isHeldInGarage() const {
+        const GarageExitPhase p = m_garageExit.phase();
+        return m_garageExitEnabled &&
+               (p == GarageExitPhase::InGarage || p == GarageExitPhase::Preparing ||
+                p == GarageExitPhase::EngineStart || p == GarageExitPhase::BoxClear ||
+                p == GarageExitPhase::Blocked);
+    }
+    /** Last GarageExit status ("IN GARAGE", "PIT LIMIT", …) for HUD/log. */
+    const char* garageStatus() const { return m_garageStatus.c_str(); }
     // FeatureHub pump (discovery, control API, track limits, weather).
     // withSession=false freezes track limits - used while the world is
     // paused or the session has not started yet.
@@ -444,6 +464,15 @@ private:
     bool m_hasPlayerBox = false; // false until placePlayerForSession binds it
     float m_pitBoxRadiusM = 8.f; // "inside the box" footprint
     std::string m_pitStatus;     // last PitLaneRepair status text
+
+    // Roadmap 2.7 — garage exit / pit entry (GarageExit.h). Enabled only for
+    // sessions that spawn in a garage box: a race grid start calls
+    // forceOnTrack() and stays exactly as free as before.
+    GarageExitController m_garageExit;
+    bool m_garageExitEnabled = false;
+    bool m_requestLeaveGarage = false;
+    bool m_requestReturnBox = false;
+    std::string m_garageStatus;
 };
 
 } // namespace ks::sim

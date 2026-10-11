@@ -222,6 +222,13 @@ static void handleKeyDown(int vk) {
     case 'T':
         if (g_simulation->telemetry()) g_simulation->telemetry()->toggleVisible();
         break;
+    case 'P':
+        // Roadmap 2.7: smart garage/pit toggle. Held in the box -> roll out
+        // (pit limiter); on track -> head back to the box, where stopping
+        // inside arms the box service. Elsewhere it is a no-op.
+        if (g_simulation->isHeldInGarage()) g_simulation->requestLeaveGarage();
+        else g_simulation->requestReturnToBox();
+        break;
     case VK_F5:
         if (shift) { g_simulation->stop(); printf("Stopped.\n"); }
         else       { g_simulation->start(); printf("Driving started!\n"); }
@@ -720,6 +727,14 @@ static void initSimulation() {
     // stationary in the box — the plan alone queues nothing.
     ks::sim::wirePitStrategyMenu(*uiMenu, g_simulation->pitStrategy(), {},
         [sim = g_simulation.get()]() { sim->requestPitService(true); });
+    // Roadmap 2.7: garage exit / pit entry — the same two intents as the P
+    // key, exposed as GARAGE menu rows.
+    uiMenu->onLeaveGarageRequested = [sim = g_simulation.get()]() {
+        sim->requestLeaveGarage();
+    };
+    uiMenu->onReturnToBoxRequested = [sim = g_simulation.get()]() {
+        sim->requestReturnToBox();
+    };
     uiMenu->onToggleFullscreenRequested = []() {
         SendMessageW(g_hWnd, WM_KEYDOWN, VK_F11, 0);
     };

@@ -620,6 +620,23 @@ void SimulationLoop::placePlayerForSession() {
         bindPlayerBox(pb->pose);
     else if (!assigned.boxes.empty())
         bindPlayerBox(assigned.boxes.front().pose);
+
+    // Roadmap 2.7: bind the garage-exit state machine to the same box. A
+    // session that spawns in the garage starts held there (leave on request,
+    // pit limiter on the way out); a grid/track start is forced OnTrack and
+    // behaves exactly as before — the machine only adds the way back in.
+    if (m_hasPlayerBox) {
+        m_garageExit.bindBox(req.garageIndex, m_playerBox, assigned.pitLaneHeading);
+        m_garageExitEnabled = true;
+        if (GarageSpawnPolicy::locationForSession(st) != SpawnLocation::Garage)
+            m_garageExit.forceOnTrack();
+        else
+            std::fprintf(stderr,
+                         "SimulationLoop: IN GARAGE — press P (or LEAVE GARAGE "
+                         "in the GARAGE menu) to leave the box\n");
+    } else {
+        m_garageExitEnabled = false;
+    }
 #endif
 }
 
@@ -1764,6 +1781,10 @@ void SimulationLoop::tick() {
             m_raceSession.isActive() ? m_raceSession.aiSpeedFactor() : 0.0f);
     while (!paused && m_simAccumulator >= m_physicsDt) {
         applyInput();
+        // Roadmap 2.7: garage exit / pit entry runs before the physics step
+        // so its hold, snap and pit limiter win over the raw driver input
+        // for this step (updatePitRepair runs after it, on the same phase).
+        updateGarageExit(static_cast<float>(m_physicsDt));
 #if HAS_VEHICLE_SIM
         if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
 #endif

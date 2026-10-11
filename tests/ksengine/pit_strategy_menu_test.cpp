@@ -13,7 +13,9 @@
  *    gated on box position in updatePitRepair();
  *  - roadmap 2.7: the screen has a REQUEST SERVICE row separate from
  *    CONFIRM PLAN, the bridge reports it through its own hook, and the plan
- *    only ever queues the confirmed jobs (tyres/refuel on an undamaged car).
+ *    only ever queues the confirmed jobs (tyres/refuel on an undamaged car);
+ *  - roadmap 2.7: GARAGE also carries the LEAVE GARAGE / RETURN TO BOX rows
+ *    that report the garage-exit intents to the loop.
  *
  * Compiles the GameMenuOverlay TU directly (menu_session_gate_test pattern).
  */
@@ -64,6 +66,45 @@ int main() {
             KS_CHECK(garage[1].text == "PIT STRATEGY");
             KS_CHECK(garage[1].description == "Fuel, tyres and repair plan for next stop");
         }
+    }
+
+    // --- GARAGE: garage-exit rows (roadmap 2.7) -----------------------------
+    // Both intents are reported to the loop, which decides whether they apply
+    // (held in the box / on track); the row closes the menu either way.
+    {
+        GameMenuOverlay menu3;
+        menu3.setVisible(true);
+        KS_CHECK(menu3.handleKeyPress(0x28)); // MAIN: DOWN
+        KS_CHECK(menu3.handleKeyPress(0x28)); // DOWN -> GARAGE
+        KS_CHECK(menu3.handleKeyPress(0x0D)); // ENTER
+        KS_CHECK(menu3.state() == MenuState::Garage);
+        int leave = 0, ret = 0;
+        menu3.onLeaveGarageRequested = [&]() { ++leave; };
+        menu3.onReturnToBoxRequested = [&]() { ++ret; };
+        {
+            const std::vector<MenuItem> g = menu3.items();
+            KS_CHECK(g.size() >= 5);
+            if (g.size() >= 5) {
+                KS_CHECK(g[2].text == "LEAVE GARAGE");
+                KS_CHECK(g[2].description == "Roll out to the pit lane (pit limit)");
+                KS_CHECK(g[3].text == "RETURN TO BOX");
+            }
+        }
+        KS_CHECK(menu3.handleKeyPress(0x28)); // SETUP -> PIT STRATEGY
+        KS_CHECK(menu3.handleKeyPress(0x28)); // -> LEAVE GARAGE
+        KS_CHECK(menu3.handleKeyPress(0x0D));
+        KS_CHECK(leave == 1);
+        KS_CHECK(ret == 0);
+        KS_CHECK(menu3.state() == MenuState::Main); // the row leaves the menu
+        KS_CHECK(menu3.handleKeyPress(0x28)); // MAIN: DOWN
+        KS_CHECK(menu3.handleKeyPress(0x28)); // DOWN -> GARAGE
+        KS_CHECK(menu3.handleKeyPress(0x0D)); // ENTER
+        KS_CHECK(menu3.handleKeyPress(0x28)); // PIT STRATEGY
+        KS_CHECK(menu3.handleKeyPress(0x28)); // LEAVE GARAGE
+        KS_CHECK(menu3.handleKeyPress(0x28)); // RETURN TO BOX
+        KS_CHECK(menu3.handleKeyPress(0x0D));
+        KS_CHECK(ret == 1);
+        KS_CHECK(leave == 1); // the other intent was not fired too
     }
 
     int opened = 0;

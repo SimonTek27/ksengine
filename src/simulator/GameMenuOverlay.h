@@ -154,6 +154,9 @@ public:
     // "do it now, I am stopped in the box" intent (SimulationLoop gates it).
     std::function<void()> onPitServiceRequested;
     std::function<void()> onOpenPitStrategyRequested;
+    // Roadmap 2.7: garage exit / pit entry (GarageExit.h driven by the loop).
+    std::function<void()> onLeaveGarageRequested;
+    std::function<void()> onReturnToBoxRequested;
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;
     // Roadmap 1.3: content select screens scan content/cars and

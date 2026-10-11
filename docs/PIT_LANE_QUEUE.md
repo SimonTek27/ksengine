@@ -1,5 +1,10 @@
 # Pit lane queue
 
+> **Stato integrazione (2026-10-11): NON cablata.** `GarageExit.h` è guidato
+> dal loop (`SimulationLoop_Pit.cpp`), ma `PitLaneQueue.h` no: `pathBlocked`
+> è sempre false, quindi l'uscita in corsia non aspetta altre auto. Da
+> cablare insieme a più veicoli in box (priorità e spaziamento qui sotto).
+
 ## Roles
 
 | Role | Meaning |

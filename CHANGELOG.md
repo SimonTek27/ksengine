@@ -32,6 +32,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   di AC — nome e lunghezza pista — che `loadTrackFolder()` preferisce a
   `surfaces.ini`, il quale resta il path di compatibilità (l'include era già
   nel working tree ma l'header non esisteva: la build non compilava).
+- **Roadmap 2.7 — uscita/rientro garage guidato** (`SimulationLoop_Pit.cpp::
+  updateGarageExit`, `GarageExit.h`): `placePlayerForSession()` lega la
+  macchina a stati allo stesso box del servizio. Una sessione che nasce in
+  garage (pratica/qualifica) parte ferma lì (**IN GARAGE**, auto agganciata
+  al box, controlli morti) e si parte con **P** (o le righe **LEAVE GARAGE** /
+  **RETURN TO BOX** del menu GARAGE): Preparing → EngineStart → BoxClear →
+  RollingOut → PitLane → TrackEntry → OnTrack, con **pit limiter** attivo
+  finché si è in corsia (`applyPitLimiter`, taglio freno sopra il limite).
+  Rientrare non richiede alcun tasto: entrare lentamente (<1,5 m/s) nel
+  proprio box è la richiesta di rientro, e da lì parte il servizio 2.7.
+  Una partenza dalla griglia (gara) chiama `forceOnTrack()` e resta esattamente
+  libera di prima. Esposizione: `requestLeaveGarage()`, `requestReturnToBox()`,
+  `isHeldInGarage()`, `garagePhase()`, `garageStatus()`.
 
 - **Layout `system/cfg/` + cartella per-giocatore `user/<player>/`** (Fase 3;
   `cmake/KsInstallLayout.cmake`, `src/engine/Config/Json.h`,

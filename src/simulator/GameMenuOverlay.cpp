@@ -188,6 +188,19 @@ void GameMenuOverlay::buildGarageMenu()
             if (onOpenPitStrategyRequested) onOpenPitStrategyRequested();
             switchMenu(MenuState::PitStrategy);
         } });
+    // Roadmap 2.7: leaving and re-entering the box are menu actions too (the
+    // P key does the same smart toggle while driving). The loop decides
+    // whether either applies — on track / already out they are no-ops.
+    m_items.push_back({ "LEAVE GARAGE", "Roll out to the pit lane (pit limit)",
+        [this]() {
+            if (onLeaveGarageRequested) onLeaveGarageRequested();
+            goBack();
+        } });
+    m_items.push_back({ "RETURN TO BOX", "Drive back in slowly to stop for service",
+        [this]() {
+            if (onReturnToBoxRequested) onReturnToBoxRequested();
+            goBack();
+        } });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 

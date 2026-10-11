@@ -61,12 +61,15 @@ veicolo. Dettaglio in `docs/WIREUP_GAPS.md` (sezione 2.7 aggiornata).
 - [x] `SimulatorApp.cpp`: cablato `wirePitStrategyMenu` (+ hook REQUEST SERVICE)
 - [x] Azione giocatore **REQUEST SERVICE** distinta da CONFIRM PLAN
 - [x] Fuel aggiornato sul veicolo durante il rifornimento (`setFuelL`)
+- [x] Uscita/rientro box: `updateGarageExit()` guidato dal loop, tasto `P` +
+      righe **LEAVE GARAGE** / **RETURN TO BOX**, pit limiter in corsia
 - [x] `SimulationLoop_FeatureMethods.cpp`: rimosse le duplicazioni non compilate
-- [x] Test: `pit_strategy_menu_test` copre riga, hook, job confermati, servizio completo
-- [ ] Gate umano: tempi realistici, HUD, esperienza di box
+- [x] Test: `pit_strategy_menu_test` copre riga, hook, job confermati, servizio completo, righe garage
+- [ ] Gate umano: tempi realistici, HUD, esperienza di box (uscita → corsia → rientro → servizio)
 
-Restano fuori da questa patch (vedi WIREUP_GAPS): uscita/rientro garage guidata
-da `GarageExit.h`, cambio gomme applicato al modello, capacità serbatoio reale.
+Restano fuori da questa patch (vedi WIREUP_GAPS): coda box multi-auto
+(`PitLaneQueue`), finestra box in gara, cambio gomme applicato al modello,
+capacità serbatoio reale.
 
 **Criterio di accettazione 2.7**
 
@@ -184,6 +187,13 @@ cmake --build --preset default
 **Requisiti:** Windows 10/11 x64 · CMake 3.16+ · Vulkan SDK  
 Qt solo per ksEditor.
 
+> **Nota build:** `SimulatorApp` e `SimulatorServer` fanno entrambi lo staging
+> di `system/shaders` nella stessa cartella di output; con `--build -j` ad alta
+> concorrenza possono scontrarsi (`MSB3073` su `cmake -E copy_directory`).
+> Non è un errore di compilazione: rilanciare il target singolo con `-j 1`
+> (o buildare i due target in sequenza) risolve. Da sistemare in
+> `cmake/KsInstallLayout.cmake`.
+
 ---
 
 ## Documenti correlati
@@ -197,6 +207,7 @@ Qt solo per ksEditor.
 
 ---
 
-*Prossimo passo più utile: (1) gate umani su Windows, (2) **2.10** menu coerente  
-(dopo 2.7 cablato il 11/10), (3) uscita/rientro garage guidata da `GarageExit.h`.  
+*Prossimo passo più utile: (1) gate umani su Windows — inclusa la nuova
+sequenza box (P per uscire, rientro lento nel box, REQUEST SERVICE),
+(2) **2.10** menu coerente, (3) coda box multi-auto `PitLaneQueue`.  
 Aggiornare stato e data a ogni gate superato; non cambiare stato senza test o misura.*

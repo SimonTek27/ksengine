@@ -1,5 +1,15 @@
 # Garage exit — detailed logic
 
+> **Stato integrazione (2026-10-11): CABLATO** nel loop compilato.
+> `SimulationLoop_Pit.cpp::updateGarageExit()` (chiamata da `tick()` prima
+> della fisica) guida `GarageExitController` sullo stesso box del servizio in
+> box: partenza in garage = tenuta finché il giocatore non chiede di uscire
+> (`P` o riga **LEAVE GARAGE** del menu GARAGE), rientro = entrare lentamente
+> nel proprio box. La coda box multi-auto (`PitLaneQueue.h`) **non** è ancora
+> cablata: `pathBlocked` resta false, quindi BoxClear non aspetta nessuno.
+> Il limiter di corsia usa `pitLaneOpen = true` sempre: la finestra box in
+> gara va presa da `RaceSessionManager`.
+
 ## State machine
 
 ```text
