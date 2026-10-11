@@ -55,9 +55,10 @@ rimosse da quel file con una nota che rimanda ai TU compilati.
 - **Cambio pneumatici**: `PitLaneRepair` segnala `tyresChanged` ma non azzera
   l'usura del modello pneumatici (API dedicata da collegare).
 - **Capacità serbatoio reale**: `in.fuelCapacityL` è ancora la costante 100 L.
-- **HUD dedicato**: lo stato è esposto (`pitServiceStatus()`,
-  `pitServiceBusy()`, `garageStatus()`) e compare nei log; non c'è ancora una
-  riga nel dashboard.
+- **HUD dedicato**: ~~lo stato è esposto e compare nei log; non c'è ancora una
+  riga nel dashboard~~ → **chiuso da 2.10 (11/10)**: il race HUD ha una riga
+  di stato (`RaceHudSample::statusText`) alimentata da `pitServiceStatus()` /
+  `garageStatus()`.
 - **Gate umano**: tempi realistici, esperienza di box, FFB/audio reali.
 
 ---
@@ -92,9 +93,20 @@ rimosse da quel file con una nota che rimanda ai TU compilati.
 
 ## 2.10 — Menu coerente
 
-Dopo 2.7: una sola fonte di verità per sessione (FeatureHub / RaceSessionManager),
-niente overlay duplicati per risultati/pit/garage. Verificare che
-`onShowResultsRequested` e lo stato pit non aprano path paralleli inconsistenti.
+**Fatto (2026-10-11)** — i tre path paralleli trovati:
+
+| Trovato | Rimedio |
+|---------|---------|
+| `RaceHudSample` / `DashboardOverlay` mostravano **posizione 1/1 hardcodata** mentre le classifiche vivevano in `RaceSessionManager::standings()` | `syncUiFromVehicle()` legge `RaceSessionManager::playerStanding()` + `standings().size()` (stessa sorgente di RESULTS e control API) |
+| Stato pit/garage esposto (`pitServiceStatus()`, `garageStatus()`) ma **non mostrato da nessuna parte** | Una sola riga di stato nel race HUD (`RaceHudSample::statusText`, allineata a destra nella top bar; priorità al servizio in corso) |
+| `src/simulator/ui/PitLaneOverlay.h`: **secondo** overlay pit, non compilato e non usato, con tempi e semantica propri | Rimosso; `docs/PIT_LANE_UI.md` resta come design con nota |
+
+Risultati e multiplayer avevano già un solo path (`onShowResultsRequested` →
+`raceSession().standings()` → `GameMenuOverlay::showResults`). La mappa di
+proprietà dello stato è in `docs/ARCHITECTURE.md` § 5.3.1.
+
+**Resta aperto**: la verifica manuale dei path menu dopo il fix 2.7 (gate
+umano) e i tempi/gate dell'esperienza di box.
 
 ---
 

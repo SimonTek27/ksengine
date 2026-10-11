@@ -56,7 +56,8 @@ Toggle: `T` cycles Compact → Race → Engineer → off (or hold for engineer).
 | speed, rpm, gear, inputs | VehicleSimulator |
 | lap / sector / best | LapSectorTimer |
 | fuel, tyre temp/wear | physics systems |
-| position | session / multiplayer |
+| position, field size | `RaceSessionManager::standings()` / `playerStanding()` (roadmap 2.10) |
+| status (pit service / garage) | `SimulationLoop::pitServiceStatus()` / `garageStatus()` → `RaceHudSample::statusText` |
 | history buffers | rolling ring (N≈200) |
 
 ## Relation to other UI

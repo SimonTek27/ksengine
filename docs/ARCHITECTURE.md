@@ -201,6 +201,20 @@ RESULT
 
 Wiring: `GameMenuOverlay::onStartSessionRequested` → `SimulationLoop::beginSession` → race session start.
 
+### 5.3.1 Ownership map — chi possiede lo stato (roadmap 2.10)
+
+| Stato | Proprietario | Lettori |
+|-------|--------------|---------|
+| tipo/fase sessione, giri, tempo rimanente | `SimulationLoop` (`beginRaceSession`, `tick`) | control API, UDP/SM, callback menu |
+| classifiche, posizione, penalità, bandiere | `RaceSessionManager` | HUD (`playerStanding()`), RESULTS, control API |
+| modalità selezionata + parametri d'avvio | `FeatureHub` (`setSessionMode`, `onBeginSession`) | menu, server discovery |
+| stato live pit/garage | `SimulationLoop::pitServiceStatus()` / `garageStatus()` | race HUD (`RaceHudSample::statusText`), log |
+| *piano* pit (fuel, gomme, riparazioni) | `PitStrategyBridge` → `PitLaneRepair` | schermo pit, tick di servizio |
+
+Regola: overlay e renderer **non** tengono copie di stato sessione, leggono
+questi proprietari. `src/simulator/ui/PitLaneOverlay.h` è stato rimosso il
+2026-10-11 proprio per questo (seconda UI pit con tempi propri).
+
 ### 5.4 Garage & pit stack
 
 ```

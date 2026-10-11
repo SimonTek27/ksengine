@@ -232,6 +232,14 @@ int main()
                 leadOk = (s.position == 1 && s.currentLap == 1);
         KS_CHECK(leadOk);
     }
+    // Roadmap 2.10: playerStanding() is the one row the HUD, RESULTS and the
+    // control API all read for the player (carIndex 0 here, the loop sets it).
+    KS_CHECK(rsm.playerStanding() != nullptr);
+    if (const auto* ps = rsm.playerStanding()) {
+        KS_CHECK(ps->carIndex == 0);
+        KS_CHECK(ps->position == 2); // dropped behind car 1
+    }
+    KS_CHECK(rsm.standings().size() == 4); // the HUD total field size
 
     // Player telemetry must land on the carIndex-0 standing even though the
     // vector slot 0 now holds the reordered leader (regression for the
@@ -246,6 +254,7 @@ int main()
 
     rsm.updateCarProgress(0, 2, 50.0f); // player takes the lead back
     KS_CHECK(posSeen == 1);
+    if (const auto* ps = rsm.playerStanding()) KS_CHECK(ps->position == 1);
 
     // Inactive sessions ignore progress updates.
     rsm.endSession();

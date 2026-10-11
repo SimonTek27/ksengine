@@ -28,6 +28,11 @@ struct RaceHudSample {
     float damageOverall = 0.f, engineHealth = 1.f, powerMult = 1.f;
     int damageWarning = 0;
     bool engineSeized = false;
+    // Roadmap 2.10 — one line for the state the loop owns: pit service status
+    // ("REFUEL 60 L", "REPAIR 42%") or garage exit status ("IN GARAGE",
+    // "PIT LANE"). Empty = nothing to say. Filled by SimulationLoop only, so
+    // there is exactly one place that decides what the HUD reports.
+    char statusText[64] = {};
 };
 
 class RaceTelemetryHud {
@@ -87,6 +92,17 @@ private:
             std::snprintf(buf, sizeof(buf), "DMG %.0f%%", m_s.damageOverall * 100.f);
             text.draw(dl, 24.f, 48.f, buf, sty(Color::rgba(0.95f,0.3f,0.3f,0.95f), 1.1f, true));
         }
+        drawStatus(dl, text, w, sty, 1.15f);
+    }
+
+    template <typename StyFn>
+    void drawStatus(DrawList& dl, TextRenderer& text, int w, StyFn sty, float scale) {
+        if (!m_s.statusText[0]) return;
+        // Right-aligned in the top bar: whatever the loop has to say (pit
+        // service or garage exit) lands in one predictable place.
+        const float sw = text.measureWidth(m_s.statusText, scale);
+        text.draw(dl, (float)w - 24.f - sw, 18.f, m_s.statusText,
+                  sty(Color::rgba(1.f, 0.85f, 0.3f, 0.95f), scale));
     }
 
     template <typename StyFn>
@@ -98,6 +114,7 @@ private:
         if (m_s.totalLaps > 0) std::snprintf(buf, sizeof(buf), "LAP %d/%d", m_s.lap, m_s.totalLaps);
         else std::snprintf(buf, sizeof(buf), "LAP %d", m_s.lap);
         text.draw(dl, (float)w * 0.5f - 50.f, 18.f, buf, sty(Color::rgba(0.9f,0.9f,0.92f,0.95f), 1.25f));
+        drawStatus(dl, text, w, sty, 1.25f);
         const float cx = (float)w * 0.5f, cy = (float)h - 150.f;
         std::snprintf(buf, sizeof(buf), "%d", (int)(m_s.speedMs * 3.6f + 0.5f));
         text.draw(dl, cx - 48.f, cy, buf, sty(Color::rgba(1,1,1,0.98f), 2.4f, true));

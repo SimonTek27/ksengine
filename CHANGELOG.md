@@ -8,6 +8,24 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Roadmap 2.10 — stato sessione a fonte unica**:
+  - HUD e dashboard non mostrano più la posizione hardcodata 1/1: leggono
+    `RaceSessionManager::playerStanding()` + `standings().size()`, la stessa
+    sorgente di RESULTS e del control API (`SimulationLoop::syncUiFromVehicle`).
+  - Una sola riga di stato per pit/garage nel race HUD: `RaceHudSample::statusText`
+    (allineata a destra nella top bar di Race/Engineer/Compact), alimentata da
+    `pitServiceStatus()` / `garageStatus()` — il servizio in corso ha priorità
+    sull'etichetta di uscita garage.
+  - `RaceSessionManager::playerStanding()` (nuovo, const): la riga del giocatore
+    da cui HUD, RESULTS e API leggono tutti.
+
+### Removed
+- **`src/simulator/ui/PitLaneOverlay.h`**: secondo overlay pit, non compilato e
+  non usato, con tempi e semantica propri (`fuelLitres * 0.12f`, riparazioni
+  istantanee) in deriva rispetto a `PitLaneRepair` / `PitStrategyBridge`.
+  `docs/PIT_LANE_UI.md` resta come design, con nota.
+
 ### Added
 - **Roadmap 2.7 — servizio box end-to-end** (`src/simulator/SimulationLoop_Pit.cpp`,
   `GameMenuOverlay`, `PitStrategyBridge.h`, `VehicleSimulator::setFuelL`,

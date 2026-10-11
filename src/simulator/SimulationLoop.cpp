@@ -1168,17 +1168,33 @@ void SimulationLoop::syncUiFromVehicle() {
     if (!m_vehicle) return;
     const auto st = m_vehicle->getState();
     m_ui.telemetry().update(st.speed, m_vehicle->rpm(), st.throttle, st.brake, st.steering, 0.f, 0.f);
+    // Roadmap 2.10 — single source of truth for the session display: the
+    // player's row is read from RaceSessionManager (the same standings the
+    // RESULTS screen and the control API report) instead of a hard-coded 1/1.
+    const DriverStanding* ps = m_raceSession.playerStanding();
+    const int posNow = (ps && ps->position > 0) ? ps->position : 1;
+    const int carsNow = std::max(1, static_cast<int>(m_raceSession.standings().size()));
     m_ui.dashboard().update(st.speed, m_vehicle->rpm(), m_vehicle->currentGear(), st.throttle, st.brake,
-        m_lapTimer.completedLaps(), m_lapTimer.currentTimeMs() * 0.001f, m_lapTimer.bestTimeMs() * 0.001f, 0.f, 1, 1);
+        m_lapTimer.completedLaps(), m_lapTimer.currentTimeMs() * 0.001f, m_lapTimer.bestTimeMs() * 0.001f,
+        0.f, posNow, carsNow);
     ui::RaceHudSample s;
     s.speedMs = static_cast<float>(st.speed); s.rpm = static_cast<float>(m_vehicle->rpm()); s.maxRpm = 8500.f;
     s.gear = m_vehicle->currentGear(); s.throttle = static_cast<float>(st.throttle);
     s.brake = static_cast<float>(st.brake); s.steer = static_cast<float>(st.steering);
     s.latG = st.acceleration.x / 9.81f; s.lonG = st.acceleration.z / 9.81f; s.fuelL = static_cast<float>(st.fuel);
     for (int i = 0; i < 4; ++i) { s.tyreTemp[i] = static_cast<float>(st.tyreTemp[i]); s.tyreWear[i] = static_cast<float>(st.tyreWear[i]); }
-    s.position = 1; s.totalCars = 1; s.lap = m_lapTimer.completedLaps() + 1; s.totalLaps = m_totalLaps;
+    s.position = posNow; s.totalCars = carsNow; s.lap = m_lapTimer.completedLaps() + 1; s.totalLaps = m_totalLaps;
     s.currentTimeMs = m_lapTimer.currentTimeMs(); s.lastTimeMs = m_lapTimer.lastTimeMs(); s.bestTimeMs = m_lapTimer.bestTimeMs();
     s.sector = m_lapTimer.sectorIndex(); s.inPit = st.inPitLane; s.pitLimiter = st.pitLimiterActive;
+    // Roadmap 2.10 — one rendering point for the state the loop owns: the pit
+    // service status wins while a stop is running, otherwise the garage exit
+    // status (skipping the "ON TRACK" no-op label). Empty = stay quiet.
+    s.statusText[0] = '\0';
+    const std::string garageNow = garageStatus();
+    if (pitServiceBusy())
+        std::snprintf(s.statusText, sizeof(s.statusText), "%s", pitServiceStatus());
+    else if (!garageNow.empty() && garageNow != "ON TRACK")
+        std::snprintf(s.statusText, sizeof(s.statusText), "%s", garageNow.c_str());
     // Roadmap 1.5 / P1.10: damage strip channels (docs/DAMAGE_TELEMETRY.md —
     // HUD, UDP/TCP and SM all read the same sampleDamage snapshot).
     const auto dmg = ks::physics::sampleDamage(m_vehicle->damage());

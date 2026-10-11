@@ -1,5 +1,14 @@
 # Pit lane screen design (ksim)
 
+> **Stato integrazione (2026-10-11): nessuna implementazione.** Il file che
+> esisteva (`src/simulator/ui/PitLaneOverlay.h`) è stato **rimosso** come
+> overlay duplicato: aveva tempi e semantica propri (`fuelLitres * 0.12f`,
+> riparazioni istantanee) che sarebbero andati in deriva dal servizio reale.
+> Questo documento resta come **design**. Il servizio in box vive oggi in
+> `PitStrategyBridge` / `PitLaneRepair` / `GameMenuOverlay` (roadmap 2.6/2.7)
+> e lo stato mostrato al giocatore è la riga di stato del race HUD
+> (`RaceHudSample::statusText`). Non reintrodurre un secondo overlay.
+
 Independent cinematic racing UI — product branding: **ksim** only.
 
 ## Purpose

@@ -95,6 +95,15 @@ public:
             if (s.carIndex == idx) { m_playerCarIndex = idx; return; }
     }
 
+    /** Roadmap 2.10 — single source of truth for the player's row: the HUD,
+     *  the RESULTS screen and the control API all read this standing instead
+     *  of keeping their own copy of position/lap. Null before configure(). */
+    const DriverStanding* playerStanding() const {
+        for (const auto& s : m_standings)
+            if (s.carIndex == m_playerCarIndex) return &s;
+        return nullptr;
+    }
+
     /** Race standings feed (roadmap 3.5): report a car's lap count and total
      *  distance, re-sort and fire onPositionChanged when the player's slot
      *  moves. No-op when the session is not active or the car is unknown.
@@ -146,6 +155,7 @@ public:
 private:
     void checkLapCrossing(const ks::physics::SimulationState& state);
     DriverStanding* standingFor(int carIndex);
+
     void updateStandings();
     void sortStandings();
     void applyPenalties();

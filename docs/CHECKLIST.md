@@ -80,8 +80,14 @@ capacità serbatoio reale.
 
 ### Priorità media — 2.10 Menu racing coerente 🟡
 
-- [ ] Una sola fonte di verità per lo stato sessione (FeatureHub / RaceSessionManager)
-- [ ] Garage, pit, risultati e multiplayer senza callback/overlay duplicati
+- [x] Una sola fonte di verità per lo stato sessione (FeatureHub / RaceSessionManager)
+      — HUD e dashboard leggono posizione/numero auto da
+      `RaceSessionManager::playerStanding()` / `standings().size()` (prima 1/1
+      hardcodato); mappa di proprietà in `docs/ARCHITECTURE.md` § 5.3.1
+- [x] Garage, pit, risultati e multiplayer senza callback/overlay duplicati
+      — rimosso `ui/PitLaneOverlay.h` (secondo overlay pit, non usato, tempi
+      propri); risultati avevano già un solo path; aggiunta la riga di stato
+      pit/garage nel race HUD (`RaceHudSample::statusText`)
 - [ ] Verifica manuale dei path menu dopo il fix 2.7
 
 ### Già consegnati (non rifare) ✅
@@ -112,7 +118,7 @@ capacità serbatoio reale.
 | 1 | Gate umani Fase 1 (A) | Build Windows | [ ] |
 | 2 | Gate umani 2A / Block C (A) | Contenuto AC | [ ] |
 | 3 | **2.7** Servizio box end-to-end | — | [x] cablato (gate umano) |
-| 4 | **2.10** Menu coerente | 2.7 | [ ] |
+| 4 | **2.10** Menu coerente | 2.7 | [x] codice (gate umano) |
 | 5 | **2.11–2.14** Soak / gara / profilo / test | 2.7 + gate | [ ] |
 | — | Team 2.8 + Upgrade 2.9 (wire-up) | — | [x] |
 | — | Rendering 2A + S1–S6 | — | [x] |
@@ -208,6 +214,6 @@ Qt solo per ksEditor.
 ---
 
 *Prossimo passo più utile: (1) gate umani su Windows — inclusa la nuova
-sequenza box (P per uscire, rientro lento nel box, REQUEST SERVICE),
-(2) **2.10** menu coerente, (3) coda box multi-auto `PitLaneQueue`.  
+sequenza box (P per uscire, rientro lento nel box, REQUEST SERVICE) e i path
+menu del fix 2.7/2.10, (2) coda box multi-auto `PitLaneQueue`.  
 Aggiornare stato e data a ogni gate superato; non cambiare stato senza test o misura.*
