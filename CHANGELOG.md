@@ -9,6 +9,20 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Roadmap 2.7 — fedeltà del servizio in box**:
+  - Gomme nuove: `out.tyresChanged` (job TYRES di `PitLaneRepair`) azzera
+    l'usura del modello pneumatici con la nuova
+    `VehicleSimulator::resetTyreWear()`, applicata **una volta per stop**
+    (`SimulationLoop_Pit.cpp`); temperature e pressione restano al modello,
+    come in una vera out-lap.
+  - Rifornimento sul serbatoio reale: `PitRepairInput::fuelCapacityL` ora
+    viene da `VehicleSimulator::fuelTankCapacityL()` (nuovo accessor; default
+    150 L — il clamp che `setFuelL`/`applySetup` usavano già — override con
+    `FUEL_CAPACITY` in `data/engine.ini`) invece della costante 100 L, che
+    fermava "riempi" ben sotto il pieno.
+  - `PitLaneRepair::plan()` plafona il target del rifornimento al serbatoio:
+    un piano che chiede più litri del contenitore ora si ferma al serbatoio
+    (prima il servizio contava litri che il veicolo non avrebbe accettati).
 - **Roadmap 2.10 — stato sessione a fonte unica**:
   - HUD e dashboard non mostrano più la posizione hardcodata 1/1: leggono
     `RaceSessionManager::playerStanding()` + `standings().size()`, la stessa

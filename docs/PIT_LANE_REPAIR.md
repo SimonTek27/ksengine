@@ -20,8 +20,8 @@ InGarage + stationary + requestService
 | Engine | `engineRepairTime` | `repairSystem(Engine)` |
 | Transmission | fisso ~25 s | `repairSystem(Transmission)` |
 | Brakes | fisso ~12 s | `repairSystem(Brakes)` |
-| Tyres | `tyreChangeSec` (4.5 s) | flag `tyresChanged` |
-| Fuel | litri / `fuelRateLps` | rifornimento continuo |
+| Tyres | `tyreChangeSec` (4.5 s) | flag `tyresChanged` → `VehicleSimulator::resetTyreWear()` |
+| Fuel | litri / `fuelRateLps` | rifornimento continuo, plafonato a `fuelCapacityL` |
 | FullService | max componenti + gomme | partial + susp + aero + tyres |
 | Stop-go | `stopGoRepairSec` | body minimo (penalty) |
 
@@ -50,6 +50,10 @@ if (out.tyresChanged) resetTyreWear();
 
 - Fase garage **InGarage** (o Returning nel box)
 - Velocità ≤ `minStationarySpeedMs` (0.35 m/s)
+- `in.fuelCapacityL` = serbatoio reale della vettura
+  (`VehicleSimulator::fuelTankCapacityL()`, default 150 L, da
+  `FUEL_CAPACITY` in `data/engine.ini`): il target del rifornimento non lo
+  supera mai, nemmeno se il piano chiede di più
 - Abort con `requestAbort`
 
 File: `src/simulator/PitLaneRepair.h`

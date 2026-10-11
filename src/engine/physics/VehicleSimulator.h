@@ -54,12 +54,26 @@ public:
     SimulationState& state() { return m_state; }
 
     /**
-     * Tank level (L), clamped like applySetup(). Refuelling in the box needs
-     * this: applySetup() would reset the whole setup, and the pit service
-     * (SimulationLoop_Pit.cpp) only moves fuel. Mass is recomputed the same
-     * way applySetup does, so a full tank still weighs more than an empty one.
+     * Tank level (L), clamped to the tank capacity (setFuelTankCapacity).
+     * Refuelling in the box needs this: applySetup() would reset the whole
+     * setup, and the pit service (SimulationLoop_Pit.cpp) only moves fuel.
+     * Mass is recomputed the same way applySetup does, so a full tank still
+     * weighs more than an empty one.
      */
     void setFuelL(float liters);
+
+    /** Roadmap 2.7 follow-up — real tank size: the pit refuel stops at this
+     *  value instead of a hard-coded one. Clamped to [5, 300] L; shrinking it
+     *  below the current level trims the fuel (and the mass) right away.
+     *  Default 150 L — the clamp applySetup()/setFuelL() always used. */
+    void setFuelTankCapacity(float liters);
+    float fuelTankCapacityL() const { return m_fuelTankL; }
+
+    /** Roadmap 2.7 follow-up — fitted tyres (PitLaneRepair job "TYRES"):
+     *  wear back to zero, which is all the tyre model needs to give full
+     *  forces again. Temperatures/pressures are left alone: like on a real
+     *  out-lap they come back up within a stint. */
+    void resetTyreWear();
     const VehicleFFBSample& ffbSample() const { return m_ffb; }
 
     void setMass(double kg);
@@ -216,6 +230,8 @@ private:
     double m_yawRate = 0;
     SetupParams m_setup{};
     double m_baseMass = 1200;
+    /** Tank capacity in litres — pit refuel target (roadmap 2.7 follow-up). */
+    float m_fuelTankL = 150.f;
     /** Previous-step body accelerations (m/s²) for load transfer (avoids algebraic loop). */
     float m_lastAx = 0.f;
     float m_lastAy = 0.f;

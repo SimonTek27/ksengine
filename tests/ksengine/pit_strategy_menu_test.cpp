@@ -314,6 +314,26 @@ int main() {
         if (!repair.jobs().empty())
             KS_CHECK(repair.jobs()[0].type == ks::sim::PitJobType::Tyres);
 
+        // Roadmap 2.7 follow-up: the tank is the ceiling. The loop feeds
+        // PitRepairInput::fuelCapacityL from VehicleSimulator::
+        // fuelTankCapacityL() (the car's real tank), so a plan that asks for
+        // more than the car can carry is clamped instead of overfilling.
+        {
+            PitStrategyState greedy{};
+            greedy.fuelTargetL = 200.f; // ask for far more than the tank holds
+            greedy.tyres = greedy.body = greedy.suspension = false;
+            PitRepairInput small;
+            small.fuelL = 30.f;
+            small.fuelCapacityL = 40.f;
+            applyStrategyToRepairInput(greedy, small);
+            repair.plan(dmg, small);
+            KS_CHECK(repair.jobs().size() == 1);
+            if (!repair.jobs().empty()) {
+                KS_CHECK(repair.jobs()[0].type == ks::sim::PitJobType::Fuel);
+                KS_CHECK_NEAR(repair.jobs()[0].fuelAddL, 10.f, 1e-3); // 40 - 30
+            }
+        }
+
         // Stopped in the box + REQUEST SERVICE -> service runs, holds the car
         // and ends on the plan's fuel target.
         PitRepairInput run = svc;

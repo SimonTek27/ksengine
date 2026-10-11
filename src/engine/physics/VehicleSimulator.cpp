@@ -87,8 +87,20 @@ void VehicleSimulator::setFrontalArea(double m2) {
 void VehicleSimulator::setWheelBase(double m) { m_wheelBase = std::max(1.5, m); }
 void VehicleSimulator::setTrackWidth(double m) { m_trackWidth = std::max(1.0, m); }
 
+void VehicleSimulator::setFuelTankCapacity(float liters) {
+    m_fuelTankL = std::clamp(liters, 5.f, 300.f);
+    // A smaller tank must not keep fuel the car can no longer carry.
+    if (m_state.fuel > m_fuelTankL) setFuelL(m_fuelTankL);
+}
+
+void VehicleSimulator::resetTyreWear() {
+    // G14 reads these every step (wear -> calculateWearEffect -> forces), so
+    // zeroing them is the whole "new tyres" event for the tyre model.
+    for (int i = 0; i < 4; ++i) m_state.tyreWear[i] = 0.0;
+}
+
 void VehicleSimulator::setFuelL(float liters) {
-    const float f = std::clamp(liters, 0.f, 150.f);
+    const float f = std::clamp(liters, 0.f, m_fuelTankL);
     m_state.fuel = f;
     m_setup.fuelL = f;
     m_baseMass = (m_baseMass > 100.0) ? m_baseMass : m_mass;
@@ -102,7 +114,7 @@ void VehicleSimulator::applySetup(const SetupParams& p) {
     m_setup = p;
     for (int i = 0; i < 4; ++i)
         m_state.tyrePressure[i] = std::clamp(static_cast<double>(p.tirePsi[i]), 1.2, 3.5);
-    m_state.fuel = std::clamp(p.fuelL, 0.f, 150.f);
+    m_state.fuel = std::clamp(p.fuelL, 0.f, m_fuelTankL);
     m_baseMass = (m_baseMass > 100.0) ? m_baseMass : m_mass;
     m_mass = std::max(200.0, m_baseMass + static_cast<double>(p.ballastKg) + static_cast<double>(p.fuelL) * 0.74);
     m_state.mass = static_cast<float>(m_mass);
@@ -212,6 +224,13 @@ void VehicleSimulator::loadEngineFromIni(const std::string& path) {
     float rpm = getf(m, "LIMITER", getf(m, "ENGINE/LIMITER", static_cast<float>(m_maxRpm)));
     if (power > 1.f) m_enginePowerKw = power;
     if (rpm > 1000.f) m_maxRpm = rpm;
+    // Roadmap 2.7 follow-up: tank size (litres) for the pit refuel target.
+    // AC carries it in data/powertrain.ini ([FUEL] capacity, in joules), which
+    // ksim does not parse yet — FUEL_CAPACITY is the ksengine-side knob until
+    // then, and the built-in default keeps old behaviour when it is absent.
+    const float tank = getf(m, "FUEL_CAPACITY",
+                            getf(m, "ENGINE/FUEL_CAPACITY", m_fuelTankL));
+    if (tank > 4.f) setFuelTankCapacity(tank);
 }
 
 void VehicleSimulator::loadTyresFromIni(const std::string& path) {

@@ -132,7 +132,12 @@ public:
             add(PitJobType::FullService,
                 std::max({body, sus, aero, m_cfg.tyreChangeSec}) + 1.f);
             m_jobs.back().changeTyres = true;
-            const float target = in.targetFuelL >= 0.f ? in.targetFuelL : m_fuelCap;
+            // The tank is the ceiling: "full" can never mean more litres than
+            // the car can carry (the capacity now comes from the vehicle —
+            // fuelTankCapacityL(), not a hard-coded 100 L).
+            const float target = std::min(in.targetFuelL >= 0.f ? in.targetFuelL
+                                                                 : m_fuelCap,
+                                          m_fuelCap);
             m_jobs.back().fuelAddL = std::clamp(target - in.fuelL, 0.f, m_cfg.maxRefuelL);
         } else {
             if (in.wantBody && rd.bodyRepairTime > 0.2f)
@@ -151,7 +156,9 @@ public:
                 add(PitJobType::Tyres, m_cfg.tyreChangeSec);
                 m_jobs.back().changeTyres = true;
             }
-            const float target = in.targetFuelL >= 0.f ? in.targetFuelL : -1.f;
+            const float target = in.targetFuelL >= 0.f
+                                     ? std::min(in.targetFuelL, m_fuelCap) // tank ceiling
+                                     : -1.f;
             if (target >= 0.f) {
                 const float need = std::clamp(target - in.fuelL, 0.f, m_cfg.maxRefuelL);
                 if (need > 0.05f) {

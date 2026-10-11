@@ -464,6 +464,7 @@ private:
     bool m_hasPlayerBox = false; // false until placePlayerForSession binds it
     float m_pitBoxRadiusM = 8.f; // "inside the box" footprint
     std::string m_pitStatus;     // last PitLaneRepair status text
+    bool m_pitTyresApplied = false; // new rubber already fitted this stop
 
     // Roadmap 2.7 — garage exit / pit entry (GarageExit.h). Enabled only for
     // sessions that spawn in a garage box: a race grid start calls

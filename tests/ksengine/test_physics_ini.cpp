@@ -158,6 +158,38 @@ int main()
         CHECK(near(vs.finalDrive(), 4.2, 1e-4));
     }
 
+    // --- roadmap 2.7 follow-up: real tank capacity + fitted tyres ----------
+    {
+        VehicleSimulator vs;
+        // Default keeps the old 150 L clamp: setFuelL past it is trimmed.
+        CHECK(near(vs.fuelTankCapacityL(), 150.0, 1e-4));
+        vs.setFuelL(200.f);
+        CHECK(near(vs.state().fuel, 150.0, 1e-3));
+
+        // FUEL_CAPACITY in the car's engine.ini becomes the real tank size...
+        writeFile(dir / "engine_tank.ini",
+                  "[ENGINE]\nPOWER=300\nFUEL_CAPACITY=64\n");
+        vs.loadEngineFromIni((dir / "engine_tank.ini").string());
+        CHECK(near(vs.fuelTankCapacityL(), 64.0, 1e-4));
+        // ...and a smaller tank trims what is already on board.
+        CHECK(near(vs.state().fuel, 64.0, 1e-3));
+        CHECK(near(vs.setupParams().fuelL, 64.0, 1e-3));
+        // The pit refuel therefore stops at the real tank, not at 100 L.
+        vs.setFuelL(80.f);
+        CHECK(near(vs.state().fuel, 64.0, 1e-3));
+
+        // Fitted tyres: only the wear model is reset, so the stop gives full
+        // forces again; temperature/pressure belong to the tyre model and are
+        // left to come back up on their own.
+        auto& s = vs.state();
+        s.tyreWear[0] = 0.8;
+        s.tyreWear[3] = 0.2;
+        s.tyreTemp[1] = 95.0;
+        vs.resetTyreWear();
+        for (int i = 0; i < 4; ++i) CHECK(near(s.tyreWear[i], 0.0, 1e-9));
+        CHECK(near(s.tyreTemp[1], 95.0, 1e-6));
+    }
+
     std::error_code ec;
     fs::remove_all(dir, ec);
 

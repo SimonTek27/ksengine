@@ -52,11 +52,15 @@ rimosse da quel file con una nota che rimanda ai TU compilati.
   è sempre false e BoxClear non aspetta altri veicoli.
 - **Finestra box in gara**: `pitLaneOpen` è sempre true; va presa da
   `RaceSessionManager`.
-- **Cambio pneumatici**: `PitLaneRepair` segnala `tyresChanged` ma non azzera
-  l'usura del modello pneumatici (API dedicata da collegare).
-- **Capacità serbatoio reale**: `in.fuelCapacityL` è ancora la costante 100 L.
-- **HUD dedicato**: ~~lo stato è esposto e compare nei log; non c'è ancora una
-  riga nel dashboard~~ → **chiuso da 2.10 (11/10)**: il race HUD ha una riga
+- ~~**Cambio pneumatici**~~ → **chiuso (11/10)**: `out.tyresChanged` ora azzera
+  l'usura del modello pneumatici (`VehicleSimulator::resetTyreWear()`,
+  applicato una volta per stop).
+- ~~**Capacità serbatoio reale**~~ → **chiuso (11/10)**: `fuelCapacityL` viene
+  da `VehicleSimulator::fuelTankCapacityL()` (default 150 L, override con
+  `FUEL_CAPACITY` in `data/engine.ini`) e `PitLaneRepair::plan()` plafona il
+  target al serbatoio. Resta aperto solo il parser di `powertrain.ini`
+  ([FUEL] capacity, in joule) per l'AC content puro.
+- ~~**HUD dedicato**~~ → **chiuso da 2.10 (11/10)**: il race HUD ha una riga
   di stato (`RaceHudSample::statusText`) alimentata da `pitServiceStatus()` /
   `garageStatus()`.
 - **Gate umano**: tempi realistici, esperienza di box, FFB/audio reali.

@@ -123,10 +123,11 @@ void SimulationLoop::updatePitRepair(float dt) {
     PitRepairInput in;
     in.speedMs = static_cast<float>(st.speed);
     in.fuelL = static_cast<float>(st.fuel);
-    // TODO(2.7 follow-up): read the car's real tank capacity (setup / data
-    // file) instead of the class default. 100 L matches PitRepairInput and
-    // the fuel capacity applySetup() clamps to.
-    in.fuelCapacityL = 100.f;
+    // Roadmap 2.7 follow-up: the refuel target is the car's own tank (default
+    // 150 L, overridable with FUEL_CAPACITY in data/engine.ini), not the
+    // class default 100 L — which used to stop the fill below what the car
+    // can carry, so "REFUEL TO FULL" was never really full.
+    in.fuelCapacityL = m_vehicle->fuelTankCapacityL();
 
     // WHAT to do is the confirmed menu plan — never the old "fill everything"
     // defaults. A plan alone still queues nothing.
@@ -164,6 +165,17 @@ void SimulationLoop::updatePitRepair(float dt) {
     if ((out.serviceActive || out.completedThisFrame) &&
         std::fabs(out.fuelL - in.fuelL) > 0.01f)
         m_vehicle->setFuelL(out.fuelL);
+
+    // New rubber: PitLaneRepair sets tyresChanged from the TYRES job and keeps
+    // it for the rest of the stop; the vehicle model wants it applied once per
+    // stop (a new stop rearms the flag, idle -> busy).
+    if (!busyBefore && m_pitRepair.isBusy()) m_pitTyresApplied = false;
+    if (out.tyresChanged && !m_pitTyresApplied) {
+        m_vehicle->resetTyreWear();
+        m_pitTyresApplied = true;
+        std::fprintf(stderr,
+                     "SimulationLoop: pit service — tyres changed (wear reset)\n");
+    }
 
     if (m_pitStatus != out.statusText) {
         m_pitStatus = out.statusText;
