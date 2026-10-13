@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "name": "Mugello",
+  "description": "Autodromo del Mugello",
+  "fia_grade": "1",
+  "type": "permanent",
+  "tags": ["circuit", "Italy"],
+  "geotags": ["43°59′51″", "11°22′19″"],
+  "country": "Italy",
+  "continent": "Europe",
+  "city": ["Scarperia", "Firenze"],
+  "capacity": 50000,
+  "length": 5245.0,
+  "length_m": 5245.0,
+  "width": 12.0,
+  "pitboxes": 24,
+  "run": "clockwise",
+  "layout": {
+    "sections": [
+      {"name": "Rettilineo", "in": 0.912, "out": 1.0},
+      {"name": "Rettilineo", "in": 0.0, "out": 0.087},
+      {"name": "San Donato", "in": 0.107, "out": 0.157},
+      {"name": "Luco", "in": 0.169, "out": 0.188},
+      {"name": "Poggiosecco", "in": 0.193, "out": 0.228},
+      {"name": "Materassi", "in": 0.269, "out": 0.291},
+      {"name": "Borgo San Lorenzo", "in": 0.293, "out": 0.322},
+      {"name": "Casanova", "in": 0.355, "out": 0.382},
+      {"name": "Savelli", "in": 0.384, "out": 0.418},
+      {"name": "Arrabbiata 1", "in": 0.438, "out": 0.484},
+      {"name": "Arrabbiata 2", "in": 0.49, "out": 0.531},
+      {"name": "Buggiano", "in": 0.569, "out": 0.617},
+      {"name": "Marnello", "in": 0.648, "out": 0.702},
+      {"name": "Biondetti", "in": 0.73, "out": 0.775},
+      {"name": "Bucine", "in": 0.819, "out": 0.905}
+    ]
+  },
+  "surfaces": {
+    "SURFACE_0": {"key": "ROAD", "friction": 0.96, "damping": 0.0, "dirt_additive": 0.0, "is_valid_track": 1, "is_pitlane": 0},
+    "SURFACE_1": {"key": "ROAD", "friction": 0.96, "damping": 0.0, "dirt_additive": 0.0, "is_valid_track": 1, "is_pitlane": 0},
+    "SURFACE_2": {"key": "PITLANE", "friction": 0.96, "damping": 0.0, "dirt_additive": 0.0, "is_valid_track": 1, "is_pitlane": 1},
+    "SURFACE_3": {"key": "KERB", "friction": 0.99, "damping": 0.0, "dirt_additive": 0.02, "is_valid_track": 1, "is_pitlane": 0, "vibration_gain": 0.3},
+    "SURFACE_6": {"key": "GRASS", "friction": 0.95, "damping": 0.0, "dirt_additive": 1.0, "is_valid_track": 0, "is_pitlane": 0},
+    "SURFACE_7": {"key": "SAND", "friction": 0.6, "damping": 0.0, "dirt_additive": 1.0, "is_valid_track": 0, "is_pitlane": 0, "sin_height": 0.03}
+  },
+  "models": {
+    "MODEL_1": {"file": "mugello.kn5", "position": "0,0,0", "rotation": "0,0,0"}
+  },
+  "drs_zones": [
+    {"id": "ZONE_0", "detection": 0.861, "start": 0.911, "end": 0.12}
+  ]
+}
