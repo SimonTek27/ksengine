@@ -1,0 +1,53 @@
+--- a/src/simulator/SimulationLoop.cpp
++++ b/src/simulator/SimulationLoop.cpp
+@@ -17,6 +17,7 @@
+ #include "VehicleAudioHook.h" // upgrade sound pack -> SimulatorAudio (roadmap 2.9)
+ #include "engine/physics/DamageTelemetry.h"
+ #include "engine/physics/AeroModel.h"   // baseline aero capture (roadmap 2.9)
++#include "engine/physics/PhysicsProfiler.h"
+ #include "engine/vehicle/VehicleAppearanceBundle.h"      // resolveAppearance (2.9)
+ #include "engine/vehicle/ApplyVehicleUpgrades.h"         // physics bridge (2.9)
+ #include "ui/UiGpuPass.h"
+@@ -1780,6 +1781,13 @@
+ }
+ 
+ void SimulationLoop::tick() {
++    static bool profileInit = false;
++    if (!profileInit) {
++        profileInit = true;
++        if (const char* e = std::getenv("KS_PROFILE"))
++            ks::physics::PhysicsProfiler::instance().setEnabled(e[0] != '0');
++    }
++
+     if (!m_running) {
+         updateCamera(1.0f / 60.0f);
+         publishSharedMemory();
+@@ -1793,6 +1801,7 @@
+         render();
+         return;
+     }
++    PROFILE_FRAME();
+     auto now = std::chrono::steady_clock::now();
+     double elapsed = std::chrono::duration<double>(now - m_lastTime).count();
+     m_lastTime = now;
+@@ -1810,6 +1819,7 @@
+         m_multiCar->setAISpeedFactor(
+             m_raceSession.isActive() ? m_raceSession.aiSpeedFactor() : 0.0f);
+     while (!paused && m_simAccumulator >= m_physicsDt) {
++        PROFILE_SECTION("physics");
+         applyInput();
+         // Roadmap 2.7: garage exit / pit entry runs before the physics step
+         // so its hold, snap and pit limiter win over the raw driver input
+@@ -2026,8 +2036,12 @@
+         m_audio->setOtherCarVoices(nullptr, 0);
+     }
+ #endif
+-    updateCamera(static_cast<float>(elapsed));
+-    render(static_cast<float>(elapsed));
++    {
++        PROFILE_SECTION("render");
++        updateCamera(static_cast<float>(elapsed));
++        render(static_cast<float>(elapsed));
++    }
++    PROFILE_END_FRAME();
+ }
