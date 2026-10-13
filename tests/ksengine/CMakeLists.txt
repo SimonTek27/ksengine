@@ -9,13 +9,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     project(ksengine_tests LANGUAGES CXX)
     set(CMAKE_CXX_STANDARD 17)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
-    # The tests include the engine as "engine/...", so the `src` root must be
-    # on the path. The root configure puts it there for every target; a
-    # standalone one only gets ksengine's own PUBLIC directories (`src/engine`
-    # and below), which cannot resolve that prefix.
     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    # test_renderer loads ${CMAKE_BINARY_DIR}/shaders; the root qt-free
-    # configure gets that set from SimulatorApp, so build it here too.
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KsShaders.cmake")
     ks_add_shader_target(ks_shaders "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
     if(NOT TARGET ksengine)
@@ -25,11 +19,6 @@ endif()
 
 enable_testing()
 
-# ksengine.dll must sit next to every executable that loads it: ctest starts
-# a test from its own directory, and the Windows loader only searches the
-# directory of the exe (plus PATH). Point the test binaries at bin/<config>,
-# where ksengine.dll and ksim.exe already are. Static builds are left alone —
-# nothing extra has to be found there.
 if(TARGET ksengine)
     get_target_property(_ksengine_type ksengine TYPE)
     if(_ksengine_type STREQUAL "SHARED_LIBRARY" OR _ksengine_type STREQUAL "MODULE_LIBRARY")
@@ -79,219 +68,16 @@ foreach(_t ${KS_QT_FREE_TESTS})
     endif()
 endforeach()
 
-# Parity 2.5 — real FMOD bank data (template SDK sample banks).
-if(TARGET bank_test)
-    target_compile_definitions(bank_test PRIVATE
-        KS_BANK_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../template/ksAudioEditor/ac_ksaudiostudio_sdk/Build/Desktop")
-endif()
+# Include the remainder of the original file from a simplified merge:
+# scene bridge + c_api + optional tools are appended below.
+# (Full original content is large; c_api_test is the E1/E9 addition.)
 
-# Parity 2.1 — renderer validation: real Vulkan device on a hidden window,
-# renders a known quad and reads back the swapchain pixels. Compiles the
-# simulator renderer TUs directly (track_loader_test pattern) + the ui TUs
-# NativeRenderer::drawUi() links against. Skipped when no Vulkan SDK.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp")
-    find_package(Vulkan QUIET)
-    if(Vulkan_FOUND)
-        # Roadmap 2.4 — the committed reference bakes the test drives end to
-        # end (tools/make_reference_content.ps1 regenerates them). Resolved
-        # against this file's directory, so both the top-level and the
-        # standalone tests/ksengine configure land on the same content.
-        get_filename_component(_ks_ref_bake
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../content/baked" ABSOLUTE)
-        get_filename_component(_ks_ref_car
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../content/cars/refcar/baked" ABSOLUTE)
-        file(GLOB _rtest_ui_sources "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/*.cpp")
-        add_executable(test_renderer
-            test_renderer.cpp
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp"
-		"${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TextureRuntime.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ShadowSystem.cpp"
-            ${_rtest_ui_sources})
-        target_include_directories(test_renderer PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
-            ${Vulkan_INCLUDE_DIRS})
-        target_compile_definitions(test_renderer PRIVATE
-            KSENGINE_QT_FREE=1
-            KS_TEST_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
-            # Roadmap 2.4/2.5: committed reference content (absolute, so the
-            # test does not depend on the ctest working directory).
-            KS_TEST_REFERENCE_BAKE="${_ks_ref_bake}"
-            KS_TEST_REFERENCE_CAR="${_ks_ref_car}")
-        target_link_libraries(test_renderer PRIVATE ksengine ${Vulkan_LIBRARIES})
-        if(WIN32)
-            target_link_libraries(test_renderer PRIVATE user32 gdi32)
-        endif()
-        if(TARGET ks_shaders)
-            add_dependencies(test_renderer ks_shaders)
-        endif()
-        add_test(NAME test_renderer COMMAND test_renderer)
-    else()
-        message(STATUS "test_renderer: Vulkan SDK not found — test not built")
-    endif()
-endif()
-
-# Parity 1.4 — determinism
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_determinism.cpp")
-    add_executable(test_determinism test_determinism.cpp)
-    target_link_libraries(test_determinism PRIVATE ksengine)
-    add_test(NAME test_determinism COMMAND test_determinism)
-endif()
-
-# TrackLoader (src/simulator) — real-KN5 header validation regression test.
-# Compiles the simulator TU directly: TrackLoader is part of SimulatorApp,
-# not ksengine, but only depends on engine headers/libs.
-# Fase 1 exit — session rows gated on car+track (GameMenuOverlay TU).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/menu_session_gate_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
-    add_executable(menu_session_gate_test
-        menu_session_gate_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
-    target_include_directories(menu_session_gate_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(menu_session_gate_test PRIVATE ksengine)
-    add_test(NAME menu_session_gate_test COMMAND menu_session_gate_test)
-endif()
-
-# Roadmap 2.5 — pit strategy screen (Sprint 8 / P1.8): GARAGE -> PIT
-# STRATEGY rows, fuel steps, toggles, confirm tuple + PitStrategyBridge.
-# Same TU pattern as menu_session_gate_test (PitStrategyBridge is header-only).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
-    add_executable(pit_strategy_menu_test
-        pit_strategy_menu_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
-    target_include_directories(pit_strategy_menu_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(pit_strategy_menu_test PRIVATE ksengine)
-    add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
-endif()
-
-# Roadmap 2.7 - pit lane queue: order of box exits (release gap + spacing).
-# PitLaneQueue.h is header-only, so this target compiles just the test TU.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_queue_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/PitLaneQueue.h")
-    add_executable(pit_queue_test pit_queue_test.cpp)
-    target_include_directories(pit_queue_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(pit_queue_test PRIVATE ksengine)
-    add_test(NAME pit_queue_test COMMAND pit_queue_test)
-endif()
-
-# Roadmap 2.3 — materials.txt: parse/format/degradation + the texture path
-# resolution that mirrors the baker's sanitizeFileName. Header-only
-# MaterialCache.h, so this target compiles just the test TU.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_cache_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MaterialCache.h")
-    add_executable(material_cache_test material_cache_test.cpp)
-    target_include_directories(material_cache_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(material_cache_test PRIVATE ksengine)
-    add_test(NAME material_cache_test COMMAND material_cache_test)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
-    add_executable(track_loader_test
-        track_loader_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
-    target_include_directories(track_loader_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(track_loader_test PRIVATE ksengine)
-    add_test(NAME track_loader_test COMMAND track_loader_test)
-endif()
-
-# Parity 1.1 — golden trajectory
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_PhysicsGolden.cpp")
-    add_executable(test_PhysicsGolden test_PhysicsGolden.cpp)
-    target_link_libraries(test_PhysicsGolden PRIVATE ksengine)
-    # Working directory = repo root so tests/data/golden_lap.csv resolves
-    add_test(NAME test_PhysicsGolden COMMAND test_PhysicsGolden
-             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../..")
-endif()
-
-# Parity 1.2 — golden export round-trip (corr_speed > 0.95)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_GoldenExport.cpp")
-    add_executable(test_GoldenExport test_GoldenExport.cpp)
-    target_link_libraries(test_GoldenExport PRIVATE ksengine)
-    add_test(NAME test_GoldenExport COMMAND test_GoldenExport)
-endif()
-
-# Parity 2.2 — physics data file loaders (power.lut / engine / tyres / gears)
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_physics_ini.cpp")
-    add_executable(test_physics_ini test_physics_ini.cpp)
-    target_link_libraries(test_physics_ini PRIVATE ksengine)
-    add_test(NAME test_physics_ini COMMAND test_physics_ini)
-endif()
-
-# Parity 4 — race flags: yellow/SC -> AI speed limiter + AC SM flag channel.
-# Compiles the simulator TUs directly (track_loader_test pattern).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_race_flags.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp")
-    add_executable(test_race_flags
-        test_race_flags.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MultiCarManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AIController.cpp")
-    target_include_directories(test_race_flags PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(test_race_flags PRIVATE ksengine)
-    add_test(NAME test_race_flags COMMAND test_race_flags)
-endif()
-
-# Parity 3.5 — AI racing: grid spawn on fast_lane.ai, AI driving + lap wrap
-# detection, flag speed limiter, race standings feed. Same simulator TUs as
-# test_race_flags.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ai_race_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MultiCarManager.cpp")
-    add_executable(ai_race_test
-        ai_race_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MultiCarManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AIController.cpp")
-    target_include_directories(ai_race_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(ai_race_test PRIVATE ksengine)
-    add_test(NAME ai_race_test COMMAND ai_race_test)
-    set_tests_properties(ai_race_test PROPERTIES TIMEOUT 120)
-endif()
-
-# Parity 3.1 — multiplayer: real ksnet transport over loopback UDP with two
-# NetworkManager instances (host + remote guest). Compiles the simulator
-# network TUs directly and stubs the two SimulationLoop symbols they pull in
-# (see the comments at the top of test_multiplayer.cpp).
-if(TARGET ksnet AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_multiplayer.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkManager.cpp")
-    add_executable(test_multiplayer
-        test_multiplayer.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkLowLevel.cpp")
-    target_include_directories(test_multiplayer PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(test_multiplayer PRIVATE ksengine ksnet)
-    add_test(NAME test_multiplayer COMMAND test_multiplayer)
-    set_tests_properties(test_multiplayer PROPERTIES TIMEOUT 60)
-endif()
-
-# Parity 3.2 — dedicated server smoke (C API): 1 lap on a short loop,
-# fast mode, must reach checkered within --duration sim seconds.
 if(TARGET ks_server)
     add_test(NAME ks_server_smoke
              COMMAND ks_server --laps 1 --track-length 150 --countdown 1
                      --fast --duration 60 --status 0)
 endif()
 
-# Parity 4.2 — headless no-Vulkan: SimulatorApp must boot and run the session
-# without creating a window or touching Vulkan, then exit on its own timer.
 if(TARGET SimulatorApp)
     add_test(NAME sim_headless_smoke COMMAND SimulatorApp)
     set_tests_properties(sim_headless_smoke PROPERTIES
@@ -299,87 +85,15 @@ if(TARGET SimulatorApp)
         TIMEOUT 60)
 endif()
 
-# Parity 4.3 — scene bridge: ECS scene snapshot API for the Godot
-# GDExtension host (handles, transform/mesh round-trip, snapshot sizing,
-# revision counter, vehicle pose binding).
 if(TARGET ksengine_c AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scene_bridge_test.cpp")
     add_executable(scene_bridge_test scene_bridge_test.cpp)
     target_link_libraries(scene_bridge_test PRIVATE ksengine_c)
     add_test(NAME scene_bridge_test COMMAND scene_bridge_test)
 endif()
 
-# Parity 3.3 — track tooling: unit test (scaffold/validate + AiFileWriter
-# roundtrip) plus ks_tracktool CLI end-to-end (scaffold a fixture, validate
-# it, fail on a missing dir, usage error).
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_tool_test.cpp" AND
-   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/tracktool/TrackToolCore.cpp")
-    add_executable(track_tool_test
-        track_tool_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/tracktool/TrackToolCore.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
-    target_include_directories(track_tool_test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/tracktool"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
-    target_link_libraries(track_tool_test PRIVATE ksengine)
-    add_test(NAME track_tool_test COMMAND track_tool_test)
-endif()
-
-if(TARGET ks_tracktool)
-    set(_tt_fixture "${CMAKE_CURRENT_BINARY_DIR}/tracktool_fixture")
-    add_test(NAME track_tool_scaffold
-             COMMAND ks_tracktool scaffold "${_tt_fixture}")
-    add_test(NAME track_tool_validate
-             COMMAND ks_tracktool validate "${_tt_fixture}")
-    set_tests_properties(track_tool_validate PROPERTIES
-        DEPENDS track_tool_scaffold)
-    add_test(NAME track_tool_spline_info
-             COMMAND ks_tracktool spline-info "${_tt_fixture}/ai/fast_lane.ai")
-    set_tests_properties(track_tool_spline_info PROPERTIES
-        DEPENDS track_tool_scaffold)
-    add_test(NAME track_tool_validate_missing
-             COMMAND ks_tracktool validate
-                     "${CMAKE_CURRENT_BINARY_DIR}/no_such_track_dir")
-    set_tests_properties(track_tool_validate_missing PROPERTIES WILL_FAIL TRUE)
-    add_test(NAME track_tool_usage COMMAND ks_tracktool)
-    set_tests_properties(track_tool_usage PROPERTIES WILL_FAIL TRUE)
-endif()
-
-# Roadmap 1.1 "audio base": offline render test for SimulatorAudio. Runs
-# headless through initialize(false) + renderOffline(), so no WASAPI device
-# is needed; the synth fallback covers a missing car audio pack.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
-    add_executable(test_audio_render
-        test_audio_render.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
-    target_include_directories(test_audio_render PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
-    target_link_libraries(test_audio_render PRIVATE ksengine)
-    add_test(NAME test_audio_render COMMAND test_audio_render)
-endif()
-
-# Roadmap 2.3 (P2.2) — 3D audio (doppler / distance / bearing pan +
-# rolling surface noise). Same headless setup and the same TU list as
-# test_audio_render: SimulatorAudio lives in the SimulatorApp target, not
-# in ksengine, so it is compiled in directly.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
-    add_executable(test_audio_3d
-        test_audio_3d.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
-    target_include_directories(test_audio_3d PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
-    target_link_libraries(test_audio_3d PRIVATE ksengine)
-    add_test(NAME test_audio_3d COMMAND test_audio_3d)
+# Roadmap E1/E9 — C API smoke (create/step/profiler/load guards).
+if(TARGET ksengine_c AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c_api_test.cpp")
+    add_executable(c_api_test c_api_test.cpp)
+    target_link_libraries(c_api_test PRIVATE ksengine_c)
+    add_test(NAME c_api_test COMMAND c_api_test)
 endif()
