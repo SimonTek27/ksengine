@@ -46,6 +46,7 @@ class FFBBase;
 
 namespace ks::ac {
 class AcSharedMemoryPublisher;
+class AcRemoteTelemetryServer;
 }
 
 namespace ks::sim {
@@ -146,6 +147,14 @@ public:
     void start();
     void stop();
     void reset();
+    /**
+     * AC UDP command 'K'/'O' (report AC_RE §3.2): teleport `carIndex` to its
+     * garage box pose with zeroed velocity — the ksengine equivalent of
+     * acs.exe's goToSpawnPosition(car, L"PIT"). Index 0 = player car; other
+     * indices match the multi-car roster (0-based). No-op when the target
+     * car or box is unknown.
+     */
+    void teleportToPit(int carIndex);
     // Fase 1 exit: start a session of the mode chosen in the menu (practice
     // = open laps solo, race = grid vs AI + countdown, time attack = solo).
     // Configures laps/AI/session byte BEFORE start(), which then builds the
@@ -335,6 +344,7 @@ private:
     void publishSharedMemory();
     void publishUdpTelemetry();
     void publishTcpTelemetry();
+    void publishAcRemoteTelemetry();
     void updateLapAndSurface(double dt);
     void beginRaceSession();
     void finishGoldenExport();
@@ -353,6 +363,7 @@ private:
     std::unique_ptr<SimulatorAudio> m_audio;
     std::unique_ptr<SetupGarage> m_setupGarage;
     std::unique_ptr<ks::ac::AcSharedMemoryPublisher> m_shm;
+    std::unique_ptr<ks::ac::AcRemoteTelemetryServer> m_acRemote;
     std::unique_ptr<UdpTelemetryBridge> m_udp;
     std::unique_ptr<TcpTelemetryBridge> m_tcp;
 
@@ -376,6 +387,8 @@ private:
     float m_normalizedSpline = 0.f;
     bool m_shmEnabled = true;
     bool m_udpEnabled = true;
+    bool m_acRemoteEnabled = true;
+    uint16_t m_acRemotePort = 9996;
     std::string m_udpHost = "127.0.0.1";
     uint16_t m_udpPort = 20777;
     bool m_tcpEnabled = true;
@@ -479,7 +492,7 @@ private:
     // Roadmap 2.7 — multi-car pit-lane order (PitLaneQueue.h): with one car
     // on track nothing ever blocks, so the behaviour is unchanged; with a
     // field it decides who rolls out first and holds the others in the box.
-    // KS_PIT_QUEUE=0 turns it off (same env-var style as the rest of ksim).
+    // KS_PIT_QUEUE=0 turns it off (same env-var style as the rest of kssim).
     PitLaneQueue m_pitQueue;
     bool m_pitQueueEnabled = false; // true once placePlayerForSession binds
     static constexpr int kPitQueuePlayer = -1; // player's id in the queue

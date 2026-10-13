@@ -10,8 +10,8 @@
 | Goal | Meaning |
 |------|---------|
 | **Qt-free engine** | `src/engine/` builds with standard C++17 only (no Qt headers). |
-| **Qt-free simulator** | `src/simulator/` (SimulatorApp / ksim) uses Win32 + Vulkan, not Qt widgets. |
-| **Independent runtime** | ksim is a standalone race client; it does not require a commercial title at runtime. |
+| **Qt-free simulator** | `src/simulator/` (SimulatorApp / kssim) uses Win32 + Vulkan, not Qt widgets. |
+| **Independent runtime** | kssim is a standalone race client; it does not require a commercial title at runtime. |
 | **Format adapters** | Content formats (e.g. KN5, surfaces.ini, shared memory layouts) live under `src/adapters/`, not inside the engine core. |
 | **Optional editor** | ksEditor (Qt6) is a modding UI that **links** ksengine; it is not required to drive or race. |
 
@@ -28,7 +28,7 @@
                              │ links ksengine.lib
                              ▼
 ┌──────────────────────────────────────────────────────────────────┐
-│  SimulatorApp / ksim                                             │
+│  SimulatorApp / kssim                                             │
 │  Win32 window · NativeRenderer (Vulkan) · SimulationLoop         │
 │  Role: race client — sessions, pits, HUD, net, telemetry         │
 └────────────────────────────┬─────────────────────────────────────┘
@@ -52,7 +52,7 @@
 | Product | Path | Qt | Output |
 |---------|------|----|--------|
 | **ksengine** | `src/engine/` | No | `ksengine.lib` |
-| **SimulatorApp** | `src/simulator/` | No | ksim / SimulatorApp executable |
+| **SimulatorApp** | `src/simulator/` | No | kssim / SimulatorApp executable |
 | **Adapters** | `src/adapters/` | No | Linked into engine or simulator as needed |
 | **ksEditor** | `src/MainWindow*`, modules | Yes | `kseditor.exe` |
 
@@ -170,6 +170,7 @@ Central façade for parity features (no Qt):
 | **SessionController** | modes | Practice / Qualify / Race / Time Attack / Hotlap |
 | **ServerDiscovery** | UDP `:20779` | LAN announce + query for server browser |
 | **ExternalControlApi** | TCP `:20780` | InSim-style text commands |
+| **UdpCommandListener** | UDP `:9666` | AC-compatible byte-command listener (`'B'`..`'Q'`), see [REPORT_AC_RE_ENGINEERING.md](../REPORT_AC_RE_ENGINEERING.md) §3 |
 | **TrackLimitsMonitor** | runtime | track-limit penalties → session |
 | **WeatherControl** | runtime | time of day, presets, wetness |
 | **PersonalBestStore** | disk | `user/pb` lap storage |

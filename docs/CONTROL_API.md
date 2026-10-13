@@ -26,8 +26,8 @@ back synchronously on the same connection.
 On accept the server sends exactly one greeting line:
 
 ```
-OK ksim control API v1                # no auth configured
-OK ksim control API v1 AUTH_REQUIRED  # token configured
+OK kssim control API v1                # no auth configured
+OK kssim control API v1 AUTH_REQUIRED  # token configured
 ```
 
 ## Authentication
@@ -143,7 +143,7 @@ Floats use `std::to_string` formatting (6 decimals) except `RESULT`
 
 ```
 $ nc 127.0.0.1 20780
-OK ksim control API v1
+OK kssim control API v1
 PING
 PONG
 SESSION PRACTICE 10
@@ -169,7 +169,7 @@ OK RESULT
 
 ---
 
-## Related channels — ksim port map
+## Related channels — kssim port map
 
 | Port | Transport | Purpose | Doc |
 |------|-----------|---------|-----|
@@ -178,6 +178,8 @@ OK RESULT
 | 20778 | TCP out | reliable telemetry (`TcpTelemetryBridge`, length-prefixed KSIM v2) | [TCP_TELEMETRY.md](TCP_TELEMETRY.md) |
 | 20779 | UDP | LAN server discovery (`ServerDiscovery`) | — |
 | 20780 | TCP | **control API (this document)** | — |
+| 9666 | UDP | AC-compatible command listener (`UdpCommandListener`, byte-command `'B'`..`'Q'`, see [REPORT_AC_RE_ENGINEERING.md](../REPORT_AC_RE_ENGINEERING.md) §3; `udp-cmd-port` in `server/kssimserver.ini`, 0 disables) | — |
+| 9996 | UDP out | AC remote telemetry (`AcRemoteTelemetryServer`) | [REPORT_AC_REMOTE_TELEMETRY.md](../REPORT_AC_REMOTE_TELEMETRY.md) |
 | 8080 | HTTP | optional lobby registry (`kslobby`, `--port`) | `LobbyServerApp.h` |
 
 ## Shared memory layout (AC-compatible)

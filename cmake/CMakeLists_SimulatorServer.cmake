@@ -56,7 +56,9 @@ target_link_libraries(SimulatorServer PRIVATE ksengine ${Vulkan_LIBRARIES})
 if(TARGET ksnet)
 	target_link_libraries(SimulatorServer PRIVATE ksnet)
 endif()
-if(HAS_MIKKTSPACE)
+# mikktspace is compiled into ksengine.dll now (root CMakeLists), so the
+# separate target may not exist — link it only when it actually does.
+if(TARGET mikktspace)
 	target_link_libraries(SimulatorServer PRIVATE mikktspace)
 endif()
 if(WIN32)
@@ -65,5 +67,5 @@ endif()
 
 message(STATUS "SimulatorServer (headless) configured - disc :20779, ctrl :20780")
 
-# Same installed layout as ksim.exe (server/kssimserver.ini is staged here too).
+# Same installed layout as kssim.exe (server/kssimserver.ini is staged here too).
 ks_stage_install_layout(SimulatorServer)
