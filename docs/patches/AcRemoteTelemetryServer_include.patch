@@ -1,0 +1,9 @@
+--- a/src/simulator/SimulationLoop.cpp
++++ b/src/simulator/SimulationLoop.cpp
+@@ -39,6 +39,7 @@
+ #include "adapters/assetto_corsa/AcSharedMemoryPublisher.h"
+ #include "adapters/assetto_corsa/AcSurfacesLoader.h"
+ #include "adapters/assetto_corsa/TrackDataJsonLoader.h"
++#include "adapters/assetto_corsa/AcRemoteTelemetryServer.h"
+
+ #include <algorithm>
