@@ -14,6 +14,8 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_NetSync.cpp
 	# roadmap 2.7 — box service (plan -> PitLaneRepair -> refuel/damage)
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_Pit.cpp
+	# optional AC remote telemetry symbol (stub server)
+	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_AcRemote.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/InputManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/CameraController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp
@@ -94,17 +96,9 @@ if(TARGET ks_shaders)
 	add_dependencies(SimulatorApp ks_shaders)
 endif()
 
-# The installed layout (ksim.exe, content/, user/, server/, system/shaders/)
-# is defined once in cmake/KsInstallLayout.cmake and staged here so a
-# build-tree run behaves exactly like an installed copy. The shader stage
-# above is part of it; content/user/server staging lives there too.
 include("${CMAKE_CURRENT_LIST_DIR}/KsInstallLayout.cmake")
 ks_stage_install_layout(SimulatorApp)
 
 message(STATUS "SimulatorApp: Qt-free runtime (src/simulator, render=src/engine)")
 
-# ---------------------------------------------------------------------------
-# Headless host (merged from 74dd224): SimulatorServer reuses the runtime
-# source list above with its own entry point.
-# ---------------------------------------------------------------------------
 include("${CMAKE_CURRENT_LIST_DIR}/CMakeLists_SimulatorServer.cmake" OPTIONAL)
