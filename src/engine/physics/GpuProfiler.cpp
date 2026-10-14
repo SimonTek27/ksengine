@@ -19,13 +19,14 @@ const char* GpuProfiler::passName(Pass p) {
 
 GpuProfiler::~GpuProfiler() { shutdown(); }
 
-bool GpuProfiler::init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t /*queueFamilyIndex*/) {
+bool GpuProfiler::init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_t queueFamilyIndex) {
     shutdown();
     m_device = device;
     if (!device) return false;
 
 #if !KS_GPU_PROFILER_VK
     (void)physicalDevice;
+    (void)queueFamilyIndex;
     m_ready = false;
     return false;
 #else
@@ -40,7 +41,19 @@ bool GpuProfiler::init(VkDevice device, VkPhysicalDevice physicalDevice, uint32_
         return false;
     }
 
-    // Check queue timestamp support via props (limit only) — full check needs queue family flags
+    // The graphics queue itself has to carry timestamps: timestampValidBits
+    // is the width of that family's counter and 0 means "no timestamps
+    // written", which would leave every slot forever unreadable.
+    uint32_t familyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> families(familyCount);
+    if (familyCount > 0)
+        vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &familyCount, families.data());
+    if (queueFamilyIndex >= familyCount ||
+        families[queueFamilyIndex].timestampValidBits == 0) {
+        m_ready = false;
+        return false;
+    }
     for (int i = 0; i < kFramesInFlight; ++i) {
         VkQueryPoolCreateInfo ci{};
         ci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;

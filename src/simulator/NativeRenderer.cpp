@@ -16,6 +16,9 @@
 // particle.vert, which cannot include this header, so the shader's offsets
 // are asserted against them at the pipeline instead.
 #include "engine/Graphics/ParticleSystem.h"
+// E9 / gate 2.14: the resolved GPU frame time is published here so one
+// PhysicsProfiler report covers CPU sections and the GPU frame path.
+#include "engine/physics/PhysicsProfiler.h"
 
 #include <cstdio>
 #include <cstring>
@@ -225,6 +228,16 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
         return false;
     }
     vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
+
+    // E9 GPU timestamps: query pools live as long as the device. init() is
+    // self-disabling when the queue carries no timestamp bits or
+    // timestampPeriod is 0, in which case every writeTimestamp() below is a
+    // no-op and gpuFrameTimeMs() reads 0 (never an invented number).
+    m_gpuProfiler.init(m_device, m_physicalDevice, m_graphicsQueueFamily);
+    // Same switch as the CPU sections in SimulationLoop::tick(): KS_PROFILE=0
+    // silences the whole frame profile, unset/anything else leaves it on.
+    if (const char* e = std::getenv("KS_PROFILE"))
+        m_gpuProfiler.setEnabled(e[0] != '0');
 
     if (!createCommandPoolAndBuffer() || !createSyncObjects()) return false;
     // The samplerAnisotropy flag handed here must equal what devCi enabled
@@ -1969,6 +1982,19 @@ void NativeRenderer::endFrame() {
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
 
+    // E9 GPU timestamps: opens the ring slot for this frame and writes the
+    // FrameBegin marker (resolves the slot two frames old, whose fence has
+    // long since signalled — beginFrame() waited on it before we got here).
+    m_gpuProfiler.beginFrame(m_commandBuffer);
+    // Whatever that resolve produced is the newest honest GPU frame number
+    // available, so publish it to the one profiler the report/CSV/C API read.
+    // Stays 0 (untouched) while timestamps are unsupported — never estimated.
+    if (m_gpuProfiler.frameTimeMs() > 0.0) {
+        auto& prof = ks::physics::PhysicsProfiler::instance();
+        prof.setGpuFrameTimeMs(m_gpuProfiler.frameTimeMs());
+        prof.setGpuAvgFrameTimeMs(m_gpuProfiler.avgFrameTimeMs());
+    }
+
     // ---- Shadow cascades: same draw list, light-space matrices instead of
     // the camera's view-projection. ----
     if (m_shadowMap && m_shadowMap->isInitialized()) {
@@ -1996,6 +2022,9 @@ void NativeRenderer::endFrame() {
             m_shadowMap->endCascadePass(m_commandBuffer);
         }
     }
+    // Shadow marker: FrameBegin -> Shadow is the cascade cost (0 with no
+    // shadow map attached).
+    m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Shadow);
 
     // Lazy build: the forward path above never pays for any of this, and a
     // failed build silently falls back to forward instead of going black.
@@ -2359,6 +2388,15 @@ void NativeRenderer::endFrame() {
         recordParticles(projRender * m_view, deferred);
         vkCmdEndRenderPass(m_commandBuffer);
     }
+    // MainPass marker: Shadow -> MainPass is the geometry/display cost on
+    // both the deferred and the forward branch.
+    m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::MainPass);
+    // UI marker: the overlay is recorded outside this command buffer
+    // (SimulationLoop::drawUi() feeds UiGpuPass hooks, not this record path),
+    // so this delta reads ~0 until the overlay lands here — it stays the
+    // ladder slot between MainPass and the post passes instead of inventing
+    // a number for work that is not on this path.
+    m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::UI);
 
     // ---- Occlusion grid for the *next* frame: max-pool the depth buffer
     // whichever geometry pass above wrote it, then copy the small grid to the
@@ -2394,6 +2432,11 @@ void NativeRenderer::endFrame() {
     m_occlR22 = m_proj(2, 2);
     m_occlR23 = m_proj(2, 3);
 
+    // FrameEnd marker closes the GPU frame (occlusion + screenshot readback
+    // land in the UI -> FrameEnd slot); the pair FrameBegin/FrameEnd is what
+    // resolveFrame() turns into frameTimeMs().
+    m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::FrameEnd);
+
     vkEndCommandBuffer(m_commandBuffer);
 
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -2407,6 +2450,9 @@ void NativeRenderer::endFrame() {
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &m_renderFinished[m_currentImageIndex];
     vkQueueSubmit(m_graphicsQueue, 1, &submit, m_inFlightFence);
+    // The frame's queries are now in flight; advance the ring so the next
+    // beginFrame() resolves this slot once m_inFlightFence has signalled.
+    m_gpuProfiler.endFrame();
 
     VkPresentInfoKHR present{};
     present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -2435,6 +2481,10 @@ void NativeRenderer::endFrame() {
 void NativeRenderer::shutdown() {
     if (!m_device) return;
     vkDeviceWaitIdle(m_device);
+
+    // Query pools die with the device — drop them while it is still valid so
+    // GpuProfiler's own destructor has nothing left to destroy.
+    m_gpuProfiler.shutdown();
 
     // Torn down first so no deferred pipeline outlives m_pipelineLayout.
     destroyDeferredResources();

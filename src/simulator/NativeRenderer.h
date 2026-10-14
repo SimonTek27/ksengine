@@ -46,6 +46,9 @@
 #include "MathTypes.h"
 #include "engine/Math/Frustum.h"
 #include "engine/scene/LodWindow.h"
+// Roadmap E9 / gate 2.14: VK_QUERY_TYPE_TIMESTAMP pools written along the
+// endFrame() record path (see gpuProfiler() below).
+#include "engine/physics/GpuProfiler.h"
 
 namespace ks::sim {
 
@@ -390,6 +393,18 @@ public:
     void setUiGpuPass(std::shared_ptr<ui::UiGpuPass> pass) { m_uiPass = std::move(pass); }
     ui::UiGpuPass* uiGpuPass() { return m_uiPass.get(); }
     void drawUi(const ui::UiRenderer& ui);
+
+    // GPU frame profile (roadmap E9 / gate 2.14). Timestamps are written in
+    // endFrame() between the FrameBegin and FrameEnd markers and resolved two
+    // frames later (the ring only reuses a pool once the single in-flight
+    // fence has signalled); the resolved value is published to
+    // PhysicsProfiler from endFrame() so the CPU report, the C API and the
+    // CSV all describe the same frame. No-op — and frameTimeMs() stays 0 —
+    // when the device or the queue reports no timestamp support.
+    GpuProfiler& gpuProfiler() { return m_gpuProfiler; }
+    double gpuFrameTimeMs() const { return m_gpuProfiler.frameTimeMs(); }
+    double gpuAvgFrameTimeMs() const { return m_gpuProfiler.avgFrameTimeMs(); }
+    bool gpuProfilerActive() const { return m_gpuProfiler.isEnabled(); }
 
     // --- Particles (roadmap ksengine-vs-cryengine P1) ---
     // Uploads this frame's billboard quads and nothing else: floatCount is a
@@ -783,6 +798,10 @@ private:
     std::shared_ptr<ui::UiGpuPass> m_uiPass;
     int m_viewportW = 1280;
     int m_viewportH = 720;
+
+    // GPU timestamp profiler (E9 / 2.14). Owns the query pools; init() runs
+    // from createDevice(), shutdown() before the device goes away.
+    GpuProfiler m_gpuProfiler;
 
     // --- Image-Based Lighting (brief P2 / S3) ---
     // 0 = GGX-prefiltered procedural sky (128x64 + 5 mips of roughness

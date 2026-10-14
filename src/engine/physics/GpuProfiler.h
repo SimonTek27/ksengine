@@ -25,6 +25,10 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+// NativeRenderer (kssim) owns one of these across the ksengine.dll boundary,
+// so the class carries the same explicit export annotation as every other
+// engine entity with out-of-line definitions (see KsExport.h).
+#include "KsExport.h"
 
 #if defined(HAS_VULKAN) || defined(VK_VERSION_1_0)
 #  include <vulkan/vulkan.h>
@@ -45,7 +49,7 @@ using VkResult = int;
 namespace ks {
 namespace sim {
 
-class GpuProfiler {
+class KSENGINE_API GpuProfiler {
 public:
     enum class Pass : int {
         FrameBegin = 0,

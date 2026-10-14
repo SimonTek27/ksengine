@@ -515,6 +515,8 @@ KSAPI int ks_engine_profiler_export_csv(const char* path_utf8) {
                      s.name.c_str(), s.totalMs, s.avgUs, s.hits);
     }
     std::fprintf(f, "\"__frame__\",%.6f,0,1\n", prof.frameTimeMs());
+    if (prof.gpuFrameTimeMs() > 0.0)
+        std::fprintf(f, "\"__gpu_frame__\",%.6f,0,1\n", prof.gpuFrameTimeMs());
     std::fclose(f);
     return 1;
 }
@@ -523,6 +525,15 @@ KSAPI double ks_engine_profiler_frame_ms(void) {
 }
 KSAPI int ks_engine_profiler_fps(void) {
     return ks::physics::PhysicsProfiler::instance().fps();
+}
+KSAPI double ks_engine_profiler_gpu_ms(void) {
+    return ks::physics::PhysicsProfiler::instance().gpuFrameTimeMs();
+}
+KSAPI double ks_engine_profiler_gpu_avg_ms(void) {
+    return ks::physics::PhysicsProfiler::instance().gpuAvgFrameTimeMs();
+}
+KSAPI int ks_engine_profiler_gpu_fps(void) {
+    return ks::physics::PhysicsProfiler::instance().gpuFps();
 }
 
 } /* extern "C" */

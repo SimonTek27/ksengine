@@ -147,6 +147,13 @@ KSAPI void ks_engine_profiler_report(const char* path_utf8_or_null);
 KSAPI int  ks_engine_profiler_export_csv(const char* path_utf8);
 KSAPI double ks_engine_profiler_frame_ms(void);
 KSAPI int    ks_engine_profiler_fps(void);
+/* GPU half of the same frame (E9): VK_QUERY_TYPE_TIMESTAMP pairs written
+ * along the renderer's endFrame() path and resolved into PhysicsProfiler.
+ * Headless/embedded runs create no renderer, so they read 0 — 0 means "no
+ * GPU data", never an estimated number. */
+KSAPI double ks_engine_profiler_gpu_ms(void);
+KSAPI double ks_engine_profiler_gpu_avg_ms(void);
+KSAPI int    ks_engine_profiler_gpu_fps(void);
 
 #ifdef __cplusplus
 }

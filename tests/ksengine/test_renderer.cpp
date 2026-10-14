@@ -1387,6 +1387,21 @@ int main()
     }
     std::filesystem::remove_all(broken, brokenEc);
 
+    // E9 / gate 2.14: this run pushed real frames through endFrame(), so the
+    // two-frame timestamp ring has resolved by now (every beginFrame() waits
+    // on the single in-flight fence first). If the queue carries timestamps
+    // at all, a real GPU frame time must be sitting there — 0 would mean the
+    // markers were written but never read back.
+    if (renderer.gpuProfilerActive()) {
+        const double gpuMs = renderer.gpuFrameTimeMs();
+        std::printf("test_renderer: gpu frame=%.3f ms avg=%.3f ms fps=%d\n",
+                    gpuMs, renderer.gpuAvgFrameTimeMs(),
+                    renderer.gpuProfiler().fps());
+        KS_CHECK(gpuMs > 0.0);
+    } else {
+        std::printf("test_renderer: gpu timestamps unavailable on this queue\n");
+    }
+
     renderer.shutdown();
     return KS_TEST_RESULT("test_renderer");
 }

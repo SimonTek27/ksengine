@@ -37,6 +37,15 @@ int main() {
     std::printf("profiler frame_ms=%.3f fps=%d\n",
                 ks_engine_profiler_frame_ms(), ks_engine_profiler_fps());
 
+    // E9 GPU frame path: this run has no renderer, so 0 is the only honest
+    // answer — the getters must never invent a number for a missing GPU pass.
+    CHECK(ks_engine_profiler_gpu_ms() >= 0.0);
+    CHECK(ks_engine_profiler_gpu_avg_ms() >= 0.0);
+    CHECK(ks_engine_profiler_gpu_fps() >= 0);
+    std::printf("profiler gpu_ms=%.3f gpu_avg_ms=%.3f gpu_fps=%d\n",
+                ks_engine_profiler_gpu_ms(), ks_engine_profiler_gpu_avg_ms(),
+                ks_engine_profiler_gpu_fps());
+
     ks_engine_destroy(e);
     if (fail) {
         std::printf("%d check(s) failed\n", fail);

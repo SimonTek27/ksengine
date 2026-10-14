@@ -17,6 +17,7 @@
 #include "VehicleAudioHook.h" // upgrade sound pack -> SimulatorAudio (roadmap 2.9)
 #include "engine/physics/DamageTelemetry.h"
 #include "engine/physics/AeroModel.h"   // baseline aero capture (roadmap 2.9)
+#include "engine/physics/PhysicsProfiler.h"
 #include "engine/vehicle/VehicleAppearanceBundle.h"      // resolveAppearance (2.9)
 #include "engine/vehicle/ApplyVehicleUpgrades.h"         // physics bridge (2.9)
 #include "ui/UiGpuPass.h"
@@ -39,6 +40,7 @@
 #include "adapters/assetto_corsa/AcSharedMemoryPublisher.h"
 #include "adapters/assetto_corsa/AcSurfacesLoader.h"
 #include "adapters/assetto_corsa/TrackDataJsonLoader.h"
+#include "adapters/assetto_corsa/AcRemoteTelemetryServer.h"
 
 #include <algorithm>
 #include <cctype>
@@ -1275,6 +1277,14 @@ void SimulationLoop::render(float dt) {
             const auto& st = m_vulkanRenderer->lastFrameStats();
             std::fprintf(stderr, "[render] %.1f fps submitted=%u drawn=%u culled=%u occluded=%u\n",
                          s_frame / elapsedReport, st.submitted, st.drawn, st.culled, st.occluded);
+            // E9 / gate 2.14: the GPU half of the same frame, only when the
+            // queue actually produced timestamps (0 is "no data", printed as
+            // such rather than as a frame time).
+            const double gpuMs = m_vulkanRenderer->gpuFrameTimeMs();
+            if (gpuMs > 0.0)
+                std::fprintf(stderr, "[render] gpu frame=%.3f ms avg=%.3f ms (~%d fps)\n",
+                             gpuMs, m_vulkanRenderer->gpuAvgFrameTimeMs(),
+                             m_vulkanRenderer->gpuProfiler().fps());
             s_frame = 0;
             s_lastReport = nowReport;
         }
@@ -1780,7 +1790,15 @@ void SimulationLoop::applyRemoteInput(int clientIndex, const net::InputData& inp
 }
 
 void SimulationLoop::tick() {
+    static bool profileInit = false;
+    if (!profileInit) {
+        profileInit = true;
+        if (const char* e = std::getenv("KS_PROFILE"))
+            ks::physics::PhysicsProfiler::instance().setEnabled(e[0] != '0');
+    }
+
     if (!m_running) {
+        PROFILE_FRAME();
         updateCamera(1.0f / 60.0f);
         publishSharedMemory();
         publishUdpTelemetry();
@@ -1809,6 +1827,7 @@ void SimulationLoop::tick() {
     if (m_multiCar)
         m_multiCar->setAISpeedFactor(
             m_raceSession.isActive() ? m_raceSession.aiSpeedFactor() : 0.0f);
+    PROFILE_SECTION("physics");
     while (!paused && m_simAccumulator >= m_physicsDt) {
         applyInput();
         // Roadmap 2.7: garage exit / pit entry runs before the physics step
@@ -2026,8 +2045,12 @@ void SimulationLoop::tick() {
         m_audio->setOtherCarVoices(nullptr, 0);
     }
 #endif
-    updateCamera(static_cast<float>(elapsed));
-    render(static_cast<float>(elapsed));
+    {
+        PROFILE_SECTION("render");
+        updateCamera(static_cast<float>(elapsed));
+        render(static_cast<float>(elapsed));
+    }
+    PROFILE_END_FRAME();
 }
 
 namespace {
