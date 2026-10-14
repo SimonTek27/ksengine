@@ -912,6 +912,15 @@ static void initSimulation() {
         }
         g_simulation->ui().menu().setVisible(false);
     }
+
+    // Gate 2.11/2.12 enabler: KS_WEATHER=<dry|damp|wet> applies the same
+    // preset the menu offers, right after the optional session start so the
+    // whole run (grip, spray, wetness decay) is reproducible without UI
+    // interaction - the wet/dry race gate runs KS_WEATHER=wet.
+    if (const char* wx = std::getenv("KS_WEATHER"); wx && wx[0]) {
+        printf("[INIT] KS_WEATHER=%s\n", wx);
+        g_simulation->setWeatherPresetByName(wx);
+    }
 }
 
 // Roadmap 2.4/2.5 — KS_SCREENSHOT writer: NativeRenderer readback rows are

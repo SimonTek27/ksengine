@@ -224,6 +224,11 @@ public:
         applyCollisionImpulse(J, contactPoint, contactNormal);
     }
 
+    // Gate 2.12 - the NaN recovery path in updatePhysics() used to reset the
+    // state silently; a1 h stability run has to be able to prove "zero
+    // recoveries". The counter is logged ("[nan] ...") and readable here.
+    unsigned long long nanRecoveries() const { return m_nanRecoveries; }
+
 private:
     static std::map<std::string, std::string> parseIni(const std::string& path);
     static float getf(const std::map<std::string, std::string>& m, const std::string& k, float def);
@@ -231,6 +236,7 @@ private:
     void shiftGears();
 
     SimulationState m_state;
+    unsigned long long m_nanRecoveries = 0;
     VehicleFFBSample m_ffb;
     bool m_running = false;
     bool m_frozen = false;

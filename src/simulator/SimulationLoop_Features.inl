@@ -29,15 +29,7 @@ void SimulationLoop::startFeatureServices(bool hostAnnounce) {
     };
     m_features.onSetTimeOfDay = [this](float h) { setTimeOfDay(h); };
     m_features.onSetWeather = [this](const std::string& name) {
-        auto wp = presetByName(name);
-        ks::physics::WeatherState ws;
-        ws.ambientTemp = wp.ambientC;
-        ws.trackTemp = wp.trackC;
-        ws.trackWetness = wp.wetness;
-        ws.rainIntensity = wp.rain;
-        ws.windSpeed = wp.windMs;
-        ws.cloudCover = wp.cloud;
-        setWeatherPreset(ws);
+        setWeatherPresetByName(name);
         m_features.weatherCtrl.applyPreset(name);
     };
     m_features.onSetupLoad = [this](const std::string& path) {

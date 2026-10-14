@@ -115,7 +115,7 @@ AI che rientrano (`requestEnter`), finestra box in gara, parser AC
 
 - [ ] **2.11** Gara asciutto/bagnato ripetibile — 10–15 min, 8+ auto; grip, spray, audio, risultati coerenti ⬜
 - [ ] **2.12** Stabilità lunga — run 1 ora senza NaN/recovery; log e telemetria ispezionabili ⬜
-- [ ] **2.13** Regressione automatica — CTest Qt-free verdi; consolidare test bridge team/upgrades/materiali se servono casi extra 🟡
+- [x] **2.13** Regressione automatica — CTest Qt-free verdi; consolidare test bridge team/upgrades/materiali se servono casi extra ✅ 2026-10-14: suite Qt-free 60/60 verdi; aggiunto `team_upgrade_bridge_test` (parser `team.ini` + `buildFieldFromTeam` con bench/padding AI, catalogo upgrade + `appliedMods` + `applyUpgradesToVehicleSimulator` su VehicleSimulator reale, instance/material swap); materiali già coperti da `material_cache_test` + `content_library_test`
 - [x] **2.14** Profilo frame reale — CPU fisica + GPU su hardware target con scena di riferimento; nessun KPI inventato ✅ 2026-10-14: run 45 s con renderer Vulkan reale (RTX 3070 Ti, Debug Qt-free), scena refcar + mugello + 8 AI; report/CSV/log/screenshot in `docs/gate_2_14/`, sintesi in `docs/GATE_2_14_FRAME_PROFILE.md` (il run ha trovato e fatto fixare 3 difetti di wiring del profiler E9)
 
 ---

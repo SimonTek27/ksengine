@@ -13,10 +13,23 @@
 |---|---|
 | GPU | NVIDIA GeForce RTX 3070 Ti, driver 32.0.16.1088 |
 | Finestra | 1904×1041, SDR 8-bit (swapchain) |
-| Scena di riferimento | `content/baked` (11 mesh) + `content/cars/refcar` + `content/tracks/mugello` (`data/data.json`) + 8 AI (`KS_AI_CARS=8`), sessione autostart |
-| Fisica | `fixedDt=0.008333` → 120 Hz, 9 auto (giocatore + 8 AI) |
+| Scena di riferimento | `content/baked` (11 mesh) + `content/cars/refcar` + `content/tracks/mugello` (`data/data.json`) + field da 9 slot (`KS_AI_CARS=8`), sessione autostart |
+| Fisica | passo fisico del tick `m_physicsDt = 1/1000` → **1 kHz**, 1 auto (giocatore; vedi correzione sotto) |
 | Durata | 45 s (`KS_PROFILE_SECONDS=45`), **3837 frame profila­ti** |
 | Comandi | `KS_PROFILE=1 KS_PROFILE_SECONDS=45 KS_PROFILE_CSV=profile_2_14.csv KS_PROFILE_REPORT=profile_2_14_report.txt KS_AUTOSTART=1 KS_CAR=content/cars/refcar KS_TRACK=<repo>/content/tracks/mugello KS_AI_CARS=8` (bat: `run_gate214_a.bat`, run di sola scena: `run_gate214_b.bat` con `KS_SCREENSHOT`) |
+
+> **Correzione (gate 2.12, 2026-10-14):** il log del run
+> (`gate2_14_stdout.txt`) mostra `SimulationLoop: spawned 0 AI cars` —
+> `content/tracks/mugello` non ha `ai/fast_lane.ai`, quindi `spawnGrid()` non
+> ha spawnato nessuna auto (il field da 9 slot in `[team]` era costruito, mai
+> popolato). Il run 2.14 ha quindi profilato **1 auto (giocatore)**, non 9:
+> i 44 965 step di `updatePhysics` sono **1 auto × 1 kHz × 45 s** (il passo
+> fisico del tick è `m_physicsDt = 1/1000`; `setFixedDt(1/120)` è il fixed
+> step dell'engine, usato per altra via). I numeri del profilo restano validi
+> per il gate 2.14 (frame reale CPU+GPU sulla scena di riferimento); la parte
+> "8 AI" non era verificata. La linea sintetica
+> `content/tracks/mugello/ai/fast_lane.ai` (cerchio R=150 m, generata per il
+> gate 2.12) ora permette auto AI reali.
 
 ## Risultati (dal report/CSV del run, valori medi per tick o per step)
 
@@ -29,7 +42,7 @@
 | `render` (camera/submit/UI) | **3 516.6 µs** | 13 493 ms | 3837 |
 | Resto del tick (FeatureHub, FFB, weather, telemetria, race session) | **388.8 µs** (residuo) | — | — |
 
-Per **step di auto** (`VehicleSimulator.*`, 44 965 step = 9 auto × 120 Hz × ~41.7 s attivi):
+Per **step di auto** (`VehicleSimulator.*`, 44 965 step = 1 auto × 1 kHz × 45 s; vedi correzione AI in apertura):
 
 | Sezione/sotto-sistema | Media per step |
 |----------------------|---------------:|

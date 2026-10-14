@@ -11,6 +11,7 @@
 #include "engine/physics/LapSectorTimer.h"
 #include "engine/physics/PhysicsGolden.h"
 #include "engine/physics/WeatherPhysics.h"
+#include "WeatherControl.h" // roadmap 2.11: KS_WEATHER preset -> WeatherState
 #include "engine/scene/Registry.h"
 #include "ui/NativeUiHub.h"
 #include "CameraController.h"
@@ -268,6 +269,19 @@ public:
         m_weather = state;
         m_weatherSim.setState(state);
         m_weatherSim.start();
+    }
+    // Gate 2.11 enabler: the same dry/damp/wet presets the menu applies,
+    // reachable without the UI (KS_WEATHER env in SimulatorApp, tests).
+    void setWeatherPresetByName(const std::string& name) {
+        const ks::sim::WeatherPreset wp = ks::sim::presetByName(name);
+        ks::physics::WeatherState ws;
+        ws.ambientTemp = wp.ambientC;
+        ws.trackTemp = wp.trackC;
+        ws.trackWetness = wp.wetness;
+        ws.rainIntensity = wp.rain;
+        ws.windSpeed = wp.windMs;
+        ws.cloudCover = wp.cloud;
+        setWeatherPreset(ws);
     }
     const ks::physics::WeatherState& weatherState() const { return m_weather; }
 

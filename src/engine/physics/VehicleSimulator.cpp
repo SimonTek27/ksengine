@@ -1006,6 +1006,17 @@ void VehicleSimulator::updatePhysics(double dt) {
     }
     if (!std::isfinite(m_state.speed) || !std::isfinite(m_state.position.x) ||
         !std::isfinite(m_state.position.z) || !std::isfinite(m_state.heading)) {
+        // Gate 2.12: a recovery is a fault the soak must surface, not absorb.
+        // Count it and shout on stderr; the1 h gate greps for "[nan]".
+        ++m_nanRecoveries;
+        fprintf(stderr,
+                "[nan] VehicleSimulator recovery #%llu: speed=%g pos=(%g,%g,%g) "
+                "heading=%g\n",
+                m_nanRecoveries, static_cast<double>(m_state.speed),
+                static_cast<double>(m_state.position.x),
+                static_cast<double>(m_state.position.y),
+                static_cast<double>(m_state.position.z),
+                static_cast<double>(m_state.heading));
         m_state.velocity = {};
         m_state.angularVelocity = {};
         m_state.acceleration = {};

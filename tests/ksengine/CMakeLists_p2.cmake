@@ -36,6 +36,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
 endif()
 
+# Gate 2.13 — team/upgrades bridge consolidation: team.ini parser +
+# buildFieldFromTeam session field, upgrade catalog parser + appliedMods +
+# applyUpgradesToVehicleSimulator on a real VehicleSimulator (header-only
+# bridges + ksengine for the VehicleSimulator setters).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/team_upgrade_bridge_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TeamInfo.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/vehicle/VehicleUpgradeSystem.h")
+    add_executable(team_upgrade_bridge_test team_upgrade_bridge_test.cpp)
+    target_include_directories(team_upgrade_bridge_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(team_upgrade_bridge_test PRIVATE ksengine)
+    add_test(NAME team_upgrade_bridge_test COMMAND team_upgrade_bridge_test)
+endif()
+
 # Roadmap 2.7 - pit lane queue: order of box exits (release gap + spacing).
 # PitLaneQueue.h is header-only, so this target compiles just the test TU.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_queue_test.cpp" AND

@@ -9,6 +9,26 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gate 2.11/2.12 enabler - `KS_WEATHER` + recovery NaN ispettibili**:
+  - `SimulationLoop::setWeatherPresetByName()` espone gli stessi preset
+    dry/damp/wet del menu; `KS_WEATHER=<dry|damp|wet>` in `SimulatorApp`
+    li applica all'avvio della sessione, rendendo la gara bagnata/asciutta
+    ripetibile senza interazione UI (gate 2.11).
+  - Il percorso di recovery NaN di `VehicleSimulator::updatePhysics()` non e`
+    piu` silenzioso: incrementa `nanRecoveries()` e scrive su stderr una
+    riga `[nan] VehicleSimulator recovery #N: ...` — un run di stabilita`
+    lunga puo` provare "zero recovery" controllando il log (gate 2.12).
+- **Gate 2.13 - consolidamento test bridge team/upgrades**:
+  - Nuovo `team_upgrade_bridge_test` (CTest Qt-free): parser `team.ini`
+    (`TeamInfoLoader::loadIni`: sezioni [Team]/[Car_N], quote, garage
+    auto-assegnati), `buildFieldFromTeam` (ordine roster, Player marcato,
+    bench tagliato dalla coda, pad "AI n", gridSlot), catalogo upgrade
+    (`VehicleUpgradeSystem::loadFromIni`: id slug, categoria dal nome,
+    `select`/`appliedMods` somma cross-tipi) e `applyUpgradesToVehicleSimulator`
+    su un `VehicleSimulator` reale (delta esatti su massa/potenza/drag,
+    re-apply senza stacking, node/material swap).
+  - Materiali gia` coperti da `material_cache_test` + `content_library_test`;
+    la suite Qt-free ora e` 60/60.
 - **Roadmap E9 / gate 2.14 - GPU timestamps di frame**:
   - `GpuProfiler` (`src/engine/physics/GpuProfiler.*`, query pool
     `VK_QUERY_TYPE_TIMESTAMP` doppi-buffered) ora e` cablato nel percorso
