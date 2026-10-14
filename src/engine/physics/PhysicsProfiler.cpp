@@ -207,5 +207,21 @@ void PhysicsProfiler::report(FILE* out) const
     std::fprintf(out, "==============================\n");
 }
 
+bool PhysicsProfiler::exportCsv(const std::string& path) const
+{
+    FILE* f = std::fopen(path.c_str(), "w");
+    if (!f) return false;
+    std::fprintf(f, "name,total_ms,avg_us,hits\n");
+    for (const auto& s : sectionsSorted()) {
+        std::fprintf(f, "\"%s\",%.6f,%.3f,%d\n",
+                     s.name.c_str(), s.totalMs, s.avgUs, s.hits);
+    }
+    std::fprintf(f, "\"__frame__\",%.6f,0,1\n", frameTimeMs());
+    if (gpuFrameTimeMs() > 0.0)
+        std::fprintf(f, "\"__gpu_frame__\",%.6f,0,1\n", gpuFrameTimeMs());
+    std::fclose(f);
+    return true;
+}
+
 } // namespace physics
 } // namespace ks

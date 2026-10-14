@@ -92,8 +92,13 @@ int main(int argc, char** argv)
             s.setThrottle(throttle);
         }
 
+        // The profiler frame here is the STEP (this tool's "frame"): the
+        // per-step pair used to live inside VehicleSimulator::updatePhysics,
+        // which would corrupt the sim frame clock at runtime (gate 2.14).
+        PROFILE_FRAME();
         const auto t0 = clock_type::now();
         for (auto& s : sims) s.updatePhysics(0.001);
+        PROFILE_END_FRAME();
         const double ns = nsSince(t0);
         totalNs += ns;
         if (ns < minNs) minNs = ns;

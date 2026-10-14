@@ -30,8 +30,39 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     device produce timestamp.
   - `c_api_test` verifica che i getter GPU restino a 0 in headless (nessun
     renderer = nessun dato).
+- **Roadmap gate 2.14 - run di profilazione + dump all'uscita**:
+  - `kssim.exe` con `KS_PROFILE=1` stampa il report `PhysicsProfiler` alla
+    chiusura ordinata; `KS_PROFILE_REPORT=<path>` lo scrive su file
+    (stdout/stderr di un build WIN32 non sono catturabili in modo affidabile
+    dal parent) e `KS_PROFILE_CSV=<path>` scrive il CSV.
+  - `KS_PROFILE_SECONDS=N`: run windowed che esce da solo dopo N secondi
+    (il gemello windowed di `KS_HEADLESS_SECONDS`, per quando la GPU deve
+    entrare nei numeri).
+  - `PhysicsProfiler::exportCsv()` è ora l'unico scrittore del CSV: il dump
+    in uscita e `ks_engine_profiler_export_csv()` emettono righe identiche.
+  - Evidenza del gate in `docs/gate_2_14/` (report, CSV, log, screenshot) con
+    sintesi e controlli di coerenza in `docs/GATE_2_14_FRAME_PROFILE.md`;
+    `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Fixed
+- **Wiring profiler E9 - 3 difetti trovati dal run del gate 2.14** (numeri
+  del report prima del fix: contai 50592 "frame" in 45 s mischiando tick e
+  step auto):
+  - `SimulationLoop::tick()`: il paro `PROFILE_FRAME` / `PROFILE_END_FRAME`
+    era asimmetrico (aperto solo nel ramo idle, chiuso solo nel ramo attivo);
+    ora ogni tick apre e chiude il proprio frame in entrambi i rami.
+  - `VehicleSimulator::updatePhysics()` scriveva il frame clock ad ogni step
+    di ogni auto (sovrascriveva `m_frameStart` e gonfiava `frames`): rimosso,
+    il costo dello step resta nella sezione `VehicleSimulator.updatePhysics`
+    + sotto-sistema `VehicleDynamics`; `ksvsprofile` possiede ora il proprio
+    frame-per-step.
+  - La sezione `PROFILE_SECTION("physics")` era a scope di funzione: misurava
+    l'intera coda del tick (FeatureHub, FFB, weather, telemetria, render)
+    come "physics". Ora lo scope coincide con il while-loop a passo fisso.
+  - `PhysicsProfiler` torna annotato `KSENGINE_API` (la WIP locale l'aveva
+    rimossa: restava mascherata da un obj compilato con l'header vecchio;
+    qualsiasi ricompilazione avrebbe perso gli export dalla ksengine.dll e
+    rotto il link di kssim).
 - **tests/ksengine/CMakeLists (split p1/p2/p3)**: il taglio del file aveva
   perso interi blocchi e sorgenti, e in CTest restavano 14 test invece di 26.
   Ripristinato da `82172929:tests/ksengine/CMakeLists.txt`:

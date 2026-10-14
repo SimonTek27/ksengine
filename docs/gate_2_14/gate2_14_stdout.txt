@@ -1,0 +1,170 @@
+[MAIN] Starting ksEditor Simulator (Qt-free)...
+[INIT] Creating Vulkan instance...
+[INIT] Creating Win32 surface...
+[INIT] Creating NativeRenderer...
+[INIT] Creating Vulkan device...
+[INIT] Creating swap chain 1904x1041...
+[NativeRenderer] swapchain: SDR (8-bit) (format 44, colorSpace 0)
+[INIT] Vulkan device + swap chain OK
+[NativeRenderer] ibl: 128x64 prefilter x5 + 32x16 irradiance + 128x128 brdf lut uploaded
+[INIT] Shadow map OK
+DirectInputJoystick: Acquire failed (0x80070057)
+DirectInputJoystick: acquired "Controller (XBOX 360 For Windows)" VID=045E PID=028E
+InputManager: DirectInput device ready
+XInputDevice: controller on index 0
+InputManager: XInput pad ready
+InputManager: mapping steer=0 throttle=1 brake=2
+MozaFFB: Initializing (USB HID)
+MozaFFB: No MOZA wheel found
+FFBSDKFactory: No FFB wheel detected
+UiGpuPass: atlas 128x48 R8 ready (6144 bytes)
+AcSharedMemory: publisher ready (mapped)
+UdpTelemetryBridge: → 127.0.0.1:20777 (v2+damage)
+SimulationLoop: UDP → 127.0.0.1:20777
+TcpTelemetryBridge: listen 0.0.0.0:20778
+SimulationLoop: TCP listen :20778
+ExternalControlApi: listening on 20780
+[INIT] Settings: fixedDt=0.008333 audio=0.80 assist TC=0 ABS=0
+[NativeRenderer] materials.txt: 10 mesh materials
+[scene] 11 entities from content/baked
+[INIT] Loaded 11 baked mesh(es) into 11 scene entities
+[scene] car visual: solid placeholder box
+VehicleUpgradeSystem: cannot open content/cars/refcar/upgrades.ini
+[upgrade] refcar: 4 package(s) from built-in defaults
+[upgrade] physics: 260.0 kW, 1348 kg, cd 0.350, cl -0.250
+[scene] upgrade livery folder missing (content/cars/refcar/skins/factory) -> base
+[scene] car materials.txt: 1 mesh material(s)
+[scene] car visuals: 1 baked mesh(es) from content/cars/refcar\baked (materials.txt applied)
+WASAPIOutput: Failed to init audio client (hr=0x88890008)
+SimulatorAudio: WASAPIOutput initialize failed
+SimulatorAudio: Shutdown
+[INIT] KS_AI_CARS=8 -> 8 AI cars
+[INIT] KS_AUTOSTART=1 -> starting drive session, menu suppressed
+[team] session field (no team):
+[team]   P1 #0   (unnamed)        livery=-              garage=0  (player)
+[team]   P2 #0   AI 1             livery=-              garage=0
+[team]   P3 #0   AI 2             livery=-              garage=0
+[team]   P4 #0   AI 3             livery=-              garage=0
+[team]   P5 #0   AI 4             livery=-              garage=0
+[team]   P6 #0   AI 5             livery=-              garage=0
+[team]   P7 #0   AI 6             livery=-              garage=0
+[team]   P8 #0   AI 7             livery=-              garage=0
+[team]   P9 #0   AI 8             livery=-              garage=0
+SimulationLoop: spawned 0 AI cars
+RaceSessionManager: Session started Laps:0 Time:0s
+ksEditor Simulator started (Win32 + Vulkan, no Qt)
+[NativeRenderer] occlusion grid 238x131 tiles (tile=8 px) @ 1904x1041 depth
+SimulationLoop: pit service ENTER GARAGE
+[render] 166.2 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.196 ms avg=0.195 ms (~5107 fps)
+[render] 140.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.196 ms avg=0.195 ms (~5110 fps)
+[render] 64.7 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.542 ms avg=0.557 ms (~1844 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.554 ms avg=0.857 ms (~643 fps)
+[render] 71.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.802 ms avg=0.861 ms (~1246 fps)
+[render] 153.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.496 ms avg=0.512 ms (~2016 fps)
+[render] 164.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.471 ms avg=0.470 ms (~2124 fps)
+[render] 165.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.538 ms avg=0.531 ms (~1859 fps)
+[render] 165.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.575 ms avg=0.574 ms (~1737 fps)
+[render] 165.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.500 ms avg=0.499 ms (~2000 fps)
+[render] 165.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.499 ms avg=0.497 ms (~2004 fps)
+[render] 165.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.559 ms avg=0.560 ms (~1790 fps)
+[render] 110.5 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.371 ms avg=0.375 ms (~2695 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.369 ms avg=0.370 ms (~2706 fps)
+[render] 64.5 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.938 ms avg=0.908 ms (~1066 fps)
+[render] 65.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.150 ms avg=1.264 ms (~869 fps)
+[render] 65.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.380 ms avg=1.568 ms (~724 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.750 ms avg=2.146 ms (~571 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.633 ms avg=2.185 ms (~612 fps)
+[render] 57.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.653 ms avg=2.083 ms (~605 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.746 ms avg=1.817 ms (~572 fps)
+[render] 65.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=6.205 ms avg=2.157 ms (~161 fps)
+[render] 65.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.657 ms avg=2.161 ms (~603 fps)
+[render] 64.7 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.734 ms avg=1.976 ms (~576 fps)
+[render] 64.5 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.659 ms avg=2.234 ms (~602 fps)
+[render] 64.7 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.647 ms avg=2.364 ms (~607 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.663 ms avg=2.277 ms (~601 fps)
+[render] 65.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.659 ms avg=1.682 ms (~602 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.664 ms avg=1.787 ms (~600 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.696 ms avg=1.708 ms (~589 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.651 ms avg=2.299 ms (~605 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.840 ms avg=2.387 ms (~543 fps)
+[render] 65.0 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.657 ms avg=2.246 ms (~603 fps)
+[render] 65.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.669 ms avg=2.185 ms (~599 fps)
+[render] 65.3 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=4.636 ms avg=2.151 ms (~215 fps)
+[render] 64.8 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.660 ms avg=2.270 ms (~602 fps)
+[render] 64.7 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.737 ms avg=1.965 ms (~575 fps)
+[render] 64.6 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.686 ms avg=2.077 ms (~593 fps)
+[render] 64.7 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.663 ms avg=2.982 ms (~601 fps)
+[render] 65.2 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=1.240 ms avg=2.256 ms (~806 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.999 ms avg=1.483 ms (~1001 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=5.168 ms avg=2.261 ms (~193 fps)
+[render] 65.1 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.790 ms avg=1.529 ms (~1265 fps)
+[render] 64.9 fps submitted=12 drawn=11 culled=1 occluded=0
+[render] gpu frame=0.793 ms avg=1.238 ms (~1260 fps)
+[MAIN] KS_PROFILE_SECONDS=45.0 reached -> exiting
+[PROFILE] run wall time 45.0 s
+=== PhysicsProfiler report ===
+frames=3837  last=5.094 ms  avg=4.797 ms  fps~196
+gpu last=0.747 ms  avg=1.249 ms  fps~1338
+
+-- Subsystems --
+name                   total_ms       avg_us     hits
+Aero                    396.427        8.816    44965
+Tires                   442.985        9.852    44965
+VehicleDynamics        2144.824       47.700    44965
+DamageModel             443.477        9.863    44965
+Total                 18264.484     4760.095     3837
+
+-- Sections --
+name                             total_ms       avg_us     hits
+render                          13493.171     3516.594     3837
+physics                          3279.538      854.714     3837
+VehicleSimulator.updatePhysics     1890.197       42.037    44965
+VehicleSimulator.damage           261.085        5.806    44965
+VehicleSimulator.tires            244.358        5.434    44965
+VehicleSimulator.aero             188.177        4.185    44965
+==============================
+[PROFILE] report -> profile_2_14_report.txt
+[PROFILE] csv -> profile_2_14.csv

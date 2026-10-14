@@ -1797,8 +1797,12 @@ void SimulationLoop::tick() {
             ks::physics::PhysicsProfiler::instance().setEnabled(e[0] != '0');
     }
 
+    // One frame pair per tick, in BOTH branches: the idle branch used to open
+    // a frame it never closed and the running branch closed one that was last
+    // opened by whoever ran before it, so the report's frame count/time mixed
+    // tick pairs with per-car step pairs (found by the gate 2.14 run).
+    PROFILE_FRAME();
     if (!m_running) {
-        PROFILE_FRAME();
         updateCamera(1.0f / 60.0f);
         publishSharedMemory();
         publishUdpTelemetry();
@@ -1809,6 +1813,7 @@ void SimulationLoop::tick() {
         updateNetworkSync(1.0f / 60.0f);
         pumpFeatureHub(1.0f / 60.0f, false);
         render();
+        PROFILE_END_FRAME();
         return;
     }
     auto now = std::chrono::steady_clock::now();
@@ -1827,32 +1832,38 @@ void SimulationLoop::tick() {
     if (m_multiCar)
         m_multiCar->setAISpeedFactor(
             m_raceSession.isActive() ? m_raceSession.aiSpeedFactor() : 0.0f);
-    PROFILE_SECTION("physics");
-    while (!paused && m_simAccumulator >= m_physicsDt) {
-        applyInput();
-        // Roadmap 2.7: garage exit / pit entry runs before the physics step
-        // so its hold, snap and pit limiter win over the raw driver input
-        // for this step (updatePitRepair runs after it, on the same phase).
-        updateGarageExit(static_cast<float>(m_physicsDt));
+    // Scoped block on purpose: the section must end with the fixed-step loop
+    // below it, not at function exit (which would swallow FeatureHub, FFB,
+    // weather, telemetry publish and render into "physics" — gate 2.14
+    // needs the physics number to be the physics step).
+    {
+        PROFILE_SECTION("physics");
+        while (!paused && m_simAccumulator >= m_physicsDt) {
+            applyInput();
+            // Roadmap 2.7: garage exit / pit entry runs before the physics step
+            // so its hold, snap and pit limiter win over the raw driver input
+            // for this step (updatePitRepair runs after it, on the same phase).
+            updateGarageExit(static_cast<float>(m_physicsDt));
 #if HAS_VEHICLE_SIM
-        if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
+            if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
 #endif
-        // Roadmap 2.7: box service at the physics rate, so the control hold
-        // (PitLaneRepair::holdCar) wins over the driver's next input instead
-        // of being overwritten by applyInput() in the same step.
-        updatePitRepair(static_cast<float>(m_physicsDt));
-        // AI cars freeze on the grid during the countdown and race once it
-        // is over; physics runs at the same fixed 1 kHz as the player's.
-        if (m_multiCar && !m_raceSession.isCountingDown())
-            m_multiCar->update(m_physicsDt);
-        if (m_sessionPhase == PHASE_GREEN_FLAG) updateLapAndSurface(m_physicsDt);
-        m_simTime += m_physicsDt;
-        m_simAccumulator -= m_physicsDt;
-        // Parity hooks (SimulationLoop_ParityHooks.h): ksnet / CarStateSync
-        // pump, stamped with the physics clock.
-        m_simTimeSec = m_simTime;
-        updateNetworkSync(static_cast<float>(m_physicsDt));
-    }
+            // Roadmap 2.7: box service at the physics rate, so the control hold
+            // (PitLaneRepair::holdCar) wins over the driver's next input instead
+            // of being overwritten by applyInput() in the same step.
+            updatePitRepair(static_cast<float>(m_physicsDt));
+            // AI cars freeze on the grid during the countdown and race once it
+            // is over; physics runs at the same fixed 1 kHz as the player's.
+            if (m_multiCar && !m_raceSession.isCountingDown())
+                m_multiCar->update(m_physicsDt);
+            if (m_sessionPhase == PHASE_GREEN_FLAG) updateLapAndSurface(m_physicsDt);
+            m_simTime += m_physicsDt;
+            m_simAccumulator -= m_physicsDt;
+            // Parity hooks (SimulationLoop_ParityHooks.h): ksnet / CarStateSync
+            // pump, stamped with the physics clock.
+            m_simTimeSec = m_simTime;
+            updateNetworkSync(static_cast<float>(m_physicsDt));
+        }
+    } // PROFILE_SECTION("physics") scope ends with the step loop
     // FeatureHub is pumped once per frame (not per physics step): discovery,
     // the external control API's command poll and weather keep running even
     // when a modal overlay pauses the world, while track limits only see the

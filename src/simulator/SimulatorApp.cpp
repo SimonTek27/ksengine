@@ -21,6 +21,7 @@
 // Roadmap 2.4/2.5 — KS_SCREENSHOT writes the readback with this Qt-free
 // encoder (same PNG writer the material module uses).
 #include "engine/material/PngCodec.h"
+#include "engine/physics/PhysicsProfiler.h" // roadmap 2.14: exit dump (KS_PROFILE=1)
 #include "engine/physics/VehicleSimulator.h"
 #include "engine/Config/EngineSettings.h"
 #include "engine/Engine.h"
@@ -75,6 +76,15 @@ static int g_shotDelay = 60;
 static bool g_shotRequested = false;
 static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
+
+// Roadmap 2.14 — windowed profile run: KS_PROFILE_SECONDS=N auto-exits a
+// rendered session after N seconds through the same deterministic teardown
+// (the KS_HEADLESS_SECONDS twin for when the GPU must be in the numbers).
+// The profile itself is requested with KS_PROFILE=1 (same switch the tick
+// scopes and the GPU markers read) and dumped on the way out; KS_PROFILE_CSV
+// additionally writes it as CSV.
+static double g_profileSeconds = 0.0;
+static double g_profileElapsed = 0.0;
 
 static const wchar_t* WINDOW_CLASS = L"KsEditorSimWindow";
 
@@ -960,6 +970,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         const int d = std::atoi(sd);
         if (d >= 0) g_shotDelay = d;
     }
+    // Roadmap 2.14 — timed profile run (see globals).
+    if (const char* ps = std::getenv("KS_PROFILE_SECONDS")) {
+        const double s = std::strtod(ps, nullptr);
+        if (s > 0.0) g_profileSeconds = s;
+    }
 
     printf("[MAIN] Starting ksEditor Simulator (Qt-free%s)...\n",
            g_headless ? ", headless" : "");
@@ -1029,7 +1044,46 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
             }
         }
 
+        // Roadmap 2.14 — wall time of the run (reported on exit) and the
+        // timed profile exit: leave through the normal teardown so the dump
+        // below sees the resolved GPU frame too.
+        g_profileElapsed += elapsed;
+        if (g_profileSeconds > 0.0 && g_profileElapsed >= g_profileSeconds) {
+            printf("[MAIN] KS_PROFILE_SECONDS=%.1f reached -> exiting\n",
+                   g_profileSeconds);
+            g_running = false;
+        }
+
         Sleep(1);
+    }
+
+    // Roadmap 2.14 — gate evidence on the way out: KS_PROFILE=1 (the same
+    // switch that enables the tick scopes and the GPU markers) prints the
+    // frame profile, KS_PROFILE_CSV=<path> additionally writes it as CSV.
+    // Both read the one PhysicsProfiler instance behind ksengine.dll, so the
+    // dump shows what the report/C API would show for this run.
+    if (const char* sp = std::getenv("KS_PROFILE");
+        sp && sp[0] && std::strcmp(sp, "0") != 0) {
+        auto& prof = ks::physics::PhysicsProfiler::instance();
+        std::fprintf(stderr, "[PROFILE] run wall time %.1f s\n", g_profileElapsed);
+        prof.report(stderr);
+        // KS_PROFILE_REPORT=<path>: same report in a file — stdout/stderr of
+        // a WIN32-subsystem build are not reliably capturable by the parent.
+        if (const char* rp = std::getenv("KS_PROFILE_REPORT"); rp && rp[0]) {
+            if (FILE* rf = std::fopen(rp, "w")) {
+                prof.report(rf);
+                std::fclose(rf);
+                printf("[PROFILE] report -> %s\n", rp);
+            } else {
+                printf("[PROFILE] report FAILED: %s\n", rp);
+            }
+        }
+        if (const char* csv = std::getenv("KS_PROFILE_CSV"); csv && csv[0]) {
+            if (prof.exportCsv(csv))
+                printf("[PROFILE] csv -> %s\n", csv);
+            else
+                printf("[PROFILE] csv FAILED: %s\n", csv);
+        }
     }
 
     // Deterministic teardown: destroy the simulation (and its borrowed

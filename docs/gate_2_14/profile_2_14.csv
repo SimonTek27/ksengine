@@ -1,0 +1,9 @@
+name,total_ms,avg_us,hits
+"render",13493.170500,3516.594,3837
+"physics",3279.538400,854.714,3837
+"VehicleSimulator.updatePhysics",1890.196600,42.037,44965
+"VehicleSimulator.damage",261.084900,5.806,44965
+"VehicleSimulator.tires",244.358100,5.434,44965
+"VehicleSimulator.aero",188.176600,4.185,44965
+"__frame__",5.094300,0,1
+"__gpu_frame__",0.746848,0,1

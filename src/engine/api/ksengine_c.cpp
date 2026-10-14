@@ -506,19 +506,9 @@ KSAPI void ks_engine_profiler_report(const char* path_utf8_or_null) {
 }
 KSAPI int ks_engine_profiler_export_csv(const char* path_utf8) {
     if (!path_utf8 || !path_utf8[0]) return 0;
-    FILE* f = std::fopen(path_utf8, "w");
-    if (!f) return 0;
-    auto& prof = ks::physics::PhysicsProfiler::instance();
-    std::fprintf(f, "name,total_ms,avg_us,hits\n");
-    for (const auto& s : prof.sectionsSorted()) {
-        std::fprintf(f, "\"%s\",%.6f,%.3f,%d\n",
-                     s.name.c_str(), s.totalMs, s.avgUs, s.hits);
-    }
-    std::fprintf(f, "\"__frame__\",%.6f,0,1\n", prof.frameTimeMs());
-    if (prof.gpuFrameTimeMs() > 0.0)
-        std::fprintf(f, "\"__gpu_frame__\",%.6f,0,1\n", prof.gpuFrameTimeMs());
-    std::fclose(f);
-    return 1;
+    // Single writer (PhysicsProfiler::exportCsv): the ksim exit dump
+    // (KS_PROFILE_CSV) and this call emit byte-identical rows.
+    return ks::physics::PhysicsProfiler::instance().exportCsv(path_utf8) ? 1 : 0;
 }
 KSAPI double ks_engine_profiler_frame_ms(void) {
     return ks::physics::PhysicsProfiler::instance().frameTimeMs();

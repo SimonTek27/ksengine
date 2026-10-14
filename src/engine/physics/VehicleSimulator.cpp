@@ -993,13 +993,17 @@ void VehicleSimulator::integrate(double dt) {
 void VehicleSimulator::updatePhysics(double dt) {
     if (!m_running || m_frozen) return;
     if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) return;
-    PROFILE_FRAME();
+    // Deliberately NOT PROFILE_FRAME/END_FRAME here: the profiler keeps one
+    // frame clock per sim frame (SimulationLoop::tick wraps it), and writing
+    // it from every car's step would overwrite the start stamp N cars x M
+    // steps per frame and count each step as a "frame" (gate 2.14 found the
+    // report header counting 9 cars x 1 kHz). The step cost stays visible
+    // through the section + VehicleDynamics subsystem below.
     {
         PROFILE_SUBSYSTEM(PhysicsProfiler::VehicleDynamics);
         PROFILE_SECTION("VehicleSimulator.updatePhysics");
         integrate(dt);
     }
-    PROFILE_END_FRAME();
     if (!std::isfinite(m_state.speed) || !std::isfinite(m_state.position.x) ||
         !std::isfinite(m_state.position.z) || !std::isfinite(m_state.heading)) {
         m_state.velocity = {};
