@@ -8,6 +8,50 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Roadmap E9 / gate 2.14 - GPU timestamps di frame**:
+  - `GpuProfiler` (`src/engine/physics/GpuProfiler.*`, query pool
+    `VK_QUERY_TYPE_TIMESTAMP` doppi-buffered) ora e` cablato nel percorso
+    frame di `NativeRenderer`: `init()` a device creation (con controllo di
+    `timestampValidBits` sulla coda grafica), marcatori `FrameBegin` / `Shadow`
+    / `MainPass` / `UI` / `FrameEnd` in `endFrame()`, `endFrame()` del
+    profiler subito dopo `vkQueueSubmit`, `shutdown()` prima della distruzione
+    del device.
+  - Il frame risolto viene pubblicato in `PhysicsProfiler`
+    (`setGpuFrameTimeMs` / `setGpuAvgFrameTimeMs`): report, CSV e C API
+    descrivono lo stesso frame. Nessun dato = 0, mai un KPI stimato.
+  - `GpuProfiler` è annotato `KSENGINE_API` (e verifica `timestampValidBits`
+    sulla coda in `init()`): senza l'export kssim non risolve i simboli oltre
+    la ksengine.dll.
+  - Nuovi getter C API: `ks_engine_profiler_gpu_ms()`,
+    `ks_engine_profiler_gpu_avg_ms()`, `ks_engine_profiler_gpu_fps()`; la riga
+    `__gpu_frame__` entra nel CSV solo se c'e` un valore reale.
+  - Il report periodico `[render]` stampa `gpu frame=... ms` quando il
+    device produce timestamp.
+  - `c_api_test` verifica che i getter GPU restino a 0 in headless (nessun
+    renderer = nessun dato).
+
+### Fixed
+- **tests/ksengine/CMakeLists (split p1/p2/p3)**: il taglio del file aveva
+  perso interi blocchi e sorgenti, e in CTest restavano 14 test invece di 26.
+  Ripristinato da `82172929:tests/ksengine/CMakeLists.txt`:
+  `track_loader_test`, `test_PhysicsGolden`, `test_GoldenExport`,
+  `test_physics_ini`, `test_race_flags`, `ai_race_test`, `test_multiplayer`,
+  i 5 `track_tool_*`, e inoltre
+  - `test_renderer`: sorgenti simulator + `KS_TEST_SHADER_DIR` /
+    `KS_TEST_REFERENCE_BAKE` / `KS_TEST_REFERENCE_CAR` + Vulkan libs
+    (senza quelle il target non compilava);
+  - `menu_session_gate_test` / `pit_strategy_menu_test`:
+    `GameMenuOverlay.cpp` + include dir (LNK2019 altrimenti);
+  - `pit_queue_test` / `material_cache_test`: include dir.
+  In p1 sono entrati `ac_remote_telemetry_test`,
+  `ac_shared_memory_publisher_test`, `udp_command_listener_test`, in p2
+  `physics_json_test` (restavano fuori con il file splittato).
+- **`physics_json_test`**: l'asserzione `mass()` == `massKg` ignorava che
+  `mass()` è la massa a secco più carburante/ballast (serbatoio default 100 L)
+  mentre `physics.json` conserva la massa secca in `baseMass()`. Ora verifica
+  `baseMass() == 980` e `mass() == baseMass + fuel * 0.74`.
+
 ### Changed
 - **Roadmap 2.7 — fedeltà del servizio in box**:
   - Gomme nuove: `out.tyresChanged` (job TYRES di `PitLaneRepair`) azzera
@@ -131,7 +175,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Test `user_data_test` (round trip JSON, sanitizzazione dei nomi,
   prima esecuzione, precedenza system/cfg → settings.json, stats).
   Verifica: 53/53 ctest; `ks_dist` produce `system/cfg/ksengine.json` e
-  una prima esecuzione da `dist/ksim` crea `user/Player/` con i tre file
+  una prima esecuzione da `dist/kssim` crea `user/Player/` con i tre file
   e le tre cartelle.
 - **ksengine.dll con API esportato esplicito** (roadmap 2.4/2.5):
   `src/engine/KsExport.h` introduce la macro `KSENGINE_API` (dllexport/dllimport in base alla definizione di `KSENGINE_BUILDING_DLL` / `KSENGINE_USE_DLL`) e `option(KSENGINE_SHARED ... ON)` in `src/engine/CMakeLists.txt` rende `ksengine` una shared library; sono stati annotati 29 classi e 32 funzioni libere in 38 header `src/engine/` con la macro `KSENGINE_API`. I simboli di superficie export sono misurati staticamente via dumpbin: 187 entità in `ksengine_export_surface.csv`, nessuna template. La DLL carica `vulkan-1.dll` in modalità delay-load.

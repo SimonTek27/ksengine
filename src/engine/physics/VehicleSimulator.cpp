@@ -1,4 +1,5 @@
 #include "VehicleSimulator.h"
+#include "CarPhysicsJson.h"
 #include "TrackSurface.h"
 #include "PhysicsProfiler.h"
 #include <cstdio>
@@ -86,6 +87,23 @@ void VehicleSimulator::setFrontalArea(double m2) {
 }
 void VehicleSimulator::setWheelBase(double m) { m_wheelBase = std::max(1.5, m); }
 void VehicleSimulator::setTrackWidth(double m) { m_trackWidth = std::max(1.0, m); }
+void VehicleSimulator::setWheelRadius(double m) {
+    // Same acceptance rule as loadTyresFromIni (RADIUS > 0.1 m).
+    if (m > 0.1) m_wheelRadius = m;
+}
+void VehicleSimulator::setFinalDrive(double ratio) {
+    if (ratio > 0.5) m_finalDrive = ratio;
+}
+void VehicleSimulator::setGearRatios(const std::vector<double>& ratios) {
+    // Same rule as loadDrivetrainFromIni: contiguous from first to first bad
+    // value, so a trailing null ("gearbox has no 7th") never truncates.
+    std::vector<double> clean;
+    for (double r : ratios) {
+        if (r > 0.01) clean.push_back(r);
+        else break;
+    }
+    if (!clean.empty()) m_gearRatios = std::move(clean);
+}
 
 void VehicleSimulator::setFuelTankCapacity(float liters) {
     m_fuelTankL = std::clamp(liters, 5.f, 300.f);
@@ -204,6 +222,14 @@ float VehicleSimulator::getf(const std::map<std::string, std::string>& m, const 
 }
 
 void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
+    // Unified data/physics.json first (single-file car physics, roadmap
+    // "unify the physics inis"); the per-file .ini set stays as the fallback
+    // so stock AC content loads unchanged.
+    if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
+    loadVehicleParamsFromIni(carPath);
+}
+
+void VehicleSimulator::loadVehicleParamsFromIni(const std::string& carPath) {
     auto tryLoad = [&](const char* name, void (VehicleSimulator::*fn)(const std::string&)) {
         fs::path p1 = fs::path(carPath) / "data" / name;
         fs::path p2 = fs::path(carPath) / name;
@@ -226,7 +252,7 @@ void VehicleSimulator::loadEngineFromIni(const std::string& path) {
     if (rpm > 1000.f) m_maxRpm = rpm;
     // Roadmap 2.7 follow-up: tank size (litres) for the pit refuel target.
     // AC carries it in data/powertrain.ini ([FUEL] capacity, in joules), which
-    // ksim does not parse yet — FUEL_CAPACITY is the ksengine-side knob until
+    // kssim does not parse yet — FUEL_CAPACITY is the ksengine-side knob until
     // then, and the built-in default keeps old behaviour when it is absent.
     const float tank = getf(m, "FUEL_CAPACITY",
                             getf(m, "ENGINE/FUEL_CAPACITY", m_fuelTankL));

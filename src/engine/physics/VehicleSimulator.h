@@ -83,11 +83,21 @@ public:
     void setFrontalArea(double m2);
     void setWheelBase(double m);
     void setTrackWidth(double m);
+    /** Roadmap "physics.json": the unified file carries the tyre radius, the
+     *  final drive and the gear set directly, without going through an .ini. */
+    void setWheelRadius(double m);
+    void setFinalDrive(double ratio);
+    void setGearRatios(const std::vector<double>& ratios);
+    double wheelBase() const { return m_wheelBase; }
+    double trackWidth() const { return m_trackWidth; }
 
     // Roadmap 2.9: read back the tuned values so upgrade application can
     // capture the car's baseline AFTER its own data inis loaded and recompute
     // from absolutes on every re-selection (never stacking on modified state).
     double mass() const { return m_mass; }
+    /** Dry mass (no ballast, no fuel) — what data/physics.json stores as
+     *  massKg; mass() is this plus whatever is on board right now. */
+    double baseMass() const { return m_baseMass; }
     double enginePowerKw() const { return m_enginePowerKw; }
     double maxRpm() const { return m_maxRpm; }
     double dragCoeff() const { return m_cd; }
@@ -175,6 +185,11 @@ public:
     const BrakeThermalModel& brakes() const { return m_brakes; }
 
     void loadVehicleParams(const std::string& carPath);
+    /** Legacy per-file .ini set (engine/tyres/drivetrain/aero/suspension).
+     *  loadVehicleParams() prefers the unified data/physics.json and only
+     *  calls this when there is none; tools that migrate a folder call it
+     *  directly to read the old format. */
+    void loadVehicleParamsFromIni(const std::string& carPath);
     void loadEngineFromIni(const std::string& path);
     void loadTyresFromIni(const std::string& path);
     void loadDrivetrainFromIni(const std::string& path);
