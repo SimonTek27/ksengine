@@ -1,0 +1,26 @@
+# gate 2.12 UDP telemetry sink - port 20777, started 2026-10-14T16:44:04.1678955+02:00
+[t=   188,3s] pkts=    6000 simt=     173,1s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=168127ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t=   379,2s] pkts=   12000 simt=     362,3s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=357256ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t=   539,7s] pkts=   18000 simt=     522,5s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=517484ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t=   705,1s] pkts=   24000 simt=     686,7s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=681702ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t=   889,7s] pkts=   30000 simt=     870,9s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=865896ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.073,8s] pkts=   36000 simt=   1.054,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1049618ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.249,7s] pkts=   42000 simt=   1.229,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1224554ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.435,2s] pkts=   48000 simt=   1.414,4s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1409371ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.620,2s] pkts=   54000 simt=   1.594,4s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1589349ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.803,8s] pkts=   60000 simt=   1.777,5s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1772539ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 1.986,4s] pkts=   66000 simt=   1.959,9s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=1954873ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 2.159,6s] pkts=   72000 simt=   2.132,4s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=2127379ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 2.344,3s] pkts=   78000 simt=   2.316,7s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=2311652ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 2.529,4s] pkts=   84000 simt=   2.501,2s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=2496168ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 2.722,3s] pkts=   90000 simt=   2.690,5s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=2685458ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 2.916,2s] pkts=   96000 simt=   2.882,2s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=2877233ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 3.100,7s] pkts=  102000 simt=   3.066,5s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=3061484ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 3.284,1s] pkts=  108000 simt=   3.249,8s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=3244752ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 3.389,0s] pkts=  114000 simt=   3.354,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=3349568ms best=0ms road= 30,0C air= 26,0C dmgW=0
+[t= 3.572,2s] pkts=  120000 simt=   3.537,8s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=3532773ms best=0ms road= 30,0C air= 26,0C dmgW=0
+# done 2026-10-14T17:45:45.3444183+02:00
+# packets=121461 bytes=29636484 short=0 badMagic=0 nanSamples=0
+# simTime first=0,0s last=3.582,3s span=3.582,3s
+# speed min=0,00 max=0,00 m/s ; rpm max=800 ; laps max=0 ; best lap=0ms
+# roadTemp min=30,0C max=30,0C ; airTemp min=26,0C max=26,0C ; damageWarning max=0

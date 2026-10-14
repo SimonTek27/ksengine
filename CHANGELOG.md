@@ -9,6 +9,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Gate 2.12 - soak di stabilita` 1 h green**: run windowed di 1 ora (9 auto,
+  renderer Vulkan reale, meteo, danni, telemetria) con **0 recovery NaN**
+  (enabler `[nan]` sopra), 121 461 frame profili, 32,2 M step di fisica
+  (9 auto x 1 kHz), telemetria UDP 121 461 pacchetti con 0 NaN; evidence in
+  `docs/gate_2_12/`, sintesi in `docs/GATE_2_12_STABILITY.md`.
 - **Gate 2.11/2.12 enabler - `KS_WEATHER` + recovery NaN ispettibili**:
   - `SimulationLoop::setWeatherPresetByName()` espone gli stessi preset
     dry/damp/wet del menu; `KS_WEATHER=<dry|damp|wet>` in `SimulatorApp`

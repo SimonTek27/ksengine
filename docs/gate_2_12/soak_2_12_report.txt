@@ -1,0 +1,21 @@
+=== PhysicsProfiler report ===
+frames=121461  last=16.450 ms  avg=16.638 ms  fps~60
+gpu last=0.739 ms  avg=1.238 ms  fps~1352
+
+-- Subsystems --
+name                   total_ms       avg_us     hits
+Aero                 215318.389        6.687 32200940
+Tires                294185.118        9.136 32200940
+VehicleDynamics     1310809.131       40.707 32200940
+DamageModel          278671.979        8.654 32200940
+Total               2257802.970    18588.707   121461
+
+-- Sections --
+name                             total_ms       avg_us     hits
+physics                       1725776.113    14208.479   121461
+VehicleSimulator.updatePhysics  1171131.276       36.369 32200940
+render                         442758.270     3645.271   121461
+VehicleSimulator.tires         170828.491        5.305 32200940
+VehicleSimulator.damage        164898.899        5.121 32200940
+VehicleSimulator.aero           99471.243        3.089 32200940
+==============================
