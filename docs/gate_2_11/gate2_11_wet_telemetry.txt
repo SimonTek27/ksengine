@@ -1,0 +1,12 @@
+# gate 2.12 UDP telemetry sink - port 20777, started 2026-10-14T18:07:06.3599173+02:00
+[t=   140,8s] pkts=    6000 simt=     131,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=126646ms best=0ms road= 17,9C air= 14,0C dmgW=0
+[t=   272,4s] pkts=   12000 simt=     263,1s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=258072ms best=0ms road= 18,7C air= 14,0C dmgW=0
+[t=   431,1s] pkts=   18000 simt=     421,8s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=416841ms best=0ms road= 18,9C air= 14,0C dmgW=0
+[t=   553,6s] pkts=   24000 simt=     543,8s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=538815ms best=0ms road= 19,0C air= 14,0C dmgW=0
+[t=   709,8s] pkts=   30000 simt=     699,9s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=694896ms best=0ms road= 19,0C air= 14,0C dmgW=0
+[t=   865,8s] pkts=   36000 simt=     855,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=850617ms best=0ms road= 19,0C air= 14,0C dmgW=0
+# done 2026-10-14T18:23:46.9577247+02:00
+# packets=37383 bytes=9121452 short=0 badMagic=0 nanSamples=0
+# simTime first=0,0s last=898,0s span=898,0s
+# speed min=0,00 max=0,00 m/s ; rpm max=800 ; laps max=0 ; best lap=0ms
+# roadTemp min=15,0C max=19,0C ; airTemp min=14,0C max=14,0C ; damageWarning max=0

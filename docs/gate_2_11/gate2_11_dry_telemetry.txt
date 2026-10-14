@@ -1,0 +1,11 @@
+# gate 2.12 UDP telemetry sink - port 20777, started 2026-10-14T17:49:54.1674558+02:00
+[t=   133,8s] pkts=    6000 simt=     125,6s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=120621ms best=0ms road= 31,3C air= 26,0C dmgW=0
+[t=   318,9s] pkts=   12000 simt=     310,0s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=305038ms best=0ms road= 31,0C air= 26,0C dmgW=0
+[t=   501,8s] pkts=   18000 simt=     492,7s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=487749ms best=0ms road= 31,0C air= 26,0C dmgW=0
+[t=   684,2s] pkts=   24000 simt=     675,0s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=670023ms best=0ms road= 31,0C air= 26,0C dmgW=0
+[t=   866,7s] pkts=   30000 simt=     857,4s speed=    0,0m/s rpm=   800 thr= 0,00 brk= 0,00 laps=0 cur=852443ms best=0ms road= 31,0C air= 26,0C dmgW=0
+# done 2026-10-14T18:06:34.5701538+02:00
+# packets=31361 bytes=7652084 short=0 badMagic=0 nanSamples=0
+# simTime first=0,0s last=898,8s span=898,8s
+# speed min=0,00 max=0,00 m/s ; rpm max=800 ; laps max=0 ; best lap=0ms
+# roadTemp min=31,0C max=32,0C ; airTemp min=26,0C max=26,0C ; damageWarning max=0
