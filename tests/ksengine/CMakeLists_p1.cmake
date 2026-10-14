@@ -28,7 +28,7 @@ enable_testing()
 # ksengine.dll must sit next to every executable that loads it: ctest starts
 # a test from its own directory, and the Windows loader only searches the
 # directory of the exe (plus PATH). Point the test binaries at bin/<config>,
-# where ksengine.dll and ksim.exe already are. Static builds are left alone —
+# where ksengine.dll and kssim.exe already are. Static builds are left alone —
 # nothing extra has to be found there.
 if(TARGET ksengine)
     get_target_property(_ksengine_type ksengine TYPE)
@@ -62,6 +62,9 @@ set(KS_QT_FREE_TESTS
     terrain_test
     png_test
     damage_telemetry_test
+    ac_remote_telemetry_test
+    ac_shared_memory_publisher_test
+    udp_command_listener_test
     keyboard_mapping_test
     content_library_test
     scene_assets_test

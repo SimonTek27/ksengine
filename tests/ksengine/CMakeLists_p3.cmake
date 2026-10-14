@@ -40,6 +40,26 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_tool_test.cpp" AND
     add_test(NAME track_tool_test COMMAND track_tool_test)
 endif()
 
+if(TARGET ks_tracktool)
+    set(_tt_fixture "${CMAKE_CURRENT_BINARY_DIR}/tracktool_fixture")
+    add_test(NAME track_tool_scaffold
+             COMMAND ks_tracktool scaffold "${_tt_fixture}")
+    add_test(NAME track_tool_validate
+             COMMAND ks_tracktool validate "${_tt_fixture}")
+    set_tests_properties(track_tool_validate PROPERTIES
+        DEPENDS track_tool_scaffold)
+    add_test(NAME track_tool_spline_info
+             COMMAND ks_tracktool spline-info "${_tt_fixture}/ai/fast_lane.ai")
+    set_tests_properties(track_tool_spline_info PROPERTIES
+        DEPENDS track_tool_scaffold)
+    add_test(NAME track_tool_validate_missing
+             COMMAND ks_tracktool validate
+                     "${CMAKE_CURRENT_BINARY_DIR}/no_such_track_dir")
+    set_tests_properties(track_tool_validate_missing PROPERTIES WILL_FAIL TRUE)
+    add_test(NAME track_tool_usage COMMAND ks_tracktool)
+    set_tests_properties(track_tool_usage PROPERTIES WILL_FAIL TRUE)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
     add_executable(test_audio_render
         test_audio_render.cpp
