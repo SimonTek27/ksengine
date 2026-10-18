@@ -1,7 +1,7 @@
 #pragma once
 #include "KsExport.h"
 
-// Qt-free DirectDraw Surface (.dds) reader — the format every Assetto Corsa
+// Qt-free DirectDraw Surface (.dds) reader — the format every Kinetika
 // KN5 embeds as its texture payload. std-only, no dependencies, binary-safe.
 //
 // Layout:
@@ -25,9 +25,9 @@
 //     format enum is small and anything else reports the id in `error`)
 //
 // Deliberately rejected (clear message, never silent corruption): BC4/BC5/
-// BC6H/BC7 and any format whose payload size doesn't fit the buffer. Real AC
+// BC6H/BC7 and any format whose payload size doesn't fit the buffer. Real
 // content uses DXT1/DXT5 almost exclusively (BC7 appears only in newer mods,
-// which `ContentRepair` already flags as unusual for AC).
+// which `ContentRepair` already flags as unusual).
 
 #include <cstdint>
 #include <string>
