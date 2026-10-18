@@ -1,4 +1,4 @@
-# Optional Assetto Corsa / CSP content adapter (not part of ksengine core)
+# Optional Kinetika / CSP content adapter (not part of ksengine core)
 if(NOT TARGET ks_adapter_ac)
   set(KS_AC_ADAPTER_DIR ${CMAKE_SOURCE_DIR}/src/adapters/assetto_corsa)
   if(EXISTS "${KS_AC_ADAPTER_DIR}/CspConfigParser.cpp")
@@ -12,6 +12,6 @@ if(NOT TARGET ks_adapter_ac)
       ${CMAKE_SOURCE_DIR}/src
       ${KS_AC_ADAPTER_DIR})
     target_compile_features(ks_adapter_ac PUBLIC cxx_std_17)
-    message(STATUS "ks_adapter_ac: Assetto Corsa / CSP content adapter")
+    message(STATUS "ks_adapter_ac: Kinetika / CSP content adapter")
   endif()
 endif()
