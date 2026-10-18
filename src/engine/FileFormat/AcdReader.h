@@ -1,7 +1,7 @@
 #pragma once
 #include "KsExport.h"
 
-// Qt-free reader for the Assetto Corsa `data.acd` car data archive.
+// Qt-free reader for the Kinetika `data.acd` car data archive.
 //
 // The format has no magic number (it starts straight at the first record), so
 // identification is structural: walk the record list and require it to land
@@ -34,11 +34,10 @@
 // index restarts at 0 for every file in the archive. The folder name is the
 // seed: renaming the car directory makes the archive undecryptable.
 //
-// createAcdKey() implements the eight octet algorithms from aluigi's
-// QuickBMS script (assetto_corsa_acd.bms), which is the reference for the
-// original game. All eight were cross-checked by hand against keys recovered
-// from known plaintext for acfl_2006_bmwsauber, tatuusfa1, lotus_exos_125_s1
-// and dallara_f317.
+// createAcdKey() implements the eight octet algorithms from the reference
+// QuickBMS script, which is the reference for the original format. All eight
+// were cross-checked by hand against keys recovered from known plaintext for
+// acfl_2006_bmwsauber, tatuusfa1, lotus_exos_125_s1 and dallara_f317.
 //
 // Note the Qt ACDParser in the editor plugin assumes an "ACD\0" magic and a
 // fixed 15-file name table; real data.acd files carry neither, so that reader
