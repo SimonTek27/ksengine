@@ -12,7 +12,7 @@
 namespace ks {
 
 /**
- * @brief Project type enumeration for Assetto Corsa modding
+ * @brief Project type enumeration for Kinetika modding
  */
 enum class ProjectType {
     None,
@@ -49,7 +49,7 @@ struct StartupResult {
 };
 
 /**
- * @brief Startup dialog for Assetto Corsa modding tool
+ * @brief Startup dialog for Kinetika modding tool
  * 
  * Allows users to:
  * - Create new projects (Car, Track, Character, Sound)
