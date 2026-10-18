@@ -1,6 +1,6 @@
 # ksEditor Overview
 
-ksEditor is a comprehensive Assetto Corsa modding suite built with C++, Qt6, and Vulkan. It provides a full-featured integrated development environment for creating and editing audio, 3D models, textures, physics, and other game assets.
+ksEditor is a comprehensive Kinetika modding suite built with C++, Qt6, and Vulkan. It provides a full-featured integrated development environment for creating and editing audio, 3D models, textures, physics, and other game assets.
 
 ## Architecture
 
@@ -39,7 +39,7 @@ src/
 │   └── formatTools/   Format conversion tools
 ├── modules/        High-level application modules (9 modules)
 │   ├── modellingEditor/   3D modeling (49 files)
-│   ├── soundEditor/       Audio editing (30 files, AC event bridge)
+│   ├── soundEditor/       Audio editing (30 files, event bridge)
 │   ├── PhysicsEditor/     Physics simulation (38 files, ERS/hybrid system)
 │   ├── LiveryEditor/      Car livery painting (20 files, 3D viewport)
 │   ├── ShowroomEditor/    3D showroom/preview (10 files)
@@ -49,7 +49,7 @@ src/
 │   └── VREditor/          VR viewport editor
 ├── plugins/        Plugin architecture
 │   ├── base/PluginBase.h     Base interfaces
-│   └── simulators/kunos/     Assetto Corsa integration (50+ files)
+│   └── simulators/kunos/     Kinetika integration plugin (50+ files)
 └── tests/          Unit tests (25+ files)
 ```
 
@@ -61,7 +61,7 @@ src/
 - **Scripting:** Python, Lua
 - **Build:** CMake
 - **External Libraries:** CGAL, Eigen, libigl, Bullet Physics, OpenVDB, STB, Mikktspace, 7-Zip
-- **Target Platform:** Windows (Assetto Corsa modding)
+- **Target Platform:** Windows (Kinetika modding)
 
 ## Feature Highlights
 
