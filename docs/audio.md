@@ -12,7 +12,7 @@ The **user-facing DAW environment** in `src/modules/soundEditor/` (28 files) pro
 - Sound bank management (Wwise-style containers, randomizers, switches, RTPCs)
 - Loudness metering (EBU R128)
 - Export to game audio middleware formats
-- AC event bridge for Assetto Corsa integration
+- Event bridge for Kinetika integration
 
 ## Audio Studio (ksAudioStudio)
 
@@ -21,7 +21,7 @@ The **internal audio engine** in `src/core/Audio/` (62 files) powering all audio
 - **KSAudioMixer** — Multi-bus mixing with DSP chain
 - **KSAudioGenerator** — Procedural audio generation (additive, subtractive, FM, granular, wavetable)
 - **KSAudioVST3Host / KSAudioVSTHost / LADSPAHost** — VST2/3 plugin hosting with parameter automation
-- **KSBankParser / KSBankWriter** — FMOD bank read/write/encrypt (version-aware: FMOD 1.x for AC1, FMOD 2.x for ACC/ACR/ACE)
+- **KSBankParser / KSBankWriter** — FMOD bank read/write/encrypt (version-aware)
 - **BankVersionManager** — Auto-detects bank format version and game target
 - **BankParserFactory / BankWriterFactory** — Factory pattern for version-specific parsers/writers
 - **AudioFormatConverter** — Cross-format conversion
