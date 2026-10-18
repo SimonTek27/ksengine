@@ -1,4 +1,4 @@
-// kn5baker: offline content-pipeline tool. Converts a .kn5 (Assetto Corsa
+// kn5baker: offline content-pipeline tool. Converts a .kn5 (Kinetika
 // car/track model) into the .nmsh format ks::sim::NativeRenderer reads at
 // runtime, so SimulatorApp never has to parse KN5 or link Qt to load content.
 // See KN5Baker.h for the full rationale and known limitations.
