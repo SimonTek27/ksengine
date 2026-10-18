@@ -13,12 +13,12 @@ BankVersionManager& BankVersionManager::instance() {
 }
 
 BankVersionManager::BankVersionManager() {
-    // ---------- Assetto Corsa 1 (AC1) ----------
+    // ---------- Kinetika 1 (legacy AC1 format profile) ----------
     BankProfile ac1;
     ac1.game = GameTarget::AssettoCorsa1;
     ac1.version = BankVersion::FMOD_1_08;
-    ac1.name = "Assetto Corsa 1";
-    ac1.description = "Original AC (2014) — FMOD Studio 1.08.x, FEV2 format, XOR encryption";
+    ac1.name = "Kinetika 1";
+    ac1.description = "Kinetika 1 profile — FMOD Studio 1.08.x, FEV2 format, XOR encryption";
     ac1.usesXorEncryption = true;
     ac1.xorKey = 0xAE12B3F4;
     ac1.hasStringTable = true;
@@ -32,12 +32,12 @@ BankVersionManager::BankVersionManager() {
     m_profiles[GameTarget::AssettoCorsa1] = ac1;
     m_versionProfiles[BankVersion::FMOD_1_08] = ac1;
 
-    // ---------- Assetto Corsa Competizione (ACC) ----------
+    // ---------- Kinetika Competizione profile ----------
     BankProfile acc;
     acc.game = GameTarget::AssettoCorsaCompetizione;
     acc.version = BankVersion::FMOD_2_02;
-    acc.name = "Assetto Corsa Competizione";
-    acc.description = "ACC (2019) — FMOD Studio 2.02.x, FEV2 format, categorized banks";
+    acc.name = "Kinetika Competizione";
+    acc.description = "Competizione profile — FMOD Studio 2.02.x, FEV2 format, categorized banks";
     acc.usesXorEncryption = false;
     acc.xorKey = 0;
     acc.hasStringTable = true;
@@ -54,12 +54,12 @@ BankVersionManager::BankVersionManager() {
     m_profiles[GameTarget::AssettoCorsaCompetizione] = acc;
     m_versionProfiles[BankVersion::FMOD_2_02] = acc;
 
-    // ---------- Assetto Corsa Rally (ACR) ----------
+    // ---------- Kinetika Rally profile ----------
     BankProfile acr;
     acr.game = GameTarget::AssettoCorsaRally;
     acr.version = BankVersion::FMOD_2_02;
-    acr.name = "Assetto Corsa Rally";
-    acr.description = "ACR (2025) — FMOD Studio 2.02.x, FEV2 format, rally-specific categories";
+    acr.name = "Kinetika Rally";
+    acr.description = "Rally profile — FMOD Studio 2.02.x, FEV2 format, rally-specific categories";
     acr.usesXorEncryption = false;
     acr.xorKey = 0;
     acr.hasStringTable = true;
@@ -76,12 +76,12 @@ BankVersionManager::BankVersionManager() {
     m_profiles[GameTarget::AssettoCorsaRally] = acr;
     m_versionProfiles[BankVersion::FMOD_2_02] = acr;
 
-    // ---------- Assetto Corsa EVO (ACE) ----------
+    // ---------- Kinetika EVO profile ----------
     BankProfile ace;
     ace.game = GameTarget::AssettoCorsaEVO;
     ace.version = BankVersion::FMOD_2_02;
-    ace.name = "Assetto Corsa EVO";
-    ace.description = "ACE (2025) — Protobuf packages, FMOD version TBD";
+    ace.name = "Kinetika EVO";
+    ace.description = "EVO profile — Protobuf packages, FMOD version TBD";
     ace.usesXorEncryption = false;
     ace.xorKey = 0;
     ace.hasStringTable = true;
@@ -203,10 +203,10 @@ QString BankVersionManager::versionToString(BankVersion version) {
 
 QString BankVersionManager::gameTargetToString(GameTarget target) {
     switch (target) {
-        case GameTarget::AssettoCorsa1: return "Assetto Corsa 1";
-        case GameTarget::AssettoCorsaCompetizione: return "Assetto Corsa Competizione";
-        case GameTarget::AssettoCorsaRally: return "Assetto Corsa Rally";
-        case GameTarget::AssettoCorsaEVO: return "Assetto Corsa EVO";
+        case GameTarget::AssettoCorsa1: return "Kinetika 1";
+        case GameTarget::AssettoCorsaCompetizione: return "Kinetika Competizione";
+        case GameTarget::AssettoCorsaRally: return "Kinetika Rally";
+        case GameTarget::AssettoCorsaEVO: return "Kinetika EVO";
         default: return "Auto-detect";
     }
 }
