@@ -1,5 +1,5 @@
 #pragma once
-/** Assetto Corsa GUID tables — adapter, not core engine. */
+/** Kinetika GUID tables — adapter, not core engine. */
 #include <string>
 #include <vector>
 
