@@ -1,7 +1,7 @@
-# ksim damage — rFactor 2–style model
+# ksim damage — Kinetika mechanical model
 
-ksim uses a **mechanical multi-system damage model** inspired by rF2’s impulse thresholds
-(`damage.ini` physical block), not a cosmetic-only AC-style panel damage.
+ksim uses a **mechanical multi-system damage model** inspired by impulse-threshold
+systems (`damage.ini` physical block), not a cosmetic-only panel damage model.
 
 ## Systems affected
 
@@ -14,10 +14,10 @@ ksim uses a **mechanical multi-system damage model** inspired by rF2’s impulse
 | **Transmission** | efficiency, stuck |
 | **Brakes** | pad/disc/caliper fade |
 
-## rF2-like impulse params (`Rf2DamageParams`)
+## Impulse params (`Rf2DamageParams`)
 
-| Param | rF2 analog | Role |
-|-------|------------|------|
+| Param | Analog | Role |
+|-------|--------|------|
 | `engineSeizeImpulse` | `Engine=` | Seize above impulse |
 | `aeroMinImpulse` | `AeroMin=` | Min impulse for aero damage |
 | `aeroDiv` | `AeroDiv=` | Impulse → aero fraction |
@@ -47,6 +47,6 @@ veh.applyDamageMultipliers(dmg); // power / drag / brakes / handling
 
 ## Not cloned
 
-- No rF2 file format lock-in (optional future INI loader)
-- No Studio 397 branding in UI
+- No third-party file format lock-in (optional future INI loader)
+- No external branding in UI
 - Visual mesh morph is optional downstream (Radius* reserved)
