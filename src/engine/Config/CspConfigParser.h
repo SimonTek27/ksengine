@@ -1,6 +1,6 @@
 #pragma once
 /**
- * DEPRECATED in engine — CSP is Assetto Corsa content, not core engine.
+ * DEPRECATED in engine — CSP is Kinetika content, not core engine.
  * Use: #include "adapters/assetto_corsa/CspConfigParser.h"
  *      ks::adapters::assetto_corsa::CspConfigParser
  */
