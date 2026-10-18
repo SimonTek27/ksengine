@@ -11,8 +11,8 @@
 namespace ks::sim {
 
 // ============================================================================
-// UdpTelemetryListener - Listens to Assetto Corsa UDP telemetry stream
-// AC broadcasts telemetry on UDP port 20747
+// UdpTelemetryListener - Listens to Kinetika UDP telemetry stream
+// Broadcasts telemetry on UDP port 20747
 // ============================================================================
 
 struct AcTelemetryData {
@@ -79,7 +79,7 @@ public:
     UdpTelemetryListener();
     ~UdpTelemetryListener();
 
-    // Initialize the listener on the specified port (default: 20747 for AC)
+    // Initialize the listener on the specified port (default: 20747)
     bool start(uint16_t port = 20747);
 
     // Stop the listener
@@ -98,7 +98,7 @@ private:
     // Thread function that receives UDP packets
     void receiveThread();
 
-    // Parse raw AC telemetry packet
+    // Parse raw telemetry packet
     void parsePacket(const uint8_t* data, size_t size);
 
     // UDP socket handle (platform-specific)
