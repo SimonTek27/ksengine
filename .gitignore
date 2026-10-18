@@ -1,33 +1,43 @@
-# Build directories
+# =============================================================================
+# Kinetika / ksengine — .gitignore
+# =============================================================================
+# Build artifacts, IDE noise, Qt codegen, runtime data.
+# Keep hand-written cmake/*.cmake tracked (shader rules, install layout).
+# =============================================================================
+
+# --- Build trees -------------------------------------------------------------
 build/
 build_*/
-build/Release/
+out/
 dist/
 Release/
 Debug/
 MinSizeRel/
 RelWithDebInfo/
-out/
 lib/
-kseditor_lib.dir/
-kseditor_lib_autogen/
 *.dir/
 *_autogen/
+kseditor_lib.dir/
+kseditor_lib_autogen/
 
-# CMake
+# --- CMake generated ---------------------------------------------------------
 CMakeCache.txt
 CMakeFiles/
+CMakeScripts/
 CMakeUserPresets.json
 CPackConfig.cmake
 CPackSourceConfig.cmake
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+Testing/
 *.cmake
 !CMakeLists.txt
-# ...but cmake/*.cmake are hand-written build modules (KsShaders.cmake and
-# friends), not generated files: without this the shared shader rules would
-# never be committed and a fresh clone would fail to configure.
+# Hand-written modules under cmake/ (KsShaders.cmake, KsInstallLayout.cmake, …)
 !cmake/*.cmake
 
-# Visual Studio / IDE
+# --- Visual Studio / MSVC / IDE ----------------------------------------------
 .vs/
 .vscode/
 .idea/
@@ -35,9 +45,14 @@ CPackSourceConfig.cmake
 *.user
 *.userosscache
 *.sln.docstates
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
 kseditor.slnx
+*.sln
+!*.sln.example
 
-# Qt
+# --- Qt (editor only) --------------------------------------------------------
 .qt/
 *.moc
 moc_*.cpp
@@ -49,21 +64,36 @@ ui_*.h
 *.jsc
 *.moch
 
-# Compiled binaries / objects
+# --- Compiled objects & binaries ---------------------------------------------
 *.obj
 *.o
 *.pdb
 *.ilk
 *.exp
 *.lib
+*.a
 *.dll
 *.exe
 *.so
 *.dylib
-*.a
+*.spv.bak
 !LICENSE.txt
 
-# Generated test artifacts
+# --- Logs & one-off build output ---------------------------------------------
+*.log
+build_output*.txt
+build_*.txt
+build2.txt
+build_engine_*.txt
+msbuild.log
+help_output.txt
+stderr.txt
+stdout.txt
+IntegrationSummary.txt
+ed*.txt
+single_file_errors.txt
+
+# --- Tests & generated verification ------------------------------------------
 test_*.txt
 test_*.out
 test_*.err
@@ -71,41 +101,34 @@ test_*.xml
 test_*.tmp
 test_results/
 anim_test.*
-single_file_errors.txt
-build_output.log
-msbuild.log
-ed*.txt
-*.log
-*.pdb
+test.ksproj
+ctest_phase1_status.txt
+ks_dist_log.txt
 
-# Misc generated
+# --- Runtime data (ksim writes these; layout ships them empty) ----------------
+# See cmake/KsInstallLayout.cmake and docs/ksengine_architecture.md
+/user/
+/content/local/
 NUL.obj
 vc140.pdb
-help_output.txt
-stderr.txt
-stdout.txt
-test.ksproj
-template/
-*.log
-build_*.txt
-build2.txt
-build_engine_*.txt
-build_output*.txt
-IntegrationSummary.txt
-SimulatorApp.vcxproj
-SimulatorApp.vcxproj.filters
 
-# Runtime data + one-off verification output: ksim writes user/ at start-up
-# (user/pb, user/<player>/) and the layout ships it empty — nothing here is
-# ever source. See cmake/KsInstallLayout.cmake.
-/user/
-/ctest_phase1_status.txt
-/ks_dist_log.txt
-/tools/__pycache__/
+# --- Python / tools ----------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+tools/__pycache__/
 
-# External dependencies (submodules/third-party source)
+# --- OS junk -----------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+
+# --- External / third-party checkout noise -----------------------------------
 external/openxr/
 7zip/
 bullet/
 vhacd/
 mikktspace.dir/
+template/
