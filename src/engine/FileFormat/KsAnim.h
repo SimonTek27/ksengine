@@ -1,9 +1,9 @@
 #pragma once
 #include "KsExport.h"
 
-// Qt-free reader for the Assetto Corsa .ksanim node animation container.
+// Qt-free reader for the Kinetika .ksanim node animation container.
 //
-// The layout below was verified byte-for-byte against ~2000 real AC .ksanim
+// The layout below was verified byte-for-byte against ~2000 real .ksanim
 // files (content/cars/*/animations, content/tracks, objects): the entry walk
 // must land exactly on EOF, which it does for every file except two known
 // corrupt mods.
