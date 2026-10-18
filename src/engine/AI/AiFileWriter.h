@@ -9,7 +9,7 @@ namespace ai {
 struct AiSpline;
 
 /**
- * Writes Assetto Corsa AI line files (ai/fast_lane.ai).
+ * Writes Kinetika AI line files (ai/fast_lane.ai).
  *
  * Inverse of AiFileReader's binary path; layout matches
  * AiSplineEditor::writeAiBinary in the Qt editor byte for byte, so files
