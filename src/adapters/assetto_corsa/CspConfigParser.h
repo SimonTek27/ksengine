@@ -1,5 +1,5 @@
 #pragma once
-/** Assetto Corsa / CSP adapter — not core engine. */
+/** Kinetika / CSP adapter — not core engine. */
 #include <string>
 #include <unordered_map>
 
@@ -7,7 +7,7 @@ namespace ks {
 namespace adapters {
 namespace assetto_corsa {
 
-/** Parses Custom Shaders Patch style config (AC community). */
+/** Parses Custom Shaders Patch style config (community content). */
 class CspConfigParser {
 public:
     bool load(const std::string& path);
