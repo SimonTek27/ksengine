@@ -35,7 +35,7 @@ struct AiSpline {
 };
 
 /**
- * Reads Assetto Corsa AI line files (ai/fast_lane.ai).
+ * Reads Kinetika AI line files (ai/fast_lane.ai).
  *
  * Binary layout (little endian), matching AiSplineEditor::parseAiBinary in
  * the Qt editor:
