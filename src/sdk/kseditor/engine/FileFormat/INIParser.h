@@ -9,7 +9,7 @@
  * @brief INI File Parser
  * 
  * Supports standard INI format with sections and key-value pairs.
- * Used for Assetto Corsa config files, physics parameters, etc.
+ * Used for Kinetika config files, physics parameters, etc.
  */
 class INIParser {
 public:
@@ -53,7 +53,7 @@ public:
     QString comment(const QString& section, const QString& key) const;
     QString sectionComment(const QString& section) const;
 
-    // Assetto Corsa specific helpers
+    // Kinetika-specific helpers
     static QMap<QString, QString> parseCAR(const QString& carFolder);
     static QMap<QString, QString> parseCONTENT(const QString& contentFolder);
 
