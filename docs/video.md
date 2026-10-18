@@ -12,14 +12,14 @@ Video support in ksEditor is focused on asset preview and replay export rather t
 - **`exportToVideo()`** — Converts in-app replay visualizations to video output for sharing lap analyses and telemetry data
 
 ### Display Configuration
-- Video mode settings (resolution, fullscreen) configurable through the Assetto Corsa integration layer
+- Video mode settings (resolution, fullscreen) configurable through the Kinetika integration layer
 
 ## Implementation Details
 
 | Feature | Location | Method |
 |---------|----------|--------|
 | Video thumbnails | `src/core/assets/AssetSearchEngine.cpp` | ffmpeg frame extraction |
-| AC video thumbnails | `src/plugins/simulators/kunos/assettocorsa/AssetsLibraryModule.cpp` | ffmpeg integration |
+| Video thumbnails (plugin) | `src/plugins/simulators/kunos/assettocorsa/AssetsLibraryModule.cpp` | ffmpeg integration |
 | Video export | `src/plugins/simulators/kunos/assettocorsa/assettocorsa.h` | Replay frame capture |
 | Video mode config | `src/plugins/simulators/kunos/assettocorsa/assettocorsa.h` | Resolution/fullscreen settings |
 
