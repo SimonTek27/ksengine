@@ -1,6 +1,6 @@
 # Plugins
 
-ksEditor uses a plugin-based architecture to support multiple simulators, with Assetto Corsa as the primary implementation.
+ksEditor uses a plugin-based architecture to support multiple simulators, with Kinetika as the primary implementation.
 
 ## Architecture
 
@@ -9,9 +9,9 @@ src/plugins/
 ├── base/
 │   └── PluginBase.h          Plugin interface + PluginManagerBase
 ├── simulators/
-│   └── kunos/                Kunos/Assetto Corsa plugin
+│   └── kunos/                Kinetika plugin (legacy path)
 │       ├── KsPlugin.h/.cpp   Main plugin class
-│       └── assettocorsa/     Full AC integration (50+ files)
+│       └── assettocorsa/     Full Kinetika integration (50+ files)
 └── Plugins.h                 Convenience header
 ```
 
@@ -43,9 +43,9 @@ Manages plugin lifecycle: discovery, loading, unloading, enable/disable. Support
 - Settings persistence per plugin
 - Event signals: loaded, unloaded, error, scanComplete
 
-## Assetto Corsa Plugin
+## Kinetika Plugin
 
-The Kunos plugin provides full AC integration:
+The primary simulator plugin provides full Kinetika integration:
 - Car/track/content discovery via `KsContentPaths`
 - KN5 model parsing and decryption
 - INI configuration parsing (`KsIni`)
