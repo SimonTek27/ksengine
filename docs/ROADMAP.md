@@ -1,6 +1,6 @@
 # Roadmap ksim / ksengine — motore auto
 
-**Aggiornata:** 2026-10-14
+**Aggiornata:** 2026-10-20
 **Ambito:** simulatore **auto**: dinamica a quattro ruote, sessioni racing,
 contenuti pista/auto e multiplayer `ksnet`.
 **Fuori ambito:** moto, barche e aerei; richiedono modelli fisici e flussi di
@@ -31,10 +31,11 @@ di fase richiedono anche il test manuale indicato.
 | Multiplayer LAN e lobby | ✅ | `ksnet`, sync, lobby. |
 | Vertical slice menu, binding e telemetria | ✅ | Selezione auto/pista, sessioni, HUD. |
 | UX racing (box/team/upgrade) | 🟡 | Codice 2.7–2.10 cablato; gate umani aperti (vedi GATE_PLAN_WINDOWS). |
-| Accettazione 2C | 🟡 | **2.12** e **2.14** chiusi 2026-10-14; **2.11** gara lunga ancora aperta. |
+| Accettazione 2C | 🟡 | **2.11**, **2.12** e **2.14** chiusi 2026-10-14; restano gate umani G1–G3. |
 
 Riferimenti: [CHECKLIST.md](CHECKLIST.md), [WIREUP_GAPS.md](WIREUP_GAPS.md),
 [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md),
+[GATE_2_11_WET_DRY_RACE.md](GATE_2_11_WET_DRY_RACE.md),
 [GATE_2_12_STABILITY.md](GATE_2_12_STABILITY.md),
 [GATE_2_14_FRAME_PROFILE.md](GATE_2_14_FRAME_PROFILE.md).
 
@@ -44,7 +45,7 @@ Riferimenti: [CHECKLIST.md](CHECKLIST.md), [WIREUP_GAPS.md](WIREUP_GAPS.md),
 
 | # | Deliverable | Stato | Criterio di accettazione |
 |---|---|---|---|
-| 2.11 | Gara asciutto/bagnato ripetibile | ⬜ | Gara 10–15 min, 8+ auto; grip, spray, audio e risultati coerenti. |
+| 2.11 | Gara asciutto/bagnato ripetibile | ✅ | Gara 10–15 min, 8+ auto; grip, spray, audio e risultati coerenti — evidence 2026-10-14 `docs/GATE_2_11_*` / `docs/gate_2_11/`. |
 | 2.12 | Stabilità lunga | ✅ | Soak 1 h windowed 2026-10-14: 0 NaN recovery; evidence `docs/GATE_2_12_STABILITY.md` / `docs/gate_2_12/`. |
 | 2.13 | Regressione automatica | 🟡 | CTest Qt-free e bridge test presenti; resta collaudo umano Fase 2. |
 | 2.14 | Profilo di frame reale | ✅ | Run 45 s Vulkan 2026-10-14 (RTX 3070 Ti); evidence `docs/GATE_2_14_FRAME_PROFILE.md` / `docs/gate_2_14/`. |
