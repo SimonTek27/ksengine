@@ -1,7 +1,7 @@
 # ksengine — Roadmap
 
 **Product:** Kinetika (ksim / ksengine)  
-**Updated:** 2026-10-18  
+**Updated:** 2026-10-20  
 **Scope:** four-wheel racing runtime (Qt-free). Not a full ksEditor feature list.
 
 **Out of scope:** motorbikes, boats, aircraft.
@@ -30,9 +30,10 @@ Compile success alone does not close a phase.
 | Rain, aquaplaning, 3D audio | ✅ | Wet physics, opt-in particles, Doppler/distance, surface rolling. |
 | Mesh rendering (bake, LOD, materials, IBL) | ✅ | KN5→NMS2, DDS, materials.txt, reference content, AI brief S1–S6. |
 | Racing UX (box / team / upgrades / menu coherence) | 🟡 | Code for 2.7–2.10 wired; human gates still open. |
-| Acceptance 2C | 🟡 | **2.12** soak and **2.14** frame profile closed 2026-10-14; **2.11** long race open. |
+| Acceptance 2C | 🟡 | **2.11** long race, **2.12** soak and **2.14** frame profile closed 2026-10-14; human gates G1–G3 remain. |
 
 Evidence: [PARITY_STATUS.md](PARITY_STATUS.md), [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md),
+[GATE_2_11_WET_DRY_RACE.md](GATE_2_11_WET_DRY_RACE.md),
 [GATE_2_12_STABILITY.md](GATE_2_12_STABILITY.md), [GATE_2_14_FRAME_PROFILE.md](GATE_2_14_FRAME_PROFILE.md).
 
 ---
@@ -91,7 +92,7 @@ Human smoke on a clean Windows build remains good practice before demos.
 
 | # | Deliverable | Status | Acceptance |
 |---|-------------|--------|------------|
-| 2.11 | Repeatable dry/wet race | ⬜ | 10–15 min, 8+ cars; grip, spray, audio, results coherent |
+| 2.11 | Repeatable dry/wet race | ✅ | 10–15 min, 8+ cars; grip, spray, audio, results coherent — evidence 2026-10-14 `docs/GATE_2_11_*` / `docs/gate_2_11/` |
 | 2.12 | Long stability | ✅ | 1 h soak 2026-10-14; 0 NaN recovery — `docs/GATE_2_12_*` |
 | 2.13 | Automated regression | 🟡 | CTest Qt-free green; human Fase 2 still required |
 | 2.14 | Real frame profile | ✅ | 45 s Vulkan 2026-10-14 (RTX 3070 Ti) — `docs/GATE_2_14_*` |
@@ -151,9 +152,8 @@ Priority for operators (see [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md)):
 
 1. **G3** — Box service (2.7) on real session path  
 2. **G1 / G2** — Build cleanliness + menu paths (2.10)  
-3. **G4 / 2.11** — Long race dry/wet  
 
-Already closed with evidence: **2.12** soak, **2.14** frame profile.
+Already closed with evidence: **2.11** long race, **2.12** soak, **2.14** frame profile.
 
 Prerequisites:
 
