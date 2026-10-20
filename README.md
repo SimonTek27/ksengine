@@ -62,7 +62,7 @@ detail; prefer the three primary docs above for onboarding and planning.
 | Menu vertical slice, bindings, telemetry | ✅ |
 | Wet physics, 3D audio, mesh rendering | ✅ |
 | Box / team / upgrades / menu coherence (code) | 🟡 human gates open |
-| Long race gate **2.11** | ⬜ |
+| Long race gate **2.11** | ✅ (2026-10-14) |
 | Soak **2.12** / frame profile **2.14** | ✅ (2026-10-14) |
 
 Full detail: [docs/ksengine.roadmap.md](docs/ksengine.roadmap.md).
