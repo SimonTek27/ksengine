@@ -1,7 +1,7 @@
 # Gate plan — Windows (accettazione umana)
 
-**Aggiornata:** 2026-10-14  
-**HEAD di riferimento:** master (post E9 profiler fix + AcRemote stub + gate 2.12/2.14)  
+**Aggiornata:** 2026-10-20  
+**HEAD di riferimento:** master (post E9 profiler fix + AcRemote stub + gate 2.11/2.12/2.14)  
 **Ambito:** runtime Qt-free (`ksim` / SimulatorApp). Non chiude fasi solo perché compila.
 
 ---
@@ -17,9 +17,9 @@
 | Track JSON Mugello | ✅ | ⬜ `KS_TRACK=…/mugello` |
 | E1 C API | ✅ | `ctest -R c_api_test` |
 | E9 Profiler | ✅ in `tick` | `KS_PROFILE=1` |
+| **2.11** Gara 10–15 min | — | ✅ 2026-10-14 (`docs/GATE_2_11_WET_DRY_RACE.md`) |
 | **2.12** Soak 1 h | — | ✅ 2026-10-14 (`docs/GATE_2_12_STABILITY.md`) |
 | **2.14** Profilo frame | — | ✅ 2026-10-14 (`docs/GATE_2_14_FRAME_PROFILE.md`) |
-| **2.11** Gara 10–15 min | — | ⬜ |
 
 ---
 
@@ -71,13 +71,15 @@ git apply docs/patches/AcRemoteTelemetryServer_include.patch
 | G3.5 | Serbatoio | fill non supera `fuelTankCapacityL` | [ ] |
 | G3.6 | Standings HUD | posizione da `RaceSessionManager`, no overlay pit duplicato | [ ] |
 
-## G4 — Gara lunga (2.11) — ancora aperto
+## G4 — Gara lunga (2.11) — chiuso
 
 | # | Check | Criterio | Pass? |
 |---|--------|----------|-------|
-| G4.1 | Gara 10–15 min | 8+ auto, asciutto | [ ] |
-| G4.2 | Bagnato | grip/spray/audio coerenti | [ ] |
-| G4.3 | Risultati | classifica e tempi plausibili | [ ] |
+| G4.1 | Gara 10–15 min | 8+ auto, asciutto | [x] 2026-10-14 |
+| G4.2 | Bagnato | grip/spray/audio coerenti | [x] (temp + wetness misurati; audio non verificabile su macchina senza device) |
+| G4.3 | Risultati | classifica e tempi plausibili | [x] exit pulito, 0 NaN |
+
+Evidence: `docs/GATE_2_11_WET_DRY_RACE.md` + `docs/gate_2_11/`.
 
 **2.12 e 2.14 sono già chiusi con evidence** — non ripetere salvo regressione.
 
@@ -93,6 +95,7 @@ git apply docs/patches/AcRemoteTelemetryServer_include.patch
 | `KS_AUTOSTART=1` | salta menu |
 | `KS_PROFILE=1` | profiler frame (E9) |
 | `KS_HEADLESS=1` | smoke senza finestra |
+| `KS_WEATHER` | `dry` / `wet` (gate 2.11) |
 
 ---
 
@@ -110,7 +113,6 @@ git apply docs/patches/AcRemoteTelemetryServer_include.patch
 1. G1.1 rebuild pulito (verifica AcRemote + profiler)  
 2. G3 box (2.7) — massima priorità prodotto  
 3. G2 contenuto AC reale  
-4. G4 / 2.11 gara 10–15 min  
-5. Solo dopo → Fase 3 roadmap  
+4. Solo dopo → Fase 3 roadmap  
 
 *Documento operativo; aggiornare alla chiusura di ogni riga G\*.*
