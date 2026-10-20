@@ -132,3 +132,13 @@ bullet/
 vhacd/
 mikktspace.dir/
 template/
+
+# --- Cleanup 2026-10-20: do not re-commit these -----------------------------
+*.i
+*.pid
+smoke_*.txt
+smoke_*.log
+backups/
+milliken_extract/
+*.zip
+!content/**/*.zip
