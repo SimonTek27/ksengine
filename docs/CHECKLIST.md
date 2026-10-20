@@ -1,8 +1,8 @@
 # Checklist operativa — ksengine / ksim
 
 **Fonte:** `docs/ROADMAP.md`, `docs/WIREUP_GAPS.md`, `docs/GATE_PLAN_WINDOWS.md`, codice su `master`  
-**Aggiornata:** 2026-10-14  
-**HEAD di riferimento:** master (E9 profiler, AcRemote stub, gate 2.12/2.14)  
+**Aggiornata:** 2026-10-20  
+**HEAD di riferimento:** master (E9 profiler, AcRemote stub, gate 2.11/2.12/2.14)  
 **Gate plan:** [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md)  
 **Ambito:** runtime Qt-free (SimulatorApp / ksim).
 
@@ -60,7 +60,7 @@
 
 ## C. Fase 2C
 
-- [ ] **2.11** Gara 10–15 min asciutto/bagnato, 8+ auto ⬜
+- [x] **2.11** Gara 10–15 min asciutto/bagnato, 8+ auto ✅ 2026-10-14 — `docs/GATE_2_11_WET_DRY_RACE.md` / `docs/gate_2_11/`
 - [x] **2.12** Soak 1 ora ✅ 2026-10-14 — `docs/GATE_2_12_STABILITY.md`
 - [x] **2.14** Profilo frame ✅ 2026-10-14 — `docs/GATE_2_14_FRAME_PROFILE.md`
 - [ ] **2.13** extra regressione se servono casi 🟡
@@ -74,7 +74,7 @@
 | 1 | Gate umani G3 box (2.7) | [ ] |
 | 2 | G1 practice/LAN | [ ] |
 | 3 | G2 contenuto AC | [ ] |
-| 4 | **2.11** gara lunga | [ ] |
+| 4 | **2.11** gara lunga | [x] |
 | 5 | 2.12 + 2.14 | [x] |
 
 ---
