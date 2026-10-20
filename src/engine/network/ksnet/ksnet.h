@@ -310,7 +310,7 @@ private:
 
 class Server {
 public:
-    Server(Allocator& allocator, the Address* privateAddress,
+    Server(Allocator& allocator, const Address* privateAddress,
            const Address& publicAddress, const ClientServerConfig& config,
            Adapter& adapter, double timeout);
     ~Server();
