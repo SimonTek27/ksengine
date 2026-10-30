@@ -7,11 +7,14 @@
 #include "engine/physics/EngineModel.h"
 #include "engine/physics/PacejkaTireModel.h"
 #include "engine/physics/VehicleSimulator.h"
+#include "adapters/assetto_corsa/AcCarManifestConverter.h"
+#include "engine/FileFormat/AcdReader.h"
 
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -156,6 +159,157 @@ int main()
             CHECK(near(vs.gearRatios()[0], 3.5, 1e-4) &&
                   near(vs.gearRatios()[3], 1.1, 1e-4));
         CHECK(near(vs.finalDrive(), 4.2, 1e-4));
+    }
+
+    // --- AC tank size: [FUEL] MAX_FUEL from car.ini / powertrain.ini -------
+    {
+        VehicleSimulator vs;
+        writeFile(dir / "car_tank.ini", "[FUEL]\nFUEL=20\nMAX_FUEL=71\n");
+        vs.loadFuelCapacityFromIni((dir / "car_tank.ini").string());
+        CHECK(near(vs.fuelTankCapacityL(), 71.0, 1e-4));
+
+        // Mods that keep the tank in powertrain.ini load the same way.
+        VehicleSimulator vs2;
+        writeFile(dir / "powertrain_tank.ini",
+                  "[FUEL]\nCONSUMPTION=1\nMAX_FUEL=45\n");
+        vs2.loadFuelCapacityFromIni((dir / "powertrain_tank.ini").string());
+        CHECK(near(vs2.fuelTankCapacityL(), 45.0, 1e-4));
+
+        // No MAX_FUEL in the file: the tank is left as it was.
+        VehicleSimulator vs3;
+        writeFile(dir / "car_nofuel.ini", "[BASIC]\nTOTALMASS=1200\n");
+        vs3.loadFuelCapacityFromIni((dir / "car_nofuel.ini").string());
+        CHECK(near(vs3.fuelTankCapacityL(), 150.0, 1e-4));
+
+        // Load order on a real car folder: the AC content sets the tank, and
+        // engine.ini's FUEL_CAPACITY still wins when both are present.
+        const fs::path carDir = dir / "car_order";
+        fs::create_directories(carDir / "data");
+        writeFile(carDir / "data" / "car.ini", "[FUEL]\nMAX_FUEL=71\n");
+        writeFile(carDir / "data" / "engine.ini", "[ENGINE]\nPOWER=300\n");
+        VehicleSimulator v4;
+        v4.loadVehicleParamsFromIni(carDir.string());
+        CHECK(near(v4.fuelTankCapacityL(), 71.0, 1e-4));
+
+        writeFile(carDir / "data" / "engine.ini",
+                  "[ENGINE]\nPOWER=300\nFUEL_CAPACITY=90\n");
+        VehicleSimulator v5;
+        v5.loadVehicleParamsFromIni(carDir.string());
+        CHECK(near(v5.fuelTankCapacityL(), 90.0, 1e-4));
+
+        // Converted content: no .ini at all, one data/data.json whose "fuel"
+        // section keeps the AC spelling (this is what the pipeline writes).
+        const fs::path jsonDir = dir / "car_json";
+        fs::create_directories(jsonDir / "data");
+        writeFile(jsonDir / "data" / "data.json",
+                  "{\"name\":\"Test\",\"fuel\":{\"FUEL\":50,\"MAX_FUEL\":90}}");
+        VehicleSimulator j1;
+        j1.loadVehicleParamsFromIni(jsonDir.string());
+        CHECK(near(j1.fuelTankCapacityL(), 90.0, 1e-4));
+
+        // "FUEL" is the current load, not the tank.
+        writeFile(jsonDir / "data" / "data.json", "{\"fuel\":{\"FUEL\":50}}");
+        VehicleSimulator j2;
+        j2.loadVehicleParamsFromIni(jsonDir.string());
+        CHECK(near(j2.fuelTankCapacityL(), 150.0, 1e-4));
+
+        // A broken manifest is ignored, not guessed at.
+        writeFile(jsonDir / "data" / "data.json", "{\"fuel\":{\"MAX_FUEL\":90}");
+        VehicleSimulator j3;
+        j3.loadVehicleParamsFromIni(jsonDir.string());
+        CHECK(near(j3.fuelTankCapacityL(), 150.0, 1e-4));
+
+        // A folder that still ships only the .ini set is not ready to be
+        // initialised: loadVehicleParams converts it first (writes
+        // data/data.json) and reads the tank from that manifest.
+        const fs::path convDir = dir / "car_convert";
+        fs::create_directories(convDir / "data");
+        writeFile(convDir / "data" / "car.ini",
+                  "[BASIC]\nTOTALMASS=735\nGRAPHICS_OFFSET=0,-0.32,-0.28\n"
+                  "[GRAPHICS]\nMIRROR_POSITION=0,0.7,0.5\n"
+                  "[FUEL]\nFUEL=20\nMAX_FUEL=200\n"
+                  "[FUELTANK]\nPOSITION=0,-0.05,0.1\n");
+        // Classic inline damper and bump stop data: the rule wants them as
+        // their own roots, and the graphics offset must move to car.GRAPHICS.
+        writeFile(convDir / "data" / "suspensions.ini",
+                  "[FRONT]\nDAMP_BUMP=16000\nDAMP_REBOUND=8000\n"
+                  "BUMPSTOP_UP=0.055\nBUMP_STOP_RATE=150000\n"
+                  "[GRAPHICS_OFFSETS]\nWHEEL_LF=-0.01\nSUSP_LF=0.0\n");
+        writeFile(convDir / "data" / "brakes.ini",
+                  "[DATA]\nMAX_TORQUE=2700\nFRONT_SHARE=0.5\n"
+                  "[DISCS_GRAPHICS]\nDISC_LF=g_Disk_LF\nFRONT_MAX_GLOW=12\n"
+                  "LAG_HOT=0.995\n");
+        writeFile(convDir / "data" / "colliders.ini",
+                  "[COLLIDER_0]\nMESH=body\n");
+        writeFile(convDir / "data" / "lods.ini",
+                  "[HEADER]\nVERSION=2\n[LOD_0]\nDISTANCE=10\n[LOD_1]\nDISTANCE=200\n");
+        writeFile(convDir / "data" / "fuel_cons.ini",
+                  "[FUEL_EVAL]\nKM_PER_LITER=1.179665\n");
+        // The fixture lives in the temp folder and survives between runs: the
+        // produced documents have to go, or needsConversion() sees a ready car
+        // and skips the conversion this test is about.
+        for (const std::string& doc : {"data.json", "driver.json", "camera.json",
+                                       "setup.json", "model.json", "sound.json", "ai.json"})
+            fs::remove(convDir / "data" / doc);
+        VehicleSimulator c1;
+        c1.loadVehicleParams(convDir.string());
+        // Seven documents: physics, driver, cameras, setup, model, sound, ai.
+        for (const std::string& doc : {"data.json", "driver.json", "camera.json",
+                                       "setup.json", "model.json", "sound.json", "ai.json"})
+            CHECK(fs::exists(convDir / "data" / doc));
+        // The rule: entries every car must carry, whatever its type.
+        std::ifstream dataIn(convDir / "data" / "data.json", std::ios::binary);
+        const std::string dataText((std::istreambuf_iterator<char>(dataIn)),
+                                   std::istreambuf_iterator<char>());
+        CHECK(dataText.find("\"dampers\"") != std::string::npos);
+        CHECK(dataText.find("\"DAMP_BUMP\"") != std::string::npos);
+        CHECK(dataText.find("\"bumpstops\"") != std::string::npos);
+        CHECK(dataText.find("\"BUMPSTOP_UP\"") != std::string::npos);
+        // The graphics offset leaves BASIC and lands in model.json, not in the
+        // physics document.
+        std::ifstream modelIn(convDir / "data" / "model.json", std::ios::binary);
+        const std::string modelText((std::istreambuf_iterator<char>(modelIn)),
+                                    std::istreambuf_iterator<char>());
+        CHECK(modelText.find("\"GRAPHICS_OFFSET\"") != std::string::npos);
+        // The mirror is body geometry, not model geometry: it stays in the
+        // physics document, in the mirrors section.
+        CHECK(dataText.find("\"MIRROR_POSITION\"") != std::string::npos);
+        CHECK(dataText.find("\"mirrors\"") != std::string::npos);
+        // LODs are part of the model, not of the car data.
+        CHECK(modelText.find("\"lods\"") != std::string::npos);
+        CHECK(dataText.find("\"lods\"") == std::string::npos);
+        // Colliders describe the shape of the model.
+        // Wheel and suspension graphical offsets are model coordinates.
+        CHECK(modelText.find("\"GRAPHICS_OFFSETS\"") != std::string::npos);
+        CHECK(dataText.find("\"GRAPHICS_OFFSETS\"") == std::string::npos);
+        // The disc section keeps the meshes; glow and lag are brake behaviour.
+        CHECK(dataText.find("\"DISCS_COMPONENTS\"") != std::string::npos);
+        CHECK(dataText.find("\"DISCS_GRAPHICS\"") == std::string::npos);
+        CHECK(dataText.find("\"LAG_HOT\"") != std::string::npos);
+        CHECK(modelText.find("\"colliders\"") != std::string::npos);
+        CHECK(dataText.find("\"colliders\"") == std::string::npos);
+        // A section that only repeated the format version keeps nothing.
+        CHECK(modelText.find("\"VERSION\"") == std::string::npos);
+        CHECK(modelText.find("\"MIRROR_POSITION\"") == std::string::npos);
+        // The conversion also leaves the verification checklist behind.
+        CHECK(fs::exists(convDir / "data" / "verify.json"));
+        CHECK(dataText.find("\"GRAPHICS_OFFSET\"") == std::string::npos);
+        CHECK(near(c1.fuelTankCapacityL(), 200.0, 1e-4));
+        // Final step: data.acd is rebuilt from the folder and reads back with the
+        // key of the car folder name.
+        const ks::assetto_corsa::AcCarManifestConverter::Result packed =
+            ks::assetto_corsa::AcCarManifestConverter::packAcd(convDir);
+        CHECK(packed.packDone);
+        CHECK(packed.packed > 0);
+        CHECK(fs::exists(convDir / "data.acd"));
+        std::ifstream acdIn(convDir / "data.acd", std::ios::binary);
+        const std::string acdBytes((std::istreambuf_iterator<char>(acdIn)),
+                                   std::istreambuf_iterator<char>());
+        const auto archive = ks::engine::fileformat::parseAcd(
+            acdBytes, convDir.filename().string());
+        CHECK(archive.ok());
+        CHECK(archive.find("data.json") != nullptr);
+        CHECK(archive.find("suspensions.ini") != nullptr);
     }
 
     // --- roadmap 2.7 follow-up: real tank capacity + fitted tyres ----------

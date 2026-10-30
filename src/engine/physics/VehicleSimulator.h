@@ -195,6 +195,12 @@ public:
     void loadDrivetrainFromIni(const std::string& path);
     void loadAeroFromIni(const std::string& path);
     void loadSuspensionFromIni(const std::string& path);
+    /** AC has the real tank in [FUEL] MAX_FUEL (litres): data/data.json in
+     *  converted content (read by CarPhysicsJson::loadAcFuelCapacity before
+     *  the .ini set), data/car.ini in stock folders, and data/powertrain.ini
+     *  in the mods that keep it there. Always before engine.ini, so the
+     *  ksengine-side FUEL_CAPACITY override still wins. */
+    void loadFuelCapacityFromIni(const std::string& path);
 
     int currentGear() const { return m_currentGear; }
     double rpm() const { return m_rpm; }

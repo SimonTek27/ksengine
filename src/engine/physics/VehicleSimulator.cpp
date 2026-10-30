@@ -8,6 +8,8 @@
 
 namespace fs = std::filesystem;
 
+#include "../../adapters/assetto_corsa/AcCarManifestConverter.h"
+
 namespace ks {
 namespace physics {
 
@@ -222,6 +224,16 @@ float VehicleSimulator::getf(const std::map<std::string, std::string>& m, const 
 }
 
 void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
+    // Converted content keeps everything in data/data.json. A folder that
+    // still ships only the AC .ini set is not ready to be initialised, so the
+    // manifest is written first; needsConversion() turns false once data.json
+    // exists, so this runs exactly once per car. A failed write is not fatal:
+    // the .ini readers below still load the vehicle.
+    if (assetto_corsa::AcCarManifestConverter::needsConversion(carPath)) {
+        const assetto_corsa::AcCarManifestConverter::Result converted =
+            assetto_corsa::AcCarManifestConverter::convert(carPath);
+        (void)converted;
+    }
     // Unified data/physics.json first (single-file car physics, roadmap
     // "unify the physics inis"); the per-file .ini set stays as the fallback
     // so stock AC content loads unchanged.
@@ -236,6 +248,20 @@ void VehicleSimulator::loadVehicleParamsFromIni(const std::string& carPath) {
         if (fs::exists(p1)) (this->*fn)(p1.string());
         else if (fs::exists(p2)) (this->*fn)(p2.string());
     };
+    // Converted content has no .ini at all: the pipeline writes one
+    // data/data.json per car and the tank lives in its "fuel" section
+    // ("MAX_FUEL" in litres), so that manifest is read first.
+    {
+        double acTankL = 0.0;
+        if (CarPhysicsJson::loadAcFuelCapacity(carPath, acTankL))
+            setFuelTankCapacity(static_cast<float>(acTankL));
+    }
+    // Roadmap 2.7 follow-up - the tank size is AC content, not a ksengine
+    // knob: car.ini [FUEL] MAX_FUEL first (powertrain.ini for the mods that
+    // keep it there), then engine.ini, whose FUEL_CAPACITY stays the explicit
+    // override for cars that ship neither.
+    tryLoad("car.ini", &VehicleSimulator::loadFuelCapacityFromIni);
+    tryLoad("powertrain.ini", &VehicleSimulator::loadFuelCapacityFromIni);
     tryLoad("engine.ini", &VehicleSimulator::loadEngineFromIni);
     tryLoad("tyres.ini", &VehicleSimulator::loadTyresFromIni);
     tryLoad("tires.ini", &VehicleSimulator::loadTyresFromIni);
@@ -251,11 +277,20 @@ void VehicleSimulator::loadEngineFromIni(const std::string& path) {
     if (power > 1.f) m_enginePowerKw = power;
     if (rpm > 1000.f) m_maxRpm = rpm;
     // Roadmap 2.7 follow-up: tank size (litres) for the pit refuel target.
-    // AC carries it in data/powertrain.ini ([FUEL] capacity, in joules), which
-    // kssim does not parse yet — FUEL_CAPACITY is the ksengine-side knob until
-    // then, and the built-in default keeps old behaviour when it is absent.
+    // The AC files (car.ini / powertrain.ini [FUEL] MAX_FUEL) were read before
+    // this one, so FUEL_CAPACITY is the ksengine-side override and the built-in
+    // default keeps old behaviour when neither file names a capacity.
     const float tank = getf(m, "FUEL_CAPACITY",
                             getf(m, "ENGINE/FUEL_CAPACITY", m_fuelTankL));
+    if (tank > 4.f) setFuelTankCapacity(tank);
+}
+
+void VehicleSimulator::loadFuelCapacityFromIni(const std::string& path) {
+    auto m = parseIni(path);
+    // AC stores [FUEL] MAX_FUEL in litres (car.ini in stock content). parseIni
+    // keeps both "SECTION/KEY" and the bare key, so the flat spelling covers
+    // the files that drop the section header.
+    const float tank = getf(m, "MAX_FUEL", getf(m, "FUEL/MAX_FUEL", -1.f));
     if (tank > 4.f) setFuelTankCapacity(tank);
 }
 

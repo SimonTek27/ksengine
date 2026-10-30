@@ -103,6 +103,45 @@ std::string CarPhysicsJson::resolvePath(const std::string& carDir) {
     return std::string();
 }
 
+std::string CarPhysicsJson::resolveAcManifestPath(const std::string& carDir) {
+    if (carDir.empty()) return std::string();
+    const fs::path inData = fs::path(carDir) / "data" / "data.json";
+    if (fs::exists(inData)) return inData.string();
+    const fs::path inRoot = fs::path(carDir) / "data.json";
+    if (fs::exists(inRoot)) return inRoot.string();
+    return std::string();
+}
+
+bool CarPhysicsJson::loadAcFuelCapacity(const std::string& carDir, double& litres,
+                                        std::string* error) {
+    const std::string path = resolveAcManifestPath(carDir);
+    if (path.empty()) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "data.json: cannot open " + path;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    bool ok = false;
+    std::string parseError;
+    const Json root = Json::parse(ss.str(), &ok, &parseError);
+    if (!ok || !root.isObject()) {
+        // A broken manifest is reported, never guessed at: the caller keeps
+        // the vehicle default and the .ini fallback still decides.
+        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
+        return false;
+    }
+    const Json& fuel = root["fuel"];
+    if (!fuel.isObject()) return false;
+    bool has = false;
+    double tank = 0.0;
+    takeNum(fuel, {"MAX_FUEL", "maxFuel", "fuelCapacityL"}, has, tank);
+    if (!has || tank <= 4.0) return false;
+    litres = tank;
+    return true;
+}
+
 bool CarPhysicsJson::parse(const std::string& jsonText, CarPhysicsData& out,
                            std::string* error) {
     out = CarPhysicsData{};

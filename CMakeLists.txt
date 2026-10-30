@@ -245,7 +245,19 @@ if(KS_QT_FREE_BUILD)
 		set_target_properties(ks_tracktool PROPERTIES
 			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 	endif()
-	# Milliken offline analysis tools (G-work): constrained moment-method
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp")
+    # AC car content conversion: writes the single data/data.json manifest
+    # from a stock .ini car folder (content pipeline).
+    # Json.cpp is compiled into the tool: the engine library keeps the JSON
+    # value type internal, the same way the tests do.
+    add_executable(ks_cartool
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/FileFormat/Json.cpp")
+    target_link_libraries(ks_cartool PRIVATE ksengine)
+    set_target_properties(ks_cartool PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+# Milliken offline analysis tools (G-work): constrained moment-method
 	# chart (ksmmm), tire-coefficient normalizer (kstirenorm), tire-model
 	# hot-path profiler (ksphprofile), vehicle-sim step profiler (ksvsprofile).
 	foreach(_kstool ksmmm kstirenorm ksphprofile ksvsprofile)

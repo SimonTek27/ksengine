@@ -79,6 +79,23 @@ public:
     /** Absolute-ish path of the unified file for a car dir, or "" if absent. */
     static std::string resolvePath(const std::string& carDir);
 
+    /**
+     * AC-style single manifest (<car>/data/data.json), the form the content
+     * pipeline writes: one JSON document whose sections keep the .ini
+     * spelling ("fuel": { "MAX_FUEL": 90, "FUEL": 50 }). Only the tank size
+     * is read from it, because that is the one AC field the .ini loaders
+     * above also cover; the rest still comes from physics.json.
+     */
+    static std::string resolveAcManifestPath(const std::string& carDir);
+
+    /**
+     * Tank size (litres) from the manifest's "fuel" section. "FUEL" is the
+     * current load, never the capacity, so only MAX_FUEL (and the
+     * physics.json spellings) count. false when absent or unreadable.
+     */
+    static bool loadAcFuelCapacity(const std::string& carDir, double& litres,
+                                   std::string* error = nullptr);
+
     /** Parse JSON text. false on syntax error or when no section matches. */
     static bool parse(const std::string& jsonText, CarPhysicsData& out,
                       std::string* error = nullptr);
