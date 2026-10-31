@@ -31,6 +31,7 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SetupGarage.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/TelemetryOverlay.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/TrackLoader.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/TrackLayout.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AIController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/RaceSessionManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/MultiCarManager.cpp
