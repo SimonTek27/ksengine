@@ -12,7 +12,7 @@
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
 | **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **✅ Delivered** — secure transport, client auto-reconnect, headless host key/token flags; evidence `test_multiplayer` + `ks_server_smoke` |
-| **3.3** | Multi-layout without full reload | Medium | Not started |
+| **3.3** | Multi-layout without full reload | Medium | **In progress** — catalog + switchLayout + test |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
 | **3.6** | Triple monitor | Low | Not started |
@@ -41,90 +41,63 @@ No further code is required to *start* the campaign.
 
 ---
 
-## 3.2 — ksnet SecureConnect (current focus)
+## 3.2 — ksnet SecureConnect
 
-### Design
+**✅ Delivered 2026-10-31** — body, NetworkLowLevel/Manager wire, reconnect, dedicated host flags, `test_multiplayer` + `ks_server_smoke`.
+
+Optional remaining: lobby advert for secure mode.
+
+---
+
+## 3.3 — Multi-layout without full reload
+
+**Goal:** change race layout (AI line, length, pit/start metadata, optional local kn5)
+without tearing down cars / renderer / session stack.
+
+### Model
 
 | Piece | Behaviour |
 |-------|-----------|
-| Key | Exactly **32 bytes** (`ksnet::PRIVATE_KEY_BYTES`) |
-| Client | `SecureConnect(key, 32, addr)` — CONNECT carries 8-byte key-proof |
-| Server | `SetPrivateKey(key, 32)` before `Start()` |
-| Reject | reason **2** = key mismatch (`kRejectKeyMismatch`) |
-| Payload | After 13-byte header: XOR keystream (nonce + key) |
-| Default | No key → `InsecureConnect` (LAN open, unchanged) |
-
-Application auth (`setAuthToken` / `setJoinToken`) remains independent and already shipped.
+| Catalog | `TrackLayoutCatalog` in `src/simulator/TrackLayout.{h,cpp}` |
+| Manifest | Optional `layouts.json` at track root (authoritative) |
+| Scan | Else: subdirs with `data/`, `ai/`, or `*.kn5` |
+| Default | Always expose `id=default` → track root when usable |
+| Env | `KS_LAYOUT=<id>` applied in `loadTrackFolder` |
+| Switch | `SimulationLoop::switchLayout(id)` rebinds length/name/kn5, resets lap distance |
 
 ### Done on master (2026-10-31)
 
-- [x] `ksnet.h`: `PRIVATE_KEY_BYTES`, `Client::SecureConnect`, `Server::SetPrivateKey` / `ClearPrivateKey` / `isSecure`
-- [x] **Body on master** (2026-10-31): `src/engine/network/ksnet/ksnet.cpp`
-      carries the implementation — XOR keystream after the 13-byte header,
-      8-byte CONNECT key proof, `kRejectKeyMismatch` = 2 — promoted from
-      `milliken_extract/ksnet.cpp` (44 KB superset of the old 36 KB file).
-      The staging tree is gone.
-- [x] Repo cleanup of VS noise / backups / LUTParser.i / milliken zip
-- [x] `tools/cleanup_superfluous.ps1` + `.sh` — promote body + delete `milliken_extract/`
-- [x] **NetworkLowLevel** — `setPrivateKey` / `clearPrivateKey` / `hasPrivateKey`;
-      `connect()` calls `SecureConnect` when a key is set, `start()` calls
-      `SetPrivateKey` before `Start()`; `isSecure()` on both endpoints.
-- [x] **NetworkManager** — key pass-through to host and client, plus
-      `KS_NET_KEY=<hex64>` at construction (invalid value stays insecure).
-- [x] **Test** — `test_multiplayer` covers secure handshake, guest join with
-      key proof, malformed-key rejection, mismatched-key reject and client
-      auto-reconnect after a server restart.
-- [x] **Reconnect** — `NetworkManager::setAutoReconnect(enabled, attempts, delay)`;
-      unexpected drops schedule CONNECT retries (0 attempts = unlimited).
-      `disconnectFromServer()` / auth failures cancel the retry loop.
-- [x] **Dedicated host** — `SimulatorServer` accepts `--secure-key HEX64` /
-      `--auth-token TOKEN` (and `secure-key` / `auth-token` in
-      `server/kssimserver.ini`), validates both before binding and reports the
-      resulting mode. `tools/ks_server` already provides the C-API headless
-      harness covered by `ks_server_smoke`.
+- [x] `TrackLayoutCatalog::discover` / `selectById` / manifest + scan
+- [x] Mugello `content/tracks/mugello/layouts.json` (default GP)
+- [x] Unit test `track_layout_test`
+- [x] `cmake/CMakeLists_ksimulator_QtFree.cmake` compiles `TrackLayout.cpp`
+- [ ] `SimulationLoop` wire (`switchLayout`, `KS_LAYOUT`) — apply `docs/patches/phase33_switchLayout.patch` if not yet merged
 
-### Remaining (optional)
+### Remaining
 
-1. **Lobby advert** — expose secure mode in the server list.
+1. Merge SimulationLoop header/cpp wire (layout fields + `switchLayout`).
+2. Reload AI racing line on switch when layout ships its own `ai/*.ai`.
+3. Menu UI to pick layout before session start.
+4. Multiplayer: broadcast active layout id on join.
+5. Real second layout content pack (e.g. Mugello national) when available.
 
-### One local command (historical — already applied)
+### Smoke
 
 ```bat
-powershell -ExecutionPolicy Bypass -File tools\cleanup_superfluous.ps1
+set KS_TRACK=content/tracks/mugello
+set KS_LAYOUT=default
+ksim.exe
+ctest -R track_layout_test --output-on-failure
 ```
-
-That script promoted `milliken_extract/ksnet.cpp` → `src/engine/network/ksnet/ksnet.cpp`,
-removed the staging tree and committed. It is kept for reproducible rebuilds of the
-cleanup but is a no-op on current master.
-
-### Next steps
-
-1. ~~Wire NetworkLowLevel~~ — done 2026-10-31 (`SecureConnect` / `SetPrivateKey`).
-2. ~~Wire NetworkManager~~ — done 2026-10-31 (`setPrivateKey` / `clearPrivateKey` / `hasPrivateKey`).
-3. ~~Optional env~~ — done: `KS_NET_KEY=<hex64>` for host/client smoke.
-4. ~~Reconnect~~ — done 2026-10-31 (`setAutoReconnect`, retry loop in `update`).
-5. ~~Dedicated server~~ — done 2026-10-31: `SimulatorServer --secure-key/--auth-token`
-   (or `secure-key`/`auth-token` in `server/kssimserver.ini`).
-
-### Smoke test
-
-```bat
-set KS_NET_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-kssimserver.exe --game-port 40000 --secure-key %KS_NET_KEY%
-ksim.exe ... join 127.0.0.1
-```
-
-Mismatch key → CONNECT_REJECT reason 2; no key → legacy InsecureConnect.
-Automated coverage: `test_multiplayer` (secure handshake, reject, auto-reconnect)
-and `ks_server_smoke`.
 
 ---
 
 ## Suggested order
 
-1. Start **3.1 data campaign** when real tyre logs exist.
-2. **3.4** driver swap after human box gate G3.
-3. Defer 3.5–3.8 until Windows soak is routine.
+1. Finish **3.3** remaining (SimulationLoop wire, AI line on switch, menu picker).
+2. Start **3.1 data campaign** when real tyre logs exist.
+3. **3.4** driver swap after human box gate G3.
+4. Defer 3.5–3.8 until Windows soak is routine.
 
 ---
 
