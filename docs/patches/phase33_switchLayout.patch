@@ -1,0 +1,98 @@
+diff --git a/src/simulator/SimulationLoop.cpp b/src/simulator/SimulationLoop.cpp
+index eed1a5b..f6a9c48 100644
+--- a/src/simulator/SimulationLoop.cpp
++++ b/src/simulator/SimulationLoop.cpp
+@@ -314,6 +314,23 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
+     loadContentMods(trackDirectory); // Lua Mod SDK: <track>/scripts/*.lua
+     m_trackData.directory = trackDirectory;
+     m_trackData.name = fs::path(trackDirectory).filename().string();
++    // Phase 3.3 — build layout catalog; optional KS_LAYOUT selects active id.
++    m_layouts.discover(trackDirectory);
++    if (const char* layoutEnv = std::getenv("KS_LAYOUT"); layoutEnv && layoutEnv[0]) {
++        if (!m_layouts.selectById(layoutEnv))
++            std::fprintf(stderr, "SimulationLoop: KS_LAYOUT=%s not found, using default\n", layoutEnv);
++    }
++    if (const auto* lay = m_layouts.active()) {
++        m_trackData.layoutId = lay->id;
++        m_trackData.layoutFolder = lay->folder;
++        if (lay->lengthM > 1.f)
++            m_trackData.splineLength = lay->lengthM;
++        if (!lay->name.empty() && lay->id != "default")
++            m_trackData.name = lay->name;
++    } else {
++        m_trackData.layoutId = "default";
++        m_trackData.layoutFolder = trackDirectory;
++    }
+     // AI racing line (roadmap 3.5): load it at track-load time so the grid
+     // can be spawned when the session starts. No file = spawnGrid is a no-op.
+     if (m_multiCar) m_multiCar->loadAiSpline(trackDirectory);
+@@ -348,6 +365,74 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
+     return true;
+ }
+ 
++
++bool SimulationLoop::switchLayout(const std::string& layoutId) {
++    namespace fs = std::filesystem;
++    if (m_trackData.directory.empty()) {
++        std::fprintf(stderr, "SimulationLoop::switchLayout: no track loaded\n");
++        return false;
++    }
++    if (m_layouts.empty())
++        m_layouts.discover(m_trackData.directory);
++    if (!m_layouts.selectById(layoutId)) {
++        std::fprintf(stderr, "SimulationLoop::switchLayout: unknown layout '%s'\n",
++                     layoutId.c_str());
++        return false;
++    }
++    const auto* lay = m_layouts.active();
++    if (!lay) return false;
++
++    const std::string folder = lay->folder.empty() ? m_trackData.directory : lay->folder;
++    m_trackData.layoutId = lay->id;
++    m_trackData.layoutFolder = folder;
++
++    float length = lay->lengthM;
++    std::string displayName = lay->name;
++    const fs::path dataJson = fs::path(folder) / "data" / "data.json";
++    if (fs::exists(dataJson)) {
++        ks::ac::TrackDataJsonLoader trackJson;
++        if (trackJson.loadFile(dataJson.string())) {
++            if (trackJson.meta().lengthM > 1.f)
++                length = trackJson.meta().lengthM;
++            if (!trackJson.meta().name.empty())
++                displayName = trackJson.meta().name;
++        }
++    }
++    if (length > 1.f)
++        m_trackData.splineLength = length;
++    if (!displayName.empty())
++        m_trackData.name = displayName;
++
++    std::string kn5;
++    std::error_code ec;
++    if (fs::is_directory(folder, ec)) {
++        for (auto& e : fs::directory_iterator(folder, ec)) {
++            if (ec) break;
++            if (e.path().extension() == ".kn5") {
++                kn5 = e.path().string();
++                break;
++            }
++        }
++    }
++    if (!kn5.empty()) {
++        m_trackData.kn5Path = kn5;
++        applyTrackVisuals(folder);
++    }
++
++    m_ui.menu().setTrackName(m_trackData.name);
++    m_lapTimer.configure(3);
++    m_lapDistance = 0.f;
++    m_normalizedSpline = 0.f;
++    m_trackData.valid = true;
++    m_trackLoaded = true;
++    std::fprintf(stderr, "SimulationLoop: switched layout '%s' (%s) length=%.1f\n",
++                 lay->id.c_str(), m_trackData.name.c_str(), m_trackData.splineLength);
++    return true;
++}
++
+ bool SimulationLoop::loadCar(const std::string& carDir) {
