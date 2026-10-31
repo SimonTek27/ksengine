@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
-# Apply full Phase 3.3 SimulationLoop multi-layout wire
+# Apply Phase 3.3 complete SimulationLoop multi-layout wire.
+# Requires TrackLayout.{h,cpp} + mugello layouts.json already on tree (master has them).
 set -euo pipefail
-cd "$(dirname "$0")/.."
-git apply --reject --whitespace=fix docs/patches/phase33_complete_wire.patch 2>/dev/null || \
-  git apply --reject --whitespace=fix docs/patches/phase33_switchLayout.patch
-echo "Applied Phase 3.3 SimulationLoop wire."
-echo "Build: cmake -B build -DKSENGINE_QT_FREE=ON -DKSIMULATOR_QT_FREE=ON && cmake --build build -j"
-echo "Test:  ctest --test-dir build -R track_layout_test --output-on-failure"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+PATCH="$ROOT/docs/patches/phase33_complete_wire.patch"
+if [[ ! -f "$PATCH" ]]; then
+  echo "missing $PATCH" >&2
+  exit 1
+fi
+if git apply --check "$PATCH"; then
+  git apply "$PATCH"
+  echo "phase33 complete wire applied"
+else
+  echo "patch does not apply cleanly; try: git apply --3way $PATCH" >&2
+  exit 1
+fi
