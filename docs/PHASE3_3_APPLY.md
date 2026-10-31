@@ -1,29 +1,33 @@
 # Apply Phase 3.3 SimulationLoop wire
 
-Catalog + test are already on master. Finish the runtime wire locally:
+Catalog, test, and cmake registration are on master. Finish the runtime wire:
 
 ```bat
 git pull
+bash tools/apply_phase33_wire.sh
+```
 
-rem 1) Header — add include + fields + API (if not present):
-rem    #include "TrackLayout.h"
-rem    SimTrackData: layoutId, layoutFolder
-rem    bool switchLayout(const std::string& layoutId);
-rem    const TrackLayoutCatalog& layoutCatalog() const;
-rem    TrackLayoutCatalog m_layouts;
+Or on Windows (Git Bash / WSL):
 
-rem 2) Body
-git apply docs/patches/phase33_switchLayout.patch
+```bat
+git pull
+git apply docs/patches/phase33_complete_wire.patch
+```
 
-rem 3) Register unit test (tests/ksengine/CMakeLists_p2.cmake) if missing:
-rem    track_layout_test links TrackLayout.cpp only
+This patches:
 
+- `src/simulator/SimulationLoop.h` — TrackLayout include, layoutId/layoutFolder, switchLayout API, m_layouts
+- `src/simulator/SimulationLoop.cpp` — discover + KS_LAYOUT + switchLayout (incl. AI line reload)
+
+Then:
+
+```bat
 cmake -B build -DKSENGINE_QT_FREE=ON -DKSIMULATOR_QT_FREE=ON
 cmake --build build -j
 ctest --test-dir build -R track_layout_test --output-on-failure
 ```
 
-Env smoke after wire:
+Env smoke:
 
 ```bat
 set KS_TRACK=content/tracks/mugello
