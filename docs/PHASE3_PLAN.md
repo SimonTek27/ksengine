@@ -1,7 +1,7 @@
 # Phase 3 — Pro depth
-
-**Started:** 2026-10-20  
-**Product:** Kinetika (ksim / ksengine)  
+**Started:** 2026-10-20
+**Status re-checked:** 2026-10-31 (master `a617f7c1`)
+**Product:** Kinetika (ksim / ksengine)
 **Prerequisite:** Phase 2 code closed; human gates G1–G3 still open on Windows (do not block Phase 3 tooling).
 
 ---
@@ -24,14 +24,12 @@
 ## 3.1 — Tyre validation (data campaign)
 
 **Already in tree**
-
 - `KsTireModel` + load sensitivity, friction-circle telemetry
 - `TireNormalizeTool` + CLI `kstirenorm` (Milliken Ch.14)
 - `MomentMethodTool` + `ksmmm` / `--gg` / `--pair`
 - Milliken gap table G1–G18 **CLOSED** (`docs/MILLIKEN_KSENGINE.md`)
 
 **Still needed (human / data)**
-
 1. Capture real telemetry (bank or car) at known Fz / α / κ / T / p.
 2. Run `kstirenorm --ini <tyres.ini> --curves out.csv --report out.txt`.
 3. Compare peak μ, α_peak, loadSensRatio vs measured; adjust INI or normalize with `--normalize --target-mu`.
