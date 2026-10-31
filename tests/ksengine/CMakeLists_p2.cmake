@@ -83,10 +83,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp")
     find_package(Vulkan QUIET)
     if(Vulkan_FOUND)
-        # Roadmap 2.4 — the committed reference bakes the test drives end to
-        # end (tools/make_reference_content.ps1 regenerates them). Resolved
-        # against this file's directory, so both the top-level and the
-        # standalone tests/ksengine configure land on the same content.
         get_filename_component(_ks_ref_bake
             "${CMAKE_CURRENT_SOURCE_DIR}/../../content/baked" ABSOLUTE)
         get_filename_component(_ks_ref_car
@@ -105,8 +101,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
         target_compile_definitions(test_renderer PRIVATE
             KSENGINE_QT_FREE=1
             KS_TEST_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
-            # Roadmap 2.4/2.5: committed reference content (absolute, so the
-            # test does not depend on the ctest working directory).
             KS_TEST_REFERENCE_BAKE="${_ks_ref_bake}"
             KS_TEST_REFERENCE_CAR="${_ks_ref_car}")
         target_link_libraries(test_renderer PRIVATE ksengine ${Vulkan_LIBRARIES})
@@ -123,8 +117,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
     endif()
 endif()
 
-# (Recovered body: loader / golden / parity blocks dropped by the p1/p2/p3
-#  split — restored from 82172929:tests/ksengine/CMakeLists.txt.)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLoader.cpp")
     add_executable(track_loader_test
@@ -137,11 +129,22 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_loader_test.cpp" AND
     add_test(NAME track_loader_test COMMAND track_loader_test)
 endif()
 
+# Phase 3.3 multi-layout catalog
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_layout_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLayout.cpp")
+    add_executable(track_layout_test
+        track_layout_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TrackLayout.cpp")
+    target_include_directories(track_layout_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME track_layout_test COMMAND track_layout_test)
+endif()
+
 # Parity 1.1 — golden trajectory
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_PhysicsGolden.cpp")
     add_executable(test_PhysicsGolden test_PhysicsGolden.cpp)
     target_link_libraries(test_PhysicsGolden PRIVATE ksengine)
-    # Working directory = repo root so tests/data/golden_lap.csv resolves
     add_test(NAME test_PhysicsGolden COMMAND test_PhysicsGolden
              WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 endif()
@@ -160,16 +163,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_physics_ini.cpp")
     add_test(NAME test_physics_ini COMMAND test_physics_ini)
 endif()
 
-# Unified car physics file (data/physics.json): one file replacing the
-# engine/tyres/drivetrain/aero/suspension .ini set, with .ini fallback.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/physics_json_test.cpp")
     add_executable(physics_json_test physics_json_test.cpp)
     target_link_libraries(physics_json_test PRIVATE ksengine)
     add_test(NAME physics_json_test COMMAND physics_json_test)
 endif()
 
-# Parity 4 — race flags: yellow/SC -> AI speed limiter + AC SM flag channel.
-# Compiles the simulator TUs directly (track_loader_test pattern).
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_race_flags.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp")
     add_executable(test_race_flags
@@ -184,9 +183,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_race_flags.cpp" AND
     add_test(NAME test_race_flags COMMAND test_race_flags)
 endif()
 
-# Parity 3.5 — AI racing: grid spawn on fast_lane.ai, AI driving + lap wrap
-# detection, flag speed limiter, race standings feed. Same simulator TUs as
-# test_race_flags.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ai_race_test.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/MultiCarManager.cpp")
     add_executable(ai_race_test
@@ -202,10 +198,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ai_race_test.cpp" AND
     set_tests_properties(ai_race_test PROPERTIES TIMEOUT 120)
 endif()
 
-# Parity 3.1 — multiplayer: real ksnet transport over loopback UDP with two
-# NetworkManager instances (host + remote guest). Compiles the simulator
-# network TUs directly and stubs the two SimulationLoop symbols they pull in
-# (see the comments at the top of test_multiplayer.cpp).
 if(TARGET ksnet AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_multiplayer.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkManager.cpp")
     add_executable(test_multiplayer
