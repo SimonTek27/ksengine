@@ -30,6 +30,7 @@ cmake -DKS_QT_FREE_BUILD=ON -DKSIMULATOR_QT_FREE=ON -B build && cmake --build bu
 
 ```text
 SimulatorServer [--announce] [--track DIR] [--ai N] [--name NAME] [--game-port 40000]
+                [--secure-key HEX64] [--auth-token TOKEN]
 ```
 
 ## Dipendenze header (già nel tree)

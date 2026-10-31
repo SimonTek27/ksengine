@@ -11,7 +11,7 @@
 | # | Item | Priority | Status |
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
-| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **In progress** — secure-connect + client auto-reconnect wired (env `KS_NET_KEY`); dedicated server open |
+| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **✅ Delivered** — secure transport, client auto-reconnect, headless host key/token flags; evidence `test_multiplayer` + `ks_server_smoke` |
 | **3.3** | Multi-layout without full reload | Medium | Not started |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
@@ -77,11 +77,15 @@ Application auth (`setAuthToken` / `setJoinToken`) remains independent and alrea
 - [x] **Reconnect** — `NetworkManager::setAutoReconnect(enabled, attempts, delay)`;
       unexpected drops schedule CONNECT retries (0 attempts = unlimited).
       `disconnectFromServer()` / auth failures cancel the retry loop.
+- [x] **Dedicated host** — `SimulatorServer` accepts `--secure-key HEX64` /
+      `--auth-token TOKEN` (and `secure-key` / `auth-token` in
+      `server/kssimserver.ini`), validates both before binding and reports the
+      resulting mode. `tools/ks_server` already provides the C-API headless
+      harness covered by `ks_server_smoke`.
 
-### Remaining
+### Remaining (optional)
 
-1. **Dedicated server** — harden `tools/ks_server` for headless operation.
-2. **Lobby advert** — expose secure mode in the server list (optional).
+1. **Lobby advert** — expose secure mode in the server list.
 
 ### One local command (historical — already applied)
 
@@ -99,26 +103,28 @@ cleanup but is a no-op on current master.
 2. ~~Wire NetworkManager~~ — done 2026-10-31 (`setPrivateKey` / `clearPrivateKey` / `hasPrivateKey`).
 3. ~~Optional env~~ — done: `KS_NET_KEY=<hex64>` for host/client smoke.
 4. ~~Reconnect~~ — done 2026-10-31 (`setAutoReconnect`, retry loop in `update`).
-5. **Dedicated server** — harden `tools/ks_server` (follow-up).
+5. ~~Dedicated server~~ — done 2026-10-31: `SimulatorServer --secure-key/--auth-token`
+   (or `secure-key`/`auth-token` in `server/kssimserver.ini`).
 
-### Smoke test (after body + wire)
+### Smoke test
 
 ```bat
 set KS_NET_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
-ksim.exe ... host
+kssimserver.exe --game-port 40000 --secure-key %KS_NET_KEY%
 ksim.exe ... join 127.0.0.1
 ```
 
 Mismatch key → CONNECT_REJECT reason 2; no key → legacy InsecureConnect.
+Automated coverage: `test_multiplayer` (secure handshake, reject, auto-reconnect)
+and `ks_server_smoke`.
 
 ---
 
 ## Suggested order
 
 1. Start **3.1 data campaign** when real tyre logs exist.
-2. **3.2 dedicated server** — harden `tools/ks_server`.
-3. **3.4** driver swap after human box gate G3.
-4. Defer 3.5–3.8 until Windows soak is routine.
+2. **3.4** driver swap after human box gate G3.
+3. Defer 3.5–3.8 until Windows soak is routine.
 
 ---
 

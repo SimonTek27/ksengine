@@ -25,7 +25,7 @@ Compile success alone does not close a phase.
 | Area | Status | Notes |
 |------|--------|--------|
 | Physics, setup, FFB, surfaces, AI, session | ✅ | P0/P1 closed; Milliken tooling documented and wired. |
-| Multiplayer LAN + lobby | ✅ | ksnet ~20 Hz, damage/setup, app auth, discovery; secure-connect + reconnect wired (3.2), dedicated server open. |
+| Multiplayer LAN + lobby | ✅ | ksnet ~20 Hz, damage/setup, app auth, discovery; secure-connect + reconnect + secure host flags delivered (3.2). |
 | Menu vertical slice, bindings, telemetry | ✅ | Car/track select, practice/quick race/time attack, results, HUD, Control API. |
 | Rain, aquaplaning, 3D audio | ✅ | Wet physics, opt-in particles, Doppler/distance, surface rolling. |
 | Mesh rendering (bake, LOD, materials, IBL) | ✅ | KN5→NMS2, DDS, materials.txt, reference content, AI brief S1–S6. |
@@ -64,7 +64,7 @@ Evidence: [PARITY_STATUS.md](PARITY_STATUS.md), [GATE_PLAN_WINDOWS.md](GATE_PLAN
 | # | Deliverable | Priority | Status |
 |---|-------------|----------|--------|
 | 3.1 | Tyre validation vs real telemetry | High | Tooling ready; data campaign open |
-| 3.2 | ksnet secure-connect, reconnect, dedicated server | Medium | **🟡 Secure-connect + reconnect wired**; dedicated server open |
+| 3.2 | ksnet secure-connect, reconnect, dedicated server | Medium | ✅ Delivered — evidence `test_multiplayer` + `ks_server_smoke` |
 | 3.3 | Multi-layout without full reload | Medium | ⬜ |
 | 3.4 | Driver swap (endurance) | Medium | ⬜ |
 | 3.5 | VR OpenXR | Low | ⬜ |

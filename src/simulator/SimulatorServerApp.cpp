@@ -105,6 +105,17 @@ bool parseBoolValue(const std::string& v, bool& out) {
     return false;
 }
 
+/** ksnet shared-secret key: exactly 32 bytes written as 64 hex chars. */
+bool validSecureKey(const std::string& key) {
+    if (key.size() != 64) return false;
+    for (char c : key) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    }
+    return true;
+}
+
+constexpr size_t kMaxAuthToken = 63; // ClientJoinMessage::authToken[64]
+
 /**
  * Startup configuration, read from server/kssimserver.ini (the file shipped
  * in the `server/` folder of the installed tree, see
@@ -120,6 +131,8 @@ struct ServerConfig {
     int maxClients        = 24;              // 1..64
     int discoveryPort     = 20779;           // UDP, ks::sim::kDiscoveryPort
     int controlPort       = 20780;           // TCP, ExternalControlApi::kDefaultPort
+    std::string secureKey;                   // 64 hex chars; empty = insecure LAN
+    std::string authToken;                   // ClientJoin token; empty = open
 };
 
 /**
@@ -177,6 +190,14 @@ bool loadServerConfig(const std::string& path, ServerConfig& cfg, std::string& e
         } else if (key == "control-port") {
             if (!parseIntValue(value, iv)) return fail(lineNo, "control-port: want a number");
             cfg.controlPort = iv;
+        } else if (key == "secure-key") {
+            if (!value.empty() && !validSecureKey(value))
+                return fail(lineNo, "secure-key: want 64 hex chars");
+            cfg.secureKey = value;
+        } else if (key == "auth-token") {
+            if (value.size() > kMaxAuthToken)
+                return fail(lineNo, "auth-token: max 63 characters");
+            cfg.authToken = value;
         } else {
             std::fprintf(stderr, "SimulatorServer: %s:%d: ignoring unknown key '%s'\n",
                          path.c_str(), lineNo, key.c_str());
@@ -219,6 +240,8 @@ int main(int argc, char** argv) {
     int controlPort = cfg.controlPort;
     std::string trackDir = cfg.track;
     std::string hostName = cfg.name;
+    std::string secureKey = cfg.secureKey;
+    std::string authToken = cfg.authToken;
 
     for (int i = 1; i < argc; ++i) {
         if (!argv[i]) continue;
@@ -253,12 +276,32 @@ int main(int argc, char** argv) {
             discoveryPort = std::atoi(argv[++i]);
         else if (!std::strcmp(argv[i], "--control-port") && i + 1 < argc)
             controlPort = std::atoi(argv[++i]);
+        else if (!std::strcmp(argv[i], "--secure-key") && i + 1 < argc) {
+            secureKey = argv[++i];
+            if (!validSecureKey(secureKey)) {
+                std::fprintf(stderr,
+                    "SimulatorServer: invalid --secure-key (need 64 hex chars = 32 bytes)\n");
+                return 2;
+            }
+        }
+        else if (!std::strcmp(argv[i], "--auth-token") && i + 1 < argc) {
+            authToken = argv[++i];
+            if (authToken.empty() || authToken.size() > kMaxAuthToken) {
+                std::fprintf(stderr,
+                    "SimulatorServer: invalid --auth-token (need 1-63 chars)\n");
+                return 2;
+            }
+        }
         else if (!std::strcmp(argv[i], "--help")) {
             std::fprintf(stderr,
                 "SimulatorServer [--config FILE] [--announce] [--track DIR] [--ai N]\n"
                 "                [--name NAME] [--game-port PORT] [--max-clients N]\n"
                 "                [--discovery-port PORT] [--control-port PORT]\n"
+                "                [--secure-key HEX64] [--auth-token TOKEN]\n"
                 "  discovery UDP %d  control TCP %d  game net optional (PORT>=1024)\n"
+                "  --secure-key enables ksnet payload obfuscation + CONNECT key proof;\n"
+                "  --auth-token requires the same token in ClientJoin (both need game net)\n"
+                "  KS_NET_KEY=<hex64> in the environment also enables secure transport\n"
                 "  defaults come from FILE (default server/kssimserver.ini);\n"
                 "  flags above override it\n", ks::sim::kDiscoveryPort,
                 ks::sim::ExternalControlApi::kDefaultPort);
@@ -285,6 +328,14 @@ int main(int argc, char** argv) {
     }
     if (!validPort(controlPort)) {
         std::fprintf(stderr, "SimulatorServer: invalid control-port %d\n", controlPort);
+        return 2;
+    }
+    if (!secureKey.empty() && gamePort == 0) {
+        std::fprintf(stderr, "SimulatorServer: --secure-key/secure-key needs --game-port\n");
+        return 2;
+    }
+    if (!authToken.empty() && gamePort == 0) {
+        std::fprintf(stderr, "SimulatorServer: --auth-token/auth-token needs --game-port\n");
         return 2;
     }
 
@@ -322,10 +373,22 @@ int main(int argc, char** argv) {
 
     ks::sim::NetworkManager net(&loop);
     if (gamePort > 0) {
-        if (net.hostServer(static_cast<uint16_t>(gamePort), maxClients, hostName, trackDir))
-            std::fprintf(stderr, "SimulatorServer: game host on port %d\n", gamePort);
-        else
+        if (!secureKey.empty() && !net.setPrivateKey(secureKey)) {
+            std::fprintf(stderr, "SimulatorServer: secure key rejected\n");
+            loop.features().stopServices();
+            return 2;
+        }
+        if (!authToken.empty())
+            net.setAuthToken(authToken);
+
+        if (net.hostServer(static_cast<uint16_t>(gamePort), maxClients, hostName, trackDir)) {
+            std::fprintf(stderr, "SimulatorServer: game host on port %d (%s%s)\n",
+                         gamePort,
+                         net.hasPrivateKey() ? "secure" : "open",
+                         net.authRequired() ? ", join token required" : "");
+        } else {
             std::fprintf(stderr, "SimulatorServer: game host unavailable (build without HAS_KSNET?)\n");
+        }
     }
 
     // Our SimulationLoop opens the session from start(): it resets the
