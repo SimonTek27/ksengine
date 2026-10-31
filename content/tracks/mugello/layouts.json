@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "layouts": [
+    {
+      "id": "default",
+      "name": "Mugello Grand Prix",
+      "folder": ".",
+      "length_m": 5245.0,
+      "default": true
+    }
+  ]
+}
