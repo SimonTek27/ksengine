@@ -243,6 +243,62 @@ int main()
     secHost.stopServer();
     check(!secHost.isHosting(), "secure host stops cleanly");
 
+    // --- 8. client auto-reconnect ----------------------------------------
+    NetworkManager rcHost(nullptr);
+    NetworkManager rcGuest(nullptr);
+    int rcJoins = 0;
+    bool rcDropped = false;
+    rcHost.onRemoteClientJoined = [&](int, uint32_t, const std::string& name) {
+        if (name == "Carol") ++rcJoins;
+    };
+    rcGuest.onDisconnectedFromServer = [&](const std::string&) {
+        rcDropped = true;
+    };
+    check(!rcGuest.autoReconnect(), "auto-reconnect is off by default");
+    rcGuest.setAutoReconnect(true, 8, 0.2);
+    check(rcGuest.autoReconnect(), "auto-reconnect can be enabled");
+
+    uint16_t rcPort = 0;
+    for (uint16_t p = 47411; p < 47420; ++p) {
+        if (rcHost.hostServer(p, 4, "ReconnectHost", "loop")) {
+            rcPort = p;
+            break;
+        }
+    }
+    check(rcPort != 0, "reconnect host starts on a free port");
+    if (!rcPort) return 1;
+
+    auto spinRc = [&](const std::function<bool()>& pred, double timeoutSec) {
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(timeoutSec));
+        while (!pred() && std::chrono::steady_clock::now() < deadline) {
+            rcHost.update(0.01);
+            rcGuest.update(0.01);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return pred();
+    };
+
+    check(rcGuest.joinServer("127.0.0.1", rcPort, "Carol", "gte3"),
+          "reconnect guest joins the first server instance");
+    check(spinRc([&] { return rcJoins == 1 && rcGuest.isConnected(); }, 5.0),
+          "guest is joined before the drop");
+
+    rcHost.stopServer();
+    check(spinRc([&] { return rcDropped; }, 5.0),
+          "guest observes the server drop");
+    check(!rcGuest.isConnected(), "guest is disconnected after the drop");
+
+    check(rcHost.hostServer(rcPort, 4, "ReconnectHost", "loop"),
+          "host restarts on the same port");
+    check(spinRc([&] { return rcJoins == 2 && rcGuest.isConnected(); }, 8.0),
+          "guest reconnects and rejoins automatically");
+    check(rcGuest.isConnected(), "guest is connected again");
+
+    rcHost.stopServer();
+
     if (g_failures) {
         std::printf("%d check(s) FAILED\n", g_failures);
         return 1;

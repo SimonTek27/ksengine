@@ -67,8 +67,10 @@ void NetworkManager::setupClientSignals() {
     m_client->onConnected = [this](uint32_t clientId) {
         m_connected = true;
         m_localClientId = clientId;
+        m_reconnectTries = 0;
+        m_reconnectTimer = 0.0;
         printf("NetworkManager: Connected as client, id=%u\n", clientId);
-        if (onClientConnectedToServer) onClientConnectedToServer(m_hosting ? "localhost" : "", m_port);
+        if (onClientConnectedToServer) onClientConnectedToServer(m_hosting ? "localhost" : m_lastHost, m_port);
     };
 
     m_client->onDisconnected = [this](const std::string& reason) {
@@ -76,6 +78,16 @@ void NetworkManager::setupClientSignals() {
         m_localClientId = 0;
         m_interp.clear();
         printf("NetworkManager: Disconnected - %s\n", reason.c_str());
+        if (m_wantConnected && m_autoReconnect && !m_hosting) {
+            if (m_reconnectAttempts == 0 || m_reconnectTries < m_reconnectAttempts) {
+                m_reconnectTimer = m_reconnectDelay;
+                printf("NetworkManager: reconnect scheduled in %.1f s (%d/%d)\n",
+                       m_reconnectDelay, m_reconnectTries + 1, m_reconnectAttempts);
+            } else {
+                m_wantConnected = false;
+                printf("NetworkManager: reconnect attempts exhausted\n");
+            }
+        }
         if (onDisconnectedFromServer) onDisconnectedFromServer(reason);
     };
 
@@ -129,6 +141,8 @@ void NetworkManager::setupClientSignals() {
 
     m_client->onAuthFailed = [this](const std::string& reason) {
         m_connected = false;
+        m_wantConnected = false;
+        m_reconnectTimer = 0.0;
         printf("NetworkManager: AUTH FAILED — %s\n", reason.c_str());
         if (onAuthFailed) onAuthFailed(reason);
         if (onConnectionFailed) onConnectionFailed(std::string("Auth failed: ") + reason);
@@ -161,6 +175,8 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
     m_port = port;
     m_driverName = "Host";
     m_carName = "gte3";
+    m_wantConnected = false;
+    m_reconnectTimer = 0.0;
 
     rebindMultiCar();
 
@@ -199,6 +215,8 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 void NetworkManager::stopServer() {
     if (!m_hosting) return;
     stopMatchmaking();
+    m_wantConnected = false;
+    m_reconnectTimer = 0.0;
     m_client->disconnect();
     m_server->stop();
     m_hosting = false;
@@ -218,6 +236,10 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
     m_driverName = driverName;
     m_carName = carName;
     m_port = port;
+    m_lastHost = host;
+    m_wantConnected = true;
+    m_reconnectTries = 0;
+    m_reconnectTimer = 0.0;
 
     m_client->setSimulationLoop(m_simLoop);
     rebindMultiCar();
@@ -234,8 +256,10 @@ bool NetworkManager::joinServer(const std::string& host, uint16_t port,
 }
 
 void NetworkManager::disconnectFromServer() {
-    if (!m_connected) return;
+    if (!m_connected && !m_wantConnected) return;
     if (m_hosting) return;
+    m_wantConnected = false;
+    m_reconnectTimer = 0.0;
     m_client->disconnect();
     m_connected = false;
     m_interp.clear();
@@ -321,6 +345,17 @@ void NetworkManager::clearPrivateKey() {
 
 bool NetworkManager::hasPrivateKey() const {
     return m_client && m_client->hasPrivateKey();
+}
+
+void NetworkManager::setAutoReconnect(bool enabled, int attempts, double delaySec) {
+    m_autoReconnect = enabled;
+    m_reconnectAttempts = attempts < 0 ? 0 : attempts;
+    m_reconnectDelay = delaySec > 0.0 ? delaySec : 2.0;
+    m_reconnectTimer = 0.0;
+    if (!enabled) {
+        m_reconnectTries = 0;
+        m_reconnectTimer = 0.0;
+    }
 }
 
 void NetworkManager::setLobbyBaseUrl(const std::string& url) {
@@ -453,6 +488,27 @@ void NetworkManager::update(double dt) {
 
     if (m_server) m_server->update(dt);
     if (m_client) m_client->update(dt);
+
+    if (m_wantConnected && !m_connected && !m_hosting && m_autoReconnect &&
+        m_reconnectTimer > 0.0) {
+        m_reconnectTimer -= dt;
+        if (m_reconnectTimer <= 0.0) {
+            m_reconnectTimer = 0.0;
+            ++m_reconnectTries;
+            printf("NetworkManager: reconnect attempt %d/%d to %s:%u\n",
+                   m_reconnectTries, m_reconnectAttempts,
+                   m_lastHost.c_str(), m_port);
+            if (!m_client->connect(m_lastHost, m_port, m_driverName, m_carName)) {
+                if (m_reconnectAttempts == 0 || m_reconnectTries < m_reconnectAttempts) {
+                    m_reconnectTimer = m_reconnectDelay;
+                } else {
+                    m_wantConnected = false;
+                    printf("NetworkManager: reconnect attempts exhausted\n");
+                    if (onConnectionFailed) onConnectionFailed("Reconnect failed");
+                }
+            }
+        }
+    }
 
     if (m_matchmakingStarted) {
         if (m_hosting) {

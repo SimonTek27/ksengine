@@ -52,6 +52,12 @@ public:
     bool setPrivateKey(const std::string& hexKey);
     void clearPrivateKey();
     bool hasPrivateKey() const;
+    /**
+     * Client auto-retry after an unexpected disconnect. attempts = 0 means
+     * unlimited; delaySec is the pause between attempts. Disabled by default.
+     */
+    void setAutoReconnect(bool enabled, int attempts = 5, double delaySec = 2.0);
+    bool autoReconnect() const { return m_autoReconnect; }
     void disconnectFromServer();
     bool isConnected() const { return m_connected; }
     bool isClient() const { return m_connected && !m_hosting; }
@@ -162,6 +168,15 @@ private:
 
     Matchmaking m_matchmaking;
     bool m_matchmakingStarted = false;
+
+    // Client reconnect state
+    bool m_autoReconnect = false;
+    int m_reconnectAttempts = 5;   // 0 = unlimited
+    int m_reconnectTries = 0;
+    double m_reconnectDelay = 2.0;
+    double m_reconnectTimer = 0.0;
+    bool m_wantConnected = false;  // user intent: join requested, not torn down
+    std::string m_lastHost;
 };
 
 #else // !HAS_KSNET
@@ -187,6 +202,8 @@ public:
     bool setPrivateKey(const std::string&) { return false; }
     void clearPrivateKey() {}
     bool hasPrivateKey() const { return false; }
+    void setAutoReconnect(bool, int = 5, double = 2.0) {}
+    bool autoReconnect() const { return false; }
     void disconnectFromServer() {}
     bool isConnected() const { return false; }
     bool isClient() const { return false; }
