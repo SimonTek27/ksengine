@@ -1,7 +1,7 @@
 # ksengine — Roadmap
 
 **Product:** Kinetika (ksim / ksengine)  
-**Updated:** 2026-10-20  
+**Updated:** 2026-10-31  
 **Scope:** four-wheel racing runtime (Qt-free). Not a full ksEditor feature list.
 
 **Out of scope:** motorbikes, boats, aircraft.
@@ -65,7 +65,7 @@ Evidence: [PARITY_STATUS.md](PARITY_STATUS.md), [GATE_PLAN_WINDOWS.md](GATE_PLAN
 |---|-------------|----------|--------|
 | 3.1 | Tyre validation vs real telemetry | High | Tooling ready; data campaign open |
 | 3.2 | ksnet secure-connect, reconnect, dedicated server | Medium | ✅ Delivered — evidence `test_multiplayer` + `ks_server_smoke` |
-| 3.3 | Multi-layout without full reload | Medium | ⬜ |
+| 3.3 | Multi-layout without full reload | Medium | 🟡 catalog + switchLayout |
 | 3.4 | Driver swap (endurance) | Medium | ⬜ |
 | 3.5 | VR OpenXR | Low | ⬜ |
 | 3.6 | Triple monitor | Low | ⬜ |
