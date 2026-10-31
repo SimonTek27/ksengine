@@ -1,9 +1,7 @@
 # ksengine — Roadmap
-
-**Product:** Kinetika (ksim / ksengine)  
-**Updated:** 2026-10-20  
+**Product:** Kinetika (ksim / ksengine)
+**Updated:** 2026-10-31
 **Scope:** four-wheel racing runtime (Qt-free). Not a full ksEditor feature list.
-
 **Out of scope:** motorbikes, boats, aircraft.
 
 ---
@@ -25,10 +23,11 @@ Compile success alone does not close a phase.
 | Area | Status | Notes |
 |------|--------|--------|
 | Physics, setup, FFB, surfaces, AI, session | ✅ | P0/P1 closed; Milliken tooling documented and wired. |
-| Multiplayer LAN + lobby | ✅ | ksnet ~20 Hz, damage/setup, app auth, discovery; secure-connect **in progress** (Phase 3.2). |
+| Multiplayer LAN + lobby | ✅ | ksnet ~20 Hz, damage/setup, app auth, discovery; secure-connect is **declared in `ksnet.h` only** — the body is still `milliken_extract/ksnet.cpp` (Phase 3.2). |
 | Menu vertical slice, bindings, telemetry | ✅ | Car/track select, practice/quick race/time attack, results, HUD, Control API. |
 | Rain, aquaplaning, 3D audio | ✅ | Wet physics, opt-in particles, Doppler/distance, surface rolling. |
 | Mesh rendering (bake, LOD, materials, IBL) | ✅ | KN5→NMS2, DDS, materials.txt, reference content, AI brief S1–S6. |
+| AC car content pipeline (`ks_cartool`) | 🟡 | `convert` / `verify` / `apply` / `prune` / `pack` in tree (commit `a617f7c1`, 2026-10-30), documented in [WIREUP_GAPS.md](WIREUP_GAPS.md); the converted `data/data.json` is still invalid JSON, so the tank falls back to its default. |
 | Racing UX (box / team / upgrades / menu coherence) | 🟡 | Code for 2.7–2.10 wired; human gates still open. |
 | Acceptance 2C | 🟡 | **2.11** long race, **2.12** soak and **2.14** frame profile closed 2026-10-14; human gates G1–G3 remain. |
 | **Phase 3** | 🟡 | Started 2026-10-20 — see [PHASE3_PLAN.md](PHASE3_PLAN.md). |
@@ -64,7 +63,7 @@ Evidence: [PARITY_STATUS.md](PARITY_STATUS.md), [GATE_PLAN_WINDOWS.md](GATE_PLAN
 | # | Deliverable | Priority | Status |
 |---|-------------|----------|--------|
 | 3.1 | Tyre validation vs real telemetry | High | Tooling ready; data campaign open |
-| 3.2 | ksnet secure-connect, reconnect, dedicated server | Medium | **🟡 API on master**; body = copy `milliken_extract/ksnet.cpp` |
+| 3.2 | ksnet secure-connect, reconnect, dedicated server | Medium | **🟡 API in `ksnet.h` only**; body, wiring and smoke still open |
 | 3.3 | Multi-layout without full reload | Medium | ⬜ |
 | 3.4 | Driver swap (endurance) | Medium | ⬜ |
 | 3.5 | VR OpenXR | Low | ⬜ |
@@ -72,6 +71,17 @@ Evidence: [PARITY_STATUS.md](PARITY_STATUS.md), [GATE_PLAN_WINDOWS.md](GATE_PLAN
 | 3.7 | Ranked / skill rating | Low | ⬜ |
 | 3.8 | Laser-scan track pipeline | Low | ⬜ |
 
+### Phase 3.2 state (re-checked 2026-10-31)
+
+| Piece | Where it actually is |
+|-------|----------------------|
+| `PRIVATE_KEY_BYTES`, `SecureConnect`, `SetPrivateKey` / `ClearPrivateKey` / `isSecure` | declared in `src/engine/network/ksnet/ksnet.h` |
+| Secure body (key proof, XOR keystream, `kRejectKeyMismatch`) | still only `milliken_extract/ksnet.cpp` |
+| `src/engine/network/ksnet/ksnet.cpp` | plain transport: no `keystream`, no mismatch reject; wire-format header lists only `1 = server full` |
+| Pass-through in `NetworkLowLevel` / `NetworkManager` | not wired |
+
+So 3.2 closes only after the body is promoted, the key is passed through, and the
+`KS_NET_KEY` smoke shows match / mismatch (reason 2) / no-key (legacy insecure).
 Details and commands: [PHASE3_PLAN.md](PHASE3_PLAN.md).
 
 ---
@@ -80,8 +90,8 @@ Details and commands: [PHASE3_PLAN.md](PHASE3_PLAN.md).
 
 Priority for operators (see [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md)):
 
-1. **G3** — Box service (2.7) on real session path  
-2. **G1 / G2** — Build cleanliness + menu paths (2.10)  
+1. **G3** — Box service (2.7) on real session path
+2. **G1 / G2** — Build cleanliness + menu paths (2.10)
 
 Already closed with evidence: **2.11** long race, **2.12** soak, **2.14** frame profile.
 
@@ -99,5 +109,4 @@ Already closed with evidence: **2.11** long race, **2.12** soak, **2.14** frame 
 | [PARITY_STATUS.md](PARITY_STATUS.md) | Fine-grained done list |
 
 ---
-
 *Update this roadmap when a gate closes; include the test name or evidence path in the same commit.*

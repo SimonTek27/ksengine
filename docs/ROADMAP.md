@@ -1,6 +1,5 @@
 # Roadmap ksim / ksengine — motore auto
-
-**Aggiornata:** 2026-10-20
+**Aggiornata:** 2026-10-31
 **Ambito:** simulatore **auto**: dinamica a quattro ruote, sessioni racing,
 contenuti pista/auto e multiplayer `ksnet`.
 **Fuori ambito:** moto, barche e aerei; richiedono modelli fisici e flussi di
@@ -28,10 +27,12 @@ di fase richiedono anche il test manuale indicato.
 | Area | Stato | Evidenza / confine |
 |---|---|---|
 | Fisica, setup, FFB, superfici, AI e sessione | ✅ | P0/P1 chiusi. |
-| Multiplayer LAN e lobby | ✅ | `ksnet`, sync, lobby. |
+| Multiplayer LAN e lobby | ✅ | `ksnet`, sync, lobby; secure-connect dichiarato in `ksnet.h`, corpo ancora in `milliken_extract/ksnet.cpp` (3.2). |
 | Vertical slice menu, binding e telemetria | ✅ | Selezione auto/pista, sessioni, HUD. |
+| Pipeline contenuti auto AC (`ks_cartool`) | 🟡 | `convert`/`verify`/`apply`/`prune`/`pack` (commit `a617f7c1`, 2026-10-30), vedi [WIREUP_GAPS.md](WIREUP_GAPS.md); `data/data.json` convertito è ancora JSON non valido, il serbatoio resta al default. |
 | UX racing (box/team/upgrade) | 🟡 | Codice 2.7–2.10 cablato; gate umani aperti (vedi GATE_PLAN_WINDOWS). |
 | Accettazione 2C | 🟡 | **2.11**, **2.12** e **2.14** chiusi 2026-10-14; restano gate umani G1–G3. |
+| Fase 3 — Pro depth | 🟡 | Avviata 2026-10-20; 3.2 è l'unico item di codice in corso. Dettaglio: [PHASE3_PLAN.md](PHASE3_PLAN.md). |
 
 Riferimenti: [CHECKLIST.md](CHECKLIST.md), [WIREUP_GAPS.md](WIREUP_GAPS.md),
 [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md),
@@ -62,6 +63,36 @@ Riferimenti: [CHECKLIST.md](CHECKLIST.md), [WIREUP_GAPS.md](WIREUP_GAPS.md),
 
 ---
 
+## Fase 3 — Pro depth
+
+Avviata 2026-10-20. Piano di esecuzione: [PHASE3_PLAN.md](PHASE3_PLAN.md);
+stato dettagliato in inglese: [ksengine.roadmap.md](ksengine.roadmap.md).
+
+| # | Deliverable | Priorità | Stato |
+|---|---|---|---|
+| 3.1 | Validazione gomme su telemetria reale | Alta | tooling pronto; campagna dati aperta |
+| 3.2 | `ksnet` secure-connect, reconnect, server dedicato | Media | 🟡 API solo in `ksnet.h`; corpo, wiring e smoke da fare |
+| 3.3 | Multi-layout senza reload completo | Media | ⬜ |
+| 3.4 | Driver swap (endurance) | Media | ⬜ |
+| 3.5 | VR OpenXR | Bassa | ⬜ |
+| 3.6 | Triple monitor | Bassa | ⬜ |
+| 3.7 | Ranked / skill rating | Bassa | ⬜ |
+| 3.8 | Pipeline piste laser-scan | Bassa | ⬜ |
+
+### 3.2 — stato reale (riverificato 2026-10-31)
+
+| Pezzo | Dove sta davvero |
+|---|---|
+| `PRIVATE_KEY_BYTES`, `SecureConnect`, `SetPrivateKey` / `ClearPrivateKey` / `isSecure` | dichiarati in `src/engine/network/ksnet/ksnet.h` |
+| Corpo sicuro (key proof, keystream XOR, `kRejectKeyMismatch`) | solo in `milliken_extract/ksnet.cpp` |
+| `src/engine/network/ksnet/ksnet.cpp` | trasporto semplice: nessun `keystream`, nessun reject per chiave errata; il commento di testa elenca solo `1 = server full` |
+| Pass-through in `NetworkLowLevel` / `NetworkManager` | non cablato |
+
+La 3.2 si chiude solo dopo promozione del corpo, pass-through della chiave e smoke
+con `KS_NET_KEY` (match / mismatch → reason 2 / nessuna chiave → insecure).
+
+---
+
 ## Decisioni esplicite
 
 | Non fare ora | Motivo |
@@ -80,6 +111,7 @@ Riferimenti: [CHECKLIST.md](CHECKLIST.md), [WIREUP_GAPS.md](WIREUP_GAPS.md),
 - [WIREUP_GAPS.md](WIREUP_GAPS.md)
 - [PARITY_STATUS.md](PARITY_STATUS.md)
 - [CONTROL_API.md](CONTROL_API.md)
+- [PHASE3_PLAN.md](PHASE3_PLAN.md)
 
 *Aggiornare questa roadmap alla chiusura di ogni gate e includere nel commit il
 test o la misura che giustifica il cambio di stato.*

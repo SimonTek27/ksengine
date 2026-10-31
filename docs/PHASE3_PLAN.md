@@ -1,7 +1,7 @@
 # Phase 3 — Pro depth
-
-**Started:** 2026-10-20  
-**Product:** Kinetika (ksim / ksengine)  
+**Started:** 2026-10-20
+**Status re-checked:** 2026-10-31 (master `a617f7c1`)
+**Product:** Kinetika (ksim / ksengine)
 **Prerequisite:** Phase 2 code closed; human gates G1–G3 still open on Windows (do not block Phase 3 tooling).
 
 ---
@@ -11,7 +11,7 @@
 | # | Item | Priority | Status |
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
-| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **In progress** — API on master; body = one local script |
+| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **In progress** — API header on master; body still `milliken_extract/ksnet.cpp`; wiring + smoke open |
 | **3.3** | Multi-layout without full reload | Medium | Not started |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
@@ -24,14 +24,12 @@
 ## 3.1 — Tyre validation (data campaign)
 
 **Already in tree**
-
 - `KsTireModel` + load sensitivity, friction-circle telemetry
 - `TireNormalizeTool` + CLI `kstirenorm` (Milliken Ch.14)
 - `MomentMethodTool` + `ksmmm` / `--gg` / `--pair`
 - Milliken gap table G1–G18 **CLOSED** (`docs/MILLIKEN_KSENGINE.md`)
 
 **Still needed (human / data)**
-
 1. Capture real telemetry (bank or car) at known Fz / α / κ / T / p.
 2. Run `kstirenorm --ini <tyres.ini> --curves out.csv --report out.txt`.
 3. Compare peak μ, α_peak, loadSensRatio vs measured; adjust INI or normalize with `--normalize --target-mu`.
@@ -56,31 +54,39 @@ No further code is required to *start* the campaign.
 
 Application auth (`setAuthToken` / `setJoinToken`) remains independent and already shipped.
 
-### Done on master (2026-10-20)
+### What is actually on master (re-checked 2026-10-31)
 
-- [x] `ksnet.h`: `PRIVATE_KEY_BYTES`, `Client::SecureConnect`, `Server::SetPrivateKey` / `ClearPrivateKey` / `isSecure`
-- [x] Repo cleanup of VS noise / backups / LUTParser.i / milliken zip
-- [x] `tools/cleanup_superfluous.ps1` + `.sh` — promote body + delete `milliken_extract/`
+| Piece | State |
+|-------|-------|
+| `ksnet.h`: `PRIVATE_KEY_BYTES`, `Client::SecureConnect`, `Server::SetPrivateKey` / `ClearPrivateKey` / `isSecure` | ✅ declared |
+| `src/engine/network/ksnet/ksnet.cpp` | ❌ plain transport — no `keystream`, no `kRejectKeyMismatch`; its wire-format header lists only `CONNECT_REJECT: u8 reason (1 = server full)` |
+| Secure body | ❌ still `milliken_extract/ksnet.cpp` |
+| `NetworkLowLevel` / `NetworkManager` key pass-through | ❌ not wired |
+| `milliken_extract/` purge | ❌ tree still present under `docs/`, `*.cpp`, `*.h`, `.inc` |
 
-### One local command (finishes 3.2 body + extract purge)
+A declaration-only header links fine because nothing calls it yet; it does **not**
+mean 3.2 is delivered. The promotion is the missing step.
+
+### Still required — one local command (body + extract purge)
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\cleanup_superfluous.ps1
 ```
-
 or:
-
 ```bash
 bash tools/cleanup_superfluous.sh
 ```
 
-That copies `milliken_extract/ksnet.cpp` → `src/engine/network/ksnet/ksnet.cpp`, removes the staging tree, commits, and pushes.
+That copies `milliken_extract/ksnet.cpp` → `src/engine/network/ksnet/ksnet.cpp`, removes the
+staging tree, commits, and pushes. **Not run yet as of 2026-10-31** — check
+`git log --oneline -- src/engine/network/ksnet/ksnet.cpp` before running it a second
+time, and verify the copied body still lists reject reason 2 in its wire-format header.
 
 ### After the body is on master
 
 1. **Wire NetworkLowLevel** — if private key set, call `SecureConnect` / `SetPrivateKey` instead of `InsecureConnect`.
 2. **Wire NetworkManager** — `setPrivateKey` / `clearPrivateKey` / `hasPrivateKey` pass-through.
-3. **Optional env** — `KS_NET_KEY=<hex64>` for host/client smoke.
+3. **Env** — `KS_NET_KEY=<hex64>` for host/client smoke.
 4. **Reconnect** — client auto-retry CONNECT (follow-up).
 5. **Dedicated server** — harden `tools/ks_server` (follow-up).
 
@@ -98,11 +104,13 @@ Mismatch key → CONNECT_REJECT reason 2; no key → legacy InsecureConnect.
 
 ## Suggested order
 
-1. Run **cleanup_superfluous** (body + drop extract).
-2. Wire NetworkManager private key.
-3. Start **3.1 data campaign** when real tyre logs exist.
-4. **3.4** driver swap after human box gate G3.
-5. Defer 3.5–3.8 until Windows soak is routine.
+1. Run **cleanup_superfluous** (body + drop extract) — still pending.
+2. Wire `NetworkLowLevel` + `NetworkManager` private key.
+3. `KS_NET_KEY` smoke: match / mismatch / no key.
+4. Reconnect auto-retry, then harden `tools/ks_server`.
+5. Start **3.1 data campaign** when real tyre logs exist.
+6. **3.4** driver swap after human box gate G3.
+7. Defer 3.5–3.8 until Windows soak is routine.
 
 ---
 
