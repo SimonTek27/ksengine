@@ -1,8 +1,8 @@
 diff --git a/src/simulator/SimulationLoop.cpp b/src/simulator/SimulationLoop.cpp
-index eed1a5b..f6a9c48 100644
+index eed1a5b..d55f9d3 100644
 --- a/src/simulator/SimulationLoop.cpp
 +++ b/src/simulator/SimulationLoop.cpp
-@@ -314,6 +314,23 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
+@@ -314,9 +314,34 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
      loadContentMods(trackDirectory); // Lua Mod SDK: <track>/scripts/*.lua
      m_trackData.directory = trackDirectory;
      m_trackData.name = fs::path(trackDirectory).filename().string();
@@ -25,8 +25,16 @@ index eed1a5b..f6a9c48 100644
 +    }
      // AI racing line (roadmap 3.5): load it at track-load time so the grid
      // can be spawned when the session starts. No file = spawnGrid is a no-op.
-     if (m_multiCar) m_multiCar->loadAiSpline(trackDirectory);
-@@ -348,6 +365,74 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
+-    if (m_multiCar) m_multiCar->loadAiSpline(trackDirectory);
++    if (m_multiCar) {
++        const std::string aiDir = !m_trackData.layoutFolder.empty()
++            ? m_trackData.layoutFolder : trackDirectory;
++        m_multiCar->loadAiSpline(aiDir);
++    }
+     // Native JSON manifest (data/data.json) preferred; surfaces.ini remains
+     // the AC compatibility path when JSON is absent or fails to parse.
+     {
+@@ -348,6 +373,80 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
      return true;
  }
  
@@ -84,6 +92,14 @@ index eed1a5b..f6a9c48 100644
 +        applyTrackVisuals(folder);
 +    }
 +
++    if (m_multiCar) {
++        const fs::path layoutAi = fs::path(folder) / "ai";
++        if (fs::is_directory(layoutAi, ec))
++            m_multiCar->loadAiSpline(folder);
++        else
++            m_multiCar->loadAiSpline(m_trackData.directory);
++    }
++
 +    m_ui.menu().setTrackName(m_trackData.name);
 +    m_lapTimer.configure(3);
 +    m_lapDistance = 0.f;
@@ -96,3 +112,48 @@ index eed1a5b..f6a9c48 100644
 +}
 +
  bool SimulationLoop::loadCar(const std::string& carDir) {
+     namespace fs = std::filesystem;
+     if (!fs::is_directory(carDir)) return false;
+diff --git a/src/simulator/SimulationLoop.h b/src/simulator/SimulationLoop.h
+index e3844d6..0c6df43 100644
+--- a/src/simulator/SimulationLoop.h
++++ b/src/simulator/SimulationLoop.h
+@@ -26,6 +26,7 @@
+                              // (pulls in PitLaneRepair.h -> GarageExit.h /
+                              // GarageSpawn.h, all self-contained)
+ #include "PitLaneQueue.h"    // roadmap 2.7: multi-car pit-lane order
++#include "TrackLayout.h"     // phase 3.3: multi-layout catalog
+ 
+ #include <memory>
+ #include <chrono>
+@@ -110,9 +111,11 @@ struct Mat4f {
+ struct SimTrackData {
+     std::string name;
+     std::string kn5Path;
+-    std::string directory;
++    std::string directory;       // track root folder
++    std::string layoutId;        // phase 3.3 active layout id
++    std::string layoutFolder;    // resolved layout folder (may equal directory)
+     bool valid = false;
+     float splineLength = 5000.f;
+ };
+ 
+ class SimulationLoop {
+@@ -123,6 +126,9 @@ public:
+     bool initialize();
+     bool loadTrack(const std::string& kn5Path);
+     bool loadTrackFolder(const std::string& trackDirectory);
++    /** Phase 3.3: rebind layout-specific data without full track unload. */
++    bool switchLayout(const std::string& layoutId);
++    const TrackLayoutCatalog& layoutCatalog() const { return m_layouts; }
+     bool loadCar(const std::string& carDir);
+     bool loadCarAudio(const std::string& carDirectory);
+     // Roadmap 2.8: load a team roster (dir or team.ini). The roster decides
+@@ -395,6 +401,7 @@ private:
+     bool m_terrainInit = false;
+ 
+     SimTrackData m_trackData;
++    TrackLayoutCatalog m_layouts;
+     ks::physics::LapSectorTimer m_lapTimer;
+     RaceSessionManager m_raceSession;
+     float m_lapDistance = 0.f;
