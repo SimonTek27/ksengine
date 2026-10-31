@@ -43,6 +43,15 @@ public:
                     const std::string& carName = "gte3");
     /** Client: token sent in ClientJoinMessage. */
     void setJoinToken(const std::string& token);
+    /**
+     * Shared-secret transport key (64 hex chars = 32 bytes), applied to both
+     * host and client paths. Empty clears secure mode. Returns false when the
+     * hex string is malformed (current mode is left untouched).
+     * KS_NET_KEY=<hex64> is honoured at construction for smoke runs.
+     */
+    bool setPrivateKey(const std::string& hexKey);
+    void clearPrivateKey();
+    bool hasPrivateKey() const;
     void disconnectFromServer();
     bool isConnected() const { return m_connected; }
     bool isClient() const { return m_connected && !m_hosting; }
@@ -175,6 +184,9 @@ public:
     int clientCount() const { return 0; }
     std::string clientName(int) const { return {}; }
     bool joinServer(const std::string&, uint16_t, const std::string& = {}, const std::string& = {}) { return false; }
+    bool setPrivateKey(const std::string&) { return false; }
+    void clearPrivateKey() {}
+    bool hasPrivateKey() const { return false; }
     void disconnectFromServer() {}
     bool isConnected() const { return false; }
     bool isClient() const { return false; }

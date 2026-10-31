@@ -153,6 +153,96 @@ int main()
     host.stopServer();
     check(!host.isHosting(), "host stops cleanly");
 
+    // --- 7. secure transport: shared 32-byte key -------------------------
+    const std::string key =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    NetworkManager secHost(nullptr);
+    NetworkManager secGuest(nullptr);
+    check(secHost.setPrivateKey(key), "host accepts a 64-hex-char transport key");
+    check(secGuest.setPrivateKey(key), "guest accepts the same transport key");
+    check(!secGuest.setPrivateKey("abcd"),
+          "malformed key is rejected");
+    check(secGuest.hasPrivateKey(),
+          "rejected key update leaves the previous key in place");
+
+    bool secServing = false;
+    bool secGuestIn = false;
+    bool secGuestJoined = false;
+    secHost.onServerStarted = [&](uint16_t) { secServing = true; };
+    secHost.onClientConnectedToServer = [&](const std::string&, uint16_t) {
+        secGuestIn = true;
+    };
+    secHost.onRemoteClientJoined = [&](int, uint32_t, const std::string&) {
+        secGuestJoined = true;
+    };
+    secGuest.onClientConnectedToServer = [&](const std::string&, uint16_t) {
+        secGuestIn = true;
+    };
+
+    uint16_t secPort = 0;
+    for (uint16_t p = 47401; p < 47410; ++p) {
+        if (secHost.hostServer(p, 4, "SecureServer", "loop")) {
+            secPort = p;
+            break;
+        }
+    }
+    check(secPort != 0, "secure host starts on a free port");
+    if (!secPort) return 1;
+
+    auto spinSecure = [&](const std::function<bool()>& pred, double timeoutSec) {
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(timeoutSec));
+        while (!pred() && std::chrono::steady_clock::now() < deadline) {
+            secHost.update(0.01);
+            secGuest.update(0.01);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return pred();
+    };
+
+    check(spinSecure([&] { return secServing && secGuestIn; }, 5.0),
+          "host local client completes the secure handshake");
+    check(secHost.server()->isSecure() && secHost.client()->isSecure(),
+          "host server and local client report secure transport");
+
+    check(secGuest.joinServer("127.0.0.1", secPort, "Bob", "gte3"),
+          "secure guest opens the transport");
+    check(spinSecure([&] { return secGuestJoined; }, 5.0),
+          "secure guest joins (CONNECT key proof accepted)");
+    check(secGuest.client()->isSecure(),
+          "guest client reports secure transport");
+
+    NetworkManager badGuest(nullptr);
+    check(badGuest.setPrivateKey(
+              "1111111111111111111111111111111111111111111111111111111111111111"),
+          "mismatching key is well-formed");
+    bool mismatchDropped = false;
+    badGuest.onDisconnectedFromServer = [&](const std::string&) {
+        mismatchDropped = true;
+    };
+    check(badGuest.joinServer("127.0.0.1", secPort, "Mallory", "gte3"),
+          "wrong-key client opens a transport");
+    auto spinBad = [&](const std::function<bool()>& pred, double timeoutSec) {
+        const auto deadline =
+            std::chrono::steady_clock::now() +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(timeoutSec));
+        while (!pred() && std::chrono::steady_clock::now() < deadline) {
+            secHost.update(0.01);
+            badGuest.update(0.01);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        return pred();
+    };
+    check(spinBad([&] { return mismatchDropped; }, 2.0),
+          "wrong key is rejected (CONNECT_REJECT reason 2)");
+    check(!badGuest.isConnected(), "wrong-key client never becomes connected");
+
+    secHost.stopServer();
+    check(!secHost.isHosting(), "secure host stops cleanly");
+
     if (g_failures) {
         std::printf("%d check(s) FAILED\n", g_failures);
         return 1;

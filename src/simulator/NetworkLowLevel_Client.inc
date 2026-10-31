@@ -4,6 +4,27 @@ NetworkClient::~NetworkClient() {
     disconnect();
 }
 
+bool NetworkClient::setPrivateKey(const std::string& hexKey) {
+    uint8_t key[ksnet::PRIVATE_KEY_BYTES] = {};
+    if (!detail::parseHexKey(hexKey, key, ksnet::PRIVATE_KEY_BYTES)) {
+        std::memset(key, 0, sizeof(key));
+        return false;
+    }
+    std::memcpy(m_privateKey, key, ksnet::PRIVATE_KEY_BYTES);
+    std::memset(key, 0, sizeof(key));
+    m_hasPrivateKey = true;
+    return true;
+}
+
+void NetworkClient::clearPrivateKey() {
+    std::memset(m_privateKey, 0, sizeof(m_privateKey));
+    m_hasPrivateKey = false;
+}
+
+bool NetworkClient::isSecure() const {
+    return m_client && m_client->isSecure();
+}
+
 bool NetworkClient::connect(const std::string& address, uint16_t port,
                              const std::string& driverName, const std::string& carName) {
     if (m_connected) disconnect();
@@ -24,7 +45,12 @@ bool NetworkClient::connect(const std::string& address, uint16_t port,
                                                   config, m_adapter, 0.0);
     if (!m_client) return false;
 
-    if (!m_client->InsecureConnect(nullptr, 0, serverAddress)) {
+    if (m_hasPrivateKey) {
+        if (!m_client->SecureConnect(m_privateKey, ksnet::PRIVATE_KEY_BYTES, serverAddress)) {
+            m_client.reset();
+            return false;
+        }
+    } else if (!m_client->InsecureConnect(nullptr, 0, serverAddress)) {
         m_client.reset();
         return false;
     }

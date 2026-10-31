@@ -16,6 +16,37 @@ class MultiCarManager;
 
 namespace net {
 
+namespace detail {
+
+inline int hexNibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/** Decode exactly outLen bytes from a lowercase/uppercase hex string. */
+inline bool parseHexKey(const std::string& hex, uint8_t* out, int outLen) {
+    if (static_cast<int>(hex.size()) != outLen * 2) return false;
+    for (int i = 0; i < outLen; ++i) {
+        const int hi = hexNibble(hex[static_cast<size_t>(i) * 2]);
+        const int lo = hexNibble(hex[static_cast<size_t>(i) * 2 + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+    return true;
+}
+
+inline bool isValidHexKey(const std::string& hex, int outLen) {
+    if (static_cast<int>(hex.size()) != outLen * 2) return false;
+    for (char c : hex) {
+        if (hexNibble(c) < 0) return false;
+    }
+    return true;
+}
+
+} // namespace detail
+
 class NetworkClient {
 public:
     explicit NetworkClient();
@@ -30,6 +61,17 @@ public:
     void setMultiCarManager(MultiCarManager* m) { m_multiCar = m; }
     void setJoinToken(const std::string& token) { m_joinToken = token; }
     const std::string& joinToken() const { return m_joinToken; }
+
+    /**
+     * Shared-secret transport key as 64 hex chars (32 bytes, ksnet::PRIVATE_KEY_BYTES).
+     * Empty clears secure mode. Takes effect on the next connect().
+     * Returns false (and stays insecure) when the hex string is malformed.
+     */
+    bool setPrivateKey(const std::string& hexKey);
+    void clearPrivateKey();
+    bool hasPrivateKey() const { return m_hasPrivateKey; }
+    /** True once the transport handshake completed with a shared key. */
+    bool isSecure() const;
 
     void update(double dt);
     void sendInput(const InputData& input);
@@ -69,6 +111,8 @@ private:
     std::string m_carName;
     std::string m_joinToken;
     bool m_joinSent = false;
+    uint8_t m_privateKey[ksnet::PRIVATE_KEY_BYTES] = {};
+    bool m_hasPrivateKey = false;
 
     SimulationLoop* m_simLoop = nullptr;
     MultiCarManager* m_multiCar = nullptr;
@@ -89,6 +133,16 @@ public:
     /** Empty = open; non-empty required on ClientJoin (constant-time compare). */
     void setAuthToken(const std::string& token) { m_authToken = token; m_authRequired = !token.empty(); }
     bool authRequired() const { return m_authRequired; }
+
+    /**
+     * Shared-secret transport key as 64 hex chars (32 bytes, ksnet::PRIVATE_KEY_BYTES).
+     * Call before start(); empty clears secure mode.
+     * Returns false (and leaves the current mode untouched) on malformed input.
+     */
+    bool setPrivateKey(const std::string& hexKey);
+    void clearPrivateKey();
+    bool hasPrivateKey() const { return m_hasPrivateKey; }
+    bool isSecure() const;
 
     void update(double dt);
     void broadcastCarState(uint32_t carId, const CarStateData& state);
@@ -134,6 +188,8 @@ private:
     std::string m_trackName;
     std::string m_authToken;
     bool m_authRequired = false;
+    uint8_t m_privateKey[ksnet::PRIVATE_KEY_BYTES] = {};
+    bool m_hasPrivateKey = false;
 };
 
 } // namespace net

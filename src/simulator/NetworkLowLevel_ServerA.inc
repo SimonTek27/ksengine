@@ -4,6 +4,27 @@ NetworkServer::~NetworkServer() {
     stop();
 }
 
+bool NetworkServer::setPrivateKey(const std::string& hexKey) {
+    uint8_t key[ksnet::PRIVATE_KEY_BYTES] = {};
+    if (!detail::parseHexKey(hexKey, key, ksnet::PRIVATE_KEY_BYTES)) {
+        std::memset(key, 0, sizeof(key));
+        return false;
+    }
+    std::memcpy(m_privateKey, key, ksnet::PRIVATE_KEY_BYTES);
+    std::memset(key, 0, sizeof(key));
+    m_hasPrivateKey = true;
+    return true;
+}
+
+void NetworkServer::clearPrivateKey() {
+    std::memset(m_privateKey, 0, sizeof(m_privateKey));
+    m_hasPrivateKey = false;
+}
+
+bool NetworkServer::isSecure() const {
+    return m_server && m_server->isSecure();
+}
+
 bool NetworkServer::start(uint16_t port, const std::string& serverName, const std::string& trackName) {
     if (m_running) stop();
 
@@ -24,6 +45,13 @@ bool NetworkServer::start(uint16_t port, const std::string& serverName, const st
     m_server = std::make_unique<ksnet::Server>(allocator, nullptr, serverAddress,
                                                   config, m_adapter, 0.0);
     if (!m_server) return false;
+
+    if (m_hasPrivateKey &&
+        !m_server->SetPrivateKey(m_privateKey, ksnet::PRIVATE_KEY_BYTES)) {
+        std::printf("NetworkServer: SetPrivateKey failed (secure mode not enabled)\n");
+        m_server.reset();
+        return false;
+    }
 
     if (!m_server->Start(MAX_CLIENTS)) {
         m_server.reset();

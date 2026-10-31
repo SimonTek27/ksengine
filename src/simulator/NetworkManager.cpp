@@ -1,5 +1,6 @@
 #include "NetworkManager.h"
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <chrono>
 
@@ -21,6 +22,14 @@ NetworkManager::NetworkManager(SimulationLoop* simLoop)
     m_client->setSimulationLoop(simLoop);
     m_server->setSimulationLoop(simLoop);
     rebindMultiCar();
+
+    if (const char* netKey = std::getenv("KS_NET_KEY"); netKey && netKey[0]) {
+        if (setPrivateKey(netKey)) {
+            printf("NetworkManager: secure transport enabled from KS_NET_KEY\n");
+        } else {
+            printf("NetworkManager: invalid KS_NET_KEY (need 64 hex chars) - staying insecure\n");
+        }
+    }
 
     setupClientSignals();
     setupServerSignals();
@@ -285,6 +294,33 @@ bool NetworkManager::authRequired() const {
 
 void NetworkManager::setJoinToken(const std::string& token) {
     if (m_client) m_client->setJoinToken(token);
+}
+
+bool NetworkManager::setPrivateKey(const std::string& hexKey) {
+    if (hexKey.empty()) {
+        clearPrivateKey();
+        return true;
+    }
+    bool ok = true;
+    if (!net::detail::isValidHexKey(hexKey, ksnet::PRIVATE_KEY_BYTES)) {
+        ok = false;
+    } else {
+        if (m_client) ok = m_client->setPrivateKey(hexKey) && ok;
+        if (m_server) ok = m_server->setPrivateKey(hexKey) && ok;
+    }
+    if (!ok) {
+        printf("NetworkManager: invalid private key (need 64 hex chars) - secure mode unchanged\n");
+    }
+    return ok;
+}
+
+void NetworkManager::clearPrivateKey() {
+    if (m_client) m_client->clearPrivateKey();
+    if (m_server) m_server->clearPrivateKey();
+}
+
+bool NetworkManager::hasPrivateKey() const {
+    return m_client && m_client->hasPrivateKey();
 }
 
 void NetworkManager::setLobbyBaseUrl(const std::string& url) {

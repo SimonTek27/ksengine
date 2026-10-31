@@ -11,7 +11,7 @@
 | # | Item | Priority | Status |
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
-| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **In progress** — API on master; body = one local script |
+| **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **In progress** — secure-connect wired on host + client (env `KS_NET_KEY`), extract purged; reconnect + dedicated server open |
 | **3.3** | Multi-layout without full reload | Medium | Not started |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
@@ -56,31 +56,45 @@ No further code is required to *start* the campaign.
 
 Application auth (`setAuthToken` / `setJoinToken`) remains independent and already shipped.
 
-### Done on master (2026-10-20)
+### Done on master (2026-10-31)
 
 - [x] `ksnet.h`: `PRIVATE_KEY_BYTES`, `Client::SecureConnect`, `Server::SetPrivateKey` / `ClearPrivateKey` / `isSecure`
+- [x] **Body on master** (2026-10-31): `src/engine/network/ksnet/ksnet.cpp`
+      carries the implementation — XOR keystream after the 13-byte header,
+      8-byte CONNECT key proof, `kRejectKeyMismatch` = 2 — promoted from
+      `milliken_extract/ksnet.cpp` (44 KB superset of the old 36 KB file).
+      The staging tree is gone.
 - [x] Repo cleanup of VS noise / backups / LUTParser.i / milliken zip
 - [x] `tools/cleanup_superfluous.ps1` + `.sh` — promote body + delete `milliken_extract/`
+- [x] **NetworkLowLevel** — `setPrivateKey` / `clearPrivateKey` / `hasPrivateKey`;
+      `connect()` calls `SecureConnect` when a key is set, `start()` calls
+      `SetPrivateKey` before `Start()`; `isSecure()` on both endpoints.
+- [x] **NetworkManager** — key pass-through to host and client, plus
+      `KS_NET_KEY=<hex64>` at construction (invalid value stays insecure).
+- [x] **Test** — `test_multiplayer` covers secure handshake, guest join with
+      key proof, malformed-key rejection and a mismatched-key reject.
 
-### One local command (finishes 3.2 body + extract purge)
+### Remaining
+
+1. **Reconnect** — client auto-retry CONNECT after a dropped link.
+2. **Dedicated server** — harden `tools/ks_server` for headless operation.
+3. **Lobby advert** — expose secure mode in the server list (optional).
+
+### One local command (historical — already applied)
 
 ```bat
 powershell -ExecutionPolicy Bypass -File tools\cleanup_superfluous.ps1
 ```
 
-or:
+That script promoted `milliken_extract/ksnet.cpp` → `src/engine/network/ksnet/ksnet.cpp`,
+removed the staging tree and committed. It is kept for reproducible rebuilds of the
+cleanup but is a no-op on current master.
 
-```bash
-bash tools/cleanup_superfluous.sh
-```
+### Next steps
 
-That copies `milliken_extract/ksnet.cpp` → `src/engine/network/ksnet/ksnet.cpp`, removes the staging tree, commits, and pushes.
-
-### After the body is on master
-
-1. **Wire NetworkLowLevel** — if private key set, call `SecureConnect` / `SetPrivateKey` instead of `InsecureConnect`.
-2. **Wire NetworkManager** — `setPrivateKey` / `clearPrivateKey` / `hasPrivateKey` pass-through.
-3. **Optional env** — `KS_NET_KEY=<hex64>` for host/client smoke.
+1. ~~Wire NetworkLowLevel~~ — done 2026-10-31 (`SecureConnect` / `SetPrivateKey`).
+2. ~~Wire NetworkManager~~ — done 2026-10-31 (`setPrivateKey` / `clearPrivateKey` / `hasPrivateKey`).
+3. ~~Optional env~~ — done: `KS_NET_KEY=<hex64>` for host/client smoke.
 4. **Reconnect** — client auto-retry CONNECT (follow-up).
 5. **Dedicated server** — harden `tools/ks_server` (follow-up).
 
@@ -98,9 +112,9 @@ Mismatch key → CONNECT_REJECT reason 2; no key → legacy InsecureConnect.
 
 ## Suggested order
 
-1. Run **cleanup_superfluous** (body + drop extract).
-2. Wire NetworkManager private key.
-3. Start **3.1 data campaign** when real tyre logs exist.
+1. Start **3.1 data campaign** when real tyre logs exist.
+2. **3.2 reconnect** — client auto-retry after a dropped link.
+3. **3.2 dedicated server** — harden `tools/ks_server`.
 4. **3.4** driver swap after human box gate G3.
 5. Defer 3.5–3.8 until Windows soak is routine.
 

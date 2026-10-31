@@ -5,6 +5,7 @@
  */
 
 #include "NetworkLowLevel.h"
+#include <cstdio>
 #include <cstring>
 
 #if HAS_KSNET

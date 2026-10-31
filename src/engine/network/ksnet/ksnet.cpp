@@ -1,12 +1,12 @@
-// ksnet implementation — reliable-UDP client/server transport (yojimbo-subset).
+// ksnet implementation — reliable-UDP client/server transport (KS Engine).
 // Wire format (little-endian, all integers):
 //   header: u64 protocolId | u8 packetType | u32 nonce
 //     nonce = the *client's* random nonce in both directions (the server
 //     echoes it, the client validates it; the server validates it against
 //     the slot the address was mapped to on CONNECT).
-//   CONNECT:             (no payload)
+//   CONNECT:             [secure] 8-byte key proof (cleartext; not XOR'd)
 //   CONNECT_ACK:         (no payload)
-//   CONNECT_REJECT:      u8 reason (1 = server full)
+//   CONNECT_REJECT:      u8 reason (1 = server full, 2 = key mismatch)
 //   DISCONNECT:          (no payload)
 //   PING / PONG:         u32 pingId
 //   DATA:                u8 numReliableChannels
@@ -15,6 +15,9 @@
 //                        per frame: u8 channel | u8 msgType
 //                                   [u16 seq if channel is reliable]
 //                                   u16 payloadLen | payload
+// When Server::SetPrivateKey / Client::SecureConnect is active, every packet's
+// payload *after* the 13-byte header is XOR-keystream obfuscated (except the
+// CONNECT proof itself, which is the handshake authenticator).
 // Reliable channel: sliding window of 64 (u16 sequence numbers, stop-retry
 // with ack bits piggybacked on every DATA packet), in-order delivery through
 // a 64-slot receive window. Unreliable channel: unordered frames.
@@ -83,6 +86,78 @@ enum PacketType : uint8_t {
 };
 
 constexpr uint8_t kRejectServerFull = 1;
+constexpr uint8_t kRejectKeyMismatch = 2;
+constexpr size_t kHeaderBytes = 13; // u64 protocolId + u8 type + u32 nonce
+constexpr size_t kKeyProofBytes = 8;
+
+// ---------------------------------------------------------------------------
+// Secure-connect helpers (shared 32-byte key → XOR keystream + CONNECT proof)
+// ---------------------------------------------------------------------------
+
+void fillKeystream(const uint8_t* key, uint32_t nonce, size_t offset, uint8_t* out, size_t n)
+{
+    for (size_t i = 0; i < n; ++i) {
+        const size_t idx = offset + i;
+        const uint8_t k0 = key[idx % PRIVATE_KEY_BYTES];
+        const uint8_t k1 = key[(idx * 7 + 13) % PRIVATE_KEY_BYTES];
+        const uint8_t nbyte = static_cast<uint8_t>((nonce >> ((idx % 4) * 8)) & 0xFFu);
+        out[i] = static_cast<uint8_t>(k0 ^ k1 ^ nbyte ^ static_cast<uint8_t>(idx & 0xFFu));
+    }
+}
+
+void xorPayload(uint8_t* data, size_t size, const uint8_t* key, uint32_t nonce)
+{
+    if (!data || size <= kHeaderBytes || !key) return;
+    const size_t payloadLen = size - kHeaderBytes;
+    // small stack buffer for common packets; fall back to heap for large
+    uint8_t stack[2048];
+    uint8_t* ks = stack;
+    std::unique_ptr<uint8_t[]> heap;
+    if (payloadLen > sizeof(stack)) {
+        heap.reset(new uint8_t[payloadLen]);
+        ks = heap.get();
+    }
+    fillKeystream(key, nonce, 0, ks, payloadLen);
+    for (size_t i = 0; i < payloadLen; ++i)
+        data[kHeaderBytes + i] ^= ks[i];
+}
+
+void xorPayloadConst(std::vector<uint8_t>& pkt, const uint8_t* key, uint32_t nonce)
+{
+    if (pkt.size() <= kHeaderBytes || !key) return;
+    xorPayload(pkt.data(), pkt.size(), key, nonce);
+}
+
+/** 8-byte CONNECT proof: keystream(protocolId bytes mixed with nonce). */
+void makeKeyProof(const uint8_t* key, uint64_t protocolId, uint32_t nonce, uint8_t out[kKeyProofBytes])
+{
+    uint8_t seed[16];
+    for (int i = 0; i < 8; ++i)
+        seed[i] = static_cast<uint8_t>((protocolId >> (8 * i)) & 0xFFu);
+    for (int i = 0; i < 4; ++i)
+        seed[8 + i] = static_cast<uint8_t>((nonce >> (8 * i)) & 0xFFu);
+    seed[12] = 0xC0;
+    seed[13] = 0x4E;
+    seed[14] = 0xC7;
+    seed[15] = 0x01; // "CONNECT" tag
+    // Mix seed into a synthetic nonce for keystream start
+    uint32_t mixed = nonce;
+    for (int i = 0; i < 16; ++i)
+        mixed = mixed * 16777619u ^ seed[i];
+    fillKeystream(key, mixed, 0x100, out, kKeyProofBytes);
+}
+
+bool verifyKeyProof(const uint8_t* key, uint64_t protocolId, uint32_t nonce,
+                    const uint8_t* proof, size_t proofLen)
+{
+    if (!key || !proof || proofLen < kKeyProofBytes) return false;
+    uint8_t expected[kKeyProofBytes];
+    makeKeyProof(key, protocolId, nonce, expected);
+    unsigned char diff = 0;
+    for (size_t i = 0; i < kKeyProofBytes; ++i)
+        diff |= static_cast<unsigned char>(expected[i] ^ proof[i]);
+    return diff == 0;
+}
 
 // ---------------------------------------------------------------------------
 // platform glue
@@ -518,12 +593,14 @@ std::vector<uint8_t> makeHeader(uint64_t protocolId, PacketType type, uint32_t n
     return pkt;
 }
 
-void sendPing(KSocket sock, const sockaddr_in& to, uint64_t protocolId, uint32_t nonce, Conn& c)
+void sendPing(KSocket sock, const sockaddr_in& to, uint64_t protocolId, uint32_t nonce, Conn& c,
+              const uint8_t* secureKey = nullptr)
 {
     std::vector<uint8_t> pkt = makeHeader(protocolId, PKT_PING, nonce);
     ++c.pingId;
     put32(pkt, c.pingId);
     c.pingSentAt = nowSec();
+    if (secureKey) xorPayloadConst(pkt, secureKey, nonce);
     sendDatagram(sock, to, pkt);
 }
 
@@ -539,13 +616,14 @@ void handlePong(Conn& c, uint32_t pingId, double sentAt)
     }
 }
 
-void pumpKeepalive(KSocket sock, const sockaddr_in& to, uint64_t protocolId, uint32_t nonce, Conn& c)
+void pumpKeepalive(KSocket sock, const sockaddr_in& to, uint64_t protocolId, uint32_t nonce, Conn& c,
+                   const uint8_t* secureKey = nullptr)
 {
     const double now = nowSec();
     if (c.lastPing == 0.0) c.lastPing = now;
     if (now - c.lastPing >= kPingIntervalSec) {
         c.lastPing = now;
-        sendPing(sock, to, protocolId, nonce, c);
+        sendPing(sock, to, protocolId, nonce, c, secureKey);
     }
 }
 
@@ -572,12 +650,15 @@ struct Client::Impl {
     uint64_t statLastRecv = 0;
     double rateSent = 0.0;
     double rateRecv = 0.0;
+    bool secure = false;
+    uint8_t privateKey[PRIVATE_KEY_BYTES] = {};
 
     ~Impl()
     {
         destroyConn(conn);
         delete factory;
         closeSocket(sock);
+        if (secure) std::memset(privateKey, 0, sizeof(privateKey));
     }
 };
 
@@ -620,8 +701,49 @@ bool Client::InsecureConnect(const char* /*privateKey*/, int /*keyLength*/, cons
     m_impl->conn.lastRecv = nowSec();
     m_impl->connectStarted = nowSec();
     m_impl->lastConnectReq = -1.0e9;
+    m_impl->secure = false;
+    std::memset(m_impl->privateKey, 0, sizeof(m_impl->privateKey));
     m_state = CLIENT_STATE_CONNECTING;
     return true;
+}
+
+bool Client::SecureConnect(const uint8_t* privateKey, int keyLength, const Address& serverAddress)
+{
+    if (!privateKey || keyLength != PRIVATE_KEY_BYTES) return false;
+
+    ensureWinsock();
+    if (m_impl->sock != kInvalidSocket) Disconnect();
+
+    if (!resolveIPv4(serverAddress, m_impl->serverAddr)) return false;
+
+    KSocket s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s == kInvalidSocket) return false;
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = 0;
+    if (bind(s, reinterpret_cast<sockaddr*>(&local), sizeof(local)) != 0) {
+        closeSocket(s);
+        return false;
+    }
+    setNonBlocking(s);
+    m_impl->sock = s;
+
+    std::random_device rd;
+    m_impl->nonce = rd();
+    m_impl->conn = Conn{};
+    m_impl->conn.lastRecv = nowSec();
+    m_impl->connectStarted = nowSec();
+    m_impl->lastConnectReq = -1.0e9;
+    m_impl->secure = true;
+    std::memcpy(m_impl->privateKey, privateKey, PRIVATE_KEY_BYTES);
+    m_state = CLIENT_STATE_CONNECTING;
+    return true;
+}
+
+bool Client::isSecure() const
+{
+    return m_impl && m_impl->secure;
 }
 
 void Client::Disconnect()
@@ -651,6 +773,13 @@ void Client::SendPackets()
         if (now - m_impl->lastConnectReq >= kConnectRetrySec) {
             m_impl->lastConnectReq = now;
             std::vector<uint8_t> pkt = makeHeader(m_impl->config.protocolId, PKT_CONNECT, m_impl->nonce);
+            if (m_impl->secure) {
+                uint8_t proof[kKeyProofBytes];
+                makeKeyProof(m_impl->privateKey, m_impl->config.protocolId, m_impl->nonce, proof);
+                pkt.insert(pkt.end(), proof, proof + kKeyProofBytes);
+                // Proof itself is not XOR'd (it *is* the key material check);
+                // subsequent packets will XOR the payload after the header.
+            }
             sendDatagram(m_impl->sock, m_impl->serverAddr, pkt);
             m_impl->bytesSent += pkt.size();
         }
@@ -663,10 +792,12 @@ void Client::SendPackets()
         return;
     }
 
-    pumpKeepalive(m_impl->sock, m_impl->serverAddr, m_impl->config.protocolId, m_impl->nonce, m_impl->conn);
+    const uint8_t* skey = m_impl->secure ? m_impl->privateKey : nullptr;
+    pumpKeepalive(m_impl->sock, m_impl->serverAddr, m_impl->config.protocolId, m_impl->nonce, m_impl->conn, skey);
 
     std::vector<uint8_t> pkt = makeHeader(m_impl->config.protocolId, PKT_DATA, m_impl->nonce);
     if (appendDataPayload(m_impl->config, m_impl->conn, pkt)) {
+        if (skey) xorPayloadConst(pkt, skey, m_impl->nonce);
         sendDatagram(m_impl->sock, m_impl->serverAddr, pkt);
         m_impl->bytesSent += pkt.size();
     }
@@ -689,6 +820,15 @@ void Client::ReceivePackets()
                                reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
         m_impl->bytesRecv += static_cast<uint64_t>(n);
+        if (n < static_cast<int>(kHeaderBytes)) continue;
+
+        // Decrypt payload (after cleartext header) when secure.
+        if (m_impl->secure && static_cast<size_t>(n) > kHeaderBytes) {
+            // Peek nonce from header for keystream
+            uint32_t peekNonce = 0;
+            std::memcpy(&peekNonce, buf + 9, 4);
+            xorPayload(buf, static_cast<size_t>(n), m_impl->privateKey, peekNonce);
+        }
 
         ByteReader r{buf, static_cast<size_t>(n)};
         const uint64_t protocolId = r.u64();
@@ -720,6 +860,7 @@ void Client::ReceivePackets()
                 const uint32_t id = r.u32();
                 std::vector<uint8_t> reply = makeHeader(m_impl->config.protocolId, PKT_PONG, m_impl->nonce);
                 put32(reply, id);
+                if (m_impl->secure) xorPayloadConst(reply, m_impl->privateKey, m_impl->nonce);
                 sendDatagram(m_impl->sock, m_impl->serverAddr, reply);
                 m_impl->bytesSent += reply.size();
                 break;
@@ -805,6 +946,8 @@ struct Server::Impl {
     KSocket sock = kInvalidSocket;
     sockaddr_in bindAddr{};
     double timeout = kDefaultTimeoutSec;
+    bool secure = false;
+    uint8_t privateKey[PRIVATE_KEY_BYTES] = {};
 
     struct Slot {
         bool used = false;
@@ -825,6 +968,7 @@ struct Server::Impl {
         for (auto& s : slots) destroyConn(s.conn);
         delete factory;
         closeSocket(sock);
+        if (secure) std::memset(privateKey, 0, sizeof(privateKey));
     }
 
     Slot* findByAddr(const sockaddr_in& a)
@@ -860,6 +1004,30 @@ Server::Server(Allocator& allocator, const Address* /*privateAddress*/,
 }
 
 Server::~Server() = default;
+
+bool Server::SetPrivateKey(const uint8_t* privateKey, int keyLength)
+{
+    if (!m_impl) return false;
+    if (!privateKey || keyLength != PRIVATE_KEY_BYTES) {
+        ClearPrivateKey();
+        return false;
+    }
+    std::memcpy(m_impl->privateKey, privateKey, PRIVATE_KEY_BYTES);
+    m_impl->secure = true;
+    return true;
+}
+
+void Server::ClearPrivateKey()
+{
+    if (!m_impl) return;
+    std::memset(m_impl->privateKey, 0, sizeof(m_impl->privateKey));
+    m_impl->secure = false;
+}
+
+bool Server::isSecure() const
+{
+    return m_impl && m_impl->secure;
+}
 
 bool Server::Start(int maxClients)
 {
@@ -909,9 +1077,11 @@ void Server::SendPackets()
             m_impl->freeSlot(slot);
             continue;
         }
-        pumpKeepalive(m_impl->sock, slot.addr, m_impl->config.protocolId, slot.nonce, slot.conn);
+        const uint8_t* skey = m_impl->secure ? m_impl->privateKey : nullptr;
+        pumpKeepalive(m_impl->sock, slot.addr, m_impl->config.protocolId, slot.nonce, slot.conn, skey);
         std::vector<uint8_t> pkt = makeHeader(m_impl->config.protocolId, PKT_DATA, slot.nonce);
         if (appendDataPayload(m_impl->config, slot.conn, pkt)) {
+            if (skey) xorPayloadConst(pkt, skey, slot.nonce);
             sendDatagram(m_impl->sock, slot.addr, pkt);
             m_impl->bytesSent += pkt.size();
         }
@@ -934,12 +1104,30 @@ void Server::ReceivePackets()
                                reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (n <= 0) break;
         m_impl->bytesRecv += static_cast<uint64_t>(n);
+        if (n < static_cast<int>(kHeaderBytes)) continue;
+
+        // Peek header (cleartext) before optional XOR of payload.
+        const uint64_t protocolIdPeek =
+            static_cast<uint64_t>(buf[0]) | (static_cast<uint64_t>(buf[1]) << 8) |
+            (static_cast<uint64_t>(buf[2]) << 16) | (static_cast<uint64_t>(buf[3]) << 24) |
+            (static_cast<uint64_t>(buf[4]) << 32) | (static_cast<uint64_t>(buf[5]) << 40) |
+            (static_cast<uint64_t>(buf[6]) << 48) | (static_cast<uint64_t>(buf[7]) << 56);
+        const uint8_t typePeek = buf[8];
+        uint32_t noncePeek = 0;
+        std::memcpy(&noncePeek, buf + 9, 4);
+
+        // CONNECT proof is cleartext (not XOR'd). All other post-header payloads
+        // are XOR'd when the server is in secure mode.
+        if (m_impl->secure && typePeek != PKT_CONNECT && static_cast<size_t>(n) > kHeaderBytes) {
+            xorPayload(buf, static_cast<size_t>(n), m_impl->privateKey, noncePeek);
+        }
 
         ByteReader r{buf, static_cast<size_t>(n)};
         const uint64_t protocolId = r.u64();
         const uint8_t type = r.u8();
         const uint32_t nonce = r.u32();
         if (!r.good || protocolId != m_impl->config.protocolId) continue;
+        (void)protocolIdPeek;
 
         Impl::Slot* slot = m_impl->findByAddr(from);
         if (slot) {
@@ -962,6 +1150,7 @@ void Server::ReceivePackets()
                     const uint32_t id = r.u32();
                     std::vector<uint8_t> reply = makeHeader(m_impl->config.protocolId, PKT_PONG, slot->nonce);
                     put32(reply, id);
+                    if (m_impl->secure) xorPayloadConst(reply, m_impl->privateKey, slot->nonce);
                     sendDatagram(m_impl->sock, from, reply);
                     m_impl->bytesSent += reply.size();
                     break;
@@ -978,6 +1167,20 @@ void Server::ReceivePackets()
         }
 
         if (type == PKT_CONNECT) {
+            // Secure server: require 8-byte key proof after header.
+            if (m_impl->secure) {
+                const size_t remaining = static_cast<size_t>(n) - kHeaderBytes;
+                if (remaining < kKeyProofBytes ||
+                    !verifyKeyProof(m_impl->privateKey, protocolId, nonce, buf + kHeaderBytes, remaining)) {
+                    std::vector<uint8_t> reject =
+                        makeHeader(m_impl->config.protocolId, PKT_CONNECT_REJECT, nonce);
+                    put8(reject, kRejectKeyMismatch);
+                    sendDatagram(m_impl->sock, from, reject);
+                    m_impl->bytesSent += reject.size();
+                    continue;
+                }
+            }
+
             Impl::Slot* freeSlot = m_impl->findFree();
             if (!freeSlot) {
                 std::vector<uint8_t> reject = makeHeader(m_impl->config.protocolId, PKT_CONNECT_REJECT, nonce);
@@ -1069,8 +1272,6 @@ bool Server::IsClientConnected(int clientIndex) const
     return m_impl->slots[static_cast<size_t>(clientIndex)].used;
 }
 
-// Kick one client: tell it we are dropping the connection, then free the slot
-// so the index can be reused by the next join (auth failure, kick, timeout).
 void Server::DisconnectClient(int clientIndex)
 {
     if (!m_impl || clientIndex < 0 || clientIndex >= static_cast<int>(m_impl->slots.size()))
