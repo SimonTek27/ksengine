@@ -281,7 +281,7 @@ TrackSimulator::TrackSimulator()
     defaultWeather.rainIntensity = 0.0;
     defaultWeather.windSpeed = 0.0;
     defaultWeather.windDirection = 0.0;
-    m_weatherSim.setWeatherState(defaultWeather);
+    m_weatherSim.setState(defaultWeather);
 }
 
 TrackSimulator::~TrackSimulator() {
@@ -891,7 +891,7 @@ void TrackSimulator::recordReplayFrame() {
 // ============================================================================
 
 void TrackSimulator::setWeatherState(const WeatherState& weather) {
-    m_weatherSim.setWeatherState(weather);
+    m_weatherSim.setState(weather);
     if (m_vehicle) {
         m_vehicle->setWeatherState(weather);
     }

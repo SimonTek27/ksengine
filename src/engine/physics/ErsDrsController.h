@@ -2,12 +2,14 @@
 
 #include <memory>
 
-// HybridSystem is in global namespace
-class HybridSystem;
-
 namespace ks {
 
 namespace physics {
+
+// HybridSystem lives in this namespace (physics/HybridSystem.h). Declaring it at
+// global scope made the member a std::unique_ptr<::HybridSystem>, a type that
+// exists nowhere, while the .cpp built the real ks::physics::HybridSystem.
+class HybridSystem;
 
 struct DrsState {
     bool enabled = false;
@@ -85,7 +87,7 @@ public:
 
 private:
     void updateDrs(double speed);
-    void updateErs(double dt, double rpm, double throttle, double brake, double engineTorque);
+    void updateErs(const ErsDrsInput& input, double speedMs);
 
     ErsState m_ers;
     DrsState m_drs;

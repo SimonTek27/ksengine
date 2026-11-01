@@ -33,12 +33,12 @@ foreach(_pat
     "VehiclePhysicsModels"
     "TireCurveEditor"
     "PhysicsSimulations"
-    # Real code that does not build yet: TrackPhysics.cpp is still Qt
-    # (QFile/QJsonDocument) and its fprintf calls lost their escapes, and
-    # PhysicsValidator.h still calls the QStringList API (.append/.isEmpty) on
-    # std::vector<std::string>.
+    # Real code that does not build yet: TrackPhysics.cpp was half ported. Its
+    # includes are Qt-free but the body still uses QFile/QJsonDocument in
+    # loadTrack, QDateTime for lap timestamps and QVariantMap for replay frames,
+    # so it needs a port (including a decision on what a replay frame is now),
+    # not a repair.
     "TrackPhysics"
-    "PhysicsValidator"
     "devices/3dprint/"
     "devices/scanners/"
     "SimulatorApp"
@@ -72,12 +72,6 @@ foreach(_pat
     "Audio/NoiseReducer"
     "Audio/PeakMeter"
     "Audio/Studio"
-    # Real models, excluded until they build: ACModelManager.cpp builds a
-    # std::unique_ptr<KsTireModel> but stores it where ks::physics::KsTireModel
-    # is expected, and ErsDrsController.cpp includes the Qt editor's
-    # HybridSystem.h, which needs QString.
-    "physics/ACModelManager\\."
-    "physics/ErsDrsController\\."
     # Dead code that never made it into the qt-free rewrite: nothing includes
     # BrakeWearSystem.h, so nothing can ever call it. It is kept out of the
     # build on purpose because it redefines ks::physics::BrakeThermalConfig

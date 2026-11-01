@@ -18,8 +18,26 @@ namespace ks {
 namespace physics {
 
 // Forward declarations
-struct BalanceSetup;
-struct SimulationConfig;
+// The validator's view of a suspension balance setup. Nothing else in the tree
+// defines this type: validateSuspensionSetup was written against a struct that
+// only ever existed as a forward declaration, so these are exactly the fields
+// its checks read.
+struct BalanceSetup {
+    double springRateFront = 0.0;
+    double springRateRear = 0.0;
+    double camberFront = 0.0;
+    double camberRear = 0.0;
+    double antiRollBarFront = 0.0;
+};
+// Same story as BalanceSetup: validateSimulationConfig was written against a
+// struct that was only ever forward-declared, so it is defined here from the
+// fields its checks read.
+struct SimulationConfig {
+    double airDensity = 0.0;
+    double fixedTimeStep = 0.0;
+    double gravity = 0.0;
+    double solverIterations = 0.0;
+};
 struct TrackLayout;
 struct TrackSector;
 
@@ -39,22 +57,22 @@ struct ValidationResult {
     /// Add an error
     void addError(const std::string& error) {
         isValid = false;
-        errors.append(error);
+        errors.push_back(error);
     }
     
     /// Add a warning
     void addWarning(const std::string& warning) {
-        warnings.append(warning);
+        warnings.push_back(warning);
     }
     
     /// Add a suggestion
     void addSuggestion(const std::string& suggestion) {
-        suggestions.append(suggestion);
+        suggestions.push_back(suggestion);
     }
     
     /// Check if there are any issues
     bool hasIssues() const {
-        return !errors.isEmpty() || !warnings.isEmpty();
+        return !errors.empty() || !warnings.empty();
     }
     
     /// Generate a formatted report

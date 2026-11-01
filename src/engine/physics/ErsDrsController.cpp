@@ -1,5 +1,5 @@
 #include "ErsDrsController.h"
-#include "sdk/kseditor/plugins/simulators/kunos/assettocorsa/physics/HybridSystem.h"
+#include "HybridSystem.h"
 #include <algorithm>
 
 namespace ks {
@@ -21,7 +21,7 @@ void ErsDrsController::reset() {
 
 void ErsDrsController::activateAttackMode() {
     if (m_hybridSystem) {
-        m_hybridSystem->activateAttackMode();
+        m_hybridSystem->activateAttack();
     }
 }
 
@@ -31,7 +31,9 @@ void ErsDrsController::setDrsDragReduction(double f) {
 
 void ErsDrsController::update(const ErsDrsInput& input) {
     updateDrs(input.speed);
-    updateErs(input.dt, input.rpm, input.throttle, input.brake, input.engineTorque);
+    // input.speed is km/h (updateDrs divides the threshold by 3.6); the hybrid
+    // unit works in m/s.
+    updateErs(input, input.speed / 3.6);
 }
 
 void ErsDrsController::updateDrs(double speed) {
@@ -42,17 +44,21 @@ void ErsDrsController::updateDrs(double speed) {
     }
 }
 
-void ErsDrsController::updateErs(double dt, double rpm, double throttle, double brake, double engineTorque) {
+void ErsDrsController::updateErs(const ErsDrsInput& input, double speedMs) {
     if (m_hybridSystem) {
-        m_hybridSystem->update(dt, rpm, throttle, brake,
-            0.0f, 1.0f, engineTorque, 0.0f, 0.0f);
-        m_ers.deployTorque = m_hybridSystem->getDeployTorque();
-        m_ers.regenTorque = m_hybridSystem->getRegenTorque();
-        m_ers.batterySoc = m_hybridSystem->getSoc();
-        m_ers.batteryTemp = m_hybridSystem->getBatteryTemp();
+        // The Qt-free unit models one net torque: positive deploys, negative
+        // harvests. The editor version reported deploy and regen separately and
+        // also a battery temperature, which this one does not simulate, so
+        // batteryTemp is left to whatever the caller set.
+        const double net = m_hybridSystem->update(
+            static_cast<float>(input.dt), static_cast<float>(input.throttle),
+            static_cast<float>(input.brake), static_cast<float>(speedMs));
+        m_ers.deployTorque = net > 0.0 ? net : 0.0;
+        m_ers.regenTorque = net < 0.0 ? -net : 0.0;
+        m_ers.batterySoc = m_hybridSystem->soc();
     } else if (m_ers.enabled) {
-        m_ers.deployTorque = throttle > 0.5 ? 100.0 : 0.0;
-        m_ers.regenTorque = brake > 0.5 ? 50.0 : 0.0;
+        m_ers.deployTorque = input.throttle > 0.5 ? 100.0 : 0.0;
+        m_ers.regenTorque = input.brake > 0.5 ? 50.0 : 0.0;
     }
 }
 

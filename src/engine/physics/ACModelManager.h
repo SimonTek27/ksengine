@@ -9,16 +9,19 @@
 #include <string>
 #include <unordered_map>
 
+namespace ks {
+namespace physics {
+
+// These are all ks::physics types. Declaring them at global scope made every
+// member a std::unique_ptr<::KsTireModel> while the constructor built the real
+// ks::physics::KsTireModel, which is a different type: two pointers that look
+// interchangeable in the header and refuse to compile in the .cpp.
 class KsTireModel;
 class EngineModel;
 class AeroModel;
 class DifferentialModel;
 class SuspensionModel;
 class BrakeThermalModel;
-
-namespace ks {
-namespace physics {
-
 class HybridSystem;
 
 class ACModelManager {

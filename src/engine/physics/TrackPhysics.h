@@ -1,13 +1,42 @@
-#include <string>
-#include "PhysicsCoreTypes.h"
 #pragma once
 
+#include <string>
+#include "PhysicsCoreTypes.h"
+
+#include "PhysicsTypes.h"  // TrackLayout, TrackSessionState
 #include "PhysicsEngine.h"
 #include "WeatherPhysics.h"
 #include <vector>
 #include <utility>
 #include <chrono>
 namespace ks::physics {
+
+// Qt-free stand-ins for the two Qt types this header used to hold. It is
+// included by sources that must build without Qt (PhysicsValidator.cpp), so a
+// QElapsedTimer member and a std::vector<QVariantMap> were not an option.
+// SessionTimer keeps the QElapsedTimer surface the .cpp already calls:
+// start(), restart(), invalidate() and elapsed() in milliseconds.
+struct SessionTimer {
+    std::chrono::steady_clock::time_point startedAt = std::chrono::steady_clock::now();
+    bool running = false;
+    void start() { startedAt = std::chrono::steady_clock::now(); running = true; }
+    void restart() { start(); }
+    void invalidate() { running = false; }
+    double elapsed() const {
+        if (!running) return 0.0;
+        return std::chrono::duration<double, std::milli>(
+                   std::chrono::steady_clock::now() - startedAt).count();
+    }
+};
+
+struct ReplayFrame {
+    double timestamp = 0.0;
+    double trackDistance = 0.0;
+    double speed = 0.0;
+    double lapTime = 0.0;
+    int lap = 0;
+    int sector = 0;
+};
 
 // ============================================================================
 // Track Surface Model
@@ -89,7 +118,7 @@ class TrackSimulator {
     double currentSpeed() const { return m_sessionState.speed; }
     void update(double dt);
     void setWeatherState(const WeatherState& w);
-    WeatherState weatherState() const { return m_weatherSim.weatherState(); }
+    WeatherState weatherState() const { return m_weatherSim.state(); }
 public:
     void sessionStarted();
     void sessionStopped();
@@ -142,11 +171,11 @@ private:
     TrackSurfaceModel m_surfaceModel;
     BankingModel m_bankingModel;
     ElevationModel m_elevationModel;
-    QElapsedTimer m_sessionTimer;
+    SessionTimer m_sessionTimer;
     double m_realTimeMultiplier = 1;
     bool m_recording = false;
     double m_lastReplayTime = 0.0;
-    std::vector<QVariantMap> m_replayData;
+    std::vector<ReplayFrame> m_replayData;
     static TrackSimulator* s_instance;
 };
 

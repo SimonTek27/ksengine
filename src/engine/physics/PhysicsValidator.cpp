@@ -4,7 +4,50 @@
 #include "VehiclePhysics.h"
 #include "TrackPhysics.h"
 #include <cmath>
+#include <sstream>
+#include <utility>
 #include <cstdio>
+
+namespace {
+// QString-style message formatting, without Qt. These call sites were written
+// as Format("...%1...%2...").arg(a).arg(b), which is the QString API; this
+// type keeps that syntax and does the numbered substitution.
+class Format {
+public:
+    explicit Format(std::string pattern) : m_pattern(std::move(pattern)) {}
+
+    template <typename T>
+    Format& arg(const T& value) {
+        std::ostringstream os;
+        os << value;
+        const std::string token = "%" + std::to_string(++m_next);
+        const std::string::size_type pos = m_pattern.find(token);
+        if (pos != std::string::npos) m_pattern.replace(pos, token.size(), os.str());
+        return *this;
+    }
+
+    operator std::string() const { return m_pattern; }
+    const std::string& str() const { return m_pattern; }
+
+private:
+    std::string m_pattern;
+    int m_next = 0;
+};
+
+// QStringList::append took another list; std::vector needs the range form.
+template <typename T>
+void ksAppendAll(std::vector<T>& dst, const std::vector<T>& src) {
+    dst.insert(dst.end(), src.begin(), src.end());
+}
+
+// QString::number(v, 'f', 2) equivalent, for the few call sites that used it.
+inline std::string ksNum(double value, char fmt, int precision) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), fmt == 'f' ? "%.*f" : "%.*g", precision, value);
+    return std::string(buf);
+}
+} // namespace
+
 namespace ks {
 namespace physics {
 
@@ -15,30 +58,30 @@ namespace physics {
 std::string ValidationResult::formatReport() const {
     std::string report;
     
-    if (isValid && errors.isEmpty() && warnings.isEmpty()) {
+    if (isValid && errors.empty() && warnings.empty()) {
         report = "✓ Validation passed with no issues.\n";
         return report;
     }
     
     report += "=== Validation Report ===\n\n";
     
-    if (!errors.isEmpty()) {
-        report += "✗ ERRORS (" + std::string::number(errors.size()) + "):\n";
+    if (!errors.empty()) {
+        report += "✗ ERRORS (" + std::to_string(errors.size()) + "):\n";
         for (const std::string& error : errors) {
             report += "  - " + error + "\n";
         }
         report += "\n";
     }
     
-    if (!warnings.isEmpty()) {
-        report += "⚠ WARNINGS (" + std::string::number(warnings.size()) + "):\n";
+    if (!warnings.empty()) {
+        report += "⚠ WARNINGS (" + std::to_string(warnings.size()) + "):\n";
         for (const std::string& warning : warnings) {
             report += "  - " + warning + "\n";
         }
         report += "\n";
     }
     
-    if (!suggestions.isEmpty()) {
+    if (!suggestions.empty()) {
         report += "💡 SUGGESTIONS:\n";
         for (const std::string& suggestion : suggestions) {
             report += "  - " + suggestion + "\n";
@@ -58,15 +101,15 @@ ValidationResult PhysicsValidator::validateVehicleParameters(float mass, float p
     ValidationResult result;
     
     if (mass < 400.0f || mass > 2000.0f) {
-        result.addError(std::string("Mass out of range: %1 kg (400-2000)").arg(mass));
+        result.addError(Format("Mass out of range: %1 kg (400-2000)").arg(mass));
     }
     
     if (power < 20.0f || power > 1500.0f) {
-        result.addError(std::string("Power out of range: %1 kW (20-1500)").arg(power));
+        result.addError(Format("Power out of range: %1 kW (20-1500)").arg(power));
     }
     
     if (wheelbase < 1.5f || wheelbase > 4.0f) {
-        result.addError(std::string("Wheelbase out of range: %1 m (1.5-4.0)").arg(wheelbase));
+        result.addError(Format("Wheelbase out of range: %1 m (1.5-4.0)").arg(wheelbase));
     }
     
     checkPowerToWeight(mass, power, result);
@@ -86,15 +129,15 @@ ValidationResult PhysicsValidator::validateTireParameters(float stiffness, float
     ValidationResult result;
     
     if (stiffness < 1000.0f || stiffness > 100000.0f) {
-        result.addWarning(std::string("Tire stiffness out of typical range: %1 N/rad").arg(stiffness));
+        result.addWarning(Format("Tire stiffness out of typical range: %1 N/rad").arg(stiffness));
     }
     
     if (friction < 0.2f || friction > 2.0f) {
-        result.addWarning(std::string("Friction coefficient out of range: %1 (0.2-2.0)").arg(friction));
+        result.addWarning(Format("Friction coefficient out of range: %1 (0.2-2.0)").arg(friction));
     }
     
     if (radius < 0.15f || radius > 0.6f) {
-        result.addError(std::string("Tire radius out of range: %1 m (0.15-0.6)").arg(radius));
+        result.addError(Format("Tire radius out of range: %1 m (0.15-0.6)").arg(radius));
     }
     
     if (radius > 0.5f && friction < 0.5f) {
@@ -108,11 +151,11 @@ ValidationResult PhysicsValidator::validateSuspensionSetup(const BalanceSetup& s
     ValidationResult result;
     
     if (setup.springRateFront < 5000.0f || setup.springRateFront > 80000.0f) {
-        result.addWarning(std::string("Front spring rate unusual: %1 N/m").arg(setup.springRateFront));
+        result.addWarning(Format("Front spring rate unusual: %1 N/m").arg(setup.springRateFront));
     }
     
     if (setup.springRateRear < 5000.0f || setup.springRateRear > 80000.0f) {
-        result.addWarning(std::string("Rear spring rate unusual: %1 N/m").arg(setup.springRateRear));
+        result.addWarning(Format("Rear spring rate unusual: %1 N/m").arg(setup.springRateRear));
     }
     
     float springRatio = setup.springRateFront / (setup.springRateRear + 1.0f);
@@ -128,11 +171,11 @@ ValidationResult PhysicsValidator::validateSuspensionSetup(const BalanceSetup& s
     }
     
     if (std::abs(setup.camberFront) > 5.0f) {
-        result.addWarning(std::string("High front camber: %1°").arg(setup.camberFront));
+        result.addWarning(Format("High front camber: %1°").arg(setup.camberFront));
     }
     
     if (std::abs(setup.camberRear) > 4.0f) {
-        result.addWarning(std::string("High rear camber: %1°").arg(setup.camberRear));
+        result.addWarning(Format("High rear camber: %1°").arg(setup.camberRear));
     }
     
     return result;
@@ -142,11 +185,11 @@ ValidationResult PhysicsValidator::validateWeightDistribution(float frontPercent
     ValidationResult result;
     
     if (frontPercent < 30.0f || frontPercent > 70.0f) {
-        result.addError(std::string("Front weight distribution extreme: %1%").arg(frontPercent));
+        result.addError(Format("Front weight distribution extreme: %1%").arg(frontPercent));
     }
     
     if (leftPercent < 40.0f || leftPercent > 60.0f) {
-        result.addWarning(std::string("Lateral weight distribution uneven: %1%").arg(leftPercent));
+        result.addWarning(Format("Lateral weight distribution uneven: %1%").arg(leftPercent));
     }
     
     if (frontPercent > 60.0f) {
@@ -167,34 +210,34 @@ ValidationResult PhysicsValidator::validateWeightDistribution(float frontPercent
 ValidationResult PhysicsValidator::validateTrack(const TrackLayout& layout) {
     ValidationResult result;
     
-    if (layout.name.isEmpty()) {
+    if (layout.name.empty()) {
         result.addError("Track name is empty");
     }
     
     ValidationResult lengthResult = validateTrackLength(layout.length);
     if (!lengthResult.isValid) {
-        result.errors.append(lengthResult.errors);
+        ksAppendAll(result.errors, lengthResult.errors);
     }
-    result.warnings.append(lengthResult.warnings);
+    ksAppendAll(result.warnings, lengthResult.warnings);
     
     if (layout.sectors.size() < 3) {
         result.addWarning("Track has fewer than 3 sectors");
     } else {
         ValidationResult sectorResult = validateSectors(layout.sectors);
         if (!sectorResult.isValid) {
-            result.errors.append(sectorResult.errors);
+            ksAppendAll(result.errors, sectorResult.errors);
         }
-        result.warnings.append(sectorResult.warnings);
+        ksAppendAll(result.warnings, sectorResult.warnings);
     }
     
-    if (layout.corners.isEmpty()) {
+    if (layout.corners.empty()) {
         result.addWarning("No corners defined for track");
     } else {
         ValidationResult cornerResult = validateCorners(layout.corners);
         if (!cornerResult.isValid) {
-            result.errors.append(cornerResult.errors);
+            ksAppendAll(result.errors, cornerResult.errors);
         }
-        result.warnings.append(cornerResult.warnings);
+        ksAppendAll(result.warnings, cornerResult.warnings);
     }
     
     if (layout.pitEntryDistance < 0 || layout.pitExitDistance < 0) {
@@ -202,7 +245,7 @@ ValidationResult PhysicsValidator::validateTrack(const TrackLayout& layout) {
     }
     
     if (layout.pitSpeedLimit < 1.0f || layout.pitSpeedLimit > 100.0f) {
-        result.addWarning(std::string("Unusual pit speed limit: %1 km/h").arg(layout.pitSpeedLimit));
+        result.addWarning(Format("Unusual pit speed limit: %1 km/h").arg(layout.pitSpeedLimit));
     }
     
     return result;
@@ -211,7 +254,7 @@ ValidationResult PhysicsValidator::validateTrack(const TrackLayout& layout) {
 ValidationResult PhysicsValidator::validateSectors(const std::vector<TrackSector>& sectors) {
     ValidationResult result;
     
-    if (sectors.isEmpty()) {
+    if (sectors.empty()) {
         result.addError("No sectors defined");
         return result;
     }
@@ -219,14 +262,14 @@ ValidationResult PhysicsValidator::validateSectors(const std::vector<TrackSector
     double prevEnd = 0.0;
     for (int i = 0; i < sectors.size(); ++i) {
         const auto& sector = sectors[i];
-        if (sector.name.isEmpty()) {
-            result.addWarning(std::string("Sector %1 has no name").arg(i));
+        if (sector.name.empty()) {
+            result.addWarning(Format("Sector %1 has no name").arg(i));
         }
         if (sector.startDistance < 0 || sector.endDistance <= sector.startDistance) {
-            result.addError(std::string("Invalid sector boundaries for sector %1").arg(i));
+            result.addError(Format("Invalid sector boundaries for sector %1").arg(i));
         }
         if (i > 0 && sector.startDistance != prevEnd) {
-            result.addWarning(std::string("Sector %1 start doesn't match previous sector end").arg(i));
+            result.addWarning(Format("Sector %1 start doesn't match previous sector end").arg(i));
         }
         prevEnd = sector.endDistance;
     }
@@ -238,7 +281,7 @@ ValidationResult PhysicsValidator::validateTrackLength(float length) {
     ValidationResult result;
     
     if (length < 500.0f || length > 50000.0f) {
-        result.addError(std::string("Track length out of range: %1 m (500-50000)").arg(length));
+        result.addError(Format("Track length out of range: %1 m (500-50000)").arg(length));
     }
     
     if (length < 1000.0f) {
@@ -255,19 +298,19 @@ ValidationResult PhysicsValidator::validateTrackLength(float length) {
 ValidationResult PhysicsValidator::validateCorners(const std::vector<TrackCorner>& corners) {
     ValidationResult result;
     
-    if (corners.isEmpty()) return result;
+    if (corners.empty()) return result;
     
     for (int i = 0; i < corners.size(); ++i) {
         const auto& corner = corners[i];
-        if (corner.name.isEmpty()) {
-            result.addWarning(std::string("Corner %1 has no name").arg(i));
+        if (corner.name.empty()) {
+            result.addWarning(Format("Corner %1 has no name").arg(i));
         }
         if (corner.radius < 1.0f || corner.radius > 500.0f) {
-            result.addWarning(std::string("Unusual radius for corner %1: %2 m").arg(i).arg(corner.radius));
+            result.addWarning(Format("Unusual radius for corner %1: %2 m").arg(i).arg(corner.radius));
         }
         checkCornerRadius(corner.radius, result);
         if (i > 0 && std::abs(corner.position - corners[i-1].position) < 10.0f) {
-            result.addWarning(std::string("Corners %1 and %2 very close").arg(i-1).arg(i));
+            result.addWarning(Format("Corners %1 and %2 very close").arg(i-1).arg(i));
         }
     }
     
@@ -285,7 +328,7 @@ ValidationResult PhysicsValidator::validateWeather(const WeatherState& weather) 
     validateTemperature(weather.trackTemp, -40.0f, 80.0f, result);
     
     if (weather.airDensity < 0.8f || weather.airDensity > 1.5f) {
-        result.addWarning(std::string("Unusual air density: %1 kg/m³").arg(weather.airDensity));
+        result.addWarning(Format("Unusual air density: %1 kg/m³").arg(weather.airDensity));
     }
     
     if (weather.trackWetness < 0.0f || weather.trackWetness > 1.0f) {
@@ -297,7 +340,7 @@ ValidationResult PhysicsValidator::validateWeather(const WeatherState& weather) 
     }
     
     if (weather.windSpeed < 0.0f || weather.windSpeed > 50.0f) {
-        result.addWarning(std::string("Unusual wind speed: %1 m/s").arg(weather.windSpeed));
+        result.addWarning(Format("Unusual wind speed: %1 m/s").arg(weather.windSpeed));
     }
     
     if (weather.humidity < 0.0f || weather.humidity > 1.0f) {
@@ -323,7 +366,7 @@ ValidationResult PhysicsValidator::validateTemperature(float temp, float minTemp
 
 void PhysicsValidator::validateTemperature(float temp, float minTemp, float maxTemp, ValidationResult& result) {
     if (temp < minTemp || temp > maxTemp) {
-        result.addError(std::string("Temperature out of range: %1°C (%2 to %3)")
+        result.addError(Format("Temperature out of range: %1°C (%2 to %3)")
                        .arg(temp).arg(minTemp).arg(maxTemp));
     }
 }
@@ -336,19 +379,19 @@ ValidationResult PhysicsValidator::validateSimulationConfig(const SimulationConf
     ValidationResult result;
     
     if (config.fixedTimeStep <= 0.0f || config.fixedTimeStep > 0.1f) {
-        result.addError(std::string("Fixed time step out of range: %1 (0.0001-0.1)").arg(config.fixedTimeStep));
+        result.addError(Format("Fixed time step out of range: %1 (0.0001-0.1)").arg(config.fixedTimeStep));
     }
     
     if (config.solverIterations < 1 || config.solverIterations > 100) {
-        result.addWarning(std::string("Unusual solver iterations: %1 (1-100)").arg(config.solverIterations));
+        result.addWarning(Format("Unusual solver iterations: %1 (1-100)").arg(config.solverIterations));
     }
     
     if (config.airDensity < 0.8f || config.airDensity > 1.5f) {
-        result.addWarning(std::string("Unusual air density: %1 kg/m³").arg(config.airDensity));
+        result.addWarning(Format("Unusual air density: %1 kg/m³").arg(config.airDensity));
     }
     
     if (config.gravity < 0.0f || config.gravity > 20.0f) {
-        result.addError(std::string("Gravity out of range: %1 m/s²").arg(config.gravity));
+        result.addError(Format("Gravity out of range: %1 m/s²").arg(config.gravity));
     }
     
     return result;
@@ -363,11 +406,11 @@ ValidationResult PhysicsValidator::validateSimulationStability(const SimulationS
     }
     
     if (state.speed > Constants::MAX_REASONABLE_SPEED) {
-        result.addError(std::string("Speed exceeds maximum reasonable: %1 m/s").arg(state.speed));
+        result.addError(Format("Speed exceeds maximum reasonable: %1 m/s").arg(state.speed));
     }
     
     if (state.rpm > Constants::MAX_REASONABLE_RPM) {
-        result.addWarning(std::string("RPM exceeds maximum reasonable: %1").arg(state.rpm));
+        result.addWarning(Format("RPM exceeds maximum reasonable: %1").arg(state.rpm));
     }
     
     float kineticEnergy = state.kineticEnergy(1000.0f);
@@ -386,7 +429,7 @@ ValidationResult PhysicsValidator::validateTimeStep(float dt) {
     }
     
     if (dt > 0.1f) {
-        result.addError(std::string("Time step too large: %1 (max 0.1)").arg(dt));
+        result.addError(Format("Time step too large: %1 (max 0.1)").arg(dt));
     }
     
     if (dt < 1e-6f) {
@@ -414,11 +457,11 @@ ValidationResult PhysicsValidator::validateTireState(const TireForceData& data) 
     }
     
     if (std::abs(data.lateralForce) > 50000.0f) {
-        result.addWarning(std::string("Lateral force unusually high: %1 N").arg(data.lateralForce));
+        result.addWarning(Format("Lateral force unusually high: %1 N").arg(data.lateralForce));
     }
     
     if (std::abs(data.longitudinalForce) > 50000.0f) {
-        result.addWarning(std::string("Longitudinal force unusually high: %1 N").arg(data.longitudinalForce));
+        result.addWarning(Format("Longitudinal force unusually high: %1 N").arg(data.longitudinalForce));
     }
     
     return result;
@@ -429,10 +472,10 @@ ValidationResult PhysicsValidator::validateTireTemperatures(const float temps[4]
     
     for (int i = 0; i < 4; ++i) {
         if (!isFinite(temps[i])) {
-            result.addError(std::string("Tire temperature %1 is NaN or Inf").arg(i));
+            result.addError(Format("Tire temperature %1 is NaN or Inf").arg(i));
         }
         if (temps[i] < -20.0f || temps[i] > 200.0f) {
-            result.addWarning(std::string("Tire temperature %1 out of range: %2°C").arg(i).arg(temps[i]));
+            result.addWarning(Format("Tire temperature %1 out of range: %2°C").arg(i).arg(temps[i]));
         }
     }
     
@@ -440,7 +483,7 @@ ValidationResult PhysicsValidator::validateTireTemperatures(const float temps[4]
     float maxTemp = std::max({temps[0], temps[1], temps[2], temps[3]});
     float minTemp = std::min({temps[0], temps[1], temps[2], temps[3]});
     if (maxTemp - minTemp > 50.0f) {
-        result.addWarning(std::string("Large tire temperature spread: %1°C").arg(maxTemp - minTemp));
+        result.addWarning(Format("Large tire temperature spread: %1°C").arg(maxTemp - minTemp));
     }
     
     return result;
@@ -454,13 +497,13 @@ ValidationResult PhysicsValidator::validateDriverInput(float throttle, float bra
     ValidationResult result;
     
     if (!isInRange(throttle, 0.0f, 1.0f)) {
-        result.addError(std::string("Throttle out of range: %1").arg(throttle));
+        result.addError(Format("Throttle out of range: %1").arg(throttle));
     }
     if (!isInRange(brake, 0.0f, 1.0f)) {
-        result.addError(std::string("Brake out of range: %1").arg(brake));
+        result.addError(Format("Brake out of range: %1").arg(brake));
     }
     if (!isInRange(steering, -1.0f, 1.0f)) {
-        result.addError(std::string("Steering out of range: %1").arg(steering));
+        result.addError(Format("Steering out of range: %1").arg(steering));
     }
     
     if (throttle > 0.9f && brake > 0.9f) {
@@ -483,33 +526,33 @@ bool PhysicsValidator::isInRange(float value, float min, float max) {
 }
 
 std::string PhysicsValidator::formatFloat(float value, int precision) {
-    return std::string::number(value, 'f', precision);
+    return ksNum(value, 'f', precision);
 }
 
 void PhysicsValidator::checkPowerToWeight(float mass, float power, ValidationResult& result) {
     float ratio = power / mass;
     if (ratio > 1.0f) {
-        result.addWarning(std::string("Very high power-to-weight ratio: %1 kW/kg").arg(ratio));
+        result.addWarning(Format("Very high power-to-weight ratio: %1 kW/kg").arg(ratio));
         result.addSuggestion("High power-to-weight - consider aero and tire upgrades");
     }
     if (ratio < 0.1f) {
-        result.addWarning(std::string("Low power-to-weight ratio: %1 kW/kg").arg(ratio));
+        result.addWarning(Format("Low power-to-weight ratio: %1 kW/kg").arg(ratio));
         result.addSuggestion("Low power-to-weight - focus on cornering speed");
     }
 }
 
 void PhysicsValidator::checkTireLoad(float load, float maxLoad, ValidationResult& result) {
     if (load > maxLoad) {
-        result.addWarning(std::string("Tire load exceeds maximum: %1 N (max %2)").arg(load).arg(maxLoad));
+        result.addWarning(Format("Tire load exceeds maximum: %1 N (max %2)").arg(load).arg(maxLoad));
     }
 }
 
 void PhysicsValidator::checkCornerRadius(float radius, ValidationResult& result) {
     if (radius < 5.0f) {
-        result.addWarning(std::string("Very tight corner radius: %1 m").arg(radius));
+        result.addWarning(Format("Very tight corner radius: %1 m").arg(radius));
     }
     if (radius > 500.0f) {
-        result.addWarning(std::string("Very large corner radius: %1 m").arg(radius));
+        result.addWarning(Format("Very large corner radius: %1 m").arg(radius));
     }
 }
 
@@ -648,32 +691,32 @@ ValidationResult PhysicsValidator::validateAll(const SimulationState& state) {
     ValidationResult result;
     
     // Check position
-    if (!isFinite(state.position.x()) || !isFinite(state.position.y()) || !isFinite(state.position.z())) {
+    if (!isFinite(state.position.x) || !isFinite(state.position.y) || !isFinite(state.position.z)) {
         result.addError("Position contains NaN or Inf");
     }
     
     // Check velocity
-    if (!isFinite(state.velocity.x()) || !isFinite(state.velocity.y()) || !isFinite(state.velocity.z())) {
+    if (!isFinite(state.velocity.x) || !isFinite(state.velocity.y) || !isFinite(state.velocity.z)) {
         result.addError("Velocity contains NaN or Inf");
     }
     
     // Check speed
     auto speedError = validateSpeed(state.speed);
     if (speedError) {
-        result.addError(std::string::fromStdString(*speedError));
+        result.addError(std::string(*speedError));
     }
     
     // Check RPM
     auto rpmError = validateRpm(state.rpm);
     if (rpmError) {
-        result.addError(std::string::fromStdString(*rpmError));
+        result.addError(std::string(*rpmError));
     }
     
     // Check tire temperatures
     for (int i = 0; i < 4; ++i) {
         auto tempError = validateTemperature(state.tyreTemp[i], -40.0, 150.0);
         if (tempError) {
-            result.addWarning(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*tempError)));
+            result.addWarning(Format("Wheel %1: %2").arg(i).arg(std::string(*tempError)));
         }
     }
     
@@ -689,31 +732,31 @@ ValidationResult PhysicsValidator::validateWheelStates(const std::array<TireWhee
         // Check normal load
         auto loadError = validateNormalLoad(wheel.normalLoad);
         if (loadError) {
-            result.addError(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*loadError)));
+            result.addError(Format("Wheel %1: %2").arg(i).arg(std::string(*loadError)));
         }
         
         // Check slip angle
         auto slipAngleError = validateTireSlipAngle(wheel.slipAngle);
         if (slipAngleError) {
-            result.addWarning(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*slipAngleError)));
+            result.addWarning(Format("Wheel %1: %2").arg(i).arg(std::string(*slipAngleError)));
         }
         
         // Check slip ratio
         auto slipRatioError = validateTireSlipRatio(wheel.slipRatio);
         if (slipRatioError) {
-            result.addWarning(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*slipRatioError)));
+            result.addWarning(Format("Wheel %1: %2").arg(i).arg(std::string(*slipRatioError)));
         }
         
         // Check temperature
         auto tempError = validateTemperature(wheel.temperature, -40.0, 150.0);
         if (tempError) {
-            result.addWarning(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*tempError)));
+            result.addWarning(Format("Wheel %1: %2").arg(i).arg(std::string(*tempError)));
         }
         
         // Check pressure
         auto pressureError = validatePressure(wheel.pressure);
         if (pressureError) {
-            result.addWarning(std::string("Wheel %1: %2").arg(i).arg(std::string::fromStdString(*pressureError)));
+            result.addWarning(Format("Wheel %1: %2").arg(i).arg(std::string(*pressureError)));
         }
     }
     
