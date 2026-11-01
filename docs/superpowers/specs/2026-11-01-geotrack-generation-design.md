@@ -190,7 +190,14 @@ albedo per chunk, una riga di `materials.txt` cadauno, `--chunk` per il lato). U
 per mesh e' quello che il renderer legge oggi, quindi le tile arrivano a schermo senza
 toccare il motore; il numero di chunk e' il primo livello di LOD.
 
+**Correzione della centerline**: `--correct [raggio]` rasterizza l'asfalto a 1 m/px,
+lo assottiglia a scheletro (Zhang-Suen) e sposta ogni stazione sul punto di scheletro
+piu' vicino entro il raggio (default 6 m), ricostruendo tangenti, sinistra, ascissa e
+curvatura sulle nuove posizioni. Il numero di stazioni resta quello di partenza:
+si corregge la posizione, non la topologia. `scene.json` riporta
+`centerline_shift_m`. `thinMask`/`stitchLap` restano file-local in
+`tools/trackmodules/TrackModulesCore.cpp`: non sono stati riusati per non toccare un
+file con modifiche locali non committate.
+
 **Resta**: LOD dei chunk a runtime nel motore (oggi il chunk piu' distante costa come
-quello sotto la macchina) e correzione della centerline vettoriale con lo skeleton
-dell'asfalto (`thinMask`, `stitchLap` sono ancora file-local in
-`tools/trackmodules/TrackModulesCore.cpp`).
+quello sotto la macchina).

@@ -141,3 +141,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TileMosaic.h")
     target_link_libraries(geotrack_tiles_test PRIVATE ksengine)
     add_test(NAME geotrack_tiles_test COMMAND geotrack_tiles_test)
 endif()
+
+# Geotrack fase 2 — scheletro dell'asfalto e snap della centerline.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/AsphaltSkeleton.h")
+    add_executable(geotrack_skeleton_test
+        geotrack_skeleton_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
+    target_include_directories(geotrack_skeleton_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(geotrack_skeleton_test PRIVATE ksengine)
+    add_test(NAME geotrack_skeleton_test COMMAND geotrack_skeleton_test)
+endif()

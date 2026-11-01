@@ -23,6 +23,9 @@ ks_geotrack giro.csv out/miapista --ortho satellite.png --width 12 --keep-width
 # mosaico di tile gia' in cache: misura + fondo a chunk
 ks_geotrack giro.csv out/miapista --tiles cache/cache.json --chunk 300
 
+# riallinea la centerline sul centro dell'asfalto (raggio di ricerca 8 m)
+ks_geotrack giro.csv out/miapista --tiles cache/cache.json --correct 8
+
 # 2) cache di vettoriale e tile (opzionale, richiede rete)
 python3 tools/geotrack/fetch_cache.py cache --bounds 50.32,6.93,50.35,6.98 \
         --overpass --tile-url "https://<provider>/{z}/{x}/{y}.png" --zoom 18
@@ -66,7 +69,11 @@ asfalto 0.02, kerb 0.03, griglia 0.06) per evitare lo z-fighting.
   fondo. Il fondo esce a chunk (`ground_<x>_<z>`), una mesh e un albedo per chunk,
   perche' il renderer ha un albedo per mesh: `--chunk` decide il lato e quindi il
   primo livello di LOD.
+- `--correct [M]` rasterizza l'asfalto a 1 m/px sul quadrato, lo assottiglia a
+  scheletro (Zhang-Suen) e sposta ogni stazione sul punto di scheletro più vicino
+  entro il raggio (default 6 m). Il numero di stazioni non cambia: si corregge la
+  posizione, non la topologia. Lo spostamento medio finisce in
+  `scene.json` (`centerline_shift_m`) e a video.
 - Resta da fare, del design doc
   (`docs/superpowers/specs/2026-11-01-geotrack-generation-design.md`): LOD dei
-  chunk a runtime nel motore e correzione della centerline sullo skeleton
-  dell'asfalto.
+  chunk a runtime nel motore.

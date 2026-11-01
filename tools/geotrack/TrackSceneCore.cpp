@@ -5,6 +5,7 @@
 #include "engine/AI/AiFileWriter.h"
 #include "engine/FileFormat/Json.h"
 #include "engine/terrain/TerrainMesh.h"
+#include "geotrack/AsphaltSkeleton.h"
 #include "geotrack/Centerline.h"
 #include "geotrack/GeoProjection.h"
 #include "geotrack/Materials.h"
@@ -132,7 +133,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         if (error) *error = "track shorter than 100 m";
         return false;
     }
-    const std::vector<Station> stations = buildStations(pts, cfg.stepM, cfg.closed);
+    std::vector<Station> stations = buildStations(pts, cfg.stepM, cfg.closed);
     if (stations.size() < 4) {
         if (error) *error = "not enough stations for a track";
         return false;
@@ -157,13 +158,48 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         if (!mosaic.loadCache(cfg.tileCachePath, projection, &tileError)) return fail(tileError);
     }
 
+    OrthoImage ortho;
+    if (!cfg.orthoPath.empty()) {
+        std::string orthoError;
+        if (!ortho.load(cfg.orthoPath, square, &orthoError)) return fail(orthoError);
+    }
+
+    // --- correzione della centerline sullo skeleton dell'asfalto ----------
+    double centerlineShiftM = 0.0;
+    {
+        const auto applyCorrection = [&](const auto& sampler) {
+            MaskGrid skeletonGrid = rasterizeAsphalt(sampler, square, 1.0);
+            thinZhangSuen(skeletonGrid);
+            std::vector<Enu> positions;
+            positions.reserve(stations.size());
+            for (const Station& s : stations) positions.push_back(s.p);
+            const std::vector<Enu> snapped =
+                snapToSkeleton(positions, skeletonGrid, cfg.correctSearchM);
+            // Stesso numero di stazioni: si corregge la posizione, non la
+            // topologia (ricampionare cambierebbe anche la lunghezza).
+            const std::vector<Station> rebuilt =
+                restationFromPoints(stations, snapped, cfg.closed);
+            double total = 0.0;
+            for (std::size_t i = 0; i < stations.size(); ++i)
+                total += std::hypot(rebuilt[i].p.x - stations[i].p.x,
+                                    rebuilt[i].p.z - stations[i].p.z);
+            centerlineShiftM = total / static_cast<double>(stations.size());
+            stations = rebuilt;
+            return true;
+        };
+        if (cfg.correctCenterline) {
+            if (ortho.valid()) {
+                applyCorrection(ortho);
+            } else if (mosaic.valid()) {
+                applyCorrection(mosaic);
+            }
+        }
+    }
+
     double widthM = cfg.widthM;
     double measuredWidthM = 0.0;
     int widthSamples = 0;
-    if (!cfg.orthoPath.empty()) {
-        OrthoImage ortho;
-        std::string orthoError;
-        if (!ortho.load(cfg.orthoPath, square, &orthoError)) return fail(orthoError);
+    if (ortho.valid()) {
         const WidthMeasurement measured = measureTrackWidth(ortho, stations, 4.0, 25.0);
         if (measured.samples < 20)
             return fail("ortho: too few asphalt samples along the centerline");
@@ -392,6 +428,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         scene.insert("width_samples", jsonInt(widthSamples));
         scene.insert("ortho", jsonStr(cfg.orthoPath));
     }
+    if (centerlineShiftM > 0.0) scene.insert("centerline_shift_m", jsonNum(centerlineShiftM));
     Json layerJson = Json::array();
     for (const std::string& name : layers) layerJson.append(jsonStr(name));
     scene.insert("layers", layerJson);
@@ -407,6 +444,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         out->gridSlots = gridCount;
         out->measuredWidthM = measuredWidthM;
         out->widthSamples = widthSamples;
+        out->centerlineShiftM = centerlineShiftM;
         out->groundChunks = groundChunks;
     }
     return true;

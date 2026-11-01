@@ -32,6 +32,8 @@ void usage() {
         "  --tiles FILE             cache.json from fetch_cache.py: tile mosaic\n"
         "                           for the measurement and the ground texture\n"
         "  --chunk M                ground chunk size with --tiles (default 1024)\n"
+        "  --correct [M]            snap the centerline onto the asphalt skeleton\n"
+        "                           (search radius, default 6 m)\n"
         "  --keep-width             report the measurement, keep --width\n"
         "centerline: .csv (lat,lon), .geojson (LineString) or .gpx\n");
 }
@@ -94,6 +96,11 @@ int main(int argc, char** argv) {
             cfg.chunkSizeM = std::atof(value("--chunk").c_str());
         } else if (arg == "--keep-width") {
             cfg.keepWidth = true;
+        } else if (arg == "--correct") {
+            cfg.correctCenterline = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                cfg.correctSearchM = std::atof(argv[++i]);
+            }
         } else if (arg == "--pit") {
             const std::string list = value("--pit");
             std::size_t cursor = 0;
@@ -136,6 +143,8 @@ int main(int argc, char** argv) {
     if (res.widthSamples > 0)
         std::printf("measured width=%.2f m (%d samples)\n", res.measuredWidthM, res.widthSamples);
     if (res.groundChunks > 0) std::printf("ground chunks=%d\n", res.groundChunks);
+    if (res.centerlineShiftM > 0.0)
+        std::printf("centerline shift=%.2f m\n", res.centerlineShiftM);
     std::printf("out=%s\n", cfg.outDir.c_str());
     return 0;
 }

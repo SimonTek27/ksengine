@@ -34,6 +34,8 @@ struct GeotrackConfig {
     std::string tileCachePath;     ///< cache.json del mosaico di tile (fase 2)
     double chunkSizeM = 1024.0;    ///< lato dei chunk del fondo quando ci sono tile
     bool keepWidth = false;        ///< non sostituire widthM con la misura
+    bool correctCenterline = false; ///< riallinea la centerline sullo skeleton dell'asfalto
+    double correctSearchM = 6.0;    ///< raggio di ricerca dello snap
 };
 
 struct GeotrackResult {
@@ -45,6 +47,7 @@ struct GeotrackResult {
     int gridSlots = 0;
     double measuredWidthM = 0.0; ///< 0 = nessuna immagine letta
     int widthSamples = 0;
+    double centerlineShiftM = 0.0; ///< spostamento medio della centerline corretta
     int groundChunks = 0; ///< 0 = fondo unico non texturizzato
 };
 
