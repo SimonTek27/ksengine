@@ -60,7 +60,8 @@ if(TARGET ks_tracktool)
     set_tests_properties(track_tool_usage PROPERTIES WILL_FAIL TRUE)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
+# WASAPIOutput.cpp is Windows-only, so neither of these can build elsewhere.
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
     add_executable(test_audio_render
         test_audio_render.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
@@ -76,7 +77,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
     add_test(NAME test_audio_render COMMAND test_audio_render)
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
     add_executable(test_audio_3d
         test_audio_3d.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"

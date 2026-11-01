@@ -82,6 +82,11 @@ foreach(_t ${KS_QT_FREE_TESTS})
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_t}.cpp")
         add_executable(${_t} "${_t}.cpp")
         target_link_libraries(${_t} PRIVATE ksengine)
+        # tools/ carries the geotrack headers as geotrack/<Name>.h, which the
+        # geotrack_* tests include directly. Only the phase-3 geotrack targets
+        # declared this, so these three failed to compile from a clean tree.
+        target_include_directories(${_t} PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
         add_test(NAME ${_t} COMMAND ${_t})
     endif()
 endforeach()
