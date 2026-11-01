@@ -185,7 +185,14 @@ namespace net {
 struct NetworkStats { float rtt = 0; float packetLoss = 0; float sendBandwidth = 0; float recvBandwidth = 0; };
 struct CarStateData { float posX=0,posY=0,posZ=0,rotX=0,rotY=0,rotZ=0,velX=0,velY=0,velZ=0,speed=0,rpm=0; int gear=0; float throttle=0,brake=0,steering=0; };
 class NetworkClient {};
-class NetworkServer {};
+class NetworkServer {
+public:
+    // Same signature as the real server so the no-network build still parses
+    // the hosting code in SimulationLoop. 0 means "this client drives no car".
+    int getClientCount() const { return 0; }
+    std::string getClientName(int) const { return {}; }
+    uint32_t getClientCarId(int) const { return 0; }
+};
 }
 
 class NetworkManager {

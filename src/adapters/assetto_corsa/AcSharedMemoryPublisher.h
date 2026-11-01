@@ -82,11 +82,11 @@ public:
             fdOut = shm_open(name, O_CREAT | O_RDWR, 0666);
             if (fdOut < 0) return false;
             if (ftruncate(fdOut, static_cast<off_t>(sz)) != 0) {
-                close(fdOut); fdOut = -1; return false;
+                ::close(fdOut); fdOut = -1; return false;
             }
             ptrOut = mmap(nullptr, sz, PROT_READ | PROT_WRITE, MAP_SHARED, fdOut, 0);
             if (ptrOut == MAP_FAILED) {
-                close(fdOut); fdOut = -1; ptrOut = nullptr; return false;
+                ::close(fdOut); fdOut = -1; ptrOut = nullptr; return false;
             }
             return true;
         };
@@ -182,7 +182,7 @@ private:
 #else
         auto unmap = [](void* p, size_t sz, int fd) {
             if (p && p != MAP_FAILED) munmap(p, sz);
-            if (fd >= 0) close(fd);
+            if (fd >= 0) ::close(fd);
         };
         if (m_phys && m_phys != &m_physSoft)
             unmap(m_phys, acShmMappingSize(sizeof(AcPhysicsPage)), m_physFd);
