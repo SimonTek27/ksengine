@@ -213,6 +213,15 @@ target_include_directories(ksengine PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
+# 2c. Third-party headers the repo does not vendor: Vulkan, GLFW and Dear ImGui.
+#     find_package(Vulkan) below covers a system install; this variable covers
+#     everything else, including the case where a preset points it at a
+#     checkout via $penv{...}. Empty by default, so nothing changes for the
+#     Windows builds that get these from vcpkg.
+if(KSENGINE_EXTRA_INCLUDE_DIRS)
+	target_include_directories(ksengine PUBLIC ${KSENGINE_EXTRA_INCLUDE_DIRS})
+endif()
+
 # 2b. Lua. The vendored copy wins over a system install (both would otherwise
 #     race to define HAS_LUA, and mixing two lua.h would be worse than either).
 #     PUBLIC, so ksengine's consumers see lua.h and resolve the symbols out of

@@ -43,7 +43,8 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_CXX_STANDARD": "17",
         "KSENGINE_QT_FREE": "ON",
-        "KSENGINE_SHARED": "OFF"
+        "KSENGINE_SHARED": "OFF",
+        "KSENGINE_EXTRA_INCLUDE_DIRS": "$penv{KS_DEPS_INCLUDE}"
       }
     },
     {
