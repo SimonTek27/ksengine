@@ -76,6 +76,7 @@ set(KS_QT_FREE_TESTS
     geotrack_geo_test
     geotrack_centerline_test
     geotrack_strips_test
+    track_physics_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})
