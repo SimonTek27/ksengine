@@ -33,12 +33,6 @@ foreach(_pat
     "VehiclePhysicsModels"
     "TireCurveEditor"
     "PhysicsSimulations"
-    # Real code that does not build yet: TrackPhysics.cpp was half ported. Its
-    # includes are Qt-free but the body still uses QFile/QJsonDocument in
-    # loadTrack, QDateTime for lap timestamps and QVariantMap for replay frames,
-    # so it needs a port (including a decision on what a replay frame is now),
-    # not a repair.
-    "TrackPhysics"
     "devices/3dprint/"
     "devices/scanners/"
     "SimulatorApp"

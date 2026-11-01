@@ -2,6 +2,7 @@
 #include <string>
 #include "PhysicsCoreTypes.h"
 #include "TrackPhysics.h"
+#include "FileFormat/Json.h"
 #include "VehiclePhysics.h"
 
 #include <cmath>
@@ -9,9 +10,29 @@
 #include <cstdio>
 #include <cmath>
 #include <fstream>
+#include <iterator>
+#include <utility>
 #include <ctime>
 
 namespace ks::physics {
+
+namespace {
+
+// Qt::ISODate equivalent for lap records: local time, second precision.
+std::string ksIsoTimestamp() {
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%S", &local);
+    return std::string(buf);
+}
+
+} // namespace
 
 // ============================================================================
 // Track Surface Model
@@ -294,86 +315,82 @@ TrackSimulator::~TrackSimulator() {
 // ============================================================================
 
 bool TrackSimulator::loadTrack(const std::string& trackPath) {
-    QFile file(trackPath);
-    if (!file.open(QIODevice::ReadOnly)) {
-        std::fprintf(stderr, "%s
-", "TrackSimulator: Cannot open track file:" << trackPath;
+    std::ifstream in(trackPath, std::ios::binary);
+    if (!in) {
+        std::fprintf(stderr, "TrackSimulator: cannot open track file: %s\n",
+                     trackPath.c_str());
         return false;
     }
 
-    QJsonParseError error;
-    QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
-    file.close();
-
-    if (error.error != QJsonParseError::NoError) {
-        std::fprintf(stderr, "%s
-", "TrackSimulator: Invalid JSON in track file:" << error.errorString();
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    bool parsed = false;
+    std::string parseError;
+    const Json root = Json::parse(text, &parsed, &parseError);
+    if (!parsed) {
+        std::fprintf(stderr, "TrackSimulator: invalid JSON in track file: %s\n",
+                     parseError.c_str());
         return false;
     }
 
-    QJsonObject obj = doc.object();
+    m_trackLayout.name = root["name"].toString();
+    m_trackLayout.config = root["config"].toString();
+    m_trackLayout.length = root["length"].toDouble();
 
-    m_trackLayout.name = obj["name"].toString();
-    m_trackLayout.config = obj["config"].toString();
-    m_trackLayout.length = obj["length"].toDouble();
-
-    QJsonObject sf = obj["startFinish"].toObject();
+    const Json sf = root["startFinish"];
     m_trackLayout.startFinishPosition = PhysVec3(
-        sf["x"].toDouble(), sf["y"].toDouble(), sf["z"].toDouble());
+        static_cast<float>(sf["x"].toDouble()),
+        static_cast<float>(sf["y"].toDouble()),
+        static_cast<float>(sf["z"].toDouble()));
     m_trackLayout.startFinishDirection = PhysVec3(
-        sf["dirX"].toDouble(), sf["dirY"].toDouble(), sf["dirZ"].toDouble());
+        static_cast<float>(sf["dirX"].toDouble()),
+        static_cast<float>(sf["dirY"].toDouble()),
+        static_cast<float>(sf["dirZ"].toDouble()));
 
-    QJsonArray sectorsArray = obj["sectors"].toArray();
-    for (const QJsonValue& val : sectorsArray) {
-        QJsonObject s = val.toObject();
+    for (const Json& val : root["sectors"]) {
         TrackSector sector;
-        sector.name = s["name"].toString();
-        sector.startDistance = s["startDistance"].toDouble();
-        sector.endDistance = s["endDistance"].toDouble();
-        m_trackLayout.sectors.append(sector);
+        sector.name = val["name"].toString();
+        sector.startDistance = val["startDistance"].toDouble();
+        sector.endDistance = val["endDistance"].toDouble();
+        m_trackLayout.sectors.push_back(sector);
     }
 
-    QJsonArray cornersArray = obj["corners"].toArray();
-    for (const QJsonValue& val : cornersArray) {
-        QJsonObject c = val.toObject();
+    for (const Json& val : root["corners"]) {
         TrackCorner corner;
-        corner.number = c["number"].toInt();
-        corner.name = c["name"].toString();
-        corner.position = c["position"].toDouble();
-        corner.radius = c["radius"].toDouble();
-        corner.entrySpeed = c["entrySpeed"].toDouble();
-        corner.apexSpeed = c["apexSpeed"].toDouble();
-        corner.exitSpeed = c["exitSpeed"].toDouble();
-        corner.banking = c["banking"].toDouble();
-        corner.type = static_cast<TrackCorner::Type>(c["type"].toInt());
-        m_trackLayout.corners.append(corner);
+        corner.number = val["number"].toInt();
+        corner.name = val["name"].toString();
+        corner.position = val["position"].toDouble();
+        corner.radius = val["radius"].toDouble();
+        corner.entrySpeed = val["entrySpeed"].toDouble();
+        corner.apexSpeed = val["apexSpeed"].toDouble();
+        corner.exitSpeed = val["exitSpeed"].toDouble();
+        corner.banking = val["banking"].toDouble();
+        corner.type = static_cast<TrackCorner::Type>(val["type"].toInt());
+        m_trackLayout.corners.push_back(corner);
     }
 
-    QJsonArray rlArray = obj["racingLine"].toArray();
-    for (const QJsonValue& val : rlArray) {
-        QJsonObject p = val.toObject();
-        m_trackLayout.racingLine.append(PhysVec3(
-            p["x"].toDouble(), p["y"].toDouble(), p["z"].toDouble()));
-        m_trackLayout.racingLineDistances.append(p["distance"].toDouble());
+    for (const Json& val : root["racingLine"]) {
+        m_trackLayout.racingLine.push_back(PhysVec3(
+            static_cast<float>(val["x"].toDouble()),
+            static_cast<float>(val["y"].toDouble()),
+            static_cast<float>(val["z"].toDouble())));
+        m_trackLayout.racingLineDistances.push_back(val["distance"].toDouble());
     }
 
-    QJsonArray elevArray = obj["elevation"].toArray();
-    for (const QJsonValue& val : elevArray) {
-        QJsonObject e = val.toObject();
-        m_trackLayout.elevationProfile.append(
-            qMakePair(e["distance"].toDouble(), e["height"].toDouble()));
+    for (const Json& val : root["elevation"]) {
+        m_trackLayout.elevationProfile.push_back(
+            std::make_pair(val["distance"].toDouble(), val["height"].toDouble()));
     }
 
-    QJsonArray surfArray = obj["surfaceSections"].toArray();
-    for (const QJsonValue& val : surfArray) {
-        QJsonObject s = val.toObject();
+    for (const Json& val : root["surfaceSections"]) {
         TrackLayout::SurfaceSection section;
-        section.startDistance = s["startDistance"].toDouble();
-        section.endDistance = s["endDistance"].toDouble();
-        section.gripLevel = s["gripLevel"].toDouble();
-        section.bumpiness = s["bumpiness"].toDouble();
-        section.surface = static_cast<TrackLayout::SurfaceSection::Surface>(s["surfaceType"].toInt());
-        m_trackLayout.surfaceSections.append(section);
+        section.startDistance = val["startDistance"].toDouble();
+        section.endDistance = val["endDistance"].toDouble();
+        section.gripLevel = val["gripLevel"].toDouble();
+        section.bumpiness = val["bumpiness"].toDouble();
+        section.surface =
+            static_cast<TrackLayout::SurfaceSection::Surface>(val["surfaceType"].toInt());
+        m_trackLayout.surfaceSections.push_back(section);
 
         SurfaceProperties props;
         props.gripCoefficient = static_cast<float>(section.gripLevel);
@@ -394,30 +411,25 @@ bool TrackSimulator::loadTrack(const std::string& trackPath) {
         m_surfaceModel.addSurface(
             static_cast<float>(section.startDistance),
             static_cast<float>(section.endDistance),
-            props
-        );
+            props);
     }
 
-    m_trackLayout.pitEntryDistance = obj["pitEntryDistance"].toDouble();
-    m_trackLayout.pitExitDistance = obj["pitExitDistance"].toDouble();
-    m_trackLayout.pitLaneLength = obj["pitLaneLength"].toDouble();
-    m_trackLayout.pitSpeedLimit = obj["pitSpeedLimit"].toDouble();
+    m_trackLayout.pitEntryDistance = root["pitEntryDistance"].toDouble();
+    m_trackLayout.pitExitDistance = root["pitExitDistance"].toDouble();
+    m_trackLayout.pitLaneLength = root["pitLaneLength"].toDouble();
+    m_trackLayout.pitSpeedLimit = root["pitSpeedLimit"].toDouble();
 
-    QJsonArray drsArray = obj["drsZones"].toArray();
-    for (const QJsonValue& val : drsArray) {
-        QJsonObject d = val.toObject();
+    for (const Json& val : root["drsZones"]) {
         TrackLayout::DrsZone zone;
-        zone.detectionPoint = d["detectionPoint"].toDouble();
-        zone.startDistance = d["activationPoint"].toDouble();
-        zone.endDistance = d["endPoint"].toDouble();
-        m_trackLayout.drsZones.append(zone);
+        zone.detectionPoint = val["detectionPoint"].toDouble();
+        zone.startDistance = val["activationPoint"].toDouble();
+        zone.endDistance = val["endPoint"].toDouble();
+        m_trackLayout.drsZones.push_back(zone);
     }
 
-    std::fprintf(stderr, "%s
-", "TrackSimulator: Loaded track:" << m_trackLayout.name
-             << "(" << m_trackLayout.config << ") Length:" << m_trackLayout.length;
-
-    // emit trackChanged(m_trackLayout.name);
+    std::fprintf(stderr, "TrackSimulator: loaded track %s (%s), length %.1f m\n",
+                 m_trackLayout.name.c_str(), m_trackLayout.config.c_str(),
+                 m_trackLayout.length);
     return true;
 }
 
@@ -712,8 +724,8 @@ void TrackSimulator::checkStartFinishCrossing() {
             }
             record.fuelUsed = fuelRate * (lapTime / 60.0);
             record.valid = true;
-            record.timestamp = QDateTime::currentDateTime().toString(Qt::ISODate);
-            m_sessionState.lapHistory.append(record);
+            record.timestamp = ksIsoTimestamp();
+            m_sessionState.lapHistory.push_back(record);
 
             if (lapTime > 0 && lapTime < m_sessionState.bestLapTime) {
                 m_sessionState.bestLapTime = lapTime;
@@ -875,14 +887,14 @@ void TrackSimulator::recordReplayFrame() {
     double currentTime = m_sessionTimer.elapsed() / 1000.0;
     if (currentTime - m_lastReplayTime < 0.1) return;
 
-    QVariantMap frame;
-    frame["timestamp"] = currentTime;
-    frame["trackDistance"] = m_sessionState.trackDistance;
-    frame["speed"] = m_sessionState.speed;
-    frame["lapTime"] = m_sessionState.currentLapTime;
-    frame["lap"] = m_sessionState.currentLap;
-    frame["sector"] = m_sessionState.currentSector;
-    m_replayData.append(frame);
+    ReplayFrame frame;
+    frame.timestamp = currentTime;
+    frame.trackDistance = m_sessionState.trackDistance;
+    frame.speed = m_sessionState.speed;
+    frame.lapTime = m_sessionState.currentLapTime;
+    frame.lap = m_sessionState.currentLap;
+    frame.sector = m_sessionState.currentSector;
+    m_replayData.push_back(frame);
     m_lastReplayTime = currentTime;
 }
 
