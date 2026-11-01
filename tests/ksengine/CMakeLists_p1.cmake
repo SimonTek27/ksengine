@@ -14,6 +14,7 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # standalone one only gets ksengine's own PUBLIC directories (`src/engine`
     # and below), which cannot resolve that prefix.
     include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    include_directories("${CMAKE_CURRENT_SOURCE_DIR}/../../tools")
     # test_renderer loads ${CMAKE_BINARY_DIR}/shaders; the root qt-free
     # configure gets that set from SimulatorApp, so build it here too.
     include("${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/KsShaders.cmake")
@@ -72,6 +73,9 @@ set(KS_QT_FREE_TESTS
     rain_effects_test
     lod_window_test
     user_data_test
+    geotrack_geo_test
+    geotrack_centerline_test
+    geotrack_strips_test
 )
 
 foreach(_t ${KS_QT_FREE_TESTS})

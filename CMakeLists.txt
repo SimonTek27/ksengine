@@ -247,6 +247,20 @@ if(KS_QT_FREE_BUILD)
 	endif()
 	# Track module catalog (roadmap 3.8 groundwork): KN5 node inventory plus
 	# corners measured on the AI line, for the curve/kerb module library.
+	# Geotrack (fase 1): satellite + vettoriale -> cartella pista giocabile.
+	# Json.cpp viaggia con il tool, come in ks_cartool.
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/geotrack/main.cpp")
+		add_executable(ks_geotrack
+			tools/geotrack/main.cpp
+			tools/geotrack/TrackSceneCore.cpp
+			src/engine/FileFormat/Json.cpp)
+		target_include_directories(ks_geotrack PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools"
+			"${CMAKE_CURRENT_SOURCE_DIR}/src")
+		target_link_libraries(ks_geotrack PRIVATE ksengine)
+		set_target_properties(ks_geotrack PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+	endif()
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/trackmodules/main.cpp")
 		add_executable(ks_trackmodules
 			tools/trackmodules/main.cpp

@@ -91,3 +91,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
     target_link_libraries(test_audio_3d PRIVATE ksengine)
     add_test(NAME test_audio_3d COMMAND test_audio_3d)
 endif()
+
+# Geotrack fase 1 — genera una cartella pista da una centerline geografica.
+# TrackSceneCore non fa parte di ksengine; Json.cpp viaggia con il target come
+# in ks_cartool (stesso schema del tool di conversione auto).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp")
+    add_executable(geotrack_generate_test
+        geotrack_generate_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp")
+    target_include_directories(geotrack_generate_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(geotrack_generate_test PRIVATE ksengine)
+    add_test(NAME geotrack_generate_test COMMAND geotrack_generate_test)
+endif()
