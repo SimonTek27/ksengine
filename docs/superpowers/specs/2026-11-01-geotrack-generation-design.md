@@ -170,3 +170,19 @@ Verifiche di accettazione:
 - Catalogo degli asset di scenario oltre al commissario.
 - Se la fase 2 deve produrre anche il DEM; fuori scope qui.
 - Conferma dei campi garage di `data.json` leggendo il loader del pit durante l'implementazione.
+
+## Stato di implementazione (2026-11-01)
+
+**Fase 1 completa** (`tools/geotrack`, commit `b5fe99a`): la cartella pista esce con
+terreno, tracciato, kerb, vie di fuga, corsia box, griglia, quattro commissari per curva,
+piazzola safety car, linea AI di bootstrap, `data/data.json` e `scene.json`. Quattro test
+verdi (`geotrack_geo`, `_centerline`, `_strips`, `_generate`).
+
+**Fase 2, prima metà**: `--ortho <png>` misura la larghezza dell'asfalto stazione per
+stazione sull'immagine georeferenziata sul quadrato; la mediana sostituisce `--width` in
+geometria e in `data.json`, salvo `--keep-width`. La prova end-to-end misura 14 m con un
+apron dei box da 30 m presente, cioè proprio il caso che gonfiava il valore a 30–39 m.
+
+**Resta della fase 2**: mosaico di tile con piano LOD al posto dell'immagine singola, e
+correzione della centerline vettoriale con lo skeleton dell'asfalto (`thinMask`,
+`stitchLap` sono ancora file-local in `tools/trackmodules/TrackModulesCore.cpp`).

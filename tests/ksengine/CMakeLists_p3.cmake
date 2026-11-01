@@ -107,3 +107,21 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp")
     target_link_libraries(geotrack_generate_test PRIVATE ksengine)
     add_test(NAME geotrack_generate_test COMMAND geotrack_generate_test)
 endif()
+
+# Geotrack fase 2 — misura dell'asfalto dall'ortofoto. Il codec immagini viaggia
+# con il target perche' loadImageFile() non fa parte dell'API esportata di
+# ksengine (stessa ragione di Json.cpp sopra).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/OrthoImage.h")
+    add_executable(geotrack_ortho_test
+        geotrack_ortho_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
+    target_include_directories(geotrack_ortho_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(geotrack_ortho_test PRIVATE ksengine)
+    add_test(NAME geotrack_ortho_test COMMAND geotrack_ortho_test)
+endif()

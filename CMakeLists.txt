@@ -253,7 +253,9 @@ if(KS_QT_FREE_BUILD)
 		add_executable(ks_geotrack
 			tools/geotrack/main.cpp
 			tools/geotrack/TrackSceneCore.cpp
-			src/engine/FileFormat/Json.cpp)
+			src/engine/FileFormat/Json.cpp
+			src/engine/material/PngCodec.cpp
+			src/engine/FileFormat/Deflate.cpp)
 		target_include_directories(ks_geotrack PRIVATE
 			"${CMAKE_CURRENT_SOURCE_DIR}/tools"
 			"${CMAKE_CURRENT_SOURCE_DIR}/src")

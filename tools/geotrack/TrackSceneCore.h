@@ -30,6 +30,8 @@ struct GeotrackConfig {
     bool closed = true;         ///< giro chiuso
     PitConfig pit;
     std::string groundTexturePath; ///< PNG del fondo; vuoto = nessun materials.txt
+    std::string orthoPath;         ///< immagine georeferenziata sul quadrato (fase 2)
+    bool keepWidth = false;        ///< non sostituire widthM con la misura
 };
 
 struct GeotrackResult {
@@ -39,6 +41,8 @@ struct GeotrackResult {
     int marshalPosts = 0;
     int lapPoints = 0;
     int gridSlots = 0;
+    double measuredWidthM = 0.0; ///< 0 = nessuna ortofoto letta
+    int widthSamples = 0;
 };
 
 /// Genera la cartella pista. `out` e `error` possono essere nulli.

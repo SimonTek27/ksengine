@@ -8,6 +8,7 @@
 #include "geotrack/Centerline.h"
 #include "geotrack/GeoProjection.h"
 #include "geotrack/Materials.h"
+#include "geotrack/OrthoImage.h"
 #include "geotrack/PitLane.h"
 #include "geotrack/Scenery.h"
 #include "geotrack/Strips.h"
@@ -148,6 +149,22 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         return false;
     }
 
+    // --- fase 2: misura dell'asfalto dall'ortofoto ------------------------
+    double widthM = cfg.widthM;
+    double measuredWidthM = 0.0;
+    int widthSamples = 0;
+    if (!cfg.orthoPath.empty()) {
+        OrthoImage ortho;
+        std::string orthoError;
+        if (!ortho.load(cfg.orthoPath, square, &orthoError)) return fail(orthoError);
+        const WidthMeasurement measured = measureTrackWidth(ortho, stations, 4.0, 25.0);
+        if (measured.samples < 20)
+            return fail("ortho: too few asphalt samples along the centerline");
+        measuredWidthM = measured.medianM;
+        widthSamples = measured.samples;
+        if (!cfg.keepWidth) widthM = measured.medianM;
+    }
+
     // --- layer -----------------------------------------------------------
     std::vector<std::string> layers;
     if (!writeLayer(bakedDir, "ground", groundQuad(square, 0.0, static_cast<float>(square.side())),
@@ -157,13 +174,13 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
 
     StripSpec trackSpec;
     trackSpec.offset = 0.0;
-    trackSpec.halfWidth = 0.5 * cfg.widthM;
+    trackSpec.halfWidth = 0.5 * widthM;
     trackSpec.y = 0.02;
     if (!writeLayer(bakedDir, "track", ribbon(stations, trackSpec), error)) return false;
     layers.push_back("track");
 
     // --- vie di fuga e kerb ----------------------------------------------
-    const double halfWidth = 0.5 * cfg.widthM;
+    const double halfWidth = 0.5 * widthM;
     StripSpec runoffSpec;
     runoffSpec.halfWidth = 12.0;
     runoffSpec.y = 0.01;
@@ -189,7 +206,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     if (cfg.pit.enabled) {
         if (cfg.pit.toS <= cfg.pit.fromS)
             return fail("pit lane: toS must be greater than fromS");
-        if (cfg.pit.offset < 0.5 * cfg.widthM)
+        if (cfg.pit.offset < 0.5 * widthM)
             return fail("pit lane: offset must clear the track half width");
         if (cfg.pit.halfWidth <= 1.0)
             return fail("pit lane: half width too small");
@@ -267,8 +284,8 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     data.insert("short_name", jsonStr(shortNameOf(trackName)));
     data.insert("length", jsonInt(std::llround(lengthM)));
     data.insert("length_m", jsonNum(lengthM));
-    data.insert("width", jsonNum(cfg.widthM));
-    data.insert("width_m", jsonNum(cfg.widthM));
+    data.insert("width", jsonNum(widthM));
+    data.insert("width_m", jsonNum(widthM));
     data.insert("run", jsonInt(1));
     data.insert("pitboxes", jsonInt(gridCount));
     data.insert("pit_pads", jsonInt(gridCount));
@@ -319,8 +336,13 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     squareJson.insert("uv_repeat_m", jsonNum(square.side()));
     scene.insert("square", squareJson);
     scene.insert("track", jsonStr(trackName));
-    scene.insert("width_m", jsonNum(cfg.widthM));
+    scene.insert("width_m", jsonNum(widthM));
     scene.insert("length_m", jsonNum(lengthM));
+    if (widthSamples > 0) {
+        scene.insert("measured_width_m", jsonNum(measuredWidthM));
+        scene.insert("width_samples", jsonInt(widthSamples));
+        scene.insert("ortho", jsonStr(cfg.orthoPath));
+    }
     Json layerJson = Json::array();
     for (const std::string& name : layers) layerJson.append(jsonStr(name));
     scene.insert("layers", layerJson);
@@ -334,6 +356,8 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         out->marshalPosts = static_cast<int>(posts.size());
         out->lapPoints = static_cast<int>(stations.size());
         out->gridSlots = gridCount;
+        out->measuredWidthM = measuredWidthM;
+        out->widthSamples = widthSamples;
     }
     return true;
 }

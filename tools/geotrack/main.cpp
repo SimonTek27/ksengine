@@ -27,6 +27,9 @@ void usage() {
         "  --pit from,to,offset,halfWidth[,ramp]\n"
         "                           pit lane window in lap metres\n"
         "  --ground-texture FILE    PNG covering the terrain square\n"
+        "  --ortho FILE             georeferenced image of the square: measures\n"
+        "                           the real asphalt width (phase 2)\n"
+        "  --keep-width             report the measurement, keep --width\n"
         "centerline: .csv (lat,lon), .geojson (LineString) or .gpx\n");
 }
 
@@ -80,6 +83,10 @@ int main(int argc, char** argv) {
             cfg.closed = false;
         } else if (arg == "--ground-texture") {
             cfg.groundTexturePath = value("--ground-texture");
+        } else if (arg == "--ortho") {
+            cfg.orthoPath = value("--ortho");
+        } else if (arg == "--keep-width") {
+            cfg.keepWidth = true;
         } else if (arg == "--pit") {
             const std::string list = value("--pit");
             std::size_t cursor = 0;
@@ -119,6 +126,8 @@ int main(int argc, char** argv) {
     std::printf("marshal posts=%d\n", res.marshalPosts);
     std::printf("lap points=%d\n", res.lapPoints);
     std::printf("grid slots=%d\n", res.gridSlots);
+    if (res.widthSamples > 0)
+        std::printf("measured width=%.2f m (%d samples)\n", res.measuredWidthM, res.widthSamples);
     std::printf("out=%s\n", cfg.outDir.c_str());
     return 0;
 }
