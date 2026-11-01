@@ -258,6 +258,22 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
             }
         }
         groundChunks = perSide * perSide;
+
+        // Piano lontano: stessa immagine, griglia grossolana, nessuna finestra.
+        // Senza questo, oltre `chunkViewM` i chunk spariscono e si vede il
+        // vuoto al posto del terreno.
+        if (cfg.chunkViewM > 0.0) {
+            const std::string farName = "ground_far";
+            const ks::engine::terrain::TerrainMeshData farMesh =
+                groundGrid(square, -0.05, 16);
+            if (!writeLayer(bakedDir, farName, farMesh, error)) return false;
+            layers.insert(layers.begin(), farName);
+            const ks::image::RawImage farImage = mosaic.crop(square, 256);
+            if (!ks::image::saveImageFile((texturesDir / (farName + ".png")).string(), farImage,
+                                          error))
+                return fail("cannot write " + farName + ".png");
+            materialRows.push_back({farName, farName + ".png", "0.95", "0.0"});
+        }
     } else {
         if (!writeLayer(bakedDir, "ground",
                         groundQuad(square, 0.0, static_cast<float>(square.side())), error))

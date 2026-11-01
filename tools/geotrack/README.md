@@ -40,7 +40,9 @@ li mette l'utente. Il binario C++ non fa rete.
 <miapista>/
   baked/manifest.txt          una riga per layer (ground, track, kerbs,
                               runoff, pitlane, griddot, a seconda delle opzioni)
-  baked/<layer>.nmsh          mesh nel formato del renderer
+  baked/<layer>.nmsh          mesh nel formato del renderer (i chunk del fondo
+                              sono NMS2 con finestra, gli altri NMSH)
+  baked/ground_far.nmsh       piano lontano, sempre disegnato sotto i chunk
   baked/materials.txt         solo con --ground-texture
   baked/textures/ground.png   solo con --ground-texture
   data/data.json              name, length, width, pitboxes, corner_count,

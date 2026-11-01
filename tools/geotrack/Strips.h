@@ -60,6 +60,37 @@ inline ks::engine::terrain::TerrainMeshData groundQuad(const Square& sq, double 
     return mesh;
 }
 
+/// Griglia regolare sul quadrato: serve al fondo "lontano", il piano che
+/// resta disegnato oltre la finestra dei chunk (senza, i chunk scartati
+/// lascerebbero un vuoto all'orizzonte).
+inline ks::engine::terrain::TerrainMeshData groundGrid(const Square& sq, double y, int cells) {
+    ks::engine::terrain::TerrainMeshData mesh;
+    cells = std::max(1, cells);
+    const int side = cells + 1;
+    for (int iz = 0; iz <= cells; ++iz) {
+        for (int ix = 0; ix <= cells; ++ix) {
+            const double fx = static_cast<double>(ix) / cells;
+            const double fz = static_cast<double>(iz) / cells;
+            const double x = sq.minX + fx * sq.side();
+            const double z = sq.minZ + fz * sq.side();
+            float u = 0.f, v = 0.f;
+            uvOn(sq, x, z, &u, &v);
+            mesh.vertices.push_back(makeVertex(x, y, z, u, v));
+        }
+    }
+    for (int iz = 0; iz < cells; ++iz) {
+        for (int ix = 0; ix < cells; ++ix) {
+            const uint32_t a = static_cast<uint32_t>(iz * side + ix);
+            const uint32_t b = a + 1;
+            const uint32_t c = a + static_cast<uint32_t>(side);
+            const uint32_t d = c + 1;
+            const uint32_t tris[6] = {a, c, b, c, d, b};
+            mesh.indices.insert(mesh.indices.end(), tris, tris + 6);
+        }
+    }
+    return mesh;
+}
+
 /// Striscia lungo la centerline: due vertici per stazione, due triangoli per
 /// segmento. Con `offset` la striscia si sposta sul lato sinistro.
 inline ks::engine::terrain::TerrainMeshData ribbon(const std::vector<Station>& st,

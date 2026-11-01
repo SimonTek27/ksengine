@@ -203,7 +203,9 @@ file con modifiche locali non committate.
 con la finestra di distanza (`--chunk-view`, default 1400 m) che
 `NativeRenderer::drawMesh` applica gia' via `LodWindow` (`distanceToBounds` + finestra),
 quindi nessuna modifica al motore: oltre il limite il chunk non viene accodato. I layer
-diversi dal fondo restano NMSH, che non ha posto per la finestra.
+diversi dal fondo restano NMSH, che non ha posto per la finestra. Sotto i chunk c'e' un
+`ground_far` (griglia 16x16, NMSH, nessuna finestra) con la stessa immagine a 256 px:
+scartare i chunk senza un piano di riserva lascerebbe il vuoto all'orizzonte.
 
 **Resta**: solo la verifica a schermo (serve cmake + Vulkan, assenti in questa VM) e il
 LOD a piu' livelli veri (oggi la finestra scarta, non sostituisce con una risoluzione

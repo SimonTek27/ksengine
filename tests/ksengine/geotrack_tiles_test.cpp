@@ -227,6 +227,21 @@ int main() {
         in.read(magic, 4);
         KS_CHECK(std::string(magic, 4) == "NMSH");
     }
+    // Piano lontano: NMSH (sempre disegnato), griglia 16x16 sul quadrato.
+    {
+        const std::string path = cfg.outDir + "/baked/ground_far.nmsh";
+        KS_CHECK(fs::is_regular_file(path));
+        KS_CHECK(fs::is_regular_file(cfg.outDir + "/baked/textures/ground_far.png"));
+        std::ifstream in(path, std::ios::binary);
+        char magic[4] = {0, 0, 0, 0};
+        std::uint32_t vertexCount = 0, indexCount = 0;
+        in.read(magic, 4);
+        in.read(reinterpret_cast<char*>(&vertexCount), 4);
+        in.read(reinterpret_cast<char*>(&indexCount), 4);
+        KS_CHECK(std::string(magic, 4) == "NMSH");
+        KS_CHECK(vertexCount == 17u * 17u);
+        KS_CHECK(indexCount == 6u * 16u * 16u);
+    }
 
     const std::string manifest = [&] {
         std::ifstream in(cfg.outDir + "/baked/manifest.txt");
