@@ -245,6 +245,18 @@ if(KS_QT_FREE_BUILD)
 		set_target_properties(ks_tracktool PROPERTIES
 			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 	endif()
+	# Track module catalog (roadmap 3.8 groundwork): KN5 node inventory plus
+	# corners measured on the AI line, for the curve/kerb module library.
+	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/trackmodules/main.cpp")
+		add_executable(ks_trackmodules
+			tools/trackmodules/main.cpp
+			tools/trackmodules/TrackModulesCore.cpp)
+		target_include_directories(ks_trackmodules PRIVATE
+			"${CMAKE_CURRENT_SOURCE_DIR}/tools/trackmodules")
+		target_link_libraries(ks_trackmodules PRIVATE ksengine)
+		set_target_properties(ks_trackmodules PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+	endif()
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp")
     # AC car content conversion: writes the single data/data.json manifest
     # from a stock .ini car folder (content pipeline).

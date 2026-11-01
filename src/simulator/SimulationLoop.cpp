@@ -1851,6 +1851,9 @@ void SimulationLoop::tick() {
             // (PitLaneRepair::holdCar) wins over the driver's next input instead
             // of being overwritten by applyInput() in the same step.
             updatePitRepair(static_cast<float>(m_physicsDt));
+            // Trackside marshals watch the same field on the same clock: an
+            // incident raised by this step is flagged before the next frame.
+            updateTracksidePosts(static_cast<float>(m_physicsDt));
             // AI cars freeze on the grid during the countdown and race once it
             // is over; physics runs at the same fixed 1 kHz as the player's.
             if (m_multiCar && !m_raceSession.isCountingDown())

@@ -16,7 +16,8 @@ namespace sim {
 
 struct TeamCarSlot {
     int raceNumber = 0;          // door number
-    int garageIndex = 0;         // 0-based box in pit lane / garage row
+    int garageIndex = 0;         // 0-based garage in the pit row (shared by the team)
+    int garageSlot = 0;          // 0 or 1: which spot of that garage (see PitGarage.h)
     std::string driverName;
     std::string carModel;        // optional override
     std::string liveryId;
@@ -78,15 +79,20 @@ public:
  * [Car_0]
  * Number=7
  * Garage=3
+ * Slot=0
  * Driver=Alice
  * Livery=sponsor_red
  * Player=1
  *
  * [Car_1]
  * Number=8
- * Garage=4
+ * Garage=3
+ * Slot=1
  * Driver=Bob
  * Livery=sponsor_blue
+ *
+ * Both cars of a team share the garage (and therefore the pit pad); Slot picks
+ * which of the two spots inside it the car starts from.
  */
     static TeamInfo loadIni(const std::string& path) {
         TeamInfo t;
@@ -153,6 +159,8 @@ public:
                 if (key == "Number" || key == "RaceNumber") cur->raceNumber = std::atoi(val.c_str());
                 else if (key == "Garage" || key == "GarageIndex" || key == "Box")
                     cur->garageIndex = std::atoi(val.c_str());
+                else if (key == "Slot" || key == "GarageSlot")
+                    cur->garageSlot = std::atoi(val.c_str());
                 else if (key == "Driver") cur->driverName = val;
                 else if (key == "Car" || key == "CarModel") cur->carModel = val;
                 else if (key == "Livery" || key == "Skin") cur->liveryId = val;
@@ -176,8 +184,13 @@ public:
         for (const auto& s : t.slots)
             if (s.garageIndex != 0) { allZeroGarage = false; break; }
         if (allZeroGarage && t.slots.size() > 1) {
-            for (size_t i = 0; i < t.slots.size(); ++i)
-                t.slots[i].garageIndex = t.garageStartIndex + static_cast<int>(i);
+            // Default roster: two cars per garage share the pad, so the garage
+            // index advances every second car and Slot picks the spot inside
+            // it (see PitGarage.h). A one-car team keeps garage 0 / slot 0.
+            for (size_t i = 0; i < t.slots.size(); ++i) {
+                t.slots[i].garageIndex = t.garageStartIndex + static_cast<int>(i) / 2;
+                t.slots[i].garageSlot = static_cast<int>(i) % 2;
+            }
         }
 
         std::fprintf(stderr, "TeamInfo: %s cars=%d numbers=", t.name.c_str(), t.carCount);

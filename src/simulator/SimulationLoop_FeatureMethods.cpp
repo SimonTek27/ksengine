@@ -65,6 +65,9 @@ void SimulationLoop::beginSession(GameSessionMode mode) {
         ;
     else
         setupDefaultGarageLayout(std::max(8, std::min(p.aiCars + 1, 32)));
+    // The safety-car bay and the marshal posts come from the same manifest.
+    if (!m_trackData.directory.empty())
+        loadTracksidePostsFromTrack(m_trackData.directory);
     if (p.aiCars > 0)
         spawnAiGrid(std::min(p.aiCars, 32));
 

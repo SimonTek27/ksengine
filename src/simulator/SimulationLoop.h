@@ -27,6 +27,7 @@
                              // GarageSpawn.h, all self-contained)
 #include "PitLaneQueue.h"    // roadmap 2.7: multi-car pit-lane order
 #include "TrackLayout.h"     // phase 3.3: multi-layout catalog
+#include "TracksidePosts.h" // safety-car bay + four marshal posts per corner
 
 #include <memory>
 #include <chrono>
@@ -141,6 +142,19 @@ public:
     void applyTrackVisuals(const std::string& trackDir);
     void applyCarVisuals(const std::string& carDir);
     const SimTrackData& trackData() const { return m_trackData; }
+
+    // Trackside posts (TracksidePosts.h): the shared safety-car bay at the pit
+    // exit and four marshals per corner, two right and two left. Loaded from the
+    // track manifest and driven by updateTracksidePosts(): the yellow comes from
+    // the posts that actually see an incident, not from a session timer.
+    const TracksidePosts& tracksidePosts() const { return m_tracksidePosts; }
+    RaceFlag localYellowFlag() const { return m_tracksidePosts.trackFlag(); }
+    bool loadTracksidePostsFromTrack(const std::string& trackDir);
+    void updateTracksidePosts(float dt);
+
+private:
+    // Marshal posts + safety-car bay, from <track>/data/data.json.
+    TracksidePosts m_tracksidePosts;
     // NOTE: truncated intermediate methods remain as on disk — full file follows in next push if needed
 };
 

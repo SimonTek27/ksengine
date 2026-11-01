@@ -30,6 +30,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 
 namespace ks {
 namespace sim {
@@ -146,6 +147,67 @@ void SimulationLoop::updateGarageExit(float dt) {
                      GarageExitController::phaseLabel(before),
                      GarageExitController::phaseLabel(out.phase));
     m_garageStatus = out.statusText;
+#else
+    (void)dt;
+#endif
+}
+
+bool SimulationLoop::loadTracksidePostsFromTrack(const std::string& trackDir) {
+    namespace fs = std::filesystem;
+    if (trackDir.empty()) return false;
+    const fs::path root(trackDir);
+    // A multi-layout pack keeps one manifest per layout folder (Vallelunga:
+    // extended_circuit/data/data.json), so the layout folder is the track dir
+    // in that case. One model per track dir is enough here.
+    const fs::path candidates[] = {root / "data" / "data.json", root / "data.json"};
+    for (const fs::path& candidate : candidates) {
+        std::error_code ec;
+        if (!fs::is_regular_file(candidate, ec)) continue;
+        if (m_tracksidePosts.loadFromFile(candidate.string())) {
+            std::fprintf(stderr, "SimulationLoop: %zu marshal posts, safety car bay %s (%s)\n",
+                         m_tracksidePosts.postCount(),
+                         m_tracksidePosts.hasSafetyCarPad() ? "present" : "absent",
+                         candidate.string().c_str());
+            return true;
+        }
+    }
+    return false;
+}
+
+void SimulationLoop::updateTracksidePosts(float dt) {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle) return;
+
+    // A post reacts to a car that stops or crawls inside its radius. Track
+    // limits already own "off track", so the speed test is what raises the
+    // flag here; the off-track bit is left to the caller that knows the surface.
+    std::vector<MarshalIncident> incidents;
+    const auto st = m_vehicle->getState();
+    MarshalIncident player;
+    player.x = static_cast<float>(st.position.x);
+    player.z = static_cast<float>(st.position.z);
+    player.speedMs = static_cast<float>(st.speed);
+    incidents.push_back(player);
+
+    if (m_multiCar) {
+        for (const auto& car : m_multiCar->cars()) {
+            if (!car || !car->vehicle) continue;
+            const auto cs = car->vehicle->getState();
+            MarshalIncident incident;
+            incident.x = static_cast<float>(cs.position.x);
+            incident.z = static_cast<float>(cs.position.z);
+            incident.speedMs = static_cast<float>(cs.speed);
+            incidents.push_back(incident);
+        }
+    }
+
+    const RaceFlag before = m_tracksidePosts.trackFlag();
+    m_tracksidePosts.update(dt, incidents);
+    const RaceFlag after = m_tracksidePosts.trackFlag();
+    if (before != after)
+        std::fprintf(stderr, "SimulationLoop: trackside flag %d -> %d (%d posts out)\n",
+                     static_cast<int>(before), static_cast<int>(after),
+                     m_tracksidePosts.flaggingCount());
 #else
     (void)dt;
 #endif
