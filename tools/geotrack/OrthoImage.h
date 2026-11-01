@@ -92,12 +92,16 @@ struct WidthMeasurement {
 /// cammina a passi di un pixel; due campioni consecutivi non-asfalto chiudono
 /// il bordo (cosi' una striscia di vernice non tronca la carreggiata). Le
 /// stazioni senza due bordi entro `maxHalfWidthM` vengono scartate.
-inline WidthMeasurement measureTrackWidth(const OrthoImage& ortho, const std::vector<Station>& st,
-                                          double minWidthM, double maxHalfWidthM) {
+/// Generico sull'origine dei campioni: vale per un'ortofoto singola
+/// (OrthoImage) e per un mosaico di tile (TileMosaic), che espongono entrambi
+/// metresPerPixel() e isAsphalt(x, z).
+template <class Sampler>
+inline WidthMeasurement measureTrackWidthImpl(const Sampler& sampler, const std::vector<Station>& st,
+                                              double minWidthM, double maxHalfWidthM) {
     WidthMeasurement result;
-    if (!ortho.valid() || st.size() < 2) return result;
+    if (st.size() < 2) return result;
 
-    const double step = std::max(0.25, ortho.metresPerPixel() * 0.5);
+    const double step = std::max(0.25, sampler.metresPerPixel() * 0.5);
     std::vector<double> widths;
     widths.reserve(st.size());
     for (const Station& s : st) {
@@ -109,7 +113,7 @@ inline WidthMeasurement measureTrackWidth(const OrthoImage& ortho, const std::ve
             for (double t = step; t <= maxHalfWidthM; t += step) {
                 const double x = s.p.x + s.left.x * sign * t;
                 const double z = s.p.z + s.left.z * sign * t;
-                if (ortho.isAsphalt(x, z)) {
+                if (sampler.isAsphalt(x, z)) {
                     halves[side] = t;
                     missRun = 0;
                 } else if (++missRun >= 2) {
@@ -132,6 +136,12 @@ inline WidthMeasurement measureTrackWidth(const OrthoImage& ortho, const std::ve
     const std::size_t mid = widths.size() / 2;
     result.medianM = widths.size() % 2 ? widths[mid] : 0.5 * (widths[mid - 1] + widths[mid]);
     return result;
+}
+
+inline WidthMeasurement measureTrackWidth(const OrthoImage& ortho, const std::vector<Station>& st,
+                                          double minWidthM, double maxHalfWidthM) {
+    if (!ortho.valid()) return WidthMeasurement{};
+    return measureTrackWidthImpl(ortho, st, minWidthM, maxHalfWidthM);
 }
 
 } // namespace ks::geo

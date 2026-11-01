@@ -20,6 +20,9 @@ ks_geotrack giro.csv out/miapista --ortho satellite.png
 # misura ma tieni la larghezza dichiarata (--keep-width)
 ks_geotrack giro.csv out/miapista --ortho satellite.png --width 12 --keep-width
 
+# mosaico di tile gia' in cache: misura + fondo a chunk
+ks_geotrack giro.csv out/miapista --tiles cache/cache.json --chunk 300
+
 # 2) cache di vettoriale e tile (opzionale, richiede rete)
 python3 tools/geotrack/fetch_cache.py cache --bounds 50.32,6.93,50.35,6.98 \
         --overpass --tile-url "https://<provider>/{z}/{x}/{y}.png" --zoom 18
@@ -58,5 +61,12 @@ asfalto 0.02, kerb 0.03, griglia 0.06) per evitare lo z-fighting.
   stazione, e il valore che finisce in `data.json` e' la **mediana**: l'apron dei
   box puo' allargare qualche campione senza spostare la larghezza del tracciato.
   `scene.json` riporta `measured_width_m`, `width_samples` e il file usato.
-- Il mosaico di tile e il piano LOD del fondo sono il passo successivo del
-  design doc (`docs/superpowers/specs/2026-11-01-geotrack-generation-design.md`).
+- `--tiles` legge `cache.json` (zoom + elenco tile) e georeferenzia ogni tile sul
+  piano locale: la stessa immagine serve a misurare l'asfalto e a texturizzare il
+  fondo. Il fondo esce a chunk (`ground_<x>_<z>`), una mesh e un albedo per chunk,
+  perche' il renderer ha un albedo per mesh: `--chunk` decide il lato e quindi il
+  primo livello di LOD.
+- Resta da fare, del design doc
+  (`docs/superpowers/specs/2026-11-01-geotrack-generation-design.md`): LOD dei
+  chunk a runtime nel motore e correzione della centerline sullo skeleton
+  dell'asfalto.

@@ -31,6 +31,8 @@ struct GeotrackConfig {
     PitConfig pit;
     std::string groundTexturePath; ///< PNG del fondo; vuoto = nessun materials.txt
     std::string orthoPath;         ///< immagine georeferenziata sul quadrato (fase 2)
+    std::string tileCachePath;     ///< cache.json del mosaico di tile (fase 2)
+    double chunkSizeM = 1024.0;    ///< lato dei chunk del fondo quando ci sono tile
     bool keepWidth = false;        ///< non sostituire widthM con la misura
 };
 
@@ -41,8 +43,9 @@ struct GeotrackResult {
     int marshalPosts = 0;
     int lapPoints = 0;
     int gridSlots = 0;
-    double measuredWidthM = 0.0; ///< 0 = nessuna ortofoto letta
+    double measuredWidthM = 0.0; ///< 0 = nessuna immagine letta
     int widthSamples = 0;
+    int groundChunks = 0; ///< 0 = fondo unico non texturizzato
 };
 
 /// Genera la cartella pista. `out` e `error` possono essere nulli.

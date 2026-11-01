@@ -12,6 +12,7 @@
 #include "geotrack/PitLane.h"
 #include "geotrack/Scenery.h"
 #include "geotrack/Strips.h"
+#include "geotrack/TileMosaic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -149,7 +150,13 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         return false;
     }
 
-    // --- fase 2: misura dell'asfalto dall'ortofoto ------------------------
+    // --- fase 2: sorgenti immagine ----------------------------------------
+    TileMosaic mosaic;
+    if (!cfg.tileCachePath.empty()) {
+        std::string tileError;
+        if (!mosaic.loadCache(cfg.tileCachePath, projection, &tileError)) return fail(tileError);
+    }
+
     double widthM = cfg.widthM;
     double measuredWidthM = 0.0;
     int widthSamples = 0;
@@ -163,14 +170,54 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         measuredWidthM = measured.medianM;
         widthSamples = measured.samples;
         if (!cfg.keepWidth) widthM = measured.medianM;
+    } else if (mosaic.valid()) {
+        const WidthMeasurement measured = measureTrackWidthImpl(mosaic, stations, 4.0, 25.0);
+        if (measured.samples < 20)
+            return fail("tiles: too few asphalt samples along the centerline");
+        measuredWidthM = measured.medianM;
+        widthSamples = measured.samples;
+        if (!cfg.keepWidth) widthM = measured.medianM;
     }
 
     // --- layer -----------------------------------------------------------
     std::vector<std::string> layers;
-    if (!writeLayer(bakedDir, "ground", groundQuad(square, 0.0, static_cast<float>(square.side())),
-                    error))
-        return false;
-    layers.push_back("ground");
+    std::vector<LayerMaterial> materialRows;
+    int groundChunks = 0;
+    if (mosaic.valid()) {
+        // Fondo a chunk: una mesh e un albedo per chunk, che e' il modo di
+        // avere le tile a schermo con il renderer attuale (un albedo per mesh).
+        // Il numero di chunk e' anche il primo livello di LOD.
+        const double chunkSize = std::max(128.0, cfg.chunkSizeM);
+        const int perSide =
+            std::max(1, static_cast<int>(std::ceil(square.side() / chunkSize - 1e-9)));
+        const fs::path texturesDir = bakedDir / "textures";
+        fs::create_directories(texturesDir, ec);
+        for (int ix = 0; ix < perSide; ++ix) {
+            for (int iz = 0; iz < perSide; ++iz) {
+                Square chunk;
+                chunk.minX = square.minX + ix * chunkSize;
+                chunk.maxX = std::min(square.minX + (ix + 1) * chunkSize, square.maxX);
+                chunk.minZ = square.minZ + iz * chunkSize;
+                chunk.maxZ = std::min(square.minZ + (iz + 1) * chunkSize, square.maxZ);
+                const std::string name = "ground_" + std::to_string(ix) + "_" + std::to_string(iz);
+                if (!writeLayer(bakedDir, name,
+                                groundQuad(chunk, 0.0, static_cast<float>(chunk.side())), error))
+                    return false;
+                layers.push_back(name);
+                const ks::image::RawImage image = mosaic.crop(chunk, 512);
+                if (!ks::image::saveImageFile((texturesDir / (name + ".png")).string(), image,
+                                              error))
+                    return fail("cannot write " + name + ".png");
+                materialRows.push_back({name, name + ".png", "0.95", "0.0"});
+            }
+        }
+        groundChunks = perSide * perSide;
+    } else {
+        if (!writeLayer(bakedDir, "ground",
+                        groundQuad(square, 0.0, static_cast<float>(square.side())), error))
+            return false;
+        layers.push_back("ground");
+    }
 
     StripSpec trackSpec;
     trackSpec.offset = 0.0;
@@ -233,6 +280,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     if (!writeText(bakedDir / "manifest.txt", manifest, error)) return false;
 
     // --- materiali dei layer e fondo --------------------------------------
+    std::vector<LayerMaterial> rows = materialRows;
     if (!cfg.groundTexturePath.empty()) {
         const fs::path texturesDir = bakedDir / "textures";
         fs::create_directories(texturesDir, ec);
@@ -240,14 +288,14 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         fs::copy_file(cfg.groundTexturePath, texturesDir / "ground.png",
                       fs::copy_options::overwrite_existing, copyError);
         if (copyError) return fail("cannot copy ground texture: " + cfg.groundTexturePath);
-        const std::vector<LayerMaterial> rows = {
-            {"ground", "ground.png", "0.95", "0.0"},
-            {"track", "-", "0.85", "0.0"},
-            {"pitlane", "-", "0.85", "0.0"},
-            {"runoff", "-", "0.95", "0.0"},
-            {"kerbs", "-", "0.7", "0.0"},
-            {"griddot", "-", "0.8", "0.0"},
-        };
+        rows.insert(rows.begin(), LayerMaterial{"ground", "ground.png", "0.95", "0.0"});
+    }
+    if (!rows.empty()) {
+        rows.push_back({"track", "-", "0.85", "0.0"});
+        rows.push_back({"pitlane", "-", "0.85", "0.0"});
+        rows.push_back({"runoff", "-", "0.95", "0.0"});
+        rows.push_back({"kerbs", "-", "0.7", "0.0"});
+        rows.push_back({"griddot", "-", "0.8", "0.0"});
         if (!writeText(bakedDir / "materials.txt", materialsTxt(rows), error)) return false;
     }
 
@@ -334,6 +382,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     squareJson.insert("pad_m", jsonNum(cfg.padM));
     // Con una texture del fondo l'immagine copre il quadrato una volta sola.
     squareJson.insert("uv_repeat_m", jsonNum(square.side()));
+    squareJson.insert("ground_chunks", jsonInt(groundChunks));
     scene.insert("square", squareJson);
     scene.insert("track", jsonStr(trackName));
     scene.insert("width_m", jsonNum(widthM));
@@ -358,6 +407,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
         out->gridSlots = gridCount;
         out->measuredWidthM = measuredWidthM;
         out->widthSamples = widthSamples;
+        out->groundChunks = groundChunks;
     }
     return true;
 }

@@ -29,6 +29,9 @@ void usage() {
         "  --ground-texture FILE    PNG covering the terrain square\n"
         "  --ortho FILE             georeferenced image of the square: measures\n"
         "                           the real asphalt width (phase 2)\n"
+        "  --tiles FILE             cache.json from fetch_cache.py: tile mosaic\n"
+        "                           for the measurement and the ground texture\n"
+        "  --chunk M                ground chunk size with --tiles (default 1024)\n"
         "  --keep-width             report the measurement, keep --width\n"
         "centerline: .csv (lat,lon), .geojson (LineString) or .gpx\n");
 }
@@ -85,6 +88,10 @@ int main(int argc, char** argv) {
             cfg.groundTexturePath = value("--ground-texture");
         } else if (arg == "--ortho") {
             cfg.orthoPath = value("--ortho");
+        } else if (arg == "--tiles") {
+            cfg.tileCachePath = value("--tiles");
+        } else if (arg == "--chunk") {
+            cfg.chunkSizeM = std::atof(value("--chunk").c_str());
         } else if (arg == "--keep-width") {
             cfg.keepWidth = true;
         } else if (arg == "--pit") {
@@ -128,6 +135,7 @@ int main(int argc, char** argv) {
     std::printf("grid slots=%d\n", res.gridSlots);
     if (res.widthSamples > 0)
         std::printf("measured width=%.2f m (%d samples)\n", res.measuredWidthM, res.widthSamples);
+    if (res.groundChunks > 0) std::printf("ground chunks=%d\n", res.groundChunks);
     std::printf("out=%s\n", cfg.outDir.c_str());
     return 0;
 }

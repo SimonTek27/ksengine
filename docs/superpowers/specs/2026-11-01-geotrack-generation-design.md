@@ -183,6 +183,14 @@ stazione sull'immagine georeferenziata sul quadrato; la mediana sostituisce `--w
 geometria e in `data.json`, salvo `--keep-width`. La prova end-to-end misura 14 m con un
 apron dei box da 30 m presente, cioè proprio il caso che gonfiava il valore a 30–39 m.
 
-**Resta della fase 2**: mosaico di tile con piano LOD al posto dell'immagine singola, e
-correzione della centerline vettoriale con lo skeleton dell'asfalto (`thinMask`,
-`stitchLap` sono ancora file-local in `tools/trackmodules/TrackModulesCore.cpp`).
+**Fase 2, mosaico**: `--tiles cache/cache.json` legge la cache di `fetch_cache.py`,
+georeferenzia ogni tile slippy-map sul piano ENU e la usa per entrambi i lavori — la
+misura dell'asfalto e il fondo del terreno a chunk (`ground_<x>_<z>`, una mesh e un
+albedo per chunk, una riga di `materials.txt` cadauno, `--chunk` per il lato). Un albedo
+per mesh e' quello che il renderer legge oggi, quindi le tile arrivano a schermo senza
+toccare il motore; il numero di chunk e' il primo livello di LOD.
+
+**Resta**: LOD dei chunk a runtime nel motore (oggi il chunk piu' distante costa come
+quello sotto la macchina) e correzione della centerline vettoriale con lo skeleton
+dell'asfalto (`thinMask`, `stitchLap` sono ancora file-local in
+`tools/trackmodules/TrackModulesCore.cpp`).

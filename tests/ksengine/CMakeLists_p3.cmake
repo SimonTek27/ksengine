@@ -125,3 +125,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/OrthoImage.h")
     target_link_libraries(geotrack_ortho_test PRIVATE ksengine)
     add_test(NAME geotrack_ortho_test COMMAND geotrack_ortho_test)
 endif()
+
+# Geotrack fase 2 — mosaico di tile: misura e fondo a chunk da cache.json.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TileMosaic.h")
+    add_executable(geotrack_tiles_test
+        geotrack_tiles_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
+    target_include_directories(geotrack_tiles_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(geotrack_tiles_test PRIVATE ksengine)
+    add_test(NAME geotrack_tiles_test COMMAND geotrack_tiles_test)
+endif()
