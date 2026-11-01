@@ -199,5 +199,12 @@ si corregge la posizione, non la topologia. `scene.json` riporta
 `tools/trackmodules/TrackModulesCore.cpp`: non sono stati riusati per non toccare un
 file con modifiche locali non committate.
 
-**Resta**: LOD dei chunk a runtime nel motore (oggi il chunk piu' distante costa come
-quello sotto la macchina).
+**LOD dei chunk**: risolto dal lato contenuto. I chunk del fondo sono scritti in NMS2
+con la finestra di distanza (`--chunk-view`, default 1400 m) che
+`NativeRenderer::drawMesh` applica gia' via `LodWindow` (`distanceToBounds` + finestra),
+quindi nessuna modifica al motore: oltre il limite il chunk non viene accodato. I layer
+diversi dal fondo restano NMSH, che non ha posto per la finestra.
+
+**Resta**: solo la verifica a schermo (serve cmake + Vulkan, assenti in questa VM) e il
+LOD a piu' livelli veri (oggi la finestra scarta, non sostituisce con una risoluzione
+minore).

@@ -196,6 +196,38 @@ int main() {
     KS_CHECK(res.groundChunks >= 4);
     KS_CHECK_NEAR(res.measuredWidthM, 14.0, 2.0);
 
+    // Formato: i chunk sono NMS2 con la finestra di distanza, gli altri layer
+    // restano NMSH (nessuna finestra). Il layout e' quello che legge
+    // NativeRenderer::loadMeshFromFile.
+    {
+        const std::string path = cfg.outDir + "/baked/ground_0_0.nmsh";
+        std::ifstream in(path, std::ios::binary);
+        char magic[4] = {0, 0, 0, 0};
+        std::uint32_t vertexCount = 0, indexCount = 0;
+        float lodIn = -1.0f, lodOut = -1.0f;
+        in.read(magic, 4);
+        in.read(reinterpret_cast<char*>(&vertexCount), 4);
+        in.read(reinterpret_cast<char*>(&indexCount), 4);
+        in.read(reinterpret_cast<char*>(&lodIn), 4);
+        in.read(reinterpret_cast<char*>(&lodOut), 4);
+        KS_CHECK(std::string(magic, 4) == "NMS2");
+        KS_CHECK(vertexCount == 4);  // un quadrato per chunk
+        KS_CHECK(indexCount == 6);
+        KS_CHECK_NEAR(lodIn, 0.0f, 1e-6);
+        KS_CHECK_NEAR(lodOut, cfg.chunkViewM ? 1400.0f : 0.0f, 1e-3);
+        // Header = magic(4) + vCount(4) + iCount(4) + lodIn(4) + lodOut(4) = 20,
+        // poi vertici (48 byte ciascuno, la dimensione che il renderer legge) e
+        // indici uint32. Niente di piu': il reader si aspetta esattamente questo.
+        KS_CHECK_NEAR(static_cast<double>(fs::file_size(path)),
+                      20.0 + vertexCount * 48.0 + indexCount * 4.0, 0.5);
+    }
+    {
+        std::ifstream in(cfg.outDir + "/baked/track.nmsh", std::ios::binary);
+        char magic[4] = {0, 0, 0, 0};
+        in.read(magic, 4);
+        KS_CHECK(std::string(magic, 4) == "NMSH");
+    }
+
     const std::string manifest = [&] {
         std::ifstream in(cfg.outDir + "/baked/manifest.txt");
         std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

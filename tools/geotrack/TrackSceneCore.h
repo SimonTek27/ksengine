@@ -33,6 +33,7 @@ struct GeotrackConfig {
     std::string orthoPath;         ///< immagine georeferenziata sul quadrato (fase 2)
     std::string tileCachePath;     ///< cache.json del mosaico di tile (fase 2)
     double chunkSizeM = 1024.0;    ///< lato dei chunk del fondo quando ci sono tile
+    double chunkViewM = 1400.0;    ///< finestra LOD dei chunk (0 = nessun limite)
     bool keepWidth = false;        ///< non sostituire widthM con la misura
     bool correctCenterline = false; ///< riallinea la centerline sullo skeleton dell'asfalto
     double correctSearchM = 6.0;    ///< raggio di ricerca dello snap

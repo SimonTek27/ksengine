@@ -64,6 +64,11 @@ asfalto 0.02, kerb 0.03, griglia 0.06) per evitare lo z-fighting.
   stazione, e il valore che finisce in `data.json` e' la **mediana**: l'apron dei
   box puo' allargare qualche campione senza spostare la larghezza del tracciato.
   `scene.json` riporta `measured_width_m`, `width_samples` e il file usato.
+- I chunk del fondo sono scritti in **NMS2** con la finestra di distanza
+  (`--chunk-view`, default 1400 m): il renderer la legge già (`LodWindow`) e non
+  disegna i chunk oltre il limite, quindi il LOD non richiede modifiche al motore
+  né un formato nuovo. Gli altri layer restano NMSH, che non ha la finestra.
+  `--chunk-view 0` disattiva la finestra.
 - `--tiles` legge `cache.json` (zoom + elenco tile) e georeferenzia ogni tile sul
   piano locale: la stessa immagine serve a misurare l'asfalto e a texturizzare il
   fondo. Il fondo esce a chunk (`ground_<x>_<z>`), una mesh e un albedo per chunk,

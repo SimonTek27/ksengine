@@ -32,6 +32,8 @@ void usage() {
         "  --tiles FILE             cache.json from fetch_cache.py: tile mosaic\n"
         "                           for the measurement and the ground texture\n"
         "  --chunk M                ground chunk size with --tiles (default 1024)\n"
+        "  --chunk-view M           chunk draw distance, NMS2 window (0 = always,\n"
+        "                           default 1400)\n"
         "  --correct [M]            snap the centerline onto the asphalt skeleton\n"
         "                           (search radius, default 6 m)\n"
         "  --keep-width             report the measurement, keep --width\n"
@@ -94,6 +96,8 @@ int main(int argc, char** argv) {
             cfg.tileCachePath = value("--tiles");
         } else if (arg == "--chunk") {
             cfg.chunkSizeM = std::atof(value("--chunk").c_str());
+        } else if (arg == "--chunk-view") {
+            cfg.chunkViewM = std::atof(value("--chunk-view").c_str());
         } else if (arg == "--keep-width") {
             cfg.keepWidth = true;
         } else if (arg == "--correct") {
@@ -142,7 +146,8 @@ int main(int argc, char** argv) {
     std::printf("grid slots=%d\n", res.gridSlots);
     if (res.widthSamples > 0)
         std::printf("measured width=%.2f m (%d samples)\n", res.measuredWidthM, res.widthSamples);
-    if (res.groundChunks > 0) std::printf("ground chunks=%d\n", res.groundChunks);
+    if (res.groundChunks > 0)
+        std::printf("ground chunks=%d (view %.0f m)\n", res.groundChunks, cfg.chunkViewM);
     if (res.centerlineShiftM > 0.0)
         std::printf("centerline shift=%.2f m\n", res.centerlineShiftM);
     std::printf("out=%s\n", cfg.outDir.c_str());

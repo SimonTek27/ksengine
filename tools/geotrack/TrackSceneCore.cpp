@@ -9,6 +9,7 @@
 #include "geotrack/Centerline.h"
 #include "geotrack/GeoProjection.h"
 #include "geotrack/Materials.h"
+#include "geotrack/NmshWriter.h"
 #include "geotrack/OrthoImage.h"
 #include "geotrack/PitLane.h"
 #include "geotrack/Scenery.h"
@@ -236,9 +237,18 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
                 chunk.minZ = square.minZ + iz * chunkSize;
                 chunk.maxZ = std::min(square.minZ + (iz + 1) * chunkSize, square.maxZ);
                 const std::string name = "ground_" + std::to_string(ix) + "_" + std::to_string(iz);
-                if (!writeLayer(bakedDir, name,
-                                groundQuad(chunk, 0.0, static_cast<float>(chunk.side())), error))
-                    return false;
+                // NMS2 con finestra di distanza: il renderer la applica gia'
+                // (LodWindow), quindi il LOD dei chunk non richiede modifiche
+                // al motore. chunkViewM 0 = nessuna finestra.
+                const ks::engine::terrain::TerrainMeshData chunkMesh =
+                    groundQuad(chunk, 0.0, static_cast<float>(chunk.side()));
+                const std::string chunkPath = (bakedDir / (name + ".nmsh")).string();
+                const bool chunkWritten =
+                    cfg.chunkViewM > 0.0
+                        ? writeMeshNms2(chunkPath, chunkMesh, 0.0f,
+                                        static_cast<float>(cfg.chunkViewM))
+                        : writeTerrainNMSH(chunkPath, chunkMesh);
+                if (!chunkWritten) return fail("cannot write " + chunkPath);
                 layers.push_back(name);
                 const ks::image::RawImage image = mosaic.crop(chunk, 512);
                 if (!ks::image::saveImageFile((texturesDir / (name + ".png")).string(), image,
@@ -419,6 +429,7 @@ bool generateTrack(const GeotrackConfig& cfg, GeotrackResult* out, std::string* 
     // Con una texture del fondo l'immagine copre il quadrato una volta sola.
     squareJson.insert("uv_repeat_m", jsonNum(square.side()));
     squareJson.insert("ground_chunks", jsonInt(groundChunks));
+    squareJson.insert("chunk_view_m", jsonNum(cfg.chunkViewM));
     scene.insert("square", squareJson);
     scene.insert("track", jsonStr(trackName));
     scene.insert("width_m", jsonNum(widthM));
