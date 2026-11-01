@@ -98,6 +98,14 @@ foreach(_pat
   list(FILTER KSENGINE_SOURCES EXCLUDE REGEX "${_pat}")
 endforeach()
 
+# Windows-only audio. AudioDevices, AudioUtil and WASAPIInput include <windows.h>,
+# <mmdeviceapi.h> and <Audioclient.h> unconditionally, so they cannot compile on a
+# POSIX host, and there is no ALSA/PulseAudio backend to swap in yet. Keeping them
+# out on other platforms is what lets the Qt-free engine build and archive there.
+if(NOT WIN32)
+  list(FILTER KSENGINE_SOURCES EXCLUDE REGEX "Audio/(AudioDevices|AudioUtil|WASAPIInput)\\.")
+endif()
+
 list(APPEND KSENGINE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/EngineModule.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/Engine.h"
@@ -188,6 +196,12 @@ target_include_directories(ksengine PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/external"
 	"${CMAKE_CURRENT_SOURCE_DIR}/external/stb"
 	"${CMAKE_CURRENT_SOURCE_DIR}/external/mikktspace"
+	# Headers reach the engine as engine/<dir>/... (the AC adapter pulls
+	# engine/FileFormat/AcdWriter.h, for instance), which only resolves from src/.
+	# Without this the target is not self-sufficient: `cmake -S src/engine` fails
+	# in physics/VehicleSimulator.cpp while the root build, which has src/ on the
+	# path already, compiles it.
+	"${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
 
 # 2b. Lua. The vendored copy wins over a system install (both would otherwise

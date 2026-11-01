@@ -22,6 +22,11 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 #define XR_USE_PLATFORM_LINUX 1
+// The engine drives OpenXR through Vulkan on every platform, but
+// openxr_platform.h only exposes XrGraphicsBindingVulkanKHR and the
+// PFN_xrGetVulkan* entry points inside #ifdef XR_USE_GRAPHICS_API_VULKAN.
+// Without this the VR translation units see no bindings at all on Linux.
+#define XR_USE_GRAPHICS_API_VULKAN 1
 #endif
 
 #if !defined(XR_PTR_SIZE)
@@ -138,9 +143,6 @@ typedef struct XrBoundSourcesForActionEnumerateInfo XrBoundSourcesForActionEnume
 typedef struct XrInputSourceLocalizedNameGetInfo XrInputSourceLocalizedNameGetInfo;
 typedef struct XrHapticActionInfo XrHapticActionInfo;
 typedef struct XrHapticBaseHeader XrHapticBaseHeader;
-typedef enum XrEyeVisibility XrEyeVisibility;
-typedef enum XrActionType XrActionType;
-typedef enum XrPerfSettingsDomainEXT XrPerfSettingsDomainEXT;
 typedef uint64_t XrInstanceCreateFlags;
 typedef uint64_t XrSessionCreateFlags;
 typedef uint64_t XrSwapchainCreateFlags;
