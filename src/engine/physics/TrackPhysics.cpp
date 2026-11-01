@@ -1,4 +1,3 @@
-#ifndef KSENGINE_QT_FREE
 #include <string>
 #include "PhysicsCoreTypes.h"
 #include "TrackPhysics.h"
@@ -10,6 +9,7 @@
 #include <cstdio>
 #include <cmath>
 #include <fstream>
+#include <sstream>
 #include <iterator>
 #include <utility>
 #include <ctime>
@@ -289,7 +289,6 @@ float ElevationModel::calculateGroundEffectModifier(
 TrackSimulator* TrackSimulator::s_instance = nullptr;
 
 TrackSimulator::TrackSimulator()
-    , m_sessionTimer()
 {
     m_sessionState.type = TrackSessionState::SessionType::Practice;
     m_sessionState.sessionActive = false;
@@ -447,10 +446,8 @@ bool TrackSimulator::setVehicle(VehicleSimulator* vehicle) {
     if (!vehicle) return false;
 
     m_vehicle = vehicle;
-    m_vehicleName = vehicle->metaObject()->className();
-
-    connect(vehicle, &VehicleSimulator::stateUpdated, this, [this](const SimulationState& state) {
-    });
+    // Qt reflection is gone, and the simulator exposes no name accessor.
+    m_vehicleName = "VehicleSimulator";
 
     // emit vehicleChanged(m_vehicleName);
     return true;
@@ -469,8 +466,7 @@ void TrackSimulator::startSession(double durationMinutes) {
     if (m_sessionState.sessionActive) return;
 
     if (!m_vehicle) {
-        std::fprintf(stderr, "%s
-", "TrackSimulator: No vehicle set, cannot start session";
+        std::fprintf(stderr, "TrackSimulator: No vehicle set, cannot start session\n");
         return;
     }
 
@@ -509,9 +505,13 @@ void TrackSimulator::startSession(double durationMinutes) {
     // emit sessionStateChanged(m_sessionState.type);
     // emit recordingStarted();
 
-    std::fprintf(stderr, "%s
-", "TrackSimulator: Session started ("
-             << (durationMinutes > 0 ? std::string::number(durationMinutes) + " min" : "untimed") << ")";
+    {
+        std::ostringstream durationText;
+        if (durationMinutes > 0) durationText << durationMinutes << " min";
+        else durationText << "untimed";
+        std::fprintf(stderr, "TrackSimulator: session started (%s)\n",
+                     durationText.str().c_str());
+    }
 }
 
 void TrackSimulator::stopSession() {
@@ -530,8 +530,7 @@ void TrackSimulator::stopSession() {
     // emit sessionStateChanged(m_sessionState.type);
     // emit recordingStopped();
 
-    std::fprintf(stderr, "%s
-", "TrackSimulator: Session stopped";
+    std::fprintf(stderr, "TrackSimulator: Session stopped\n");
 }
 
 void TrackSimulator::pauseSession() {
@@ -625,10 +624,11 @@ void TrackSimulator::updateVehicleTelemetry(double dt) {
     m_sessionState.gear = state.gear;
 
     for (int i = 0; i < 4; ++i) {
-        WheelState ws = m_vehicle->wheelState(i);
-        m_sessionState.tyreTemp[i] = ws.temperature;
-        m_sessionState.tyrePressure[i] = ws.pressure;
-        m_sessionState.tyreWear[i] = ws.wear;
+        // SimulationState already carries the tyre channels per wheel; there is
+        // no per-wheel accessor on VehicleSimulator any more.
+        m_sessionState.tyreTemp[i] = state.tyreTemp[i];
+        m_sessionState.tyrePressure[i] = state.tyrePressure[i];
+        m_sessionState.tyreWear[i] = state.tyreWear[i];
     }
 
     // emit speedChanged(m_sessionState.speed);
@@ -905,7 +905,7 @@ void TrackSimulator::recordReplayFrame() {
 void TrackSimulator::setWeatherState(const WeatherState& weather) {
     m_weatherSim.setState(weather);
     if (m_vehicle) {
-        m_vehicle->setWeatherState(weather);
+        // The vehicle no longer takes a weather state; the track owns it.
     }
 }
 
@@ -914,7 +914,7 @@ void TrackSimulator::setWeatherState(const WeatherState& weather) {
 // ============================================================================
 
 void TrackSimulator::updateAiTargets() {
-    (void)m_vehicle
+    (void)m_vehicle;
 }
 
 // ============================================================================
@@ -929,6 +929,3 @@ void TrackSimulator::update(double dt) {
 
 } // namespace ks::physics
 
-#else
-// Qt-free: TrackPhysics I/O uses std::fstream alternatives in VehicleSimulator/TrackLoader
-#endif
