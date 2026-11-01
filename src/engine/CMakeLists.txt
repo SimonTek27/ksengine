@@ -133,6 +133,9 @@ if(EXISTS "${KSENGINE_LUA_DIR}/lua.h")
 		add_library(ksengine_lua STATIC ${_ksengine_lua_sources})
 		target_include_directories(ksengine_lua PUBLIC "${KSENGINE_LUA_DIR}")
 		set_target_properties(ksengine_lua PROPERTIES FOLDER "engine/external")
+		# Lua is archived into ksengine, so it has to be position independent
+		# whenever the engine is, or the shared link rejects it on ELF.
+		set_target_properties(ksengine_lua PROPERTIES POSITION_INDEPENDENT_CODE ON)
 		if(MSVC)
 			set_source_files_properties(${_ksengine_lua_sources} PROPERTIES
 				COMPILE_DEFINITIONS _CRT_SECURE_NO_WARNINGS)
@@ -160,6 +163,12 @@ if(KSENGINE_SHARED)
 else()
 	add_library(ksengine STATIC ${KSENGINE_SOURCES})
 endif()
+
+# MSVC makes objects position independent on its own, so a shared ksengine
+# linked on Windows without anyone asking. On ELF it does not: default to
+# -fPIC so the default KSENGINE_SHARED=ON configuration links there too, and
+# keep it on for the static archive so both configurations agree.
+set_target_properties(ksengine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 if(KSENGINE_SHARED)
 	# dllexport while compiling the DLL, dllimport for everything linking it.
