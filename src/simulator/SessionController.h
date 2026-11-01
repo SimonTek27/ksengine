@@ -25,6 +25,12 @@ struct SessionStartParams {
     int gridSize = 16;
     bool standingStart = true;
     bool trackLimits = true;
+    // beginSession() reads these: a timed session runs on the clock instead of
+    // laps, aiCars fills the grid behind the player, startInGarage spawns the
+    // player in its box instead of on the grid.
+    int sessionTimeSeconds = 0;
+    int aiCars = 0;
+    bool startInGarage = false;
 };
 
 inline const char* sessionModeName(GameSessionMode m) {

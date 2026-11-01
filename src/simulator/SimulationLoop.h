@@ -340,8 +340,8 @@ public:
     void applyDamageEffects();
     void beginSession(GameSessionMode mode);
     void configurePitAxis(float originX, float originZ, float headingRad, float lengthM);
-    void loadGarageFromTrack(const std::string& trackDir);
-    void loadReplayFile(const std::string& path);
+    bool loadGarageFromTrack(const std::string& trackDir);
+    bool loadReplayFile(const std::string& path);
     void setupDefaultGarageLayout(int boxCount);
     void snapVehicleToPose(ks::physics::VehicleSimulator* veh, const WorldPose& pose);
     void spawnAiGrid(int count);
@@ -553,6 +553,9 @@ private:
     PitLaneCollision m_pitCollision;
     bool m_pitSystemsReady = false;
     float m_snapHoldSec = 0.f;
+    // Time the car stays frozen after snapVehicleToPose(), so the throttle
+    // does not fight the teleport on the first frame out of the box.
+    static constexpr float kSnapHoldDuration = 0.35f;
 
 };
 
