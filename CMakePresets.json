@@ -34,6 +34,19 @@
       "binaryDir": "${sourceDir}/out/build/msvc-release"
     },
     {
+      "name": "linux-qtfree",
+      "displayName": "Linux Qt-free engine",
+      "description": "ksengine only, no Qt: Ninja, Release, static archive. This is the configuration that builds and links on a POSIX host.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/linux-qtfree",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_STANDARD": "17",
+        "KSENGINE_QT_FREE": "ON",
+        "KSENGINE_SHARED": "OFF"
+      }
+    },
+    {
       "hidden": true,
       "name": "Qt",
       "cacheVariables": {
@@ -47,6 +60,11 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "linux-qtfree",
+      "displayName": "Build Linux Qt-free engine",
+      "configurePreset": "linux-qtfree"
+    },
     {
       "name": "default-debug",
       "displayName": "Build Debug",
