@@ -208,6 +208,9 @@ public:
     bool joinServer(const std::string&, uint16_t, const std::string& = {}, const std::string& = {}) { return false; }
     bool setPrivateKey(const std::string&) { return false; }
     void clearPrivateKey() {}
+    void setAuthToken(const std::string&) {}
+    bool authRequired() const { return false; }
+    void setJoinToken(const std::string&) {}
     bool hasPrivateKey() const { return false; }
     void setAutoReconnect(bool, int = 5, double = 2.0) {}
     bool autoReconnect() const { return false; }
