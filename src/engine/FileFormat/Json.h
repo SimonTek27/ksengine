@@ -52,6 +52,7 @@ public:
     Json();
     Json(bool value);
     Json(int value);
+    Json(long value);       // distinct from long long only where int64_t is long
     Json(long long value);
     Json(double value);
     Json(const char* value);

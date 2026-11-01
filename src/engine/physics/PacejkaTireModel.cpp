@@ -1,5 +1,5 @@
 #include "PacejkaTireModel.h"
-#include "../../Config/IniFile.h"
+#include "../Config/IniFile.h"
 
 #include <algorithm>
 #include <cmath>

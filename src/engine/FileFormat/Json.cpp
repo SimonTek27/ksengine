@@ -321,6 +321,9 @@ Json::Json(bool value) : m_type(Type::Bool), m_bool(value) {}
 Json::Json(int value)
     : m_type(Type::Number), m_isInt(true), m_int(value), m_double(static_cast<double>(value)) {}
 
+Json::Json(long value)
+    : m_type(Type::Number), m_isInt(true), m_int(value), m_double(static_cast<double>(value)) {}
+
 Json::Json(long long value)
     : m_type(Type::Number), m_isInt(true), m_int(value), m_double(static_cast<double>(value)) {}
 

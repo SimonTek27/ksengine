@@ -1,5 +1,6 @@
 #include "SimucubeFFB.h"
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -22,6 +23,24 @@
 namespace ks::device {
 
 namespace {
+
+// The descriptor is kept in a void* member so the object layout is the same on
+// both platforms: Windows SOCKET is pointer-sized, while a POSIX descriptor is
+// a plain int and cannot be narrowed to it on LP64.
+#ifdef _WIN32
+using socket_handle_t = SOCKET;
+inline socket_handle_t toHandle(void* s) { return reinterpret_cast<socket_handle_t>(s); }
+inline void* toStorage(socket_handle_t s) { return reinterpret_cast<void*>(s); }
+#else
+using socket_handle_t = int;
+inline socket_handle_t toHandle(void* s) {
+    return static_cast<socket_handle_t>(reinterpret_cast<std::intptr_t>(s));
+}
+inline void* toStorage(socket_handle_t s) {
+    return reinterpret_cast<void*>(static_cast<std::intptr_t>(s));
+}
+#endif
+
 inline float clampf(float v, float lo, float hi) {
     return std::max(lo, std::min(hi, v));
 }
@@ -54,8 +73,8 @@ bool SimucubeFFB::initialize() {
     }
 #endif
 
-    m_udpSocket = reinterpret_cast<void*>(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
-    if (reinterpret_cast<SOCKET>(m_udpSocket) == INVALID_SOCKET) {
+    m_udpSocket = toStorage(socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP));
+    if (toHandle(m_udpSocket) == INVALID_SOCKET) {
         std::fprintf(stderr, "SimucubeFFB: Socket creation failed\n");
 #ifdef _WIN32
         WSACleanup();
@@ -65,13 +84,13 @@ bool SimucubeFFB::initialize() {
 
     int timeout = 1000;
 #ifdef _WIN32
-    setsockopt(reinterpret_cast<SOCKET>(m_udpSocket), SOL_SOCKET, SO_RCVTIMEO,
+    setsockopt(toHandle(m_udpSocket), SOL_SOCKET, SO_RCVTIMEO,
                reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 #else
     struct timeval tv;
     tv.tv_sec = 1;
     tv.tv_usec = 0;
-    setsockopt(reinterpret_cast<SOCKET>(m_udpSocket), SOL_SOCKET, SO_RCVTIMEO,
+    setsockopt(toHandle(m_udpSocket), SOL_SOCKET, SO_RCVTIMEO,
                &tv, sizeof(tv));
 #endif
 
@@ -109,7 +128,7 @@ bool SimucubeFFB::discoverDevice() {
         addr.sin_port = htons(TRUEDRIVE_DEFAULT_PORT);
         addr.sin_addr.s_addr = inet_addr(ip);
 
-        sendto(reinterpret_cast<SOCKET>(m_udpSocket),
+        sendto(toHandle(m_udpSocket),
                reinterpret_cast<const char*>(queryPacket), sizeof(queryPacket),
                0, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
 
@@ -120,7 +139,7 @@ bool SimucubeFFB::discoverDevice() {
 #else
         socklen_t fromLen = sizeof(fromAddr);
 #endif
-        int received = recvfrom(reinterpret_cast<SOCKET>(m_udpSocket),
+        int received = recvfrom(toHandle(m_udpSocket),
                                 reinterpret_cast<char*>(response), sizeof(response),
                                 0, reinterpret_cast<struct sockaddr*>(&fromAddr), &fromLen);
 
@@ -150,7 +169,7 @@ bool SimucubeFFB::sendTrueDriveCommand(const uint8_t* data, size_t len) {
     addr.sin_port = htons(m_targetPort);
     addr.sin_addr.s_addr = inet_addr(m_targetIP.c_str());
 
-    int sent = sendto(reinterpret_cast<SOCKET>(m_udpSocket),
+    int sent = sendto(toHandle(m_udpSocket),
                       reinterpret_cast<const char*>(data), static_cast<int>(len),
                       0, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
     return sent == static_cast<int>(len);
@@ -175,7 +194,7 @@ bool SimucubeFFB::sendTorqueCommand(float torqueNm) {
 void SimucubeFFB::processUDPResponse() {
     if (!m_connected || !m_udpSocket) return;
     uint8_t response[64] = {};
-    int received = recvfrom(reinterpret_cast<SOCKET>(m_udpSocket),
+    int received = recvfrom(toHandle(m_udpSocket),
                             reinterpret_cast<char*>(response), sizeof(response),
                             0, nullptr, nullptr);
     if (received > 0 && response[0] == 0x10) {
@@ -231,7 +250,7 @@ void SimucubeFFB::shutdown() {
     if (m_connected)
         sendTorqueCommand(0.0f);
     if (m_udpSocket != nullptr) {
-        closesocket(reinterpret_cast<SOCKET>(m_udpSocket));
+        closesocket(toHandle(m_udpSocket));
         m_udpSocket = nullptr;
     }
 #ifdef _WIN32
