@@ -1,10 +1,17 @@
 #pragma once
-/** Bidirectional control API (InSim-style) TCP default :20780 */
+/** Bidirectional control API (InSim-style) TCP default :20780
+ *
+ *  Set KS_CONTROL_DEBUG=1 to trace accepts, reads, parsed commands and replies
+ *  on stderr. Off by default: the trace is for diagnosing a client that
+ *  connects but never gets an answer, which is otherwise invisible from the
+ *  outside (the socket looks healthy on both ends).
+ */
 #include <string>
 #include <vector>
 #include <functional>
 #include <sstream>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdint>
 #include <cctype>
@@ -57,6 +64,8 @@ public:
 
     bool start(uint16_t port = kDefaultPort) {
         if (m_listen >= 0) return true;
+        const char* dbgEnv = std::getenv("KS_CONTROL_DEBUG");
+        m_debug = dbgEnv && *dbgEnv && std::strcmp(dbgEnv, "0") != 0;
 #ifdef _WIN32
         WSADATA wsa; WSAStartup(MAKEWORD(2, 2), &wsa);
         m_listen = (int)socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -78,11 +87,13 @@ public:
         if (listen(m_listen, 4) != 0) return false;
 #endif
         m_port = port;
-        std::fprintf(stderr, "ExternalControlApi: listening on %u\n", (unsigned)port);
+        std::fprintf(stderr, "ExternalControlApi: listening on %u%s\n",
+                     (unsigned)port, m_debug ? " (debug trace on)" : "");
+        std::fflush(stderr);
         return true;
     }
     void stop() {
-        closeClient();
+        closeClient("stop");
         if (m_listen >= 0) {
 #ifdef _WIN32
             closesocket((SOCKET)m_listen);
@@ -113,23 +124,28 @@ public:
 #else
         int n = (int)recv(m_client, buf, sizeof(buf) - 1, 0);
 #endif
-        if (n == 0) { closeClient(); return; }
+        if (n == 0) { trace("peer closed (recv 0)"); closeClient("recv 0"); return; }
         if (n < 0) {
             // "Nothing to read yet" is not a dead client. Anything else - a
             // reset from a client that vanished without a clean close - is,
             // and keeping the socket would wedge the API: acceptIfNeeded()
             // only takes a new client while m_client < 0, so one lost peer
             // would silence the port until the simulator exits.
-            if (!wouldBlock()) closeClient();
+            if (!wouldBlock()) {
+                trace("recv failed: " + lastError());
+                closeClient("recv error");
+            }
             return;
         }
         buf[n] = 0; m_rx.append(buf, n);
+        trace("recv " + std::to_string(n) + " -> rx=" + std::to_string(m_rx.size()));
         for (;;) {
             auto pos = m_rx.find('\n');
             if (pos == std::string::npos) break;
             std::string line = m_rx.substr(0, pos); m_rx.erase(0, pos + 1);
             while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
             if (line.empty()) continue;
+            trace("cmd '" + line + "'");
             auto cmd = parseControlLine(line);
             if (cmd.verb == "PING") { sendLine("PONG"); continue; }
             if (cmd.verb == "AUTH") {
@@ -152,22 +168,38 @@ public:
         }
     }
     void sendLine(const std::string& line) {
-        if (m_client < 0) return;
+        if (m_client < 0) { trace("send skipped: no client"); return; }
         std::string msg = line; if (msg.empty() || msg.back() != '\n') msg.push_back('\n');
 #ifdef _WIN32
         const int sent = (int)send((SOCKET)m_client, msg.c_str(), (int)msg.size(), 0);
 #else
         const int sent = (int)send(m_client, msg.c_str(), msg.size(), 0);
 #endif
+        trace("sent " + std::to_string(sent) + "/" + std::to_string((int)msg.size()));
         // Drop a peer that stopped reading here as well: recv() only notices on
         // the next poll, and every reply until then goes nowhere.
-        if (sent == 0 || (sent < 0 && !wouldBlock())) closeClient();
+        if (sent == 0 || (sent < 0 && !wouldBlock())) {
+            trace("send failed: " + lastError());
+            closeClient("send error");
+        }
     }
     void emitEvent(const std::string& evt) { sendLine(std::string("EVT ") + evt); }
     bool hasClient() const { return m_client >= 0; }
     uint16_t port() const { return m_port; }
 
 private:
+    static std::string lastError() {
+#ifdef _WIN32
+        return "winsock " + std::to_string((int)WSAGetLastError());
+#else
+        return "errno " + std::to_string(errno);
+#endif
+    }
+    void trace(const std::string& what) {
+        if (!m_debug) return;
+        std::fprintf(stderr, "[ctl] %s\n", what.c_str());
+        std::fflush(stderr);
+    }
     void acceptIfNeeded() {
         if (m_listen < 0 || m_client >= 0) return;
         sockaddr_in from{};
@@ -181,6 +213,7 @@ private:
         if (c < 0) return;
         m_client = c;
         m_authenticated = !m_authRequired;
+        trace("accepted client " + std::to_string(c));
         if (m_authRequired)
             sendLine("OK ksim control API v1 AUTH_REQUIRED");
         else
@@ -195,8 +228,9 @@ private:
             onClientConnected(ip);
         }
     }
-    void closeClient() {
+    void closeClient(const char* why) {
         if (m_client < 0) return;
+        trace(std::string("closing client (") + why + ")");
 #ifdef _WIN32
         closesocket((SOCKET)m_client);
 #else
@@ -211,6 +245,7 @@ private:
     std::string m_token;
     bool m_authRequired = false;
     bool m_authenticated = false;
+    bool m_debug = false;
 };
 
 } // namespace sim
