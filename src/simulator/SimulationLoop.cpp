@@ -336,9 +336,26 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
         }
     }
     ks::physics::TrackSurface::instance().syncFromWeather(m_weather.trackWetness, m_weather.trackTemp);
+    // A real AC track folder holds several .kn5 — the layout plus its
+    // sub-layouts and decorative props — so directory order is not a choice:
+    // it picked a 7 MB deco file over the 406 MB vallelunga.kn5. Prefer the
+    // file named like the folder, else the largest one.
     std::string kn5;
-    for (auto& e : fs::directory_iterator(trackDirectory))
-        if (e.path().extension() == ".kn5") { kn5 = e.path().string(); break; }
+    {
+        const std::string folderStem = fs::path(trackDirectory).filename().string();
+        std::uintmax_t largest = 0;
+        std::error_code walkEc;
+        for (const auto& entry : fs::directory_iterator(trackDirectory, walkEc)) {
+            const fs::path path = entry.path();
+            if (path.extension() != ".kn5") continue;
+            if (path.stem().string() == folderStem) { kn5 = path.string(); break; }
+            std::error_code sizeEc;
+            const std::uintmax_t size = fs::file_size(path, sizeEc);
+            if (sizeEc || size <= largest) continue;
+            largest = size;
+            kn5 = path.string();
+        }
+    }
     if (!kn5.empty()) return loadTrack(kn5);
     m_trackData.valid = true; m_trackLoaded = true;
     m_ui.menu().setTrackName(m_trackData.name);
@@ -1393,6 +1410,66 @@ void SimulationLoop::despawnCarVisuals() {
     m_carVisualEntities.clear();
 }
 
+namespace {
+// Vertex bounds of a baked .nmsh: "NMS2" is magic + counts + the lod window,
+// "NMSH" is the legacy magic + counts. False on anything unreadable, so a
+// malformed bake can never fabricate a spawn point.
+bool readNmshBounds(const std::string& path, float outMin[3], float outMax[3]) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    char magic[4] = {0, 0, 0, 0};
+    in.read(magic, 4);
+    std::uint32_t counts[2] = {0, 0};
+    in.read(reinterpret_cast<char*>(counts), sizeof(counts));
+    if (!in) return false;
+    const bool nms2 = std::memcmp(magic, "NMS2", 4) == 0;
+    if (!nms2 && std::memcmp(magic, "NMSH", 4) != 0) return false;
+    if (nms2) in.seekg(8, std::ios::cur); // lodIn, lodOut
+    const std::uint32_t vertexCount = counts[0];
+    if (vertexCount == 0 || vertexCount > 4000000u) return false;
+    float v[12];
+    bool any = false;
+    for (std::uint32_t i = 0; i < vertexCount; ++i) {
+        in.read(reinterpret_cast<char*>(v), sizeof(v));
+        if (!in) return false;
+        for (int k = 0; k < 3; ++k) {
+            if (!any) { outMin[k] = v[k]; outMax[k] = v[k]; }
+            else if (v[k] < outMin[k]) outMin[k] = v[k];
+            else if (v[k] > outMax[k]) outMax[k] = v[k];
+        }
+        any = true;
+    }
+    return any;
+}
+
+bool markerCentre(const std::string& baked, const char* name, vec3& out) {
+    float lo[3], hi[3];
+    if (!readNmshBounds(baked + "/" + name + ".nmsh", lo, hi)) return false;
+    out = vec3{(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
+    return true;
+}
+
+// AC keeps its spawn points as tiny marker meshes (AC_START_0,
+// AC_HOTLAP_START_0, AC_PIT_0..N) and the baker applies each node's world
+// matrix, so the box centre is the spawn position in world space. The pit row
+// runs parallel to the track, so PIT_0 -> PIT_1 gives a usable yaw.
+bool trackSpawnPose(const std::string& baked, vec3& pos, float& heading) {
+    vec3 start, pit0, pit1;
+    const bool hasStart = markerCentre(baked, "AC_START_0", start);
+    const bool hasHotlap = !hasStart && markerCentre(baked, "AC_HOTLAP_START_0", start);
+    const bool hasPit0 = markerCentre(baked, "AC_PIT_0", pit0);
+    if (!hasStart && !hasHotlap && !hasPit0) return false;
+    pos = (hasStart || hasHotlap) ? start : pit0;
+    if (hasPit0 && markerCentre(baked, "AC_PIT_1", pit1)) {
+        const float dx = pit1.x - pit0.x;
+        const float dy = pit1.y - pit0.y;
+        if (dx * dx + dy * dy > 0.25f) heading = std::atan2(dx, dy);
+    }
+    return true;
+}
+} // namespace
+
+
 void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
     if (!m_vulkanRenderer) return; // headless: metadata-only load is valid
     const std::string baked = ks::sim::findBakedManifestDir(trackDir);
@@ -1426,6 +1503,25 @@ void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
     m_spawnedSceneDir = baked;
     std::fprintf(stderr, "[scene] track visuals from %s (%d entities)\n",
                  baked.c_str(), static_cast<int>(m_sceneEntities.size()));
+    // The baked world is not centred on the engine origin (vallelunga spans
+    // Y -7620..+7827 and has nothing within 100 m of 0), so a car left at the
+    // origin renders an empty frustum: 963 of 971 meshes cull away and the
+    // track is loaded but invisible. Anchor the player on the track's own
+    // spawn marker, which is what makes loading a real track mean anything.
+    vec3 spawn;
+    float spawnHeading = 0.0f;
+    if (trackSpawnPose(baked, spawn, spawnHeading)) {
+#if HAS_VEHICLE_SIM
+        if (m_vehicle) {
+            auto& st = m_vehicle->state();
+            st.position = {spawn.x, spawn.y, spawn.z};
+            st.heading = spawnHeading;
+        }
+#endif
+        std::fprintf(stderr,
+                     "[scene] anchored at the track spawn (%.1f, %.1f, %.1f) heading %.2f\n",
+                     spawn.x, spawn.y, spawn.z, spawnHeading);
+    }
 }
 
 // Loads a bake's meshes under a name prefix — materials.txt, the texture dir
