@@ -26,6 +26,7 @@ import json
 import os
 import socket
 import sys
+import time
 
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "ksim-control", "version": "1.0.0"}
@@ -35,9 +36,38 @@ PORT = int(os.environ.get("KSIM_PORT", "20780"))
 TOKEN = os.environ.get("KSIM_TOKEN", "")
 TIMEOUT = float(os.environ.get("KSIM_TIMEOUT", "2.0"))
 
+NEWLINE = b"\n"
+
 
 class ControlError(Exception):
     """The control API could not be reached, or answered with ERR."""
+
+
+class _LineReader:
+    """Newline-delimited reads straight from the socket.
+
+    socket.makefile() is not used on purpose: its buffered readline() misbehaves
+    with a socket timeout set (on Windows it can sit on data that has already
+    arrived), while a plain recv() returns that data immediately - and the
+    protocol is line-based anyway.
+    """
+
+    def __init__(self, sock):
+        self._sock = sock
+        self._buf = b""
+
+    def readline(self):
+        while NEWLINE not in self._buf:
+            chunk = self._sock.recv(4096)
+            if not chunk:
+                if self._buf:
+                    line, self._buf = self._buf, b""
+                    return line
+                raise ControlError("control API closed the connection")
+            self._buf += chunk
+        line, _, rest = self._buf.partition(NEWLINE)
+        self._buf = rest
+        return line
 
 
 def _readline(reader):
@@ -48,18 +78,34 @@ def _readline(reader):
 
 
 def control(verb, args=()):
-    """Send one verb and return every reply line of that exchange.
+    """Send one verb, retrying once while the simulator reaps a previous client.
 
-    Replies come back as `EVT ...` events followed by exactly one `OK ...` or
-    `ERR ...` terminator. `PB LIST` is the one command that answers with extra
-    rows after its OK line (OK PB COUNT <n> then <n> `PB ...` rows), so the
-    terminator alone is not enough to know when the exchange is over.
+    The control API serves one client at a time: it does not answer a new socket
+    until the old one has gone, so the first call right after another client
+    disconnects can be accepted but silent. One retry covers that; when a client
+    is really still connected the retry is silent too and the caller is told why.
     """
     line = " ".join([verb] + [str(a) for a in args]).strip()
     try:
+        return _control_once(line)
+    except socket.timeout:
+        time.sleep(0.75)
+        try:
+            return _control_once(line)
+        except socket.timeout:
+            raise ControlError(
+                "control API accepted the connection but did not answer twice "
+                "on %s:%d. It serves one client at a time: another client may "
+                "still be connected (close it, or wait a moment and retry)."
+                % (HOST, PORT))
+
+
+def _control_once(line):
+    """One request/response exchange on a fresh connection."""
+    try:
         with socket.create_connection((HOST, PORT), timeout=TIMEOUT) as sock:
             sock.settimeout(TIMEOUT)
-            reader = sock.makefile("rb")
+            reader = _LineReader(sock)
 
             greeting = _readline(reader)
             if not greeting.startswith("OK "):
@@ -73,7 +119,6 @@ def control(verb, args=()):
                 reply = _readline(reader)
                 if not reply.startswith("OK"):
                     raise ControlError("auth rejected: %s" % reply)
-                greeting = "OK control API v1 (authenticated)"
 
             sock.sendall((line + "\n").encode("utf-8"))
             lines = []
@@ -93,6 +138,8 @@ def control(verb, args=()):
                 if reply.startswith("OK"):
                     break
             return lines
+    except socket.timeout:
+        raise  # control() decides whether this is worth one retry
     except OSError as exc:
         raise ControlError(
             "cannot reach ksim control API on %s:%d (%s). Is the simulator "
