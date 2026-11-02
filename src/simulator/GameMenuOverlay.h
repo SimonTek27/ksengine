@@ -40,6 +40,7 @@ enum class MenuState {
     TrackSelect,
     TeamSelect,
     Results,
+    Pause,
     DevModeConfirm,
     QuitConfirm
 };
@@ -141,12 +142,19 @@ public:
     void setPitStrategy(float fuelL, bool tyres, bool body, bool susp, bool aero,
                         bool engine);
 
+    /** In-car pause overlay (ESC while driving). A screen of its own because
+     *  its rows act on a running session: resume, restart, garage, settings,
+     *  quit — never the pre-session "pick a car and a track" flow. */
+    void openPauseMenu();
+
     std::function<void()> onExitRequested;
     // Fase 1 exit: the SINGLE PLAYER session rows report which session the
     // player picked (Practice / TimeAttack / Race) — SimulationLoop applies
     // the mode (laps, AI grid, countdown) through startSession().
     std::function<void(GameSessionMode)> onStartDrivingRequested;
     std::function<void()> onResetRequested;
+    /** Pause overlay: re-enter the current session mode from the pits. */
+    std::function<void()> onRestartSessionRequested;
     std::function<void()> onToggleFullscreenRequested;
     std::function<void(const DriverProfile&)> onProfileChanged;
     std::function<void()> onDevModeRequested;
@@ -194,6 +202,7 @@ private:
     void buildProfileMenu();
     void buildGarageMenu();
     void buildPitStrategyMenu();
+    void buildPauseMenu();
     // Rebuilds the pit strategy rows in place (fuel step / toggles edit the
     // stored values) keeping the cursor — the row layout is stable.
     void refreshPitStrategy();

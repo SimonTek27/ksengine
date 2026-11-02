@@ -109,7 +109,10 @@ public:
             this->uploadDynamic(v, vc, i, ic);
         };
         pass.onDraw = [this](uint32_t vc, uint32_t ic, float sw, float sh) {
-            this->recordDraw(m_cmd, vc, ic, sw, sh);
+            // The hook carries the layout viewport only; without the framebuffer
+            // size the draw covers exactly that space (NativeRenderer calls
+            // recordDraw() directly with both sizes).
+            this->recordDraw(m_cmd, vc, ic, sw, sh, sw, sh);
         };
         pass.m_pipeline = m_pipeline;
         pass.m_vb = m_vb;
@@ -233,14 +236,21 @@ public:
         return true;
     }
 
-    void recordDraw(VkCommandBuffer cmd, uint32_t /*vc*/, uint32_t ic, float screenW, float screenH) {
+    // layoutW/H: the pixel space the vertices were laid out in (the UI viewport,
+    // i.e. logical window pixels). fbW/H: the framebuffer the draw lands in.
+    // They differ on a HiDPI window, so the push constant divides by the layout
+    // space while the viewport covers the whole framebuffer — dividing by the
+    // framebuffer instead left the overlay in the top-left corner of a
+    // DPI-scaled swapchain.
+    void recordDraw(VkCommandBuffer cmd, uint32_t /*vc*/, uint32_t ic,
+                    float layoutW, float layoutH, float fbW, float fbH) {
         if (!m_ok || !cmd || ic == 0 || !m_pipeline) return;
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_descSet, 0, nullptr);
 
-        float pc[2] = {screenW, screenH};
+        float pc[2] = {layoutW, layoutH};
         vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), pc);
 
         VkDeviceSize off = 0;
@@ -249,11 +259,11 @@ public:
 
         // Full-screen viewport matching swapchain
         VkViewport vp{};
-        vp.width = screenW;
-        vp.height = screenH;
+        vp.width = fbW;
+        vp.height = fbH;
         vp.maxDepth = 1.f;
         vkCmdSetViewport(cmd, 0, 1, &vp);
-        VkRect2D sc{{0, 0}, {static_cast<uint32_t>(screenW), static_cast<uint32_t>(screenH)}};
+        VkRect2D sc{{0, 0}, {static_cast<uint32_t>(fbW), static_cast<uint32_t>(fbH)}};
         vkCmdSetScissor(cmd, 0, 1, &sc);
 
         vkCmdDrawIndexed(cmd, ic, 1, 0, 0, 0);

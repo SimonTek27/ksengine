@@ -2556,6 +2556,8 @@ void NativeRenderer::drawUi(const ui::UiRenderer& ui) {
         m_uiAtlasPass = nullptr;
     }
     m_uiPass->uploadFrame(ui);
+    m_uiLayoutW = static_cast<float>(ui.viewportWidth());
+    m_uiLayoutH = static_cast<float>(ui.viewportHeight());
 }
 
 // Builds (once per render pass) the Vulkan overlay pipeline. VulkanUiPipeline
@@ -2609,10 +2611,13 @@ void NativeRenderer::recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd) {
     pipe->uploadDynamic(verts.data(), static_cast<uint32_t>(verts.size()),
                         indices.data(), static_cast<uint32_t>(indices.size()));
     pipe->setCommandBuffer(cmd);
-    // Swapchain pixels, not the viewport hint: the UI is laid out in window
-    // pixels, and the extent is what the frame is actually rendered into.
+    // Vertices are laid out in the UI viewport; the draw covers the whole
+    // framebuffer (see recordDraw). Passing the swapchain extent as the layout
+    // space drew the overlay at ~39% size in the top-left corner on the DPI
+    // scaled window.
     pipe->recordDraw(cmd, static_cast<uint32_t>(verts.size()),
                      static_cast<uint32_t>(indices.size()),
+                     m_uiLayoutW, m_uiLayoutH,
                      static_cast<float>(m_swapChainExtent.width),
                      static_cast<float>(m_swapChainExtent.height));
 }

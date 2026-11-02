@@ -385,6 +385,56 @@ int main() {
         KS_CHECK(!carMenu.isVisible());
         KS_CHECK(ks::sim::ui::NativeUiHub::openInCarMenu(carMenu, true));
         KS_CHECK(carMenu.isVisible());
+        KS_CHECK(carMenu.state() == MenuState::Pause); // pause screen, not MAIN
+    }
+
+    // ---------------------------------------------------------------------
+    // In-car pause overlay: its own rows (resume / restart / garage /
+    // settings / quit), ESC resumes the car, and screens it opens come back
+    // to it instead of the pre-session MAIN menu.
+    // ---------------------------------------------------------------------
+    {
+        GameMenuOverlay menu;
+        menu.openPauseMenu();
+        KS_CHECK(menu.isVisible());
+        KS_CHECK(menu.state() == MenuState::Pause);
+        KS_CHECK(rowOf(menu, "RESUME") >= 0);
+        KS_CHECK(rowOf(menu, "RESTART SESSION") >= 0);
+        KS_CHECK(rowOf(menu, "GARAGE") >= 0);
+        KS_CHECK(rowOf(menu, "SETTINGS") >= 0);
+        KS_CHECK(rowOf(menu, "QUIT") >= 0);
+        // No "pick a car / track" rows: those belong to the pre-session menu.
+        KS_CHECK(rowOf(menu, "SINGLE PLAYER") < 0);
+        KS_CHECK(rowOf(menu, "MULTI PLAYER") < 0);
+
+        // ESC on the pause screen resumes instead of swallowing the key.
+        KS_CHECK(menu.handleKeyPress(KEY_ESC));
+        KS_CHECK(!menu.isVisible());
+
+        // GARAGE opened from the pause screen returns to it, not to MAIN.
+        menu.openPauseMenu();
+        menu.setSelectedIndex(rowOf(menu, "GARAGE"));
+        KS_CHECK(menu.handleKeyPress(KEY_ENTER));
+        KS_CHECK(menu.state() == MenuState::Garage);
+        KS_CHECK(menu.handleKeyPress(KEY_ESC));
+        KS_CHECK(menu.state() == MenuState::Pause);
+        KS_CHECK(menu.handleKeyPress(KEY_ESC));
+        KS_CHECK(!menu.isVisible());
+
+        // RESUME is a plain close, and RESTART SESSION reports the intent.
+        int restarts = 0;
+        menu.onRestartSessionRequested = [&restarts]() { ++restarts; };
+        menu.openPauseMenu();
+        menu.setSelectedIndex(rowOf(menu, "RESTART SESSION"));
+        KS_CHECK(menu.handleKeyPress(KEY_ENTER));
+        KS_CHECK(restarts == 1);
+        KS_CHECK(!menu.isVisible());
+
+        menu.openPauseMenu();
+        menu.setSelectedIndex(rowOf(menu, "RESUME"));
+        KS_CHECK(menu.handleKeyPress(KEY_ENTER));
+        KS_CHECK(!menu.isVisible());
+        KS_CHECK(restarts == 1); // RESUME never restarts anything
     }
 
     std::printf("game_menu_navigation: main graph, sub-screens, callbacks, "

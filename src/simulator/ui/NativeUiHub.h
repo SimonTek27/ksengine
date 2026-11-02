@@ -172,7 +172,7 @@ public:
      *  Static so the policy can be exercised without a full hub. */
     static bool openInCarMenu(GameMenuOverlay& menu, bool allowed) {
         if (!allowed) return false;
-        menu.setVisible(true);
+        menu.openPauseMenu();
         return true;
     }
 
@@ -183,22 +183,48 @@ public:
     }
 
 private:
-    /** KS_FONT_TTF=/path/to/font.ttf (+ optional KS_FONT_PX=16) swaps the baked 8x8 set. */
+    static bool fileReadable(const char* path) {
+        std::FILE* f = std::fopen(path, "rb");
+        if (f == nullptr) return false;
+        std::fclose(f);
+        return true;
+    }
+
+    /** Elegant, readable UI face. KS_FONT_TTF picks one explicitly; otherwise
+     *  the platform UI font is used (Segoe UI on Windows — clean at menu sizes,
+     *  unlike the baked 8x8 bitmap, which stays as the last resort). */
     void applyConfiguredFont() {
-        const char* path = std::getenv("KS_FONT_TTF");
-        if (path == nullptr || *path == '\0') return;
-        float pixelSize = 16.f;
+        float pixelSize = 17.f;
         if (const char* raw = std::getenv("KS_FONT_PX"); raw != nullptr && *raw != '\0') {
             const float parsed = std::strtof(raw, nullptr);
             if (parsed > 0.f && parsed <= 512.f) pixelSize = parsed;
         }
-        std::string error;
-        FontAtlas& font = *m_text.atlasPtr();
-        if (!loadTtfFont(font, path, pixelSize, &error)) {
-            std::printf("[ui] KS_FONT_TTF ignored: %s\n", error.c_str());
+        std::string chosen;
+        if (const char* path = std::getenv("KS_FONT_TTF"); path != nullptr && *path != '\0') {
+            chosen = path;
+        } else {
+            // A project-local face wins, so a build can ship its own type.
+            static const char* kCandidates[] = {
+                "system/fonts/ui.ttf",
+                "assets/ui/ui.ttf",
+                "C:/Windows/Fonts/segoeui.ttf",
+                "C:/Windows/Fonts/seguisb.ttf",
+            };
+            for (const char* candidate : kCandidates) {
+                if (fileReadable(candidate)) { chosen = candidate; break; }
+            }
+        }
+        if (chosen.empty()) {
+            std::printf("[ui] no UI font found, keeping the baked 8x8 set\n");
             return;
         }
-        std::printf("[ui] font %s @ %.1f px -> %dx%d atlas\n", path, pixelSize,
+        std::string error;
+        FontAtlas& font = *m_text.atlasPtr();
+        if (!loadTtfFont(font, chosen, pixelSize, &error)) {
+            std::printf("[ui] font %s ignored: %s\n", chosen.c_str(), error.c_str());
+            return;
+        }
+        std::printf("[ui] font %s @ %.1f px -> %dx%d atlas\n", chosen.c_str(), pixelSize,
                     font.width(), font.height());
     }
 
@@ -256,7 +282,8 @@ private:
                     sty(Color::rgba(0.75f, 0.75f, 0.78f, a), 1.1f));
 
         char ctx[128];
-        std::snprintf(ctx, sizeof(ctx), "%s  ·  %s",
+        // ASCII only: the atlas covers 32..126, so a middle dot rendered as??.
+        std::snprintf(ctx, sizeof(ctx), "%s   |   %s",
                       m_menu->carName().empty() ? "Vehicle" : m_menu->carName().c_str(),
                       m_menu->trackName().empty() ? "Circuit" : m_menu->trackName().c_str());
         m_text.draw(dl, 72.f + slide, static_cast<float>(h) - 48.f, ctx,

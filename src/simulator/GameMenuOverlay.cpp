@@ -27,6 +27,7 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::TrackSelect: return "SELECT TRACK";
     case MenuState::TeamSelect: return "SELECT TEAM";
     case MenuState::Results: return "RESULTS";
+    case MenuState::Pause: return "PAUSED";
     case MenuState::DevModeConfirm: return "EDITOR";
     case MenuState::QuitConfirm: return "QUIT";
     }
@@ -304,6 +305,10 @@ void GameMenuOverlay::buildSettingsMenu()
         [this]() { if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio"); } });
     m_items.push_back({ "CONTROLS", "Bindings and devices",
         [this]() { switchMenu(MenuState::Controls); } });
+        // Real window toggle (already wired), listed here because this is
+        // where players look for it.
+        m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
+            [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); } });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 
@@ -417,6 +422,36 @@ void GameMenuOverlay::buildResultsMenu()
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
 }
 
+// The in-car overlay (ESC while driving, gated by inCarMenuAllowed). Every row
+// here acts on the session that is already running, so it is built separately
+// from the pre-session screens; GARAGE/SETTINGS are the same screens as on
+// MAIN and BACK returns to this one, not to MAIN.
+void GameMenuOverlay::buildPauseMenu()
+{
+    m_items.clear();
+    m_items.push_back({ "RESUME", "Back to the car",
+        [this]() { setVisible(false); } });
+    m_items.push_back({ "RESTART SESSION",
+        "Restart this session from the pits",
+        [this]() {
+            if (onRestartSessionRequested) onRestartSessionRequested();
+            setVisible(false);
+        } });
+    m_items.push_back({ "GARAGE", "Setup, tyres and vehicle options",
+        [this]() { switchMenu(MenuState::Garage); } });
+    m_items.push_back({ "SETTINGS", "Display, audio and input",
+        [this]() { switchMenu(MenuState::Settings); } });
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "QUIT", "Exit ksim",
+        [this]() { switchMenu(MenuState::QuitConfirm); } });
+}
+
+void GameMenuOverlay::openPauseMenu()
+{
+    switchMenu(MenuState::Pause);
+    setVisible(true);
+}
+
 void GameMenuOverlay::buildDevModeConfirm()
 {
     m_items.clear();
@@ -448,6 +483,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::Profile: buildProfileMenu(); break;
     case MenuState::Garage: buildGarageMenu(); break;
     case MenuState::PitStrategy: buildPitStrategyMenu(); break;
+    case MenuState::Pause: buildPauseMenu(); break;
     case MenuState::Replay: buildReplayMenu(); break;
     case MenuState::ContentManager: buildContentManagerMenu(); break;
     case MenuState::Settings: buildSettingsMenu(); break;
@@ -466,8 +502,8 @@ void GameMenuOverlay::switchMenu(MenuState state)
 
 void GameMenuOverlay::goBack()
 {
-    if (m_currentState == MenuState::Main) {
-        setVisible(false);
+    if (m_currentState == MenuState::Main || m_currentState == MenuState::Pause) {
+        setVisible(false); // MAIN: leave the menu; PAUSE: back in the car
         return;
     }
     if (m_currentState == MenuState::Controls) {
@@ -493,6 +529,12 @@ void GameMenuOverlay::goBack()
             switchMenu(m_previousState);
         else
             switchMenu(MenuState::Main);
+        return;
+    }
+    // Screens opened from the pause overlay go back to it, so ESC from the
+    // garage while driving never drops the player on the pre-session menu.
+    if (m_previousState == MenuState::Pause) {
+        switchMenu(MenuState::Pause);
         return;
     }
     switchMenu(MenuState::Main);

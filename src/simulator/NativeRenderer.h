@@ -809,6 +809,11 @@ private:
     bool m_uiForwardFailed = false;
     bool m_uiDisplayFailed = false;
     void* m_uiAtlasPass = nullptr;   // pipeline the font atlas was uploaded to
+    // Pixel space the current UI batch was laid out in (logical window px). The
+    // swapchain may be larger on a HiDPI window; recordUiOverlay() maps this
+    // space onto the whole framebuffer.
+    float m_uiLayoutW = 0.f;
+    float m_uiLayoutH = 0.f;
     int m_viewportW = 1280;
     int m_viewportH = 720;
 

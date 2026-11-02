@@ -835,6 +835,16 @@ static void initSimulation() {
             printf("Keyboard bindings saved (%s)\n", g_userLayout.controls.c_str());
     };
 
+    // In-car pause overlay: RESTART re-enters the mode the session was started
+    // in (startSession() stops the running one first), so the player is back
+    // in the pits with the same car, track and AI count.
+    uiMenu->onRestartSessionRequested = []() {
+        if (!g_simulation) return;
+        const ks::sim::GameSessionMode mode = g_simulation->features().sessionMode;
+        std::printf("[MENU] restart session: %s\n", ks::sim::sessionModeName(mode));
+        g_simulation->startSession(mode);
+    };
+
     // --- Roadmap 3.1: menu <-> transport ---------------------------------
     uiMenu->onHostServerRequested = []() {
         auto* net = g_simulation->networkManager();
