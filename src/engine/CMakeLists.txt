@@ -28,11 +28,7 @@ foreach(_dir ${KSENGINE_QT_FREE_DIRS})
 endforeach()
 
 foreach(_pat
-    "physics/weather/"
-    "VehiclePhysics"
-    "VehiclePhysicsModels"
-    "TireCurveEditor"
-    "PhysicsSimulations"
+
     "devices/3dprint/"
     "devices/scanners/"
     "SimulatorApp"

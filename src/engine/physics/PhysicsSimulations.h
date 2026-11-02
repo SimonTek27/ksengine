@@ -1,6 +1,6 @@
+#pragma once
 #include <string>
 #include "PhysicsCoreTypes.h"
-#pragma once
 
 #include "PhysicsEngine.h"
 #include <vector>
@@ -36,7 +36,7 @@ struct SoftBodySimulator {
     void unpinVertex(int index);
     void pinVertexGroup(const std::vector<int>& indices);
 
-    void reset();
+    void reset();  ///< clears velocities; the mesh geometry is not restored
 
 public:
     void simulationStep(int step);
@@ -288,7 +288,7 @@ struct HairSystem {
 
     // Texture-driven hair parameters
     struct TextureMap {
-        QByteArray data;        // Raw texture data (RGBA)
+        std::vector<unsigned char> data;        // Raw texture data (RGBA)
         int width = 0;
         int height = 0;
         int channels = 4;
