@@ -1510,7 +1510,21 @@ void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
     // spawn marker, which is what makes loading a real track mean anything.
     vec3 spawn;
     float spawnHeading = 0.0f;
-    if (trackSpawnPose(baked, spawn, spawnHeading)) {
+    bool haveSpawn = trackSpawnPose(baked, spawn, spawnHeading);
+    // A bake without AC markers (content converted from another format) still
+    // has its AI line: the grid anchor is the same point its cars start from,
+    // so use it rather than leaving the player at the engine origin.
+    if (!haveSpawn && m_multiCar) {
+        vec3 linePos;
+        float lineHeading = 0.0f;
+        if (m_multiCar->gridPose(0, 6.0f, linePos, lineHeading)) {
+            spawn = linePos;
+            spawnHeading = lineHeading;
+            haveSpawn = true;
+            std::fprintf(stderr, "[scene] no AC marker, spawn from the AI line\n");
+        }
+    }
+    if (haveSpawn) {
 #if HAS_VEHICLE_SIM
         if (m_vehicle) {
             auto& st = m_vehicle->state();
