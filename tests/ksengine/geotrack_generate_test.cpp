@@ -59,16 +59,22 @@ int main() {
     KS_CHECK_NEAR(loader.meta().widthM, 12.0, 1e-3);
 
     // Manifest: una riga per mesh, senza estensione, e ogni .nmsh esiste.
-    std::ifstream man(cfg.outDir + "/baked/manifest.txt");
-    std::string line;
-    int lines = 0;
-    while (std::getline(man, line)) {
-        if (line.empty()) continue;
-        ++lines;
-        KS_CHECK(line.find('.') == std::string::npos);
-        KS_CHECK(fs::is_regular_file(cfg.outDir + "/baked/" + line + ".nmsh"));
+    // Scoped on purpose: a stream still open here makes the closing
+    // fs::remove_all() fail on Windows (POSIX unlinks open files, Windows does
+    // not), and the uncaught filesystem_error aborts the process instead of
+    // reporting a test result.
+    {
+        std::ifstream man(cfg.outDir + "/baked/manifest.txt");
+        std::string line;
+        int lines = 0;
+        while (std::getline(man, line)) {
+            if (line.empty()) continue;
+            ++lines;
+            KS_CHECK(line.find('.') == std::string::npos);
+            KS_CHECK(fs::is_regular_file(cfg.outDir + "/baked/" + line + ".nmsh"));
+        }
+        KS_CHECK(lines >= 2);
     }
-    KS_CHECK(lines >= 2);
 
     // scene.json dichiara bounds, lato del quadrato e i layer.
     const std::string scene = slurp(cfg.outDir + "/scene.json");
@@ -183,6 +189,7 @@ int main() {
     bad.widthM = 80.0;
     KS_CHECK(!ks::geo::generateTrack(bad, &res, &err));
 
-    fs::remove_all(dir);
+    std::error_code cleanupEc;
+    fs::remove_all(dir, cleanupEc);
     return KS_TEST_RESULT("geotrack_generate_test");
 }

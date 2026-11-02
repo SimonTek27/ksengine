@@ -253,15 +253,20 @@ int main() {
     KS_CHECK(fs::is_regular_file(cfg.outDir + "/baked/ground_0_0.nmsh"));
     KS_CHECK(fs::is_regular_file(cfg.outDir + "/baked/textures/ground_0_0.png"));
 
-    std::ifstream materials(cfg.outDir + "/baked/materials.txt");
-    std::string firstRow;
-    std::getline(materials, firstRow);
-    KS_CHECK(firstRow.find("ground_0_0\tground_0_0.png") == 0);
+    // Scoped: see geotrack_generate_test — an open handle makes the closing
+    // remove_all() throw on Windows, which aborts instead of failing.
+    {
+        std::ifstream materials(cfg.outDir + "/baked/materials.txt");
+        std::string firstRow;
+        std::getline(materials, firstRow);
+        KS_CHECK(firstRow.find("ground_0_0\tground_0_0.png") == 0);
+    }
 
     ks::ac::TrackDataJsonLoader loader;
     KS_CHECK(loader.loadForTrackDir(cfg.outDir));
     KS_CHECK_NEAR(loader.meta().widthM, res.measuredWidthM, 0.01);
 
-    fs::remove_all(dir);
+    std::error_code cleanupEc;
+    fs::remove_all(dir, cleanupEc);
     return KS_TEST_RESULT("geotrack_tiles_test");
 }
