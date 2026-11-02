@@ -36,6 +36,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
 endif()
 
+# AI line — arc-length parameterisation: distance lookup, wrapping on a closed
+# loop, nearest point and uniform sampling.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ai_spline_arc_test.cpp")
+    add_executable(ai_spline_arc_test ai_spline_arc_test.cpp)
+    target_include_directories(ai_spline_arc_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(ai_spline_arc_test PRIVATE ksengine)
+    add_test(NAME ai_spline_arc_test COMMAND ai_spline_arc_test)
+endif()
+
 # Game menu — navigation end-to-end: every screen from MAIN, its ESC path,
 # the callbacks behind the rows and the row/separator invariants.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game_menu_navigation_test.cpp" AND
