@@ -11,6 +11,12 @@
 #include <fstream>
 #include <sys/stat.h>
 
+#if !defined(S_ISREG)
+// MSVC's <sys/stat.h> defines _S_IFREG/_S_IFMT but not the POSIX S_ISREG
+// macro, so the portable spelling has to be supplied here.
+#define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
+#endif
+
 namespace ks {
 namespace physics {
 
