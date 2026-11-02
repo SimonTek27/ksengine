@@ -2351,6 +2351,7 @@ void NativeRenderer::endFrame() {
             vkCmdPushConstants(m_commandBuffer, m_displayLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(t), &t);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
+            recordUiOverlay(m_displayRenderPass, m_commandBuffer);
             vkCmdEndRenderPass(m_commandBuffer);
         }
     } else {
@@ -2386,6 +2387,7 @@ void NativeRenderer::endFrame() {
         // drawn so far (their own pipeline owns no descriptor set, so this
         // only rebinds pipeline + push constants).
         recordParticles(projRender * m_view, deferred);
+        recordUiOverlay(m_renderPass, m_commandBuffer);
         vkCmdEndRenderPass(m_commandBuffer);
     }
     // MainPass marker: Shadow -> MainPass is the geometry/display cost on
@@ -2544,12 +2546,75 @@ void NativeRenderer::shutdown() {
 }
 
 void NativeRenderer::drawUi(const ui::UiRenderer& ui) {
+    // Upload only: between beginFrame() and endFrame() no render pass is open
+    // (drawMesh() just queues), so the overlay is recorded from endFrame() —
+    // inside the pass that actually writes the swapchain — by
+    // recordUiOverlay().
     if (!m_uiPass) {
         m_uiPass = std::make_shared<ui::UiGpuPass>();
         m_uiPass->initialize(ui.font());
+        m_uiAtlasPass = nullptr;
     }
     m_uiPass->uploadFrame(ui);
-    m_uiPass->draw();
+}
+
+// Builds (once per render pass) the Vulkan overlay pipeline. VulkanUiPipeline
+// is header-only and needs the concrete pass it draws into, so the forward and
+// deferred paths each get their own instance.
+ui::VulkanUiPipeline* NativeRenderer::uiPipelineFor(VkRenderPass pass) {
+    const bool display = (pass == m_displayRenderPass && m_displayRenderPass != VK_NULL_HANDLE);
+    std::unique_ptr<ui::VulkanUiPipeline>& slot = display ? m_uiDisplay : m_uiForward;
+    bool& failed = display ? m_uiDisplayFailed : m_uiForwardFailed;
+    if (slot && slot->isReady()) return slot.get();
+    if (failed || pass == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE) return nullptr;
+
+    auto pipe = std::make_unique<ui::VulkanUiPipeline>();
+    ui::VulkanUiPipeline::CreateInfo ci;
+    ci.physicalDevice = m_physicalDevice;
+    ci.device = m_device;
+    ci.queue = m_graphicsQueue;
+    ci.renderPass = pass;
+    ci.queueFamily = m_graphicsQueueFamily;
+    const std::string dir = m_shaderDir.empty() ? std::string("system/shaders") : m_shaderDir;
+    ci.vertSpvPath = dir + "/ui.vert.spv";
+    ci.fragSpvPath = dir + "/ui.frag.spv";
+    if (!pipe->create(ci)) {
+        failed = true;
+        std::fprintf(stderr, "[NativeRenderer] UI overlay pipeline (%s pass) not built\n",
+                     display ? "display" : "forward");
+        return nullptr;
+    }
+    slot = std::move(pipe);
+    m_uiAtlasPass = nullptr; // a fresh pipeline needs the atlas again
+    return slot.get();
+}
+
+// Records the overlay inside the open colour pass: bind the pipeline, hand it
+// this frame's vertices, draw. Silent when there is nothing to draw, which is
+// the normal case for every frame without a HUD or a menu.
+void NativeRenderer::recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd) {
+    if (!m_uiPass || !cmd) return;
+    const auto& verts = m_uiPass->cpuVertices();
+    const auto& indices = m_uiPass->cpuIndices();
+    if (indices.empty() || verts.empty()) return;
+
+    ui::VulkanUiPipeline* pipe = uiPipelineFor(pass);
+    if (!pipe) return;
+    if (m_uiAtlasPass != pipe) {
+        if (!pipe->uploadAtlas(m_uiPass->atlasPixels(), m_uiPass->atlasWidth(),
+                               m_uiPass->atlasHeight()))
+            return;
+        m_uiAtlasPass = pipe;
+    }
+    pipe->uploadDynamic(verts.data(), static_cast<uint32_t>(verts.size()),
+                        indices.data(), static_cast<uint32_t>(indices.size()));
+    pipe->setCommandBuffer(cmd);
+    // Swapchain pixels, not the viewport hint: the UI is laid out in window
+    // pixels, and the extent is what the frame is actually rendered into.
+    pipe->recordDraw(cmd, static_cast<uint32_t>(verts.size()),
+                     static_cast<uint32_t>(indices.size()),
+                     static_cast<float>(m_swapChainExtent.width),
+                     static_cast<float>(m_swapChainExtent.height));
 }
 
 // ---------------------------------------------------------------------------

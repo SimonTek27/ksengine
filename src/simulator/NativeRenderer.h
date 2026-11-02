@@ -49,6 +49,7 @@
 // Roadmap E9 / gate 2.14: VK_QUERY_TYPE_TIMESTAMP pools written along the
 // endFrame() record path (see gpuProfiler() below).
 #include "engine/physics/GpuProfiler.h"
+#include "ui/VulkanUiPipeline.h"
 
 namespace ks::sim {
 
@@ -796,6 +797,18 @@ private:
     float m_mbMaxLength = 0.03f;
 
     std::shared_ptr<ui::UiGpuPass> m_uiPass;
+    // The overlay's real Vulkan pipeline, one per render pass it can land in:
+    // the forward colour pass, or the display pass of the deferred path (the
+    // only writer of the swapchain there). Nothing bound these hooks before,
+    // so UiGpuPass stayed a CPU mirror and no interface ever reached the
+    // screen — see recordUiOverlay().
+    ui::VulkanUiPipeline* uiPipelineFor(VkRenderPass pass);
+    void recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd);
+    std::unique_ptr<ui::VulkanUiPipeline> m_uiForward;
+    std::unique_ptr<ui::VulkanUiPipeline> m_uiDisplay;
+    bool m_uiForwardFailed = false;
+    bool m_uiDisplayFailed = false;
+    void* m_uiAtlasPass = nullptr;   // pipeline the font atlas was uploaded to
     int m_viewportW = 1280;
     int m_viewportH = 720;
 

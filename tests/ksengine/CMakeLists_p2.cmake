@@ -36,6 +36,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
 endif()
 
+# Game menu — navigation end-to-end: every screen from MAIN, its ESC path,
+# the callbacks behind the rows and the row/separator invariants.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game_menu_navigation_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    add_executable(game_menu_navigation_test
+        game_menu_navigation_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    target_include_directories(game_menu_navigation_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(game_menu_navigation_test PRIVATE ksengine)
+    add_test(NAME game_menu_navigation_test COMMAND game_menu_navigation_test)
+endif()
+
 # Gate 2.13 — team/upgrades bridge consolidation: team.ini parser +
 # buildFieldFromTeam session field, upgrade catalog parser + appliedMods +
 # applyUpgradesToVehicleSimulator on a real VehicleSimulator (header-only
