@@ -8,7 +8,11 @@ cmake_minimum_required(VERSION 3.16)
 # renderer test died on the missing native_forward.{vert,frag}.spv. Creating it
 # here also makes the if(TARGET ks_shaders) in CMakeLists_p2.cmake mean something.
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/KsShaders.cmake")
-ks_add_shader_target(ks_shaders "${CMAKE_SOURCE_DIR}/src")
+# The simulator fragment creates the same target when KSIMULATOR_QT_FREE is
+# on, and add_custom_target refuses a duplicate name.
+if(NOT TARGET ks_shaders)
+    ks_add_shader_target(ks_shaders "${CMAKE_SOURCE_DIR}/src")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/CMakeLists_p1.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/CMakeLists_p2.cmake")
