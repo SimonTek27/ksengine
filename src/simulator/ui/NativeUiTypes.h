@@ -43,6 +43,7 @@ struct DrawCmd {
     float value = 0.f;
     std::string text;
     float fontScale = 1.f;
+    float maxWidth = 0.f; // > 0 wraps the text into lines of at most this width
     // Vector path flattened points (x,y pairs)
     std::vector<float> pathPoints;
     bool pathClosed = false;
@@ -91,6 +92,21 @@ public:
         d.color = c;
         d.text = text;
         d.fontScale = scale;
+        m_cmds.push_back(std::move(d));
+    }
+
+    /** Text that wraps at `maxWidth` (pixels, 0 = single line). The wrapping
+     *  itself is BitmapText's, so a long description cannot run out of the
+     *  panel that holds it. */
+    void addTextWrapped(float x, float y, const std::string& text, const Color& c,
+                        float scale, float maxWidth) {
+        DrawCmd d;
+        d.type = DrawCmdType::Text;
+        d.x0 = x; d.y0 = y;
+        d.color = c;
+        d.text = text;
+        d.fontScale = scale;
+        d.maxWidth = maxWidth;
         m_cmds.push_back(std::move(d));
     }
 

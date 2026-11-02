@@ -335,8 +335,11 @@ private:
                 dl.addRectFilled({px, py, 3.f, 160.f}, Color::rgba(0.9f, 0.15f, 0.15f, 0.7f * a));
                 m_text.draw(dl, px + 20.f, py + 24.f, "INFO",
                             sty(Color::rgba(0.9f, 0.25f, 0.25f, a), 1.f, true));
-                m_text.draw(dl, px + 20.f, py + 56.f, desc,
-                            sty(Color::rgba(0.85f, 0.85f, 0.88f, a), 1.15f));
+                // Wrapped inside the panel: a long description used to run
+                // past its right edge.
+                dl.addTextWrapped(px + 20.f, py + 56.f, desc,
+                                  Color::rgba(0.85f, 0.85f, 0.88f, a), 1.15f,
+                                  pw - 40.f);
             }
         }
 

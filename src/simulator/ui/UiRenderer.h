@@ -160,6 +160,7 @@ private:
                 TextStyle st;
                 st.color = cmd.color;
                 st.scale = cmd.fontScale;
+                st.maxWidth = cmd.maxWidth;
                 bt.emit(cmd.text, cmd.x0, cmd.y0, st, m_vertices, m_indices);
                 break;
             }
