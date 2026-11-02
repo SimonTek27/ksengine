@@ -125,8 +125,13 @@ def _control_once(line):
             while True:
                 reply = _readline(reader)
                 lines.append(reply)
-                if reply.startswith("ERR"):
-                    break
+                # EVT lines are progress, not the answer: the real reply comes
+                # after them. Everything else terminates the exchange - and a
+                # terminal reply is not always OK: PING answers "PONG", which
+                # is why matching only "OK" here left every ping waiting for a
+                # second line until the socket timed out.
+                if reply.startswith("EVT "):
+                    continue
                 if reply.startswith("OK PB COUNT "):
                     try:
                         rows = int(reply.split()[-1])
@@ -134,9 +139,7 @@ def _control_once(line):
                         break
                     for _ in range(max(0, rows)):
                         lines.append(_readline(reader))
-                    break
-                if reply.startswith("OK"):
-                    break
+                break
             return lines
     except socket.timeout:
         raise  # control() decides whether this is worth one retry

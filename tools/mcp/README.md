@@ -25,6 +25,17 @@ Environment:
 | `KSIM_TOKEN` | *(empty)* | `AUTH` token, when the API requires one |
 | `KSIM_TIMEOUT` | `2.0` | socket timeout in seconds |
 
+## Replies
+
+An exchange ends on the first line that is not an `EVT ...` event: `OK ...`,
+`ERR ...` or `PONG`. `OK PB COUNT <n>` is followed by `n` rows. Nothing else is
+reinterpreted.
+
+Silence is diagnosable from ksim's own side: start the simulator with
+`KS_CONTROL_DEBUG=1` and it traces every accept, read, parsed command and reply
+on stderr. That trace is how the missing `PONG` was found - a terminal reply
+that does not start with `OK`.
+
 ## MCP client config
 
 ```json
@@ -54,12 +65,11 @@ Environment:
 
 ## Limits
 
-- The control API serves **one client at a time**. A call made while another
-  client is still connected waits for the timeout and returns that as an error:
-  the simulator does not answer the new socket until it has reaped the old one. Each tool call opens the
-  socket, completes its exchange and closes it, so the port is only busy for
-  the duration of a call — but a second tool talking to the same ksim while one
-  call is in flight is refused by the simulator, not by the bridge.
+- The control API serves **one client at a time**: a call made while another
+  client is still connected is accepted but stays unanswered. Each tool call
+  opens the socket, completes its exchange and closes it, and one retry covers
+  the moment when the simulator is still reaping the previous one; a client
+  that really is connected makes the retry fail too, and the error says so.
 - No `mid-session` guarantees: the verbs are what `FeatureHub::handleControl`
   implements. Telemetry (`:20777` / `:20778`) and shared memory are separate
   channels and not wrapped here.
