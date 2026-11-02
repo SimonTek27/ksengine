@@ -14,6 +14,7 @@
  *
  * Compiles the GameMenuOverlay TU directly (menu_session_gate_test pattern).
  */
+#include "simulator/ui/NativeUiHub.h"
 #include "KsTest.h"
 #include "simulator/GameMenuOverlay.h"
 
@@ -364,6 +365,26 @@ int main() {
         menu.setVisible(false);
         for (int i = 0; i < 30; ++i) menu.render(1920, 1080);
         KS_CHECK(menu.fadeAlpha() <= 0.01f);
+    }
+
+    // ---------------------------------------------------------------------
+    // In-car overlay gate: the pause screen opens only when the car stands
+    // still or the session is singleplayer.
+    // ---------------------------------------------------------------------
+    {
+        KS_CHECK(!ks::sim::inCarMenuAllowed(true, 120.f));   // racing in multiplayer
+        KS_CHECK(!ks::sim::inCarMenuAllowed(true, 12.f));
+        KS_CHECK(ks::sim::inCarMenuAllowed(true, 0.f));      // parked on the grid
+        KS_CHECK(ks::sim::inCarMenuAllowed(false, 240.f));   // singleplayer, flat out
+
+        // The pre-session overlay is never gated, and a refused ESC leaves the
+        // menu closed (the hub still consumes the key).
+        GameMenuOverlay carMenu;
+        carMenu.setVisible(false);
+        KS_CHECK(!ks::sim::ui::NativeUiHub::openInCarMenu(carMenu, false));
+        KS_CHECK(!carMenu.isVisible());
+        KS_CHECK(ks::sim::ui::NativeUiHub::openInCarMenu(carMenu, true));
+        KS_CHECK(carMenu.isVisible());
     }
 
     std::printf("game_menu_navigation: main graph, sub-screens, callbacks, "

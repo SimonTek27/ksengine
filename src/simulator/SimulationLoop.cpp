@@ -1198,8 +1198,17 @@ void SimulationLoop::ensureScenePipeline() {
 
 void SimulationLoop::syncUiFromVehicle() {
 #if HAS_VEHICLE_SIM
-    if (!m_vehicle) return;
+    // In-car pause overlay gate (see inCarMenuAllowed): a live network session
+    // counts as multiplayer, otherwise the driver is alone on track.
+    const bool multiplayer =
+        m_network && (m_network->isHosting() || m_network->isConnected());
+    if (!m_vehicle) {
+        m_ui.setInCarMenuAllowed(true); // no car, no in-car overlay to gate
+        return;
+    }
     const auto st = m_vehicle->getState();
+    m_ui.setInCarMenuAllowed(
+        inCarMenuAllowed(multiplayer, static_cast<float>(st.speed) * 3.6f));
     m_ui.telemetry().update(st.speed, m_vehicle->rpm(), st.throttle, st.brake, st.steering, 0.f, 0.f);
     // Roadmap 2.10 — single source of truth for the session display: the
     // player's row is read from RaceSessionManager (the same standings the

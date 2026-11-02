@@ -10,6 +10,13 @@ namespace ks { namespace engine { namespace config { class Locale; } } }
 
 namespace ks::sim {
 
+/** May the pause overlay open while the player is in the car? Standing still
+ *  or singleplayer only: freezing the world mid-race in multiplayer would
+ *  leave the rest of the field racing while one driver reads a menu. */
+inline bool inCarMenuAllowed(bool multiplayer, float speedKmh) {
+    return !multiplayer || speedKmh < 5.f;
+}
+
 struct SimPoint { int x = 0; int y = 0; };
 struct SimRect {
     int x = 0, y = 0, w = 0, h = 0;

@@ -112,7 +112,10 @@ public:
         if (key == 112) { m_devices->toggle(); return true; }
         if (key == 113) { m_mp->toggle(); return true; }
         if (key == 27 && !m_menu->isVisible()) {
-            m_menu->setVisible(true);
+            // Two overlays share this menu: the one before a session, and the
+            // pause screen once in the car. The second is gated (see
+            // inCarMenuAllowed).
+            openInCarMenu(*m_menu, m_inCarMenuAllowed);
             return true;
         }
         return false;
@@ -157,6 +160,20 @@ public:
     bool handleMouseWheel(float delta, float x, float y) {
         MouseEvent e; e.type = MouseEventType::Wheel; e.wheelDelta = delta; e.x = x; e.y = y;
         return handleMouse(e);
+    }
+
+    /** Set once per frame by SimulationLoop: whether the in-car overlay (the
+     *  same menu, opened with ESC while driving) is allowed right now. */
+    void setInCarMenuAllowed(bool allowed) { m_inCarMenuAllowed = allowed; }
+
+    /** ESC while in the car: opens the overlay only when the gate allows it.
+     *  Returns whether it opened; the caller consumes the key either way, so a
+     *  refused ESC never falls through to the driver's controls.
+     *  Static so the policy can be exercised without a full hub. */
+    static bool openInCarMenu(GameMenuOverlay& menu, bool allowed) {
+        if (!allowed) return false;
+        menu.setVisible(true);
+        return true;
     }
 
     bool blocksDrivingInput() const {
@@ -352,6 +369,7 @@ private:
     RaceTelemetryHud m_raceHud;
     KeyRebindOverlay m_keyRebind;
     int m_viewW = 1280, m_viewH = 720;
+    bool m_inCarMenuAllowed = true;   // pre-session: always
 
     std::unique_ptr<GameMenuOverlay> m_menu;
     std::unique_ptr<DashboardOverlay> m_dash;
