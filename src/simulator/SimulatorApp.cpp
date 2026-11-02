@@ -46,6 +46,8 @@ static VkSurfaceKHR g_surface = VK_NULL_HANDLE;
 static ks::sim::NativeRenderer* g_nativeRenderer = nullptr;
 static ks::sim::CascadedShadowMap g_shadowMap;
 static std::unique_ptr<ks::sim::SimulationLoop> g_simulation;
+// --track <dir> from WinMain: same setting as KS_TRACK, see initSimulation().
+static std::string g_cliTrack;
 
 // Phase 3 — the per-player data folder (user/<player>/, created on the first
 // start) and the settings merged from system/cfg/ksengine.json (install
@@ -678,12 +680,20 @@ static void initSimulation() {
         else
             printf("[INIT] KS_CAR load failed: %s\n", car);
     }
-    // KS_TRACK=<dir>: pick a track before the first frame (same path SELECT
-    // TRACK uses; a folder without a bake keeps the current scene, and the
-    // ai/fast_lane.ai spline inside it feeds the grid).
-    if (const char* track = std::getenv("KS_TRACK"); track && track[0]) {
-        if (!g_simulation->loadTrackFolder(track))
-            printf("[INIT] KS_TRACK load failed: %s\n", track);
+    // KS_TRACK=<dir> or --track <dir>: pick a track before the first frame
+    // (same path SELECT TRACK uses; a folder without a bake keeps the current
+    // scene, and the ai/fast_lane.ai spline inside it feeds the grid). The
+    // command line wins over the environment, so a shortcut can override it.
+    std::string startTrack = g_cliTrack;
+    if (startTrack.empty()) {
+        if (const char* track = std::getenv("KS_TRACK"); track && track[0])
+            startTrack = track;
+    }
+    if (!startTrack.empty()) {
+        if (g_simulation->loadTrackFolder(startTrack))
+            printf("[INIT] Track loaded: %s\n", startTrack.c_str());
+        else
+            printf("[INIT] track load failed: %s\n", startTrack.c_str());
     }
     // KS_TEAM=<dir>: load a team roster (team.ini) so drivers, race numbers,
     // liveries, garage boxes and grid slots come from it (roadmap 2.8).
@@ -952,7 +962,7 @@ static bool saveScreenshotToFile(const std::string& path) {
     return true;
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     g_hInstance = hInstance;
 
     // Unbuffered stdout: diagnostics must survive a hard crash (the headless
@@ -980,6 +990,37 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int) {
         if (d >= 0) g_shotDelay = d;
     }
     // Roadmap 2.14 — timed profile run (see globals).
+    // --track <dir>: the KS_TRACK setting, from the command line. WinMain gets
+    // the raw ANSI tail, so this is a minimal quoted-word split; anything it
+    // does not recognise is ignored (shells add their own switches).
+    if (lpCmdLine && lpCmdLine[0]) {
+        const auto isSpace = [](char c) {
+            return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+        };
+        const std::string cmd(lpCmdLine);
+        size_t i = 0;
+        const auto skipSpace = [&]() { while (i < cmd.size() && isSpace(cmd[i])) ++i; };
+        const auto nextWord = [&]() {
+            std::string w;
+            skipSpace();
+            if (i < cmd.size() && cmd[i] == '"') {
+                for (++i; i < cmd.size() && cmd[i] != '"'; ++i) w += cmd[i];
+                if (i < cmd.size()) ++i;
+            } else {
+                while (i < cmd.size() && !isSpace(cmd[i])) w += cmd[i++];
+            }
+            return w;
+        };
+        while (true) {
+            const std::string flag = nextWord();
+            if (flag.empty()) break;
+            if (flag == "--track" || flag == "-t") {
+                const std::string value = nextWord();
+                if (value.empty()) printf("[MAIN] --track needs a directory\n");
+                else g_cliTrack = value;
+            }
+        }
+    }
     if (const char* ps = std::getenv("KS_PROFILE_SECONDS")) {
         const double s = std::strtod(ps, nullptr);
         if (s > 0.0) g_profileSeconds = s;

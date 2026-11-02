@@ -6,6 +6,17 @@ if(NOT KSIMULATOR_QT_FREE)
 	return()
 endif()
 
+# Install location of the shipped layout (cmake/KsInstallLayout.cmake). On this
+# machine the Qt-free simulator lives in E:/ksimulator; the default is adopted
+# only when that directory already exists, so other hosts keep CMake's standard
+# prefix, and an explicit -DCMAKE_INSTALL_PREFIX always wins.
+set(KSIM_INSTALL_PREFIX_DEFAULT "E:/ksimulator" CACHE PATH
+	"Default install prefix for the Qt-free simulator")
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND EXISTS "${KSIM_INSTALL_PREFIX_DEFAULT}")
+	message(STATUS "SimulatorApp: install prefix defaults to ${KSIM_INSTALL_PREFIX_DEFAULT}")
+	set(CMAKE_INSTALL_PREFIX "${KSIM_INSTALL_PREFIX_DEFAULT}" CACHE PATH "Install prefix" FORCE)
+endif()
+
 find_package(Vulkan REQUIRED)
 
 set(KSIM_SOURCES
