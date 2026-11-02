@@ -85,10 +85,6 @@
 #include "sdk/kseditor/engine/Audio/AudioStudioTypes.h"
 #include "sdk/kseditor/qmlbridges/Scripting/ACEContentQMLBridge.h"
 #include "sdk/kseditor/engine/Audio/AIAudioStemSeparator.h"
-#include "engine/devices/scanners/photogrammetry/PhotogrammetryCapture.h"
-#include "engine/devices/scanners/turntable_scanner/TurntableScanner.h"
-#include "engine/devices/scanners/structured_light/StructuredLightScanner.h"
-#include "engine/devices/scanners/stereo_vision/StereoVisionScanner.h"
 
 
 static int runMainWindow(QApplication& app, const QString& projectPath)
@@ -265,23 +261,6 @@ static int appMain(int argc, char *argv[])
     qmlRegisterSingletonType<ks::ShowroomEditorQmlBridge>("ksEditor.ShowroomEditor", 1, 0, "ShowroomEditor",
         [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::ShowroomEditorQmlBridge::instance(); });
 
-    // Register photogrammetry capture bridge (scanner classes are not singletons)
-#if 0
-    qmlRegisterSingletonType<ks::photogrammetry::PhotogrammetryCapture>("ksEditor.Photogrammetry", 1, 0, "PhotogrammetryCapture",
-        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::photogrammetry::PhotogrammetryCapture::instance(); });
-
-    // Register turntable scanner bridge
-    qmlRegisterSingletonType<ks::turntable_scanner::TurntableScanner>("ksEditor.TurntableScanner", 1, 0, "TurntableScanner",
-        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::turntable_scanner::TurntableScanner::instance(); });
-
-    // Register structured light scanner bridge
-    qmlRegisterSingletonType<ks::structured_light::StructuredLightScanner>("ksEditor.StructuredLight", 1, 0, "StructuredLightScanner",
-        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::structured_light::StructuredLightScanner::instance(); });
-
-    // Register stereo vision scanner bridge
-    qmlRegisterSingletonType<ks::stereo_vision::StereoVisionScanner>("ksEditor.StereoVision", 1, 0, "StereoVisionScanner",
-        [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::stereo_vision::StereoVisionScanner::instance(); });
-#endif
     qmlRegisterSingletonType<ks::AssetsLibraryQmlBridge>("ksEditor.AssetsLibrary", 1, 0, "AssetsLibrary",
         [](QQmlEngine*, QJSEngine*) -> QObject* { return ks::AssetsLibraryQmlBridge::instance(); });
     qmlRegisterSingletonType<ks::audio::AudioEffectsQmlBridge>("ksEditor.AudioEffects", 1, 0, "AudioEffects",

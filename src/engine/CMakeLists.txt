@@ -29,8 +29,6 @@ endforeach()
 
 foreach(_pat
 
-    "devices/3dprint/"
-    "devices/scanners/"
     "SimulatorApp"
     "GameMenuOverlay"
     "README.md"
