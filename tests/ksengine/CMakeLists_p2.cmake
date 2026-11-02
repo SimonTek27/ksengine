@@ -217,7 +217,8 @@ if(TARGET ksnet AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_multiplayer.cpp" AN
     add_executable(test_multiplayer
         test_multiplayer.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkManager.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkLowLevel.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NetworkLowLevel.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
     target_include_directories(test_multiplayer PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src")

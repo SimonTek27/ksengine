@@ -16,6 +16,8 @@
 #include "simulator/NetworkManager.h"
 #include "simulator/SimulationLoop.h"
 #include "simulator/MultiCarManager.h"
+#include "simulator/GameMenuOverlay.h"
+#include "simulator/ui/NativeUiHub.h"
 
 #include <chrono>
 #include <cmath>
@@ -125,6 +127,31 @@ int main()
     check(guestName == "Alice", "server records the joining driver name");
     check(guestIdx == 1, "remote client got the second server slot");
     check(host.clientCount() == 2, "server sees 2 connected clients");
+
+    // --- 4b. in-car overlay gate, on this live session ---------------------
+    // Two overlays share GameMenuOverlay: the one before a session and the
+    // pause screen once in the car. The second is gated by
+    // inCarMenuAllowed(), with the multiplayer flag read from the live
+    // transport — exactly what SimulationLoop::syncUiFromVehicle feeds it.
+    // A moving car in an online session must not open it; a stopped one may.
+    check(guest.isConnected() && !guest.isHosting(),
+          "guest reports connected, not hosting (multiplayer = true)");
+    check(!inCarMenuAllowed(guest.isConnected(), 120.0f),
+          "moving online car: in-car overlay refused");
+    check(!inCarMenuAllowed(host.isHosting(), 120.0f),
+          "moving host: in-car overlay refused");
+    {
+        GameMenuOverlay carMenu;
+        carMenu.setVisible(false);
+        check(!ui::NativeUiHub::openInCarMenu(
+                  carMenu, inCarMenuAllowed(guest.isConnected(), 120.0f)),
+              "ESC on a moving online car does not open the overlay");
+        check(!carMenu.isVisible(), "  ...and the overlay stays closed");
+        check(ui::NativeUiHub::openInCarMenu(
+                  carMenu, inCarMenuAllowed(guest.isConnected(), 0.0f)),
+              "stopped car in the same session: overlay opens");
+        check(carMenu.isVisible(), "  ...and the overlay is visible");
+    }
 
     // --- 4. chat relay: guest -> server -> host ---------------------------
     guest.sendChatMessage("ciao dal test");
