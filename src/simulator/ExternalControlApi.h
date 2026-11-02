@@ -8,6 +8,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cctype>
+#include <cerrno>
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -91,6 +92,18 @@ public:
             m_listen = -1;
         }
     }
+    /** True when the last socket call failed only because there is nothing to
+     *  do yet. Any other error means the peer is gone. */
+    static bool wouldBlock() {
+#ifdef _WIN32
+        const int err = WSAGetLastError();
+        return err == WSAEWOULDBLOCK || err == WSAEINPROGRESS;
+#else
+        const int err = errno;
+        return err == EAGAIN || err == EWOULDBLOCK || err == EINTR;
+#endif
+    }
+
     void poll() {
         acceptIfNeeded();
         if (m_client < 0) return;
@@ -101,7 +114,15 @@ public:
         int n = (int)recv(m_client, buf, sizeof(buf) - 1, 0);
 #endif
         if (n == 0) { closeClient(); return; }
-        if (n < 0) return;
+        if (n < 0) {
+            // "Nothing to read yet" is not a dead client. Anything else - a
+            // reset from a client that vanished without a clean close - is,
+            // and keeping the socket would wedge the API: acceptIfNeeded()
+            // only takes a new client while m_client < 0, so one lost peer
+            // would silence the port until the simulator exits.
+            if (!wouldBlock()) closeClient();
+            return;
+        }
         buf[n] = 0; m_rx.append(buf, n);
         for (;;) {
             auto pos = m_rx.find('\n');
@@ -134,10 +155,13 @@ public:
         if (m_client < 0) return;
         std::string msg = line; if (msg.empty() || msg.back() != '\n') msg.push_back('\n');
 #ifdef _WIN32
-        send((SOCKET)m_client, msg.c_str(), (int)msg.size(), 0);
+        const int sent = (int)send((SOCKET)m_client, msg.c_str(), (int)msg.size(), 0);
 #else
-        send(m_client, msg.c_str(), msg.size(), 0);
+        const int sent = (int)send(m_client, msg.c_str(), msg.size(), 0);
 #endif
+        // Drop a peer that stopped reading here as well: recv() only notices on
+        // the next poll, and every reply until then goes nowhere.
+        if (sent == 0 || (sent < 0 && !wouldBlock())) closeClient();
     }
     void emitEvent(const std::string& evt) { sendLine(std::string("EVT ") + evt); }
     bool hasClient() const { return m_client >= 0; }
