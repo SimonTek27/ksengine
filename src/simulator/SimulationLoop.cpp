@@ -550,7 +550,67 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     };
 
     int meshes = 0;
+    int mappedNormal = 0;
+    int painted = 0;
+    int metalSurfaces = 0;
     std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
+
+    // Folds a KN5 name to lower case: shader/mapping names are author-written
+    // and inconsistent about it ("Normal", "normal", "KS_NM").
+    auto lower = [](const std::string& text) {
+        std::string folded;
+        folded.reserve(text.size());
+        for (char c : text) {
+            folded.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+        }
+        return folded;
+    };
+
+    // First float of a shader property. AC stores each property as four
+    // float4s' worth of 40 bytes (ValueA/B/C/D), and every scalar the surface
+    // model needs (ksSpecularEXP, ksSpecular, fresnelC) lives at offset 0.
+    auto propertyFloat = [](const ff::Kn5Material& material, const char* name) {
+        for (const auto& property : material.properties) {
+            if (property.name != name) continue;
+            float value = 0.0f;
+            std::memcpy(&value, property.value.data(), sizeof(value));
+            return value;
+        }
+        return -1.0f;
+    };
+
+    // Decodes a KN5 texture once and returns the key the mesh names. Empty
+    // when the file does not carry it, which leaves the surface untextured
+    // rather than failing the whole load.
+    auto textureKey = [&](const std::string& wanted) -> std::string {
+        if (wanted.empty()) return std::string();
+        auto known = decodedTextures.find(wanted);
+        if (known != decodedTextures.end()) return known->second;
+        std::string key;
+        for (const auto& texture : parsed.file.textures) {
+            if (texture.name != wanted || texture.data.empty()) continue;
+            const std::string_view bytes(reinterpret_cast<const char*>(texture.data.data()),
+                                         texture.data.size());
+            if (!ff::isDds(bytes)) break;
+            const auto image = ff::decodeDds(bytes);
+            if (!image.ok() || image.rgba.empty()) {
+                std::fprintf(stderr, "[kn5] texture %s: %s\n", wanted.c_str(),
+                             image.info.error.c_str());
+                break;
+            }
+            char cacheKey[200];
+            std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s", prefix.c_str(),
+                          wanted.c_str());
+            if (!m_vulkanRenderer->addTextureFromMemory(cacheKey, image.rgba, image.info.width,
+                                                        image.info.height)) {
+                break;
+            }
+            key = cacheKey;
+            break;
+        }
+        decodedTextures.emplace(wanted, key);
+        return key;
+    };
     float bboxMin[3] = {1e9f, 1e9f, 1e9f};
     float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
     std::function<void(const ff::Kn5Node&)> walk = [&](const ff::Kn5Node& node) {
@@ -605,42 +665,73 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 m.material_id < static_cast<std::int32_t>(parsed.file.materials.size())) {
                 const auto& material =
                     parsed.file.materials[static_cast<std::size_t>(m.material_id)];
-                std::string wanted = material.mappings.empty()
+
+                // Albedo: slot 0, else the first mapping the file lists.
+                std::string albedo = material.mappings.empty()
                                          ? std::string{}
                                          : material.mappings.front().texture;
-                for (const auto& mapping : material.mappings)
-                    if (mapping.slot == 0 && !mapping.texture.empty()) {
-                        wanted = mapping.texture;
-                        break;
+                std::string normal;
+                for (const auto& mapping : material.mappings) {
+                    if (mapping.slot == 0 && !mapping.texture.empty()) albedo = mapping.texture;
+                    // The normal map is authored under its own mapping name
+                    // ("Normal", "NormalDetail"), not a fixed slot.
+                    if (lower(mapping.name).find("normal") != std::string::npos) {
+                        normal = mapping.texture;
                     }
-                if (!wanted.empty()) {
-                    auto known = decodedTextures.find(wanted);
-                    if (known == decodedTextures.end()) {
-                        std::string key;
-                        for (const auto& texture : parsed.file.textures) {
-                            if (texture.name != wanted || texture.data.empty()) continue;
-                            const std::string_view bytes(
-                                reinterpret_cast<const char*>(texture.data.data()),
-                                texture.data.size());
-                            if (!ff::isDds(bytes)) break;
-                            const auto image = ff::decodeDds(bytes);
-                            if (!image.ok() || image.rgba.empty()) {
-                                std::fprintf(stderr, "[kn5] texture %s: %s\n",
-                                             wanted.c_str(), image.info.error.c_str());
-                                break;
-                            }
-                            char cacheKey[160];
-                            std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s",
-                                          prefix.c_str(), wanted.c_str());
-                            if (!m_vulkanRenderer->addTextureFromMemory(
-                                    cacheKey, image.rgba, image.info.width, image.info.height))
-                                break;
-                            key = cacheKey;
-                            break;
-                        }
-                        known = decodedTextures.emplace(wanted, key).first;
-                    }
-                    if (!known->second.empty()) nm.albedoTexture = known->second;
+                }
+                nm.albedoTexture = textureKey(albedo);
+                if (!normal.empty() && normal != albedo) {
+                    nm.normalTexture = textureKey(normal);
+                    if (!nm.normalTexture.empty()) ++mappedNormal;
+                }
+
+                // Surface response. Without this every surface of the car is a
+                // 0.35-roughness dielectric, which is what made it read flat.
+                const float exponent = propertyFloat(material, "ksSpecularEXP");
+                if (exponent > 0.0f) {
+                    // Blinn-Phong exponent -> GGX roughness (the lobe of
+                    // exponent E has alpha ~ sqrt(2 / (E + 2))).
+                    nm.roughness = std::sqrt(2.0f / (exponent + 2.0f));
+                }
+                // What the surface is, from the shader and material names the
+                // file ships (a 499P alone uses twelve of them): damage_dirt is
+                // the painted bodywork shader, tyres/windscreen/glass name
+                // themselves, rims and discs are the bare-metal parts.
+                const std::string shader = lower(material.shader);
+                const std::string matName = lower(material.name);
+                auto mentions = [](const std::string& text, const char* needle) {
+                    return text.find(needle) != std::string::npos;
+                };
+                const bool isPaint = mentions(shader, "damage_dirt") ||
+                                     mentions(shader, "carpaint") ||
+                                     mentions(matName, "paint");
+                const bool isMetal = mentions(shader, "chrome") ||
+                                     mentions(shader, "metal") ||
+                                     mentions(shader, "brakedisc") ||
+                                     mentions(matName, "rim") ||
+                                     mentions(matName, "disc");
+                const bool isGlass = mentions(shader, "windscreen") ||
+                                     mentions(shader, "glass");
+                const bool isRubber = mentions(shader, "tyres") ||
+                                      mentions(matName, "tyre");
+                if (isPaint) {
+                    // Lacquered bodywork: a clear coat over the base, and the
+                    // base glossier than the raw exponent suggests.
+                    nm.clearcoat = 1.0f;
+                    nm.roughness = std::min(nm.roughness, 0.14f);
+                    ++painted;
+                } else if (isMetal) {
+                    nm.metalness = 0.9f;
+                    nm.roughness = std::min(nm.roughness, 0.28f);
+                    ++metalSurfaces;
+                } else if (isGlass) {
+                    nm.roughness = std::min(nm.roughness, 0.04f);
+                    nm.metalness = 0.0f;
+                } else if (isRubber) {
+                    // Rubber is matte: the exponent authored on a tyre is not
+                    // a glossy one, and clamping keeps the tread from shining.
+                    nm.roughness = std::max(nm.roughness, 0.85f);
+                    nm.metalness = 0.0f;
                 }
             }
 
@@ -697,6 +788,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     for (const auto& node : parsed.file.nodes) walk(node);
 
     if (meshes == 0) return false;
+    std::printf("[kn5] %s: %d mesh(es), %d with a normal map, %d painted, %d bare metal\n",
+                std::filesystem::path(modelPath).filename().string().c_str(), meshes, mappedNormal, painted,
+                metalSurfaces);
     if (outMin && outMax) {
         for (int axis = 0; axis < 3; ++axis) {
             outMin[axis] = bboxMin[axis];
