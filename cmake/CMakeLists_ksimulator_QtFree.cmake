@@ -32,6 +32,7 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp
 	# race/upgrade sound packs (roadmap 2.9) — was never compiled before
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio_SoundPack.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/Mp3Decode.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AudioMixer.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AudioBankManager.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SoundsIniParser.cpp
@@ -96,7 +97,8 @@ if(HAS_MIKKTSPACE)
 	target_link_libraries(SimulatorApp PRIVATE mikktspace)
 endif()
 if(WIN32)
-	target_link_libraries(SimulatorApp PRIVATE dinput8 dxguid xinput ole32 user32 gdi32 ws2_32 winmm)
+	target_link_libraries(SimulatorApp PRIVATE dinput8 dxguid xinput ole32 user32 gdi32 ws2_32 winmm
+		mfplat mfreadwrite mfuuid)
 endif()
 
 # ---------------------------------------------------------------------------

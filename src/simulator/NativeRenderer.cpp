@@ -675,7 +675,30 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     pipeCi.renderPass = m_renderPass;
     pipeCi.subpass = 0;
 
-    return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeCi, nullptr, &m_pipeline) == VK_SUCCESS;
+    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeCi, nullptr, &m_pipeline) != VK_SUCCESS)
+        return false;
+
+    // Glass and decals are the same geometry with a different blend state:
+    // the destination is mixed under the source and the depth buffer is
+    // only tested, never written, so a windscreen shows the cabin instead
+    // of a solid panel.
+    VkPipelineColorBlendAttachmentState glassAtt = blendAtt;
+    glassAtt.blendEnable = VK_TRUE;
+    glassAtt.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    glassAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    glassAtt.colorBlendOp = VK_BLEND_OP_ADD;
+    glassAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    glassAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    glassAtt.alphaBlendOp = VK_BLEND_OP_ADD;
+    VkPipelineColorBlendStateCreateInfo glassBlend = colorBlend;
+    glassBlend.pAttachments = &glassAtt;
+    VkPipelineDepthStencilStateCreateInfo glassDepth = depthStencil;
+    glassDepth.depthWriteEnable = VK_FALSE;
+    VkGraphicsPipelineCreateInfo glassCi = pipeCi;
+    glassCi.pColorBlendState = &glassBlend;
+    glassCi.pDepthStencilState = &glassDepth;
+    return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &glassCi, nullptr,
+                                     &m_transparentPipeline) == VK_SUCCESS;
 }
 
 // Layout must match the `FrameData` uniform block declared in
@@ -2203,9 +2226,10 @@ void NativeRenderer::endFrame() {
     // passes must not.
     auto recordDrawList = [&]() {
         static bool s_recordDebug = getenv("KS_RECORD_DEBUG") != nullptr;
-        for (const auto& draw : m_mainDrawList) {
+        const bool canBlend = !deferred; // the GBuffer pass has no blending
+        auto drawOne = [&](const QueuedDraw& draw) {
             auto it = m_meshes.find(draw.meshName);
-            if (it == m_meshes.end()) continue;
+            if (it == m_meshes.end()) return;
             const NativeMesh& mesh = it->second;
             if (!mesh.vertexBuffer) {
                 // Passed CPU-side frustum culling (so it counts as "drawn")
@@ -2215,7 +2239,7 @@ void NativeRenderer::endFrame() {
                 if (m_missingBufferLogged.insert(draw.meshName).second)
                     std::fprintf(stderr, "[draw] %s: no vertex buffer, instance skipped\n",
                                  draw.meshName.c_str());
-                continue;
+                return;
             }
 
             // Descriptor set 1 (Roadmap 2.3): the mesh's own albedo/normal/
@@ -2249,6 +2273,35 @@ void NativeRenderer::endFrame() {
             } else {
                 vkCmdDraw(m_commandBuffer, static_cast<uint32_t>(mesh.vertices.size()), 1, 0, 0);
             }
+        };
+
+        // Opaque first: everything that owns the pixel it covers.
+        for (const auto& draw : m_mainDrawList) {
+            auto it = m_meshes.find(draw.meshName);
+            if (it == m_meshes.end()) continue;
+            if (it->second.blended && canBlend) continue;
+            drawOne(draw);
+        }
+
+        // Then the see-through surfaces, far to near, so each one blends
+        // over the layer behind it. Sorting is by view-space z of the
+        // instance origin, which is what a turntable and a chase camera
+        // need; per-triangle sorting is not worth it for kn5 glass.
+        std::vector<const QueuedDraw*> seeThrough;
+        if (canBlend && m_transparentPipeline != VK_NULL_HANDLE) {
+            for (const auto& draw : m_mainDrawList) {
+                auto it = m_meshes.find(draw.meshName);
+                if (it == m_meshes.end() || !it->second.blended) continue;
+                seeThrough.push_back(&draw);
+            }
+            std::sort(seeThrough.begin(), seeThrough.end(),
+                      [&](const QueuedDraw* a, const QueuedDraw* b) {
+                          return (m_view * a->model)(3, 2) < (m_view * b->model)(3, 2);
+                      });
+            vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              m_transparentPipeline);
+            for (const QueuedDraw* draw : seeThrough) drawOne(*draw);
+            vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
         }
     };
 
@@ -2581,6 +2634,10 @@ void NativeRenderer::shutdown() {
     }
     m_meshes.clear();
 
+    if (m_transparentPipeline) {
+        vkDestroyPipeline(m_device, m_transparentPipeline, nullptr);
+        m_transparentPipeline = VK_NULL_HANDLE;
+    }
     if (m_pipeline) vkDestroyPipeline(m_device, m_pipeline, nullptr);
     if (m_pipelineLayout) vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     // After m_pipelineLayout: it embeds both set layouts, so the material

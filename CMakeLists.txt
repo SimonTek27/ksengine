@@ -468,6 +468,10 @@ target_link_libraries(kslib PUBLIC
 	Qt6::WebSockets
 	dwmapi
 	opengl32
+	mfplat
+	mfreadwrite
+	mfuuid
+	ole32
 )
 
 if(HAS_MIKKTSPACE)
@@ -549,6 +553,7 @@ add_executable(SimulatorApp
 	"src/simulator/SimulationLoop.cpp"
 	"src/simulator/SimulatorAudio.cpp"
 	"src/simulator/SimulatorAudio_SoundPack.cpp"
+	"src/simulator/Mp3Decode.cpp"
 	"src/simulator/AIController.cpp"
 	"src/simulator/RaceSessionManager.cpp"
 	"src/simulator/DashboardOverlay.cpp"

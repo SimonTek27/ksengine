@@ -51,10 +51,12 @@ struct ShowroomAudioTrack {
 
     bool present() const { return format != ShowroomAudioFormat::None; }
 
-    /** Whether this build can decode the file. wav and ogg are read directly;
-     *  a bank is unpacked to PCM; mp3 has no decoder in the tree. */
+    /** Whether this build can decode the file. wav is read directly, a
+     *  bank is unpacked to PCM, mp3 goes through Media Foundation once at
+     *  load time; ogg still has no path into the mixer. */
     bool playable() const {
-        return format == ShowroomAudioFormat::Wav || format == ShowroomAudioFormat::Bank;
+        return format == ShowroomAudioFormat::Wav || format == ShowroomAudioFormat::Bank ||
+               format == ShowroomAudioFormat::Mp3;
     }
 
     const char* formatName() const {
@@ -70,8 +72,6 @@ struct ShowroomAudioTrack {
     /** Why an existing file will not be heard (nullptr when it will be). */
     const char* silenceReason() const {
         if (format == ShowroomAudioFormat::None) return "not present";
-        if (format == ShowroomAudioFormat::Mp3)
-            return "no mp3 decoder in this build (wav and bank are)";
         if (format == ShowroomAudioFormat::Ogg)
             return "ogg decoding is not wired into the audio layer yet (wav and bank are)";
         return nullptr;
@@ -232,12 +232,12 @@ inline bool parseShowroom(const std::string& text, const std::string& folderId,
     }
     out.ambience = showroom_detail::resolveTrack(directory, "ambience", ambienceVolume);
     out.music = showroom_detail::resolveTrack(directory, "music_00", musicVolume);
-    if (out.ambience.present() && !out.ambience.playable())
-        showroom_detail::note(out, std::string("ambience.") + out.ambience.formatName() +
-                                       ": " + out.ambience.silenceReason());
-    if (out.music.present() && !out.music.playable())
-        showroom_detail::note(out, std::string("music_00.") + out.music.formatName() +
-                                       ": " + out.music.silenceReason());
+    if (const char* why = out.ambience.present() ? out.ambience.silenceReason() : nullptr)
+        showroom_detail::note(out, std::string("ambience.") +
+                                       out.ambience.formatName() + ": " + why);
+    if (const char* why = out.music.present() ? out.music.silenceReason() : nullptr)
+        showroom_detail::note(out, std::string("music_00.") +
+                                       out.music.formatName() + ": " + why);
 
     out.valid = true;
     return true;

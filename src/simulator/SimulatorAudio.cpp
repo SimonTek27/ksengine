@@ -1,3 +1,4 @@
+#include "Mp3Decode.h"
 #include "SimulatorAudio.h"
 
 #include <filesystem>
@@ -116,6 +117,24 @@ bool SimulatorAudio::loadShowroomAudio(const ShowroomAudioTrack& ambience,
                 (std::filesystem::temp_directory_path(ec) / "ksim_showroom_bank.wav").string();
             if (ks::audio::extractBankSampleToWav(track.path, 0, temp)) wav = loadWav(temp);
             std::remove(temp.c_str());
+        } else if (track.format == ShowroomAudioFormat::Mp3) {
+            // mp3 is not a WAV and there is no decoder for it in the tree:
+            // Media Foundation turns it into PCM once, here, so the mixer
+            // still only ever sees interleaved floats.
+            DecodedAudio decoded;
+            std::string why;
+            if (!decodeMp3ToPcm(track.path, decoded, &why)) {
+                std::fprintf(stderr, "[audio] showroom %s could not be decoded: %s (%s)",
+                             track.baseName.c_str(), track.path.c_str(), why.c_str());
+                std::putchar(10);
+                return false;
+            }
+            out.samples = std::move(decoded.samples);
+            out.sampleRate = decoded.sampleRate;
+            out.channels = decoded.channels;
+            out.loop = track.loop;
+            out.volume = track.volume;
+            return true;
         } else {
             wav = loadWav(track.path);
         }

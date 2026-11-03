@@ -554,6 +554,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     int painted = 0;
     int metalSurfaces = 0;
     int cutouts = 0;
+    int seeThrough = 0;
     int selfLit = 0;
     std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
 
@@ -740,11 +741,22 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 // (grilles, outlines) or as a blended surface (glass,
                 // decals, windscreen), and both need the same discard or
                 // the quad renders opaque.
-                if (material.alpha_tested != 0 || material.blend != 0) {
+                // Two different things, and they must not be confused: an
+                // alpha_tested surface (grille, outline) is solid or absent,
+                // while a blended one (glass, windscreen, decal) is mixed
+                // over whatever is behind it. Cutting a windscreen out at
+                // half alpha made it vanish instead of turning see-through.
+                if (material.alpha_tested != 0) {
                     const float ref = propertyFloat(material, "ksAlphaRef");
                     nm.alphaTested = true;
                     nm.alphaRef = ref > 0.0f ? ref : 0.5f;
                     ++cutouts;
+                }
+                if (material.blend != 0) {
+                    nm.blended = true;
+                    nm.alphaTested = false; // the pass blends, it does not cut
+                    nm.castShadow = false; // a pane casts no useful shadow
+                    ++seeThrough;
                 }
                 const float emissiveValue = propertyFloat(material, "ksEmissive");
                 if (emissiveValue > 0.0f) {
@@ -806,9 +818,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     for (const auto& node : parsed.file.nodes) walk(node);
 
     if (meshes == 0) return false;
-    std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, %d cut-out, %d self-lit",
+        std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, "
+                    "%d cut-out, %d see-through, %d self-lit",
             std::filesystem::path(modelPath).filename().string().c_str(), meshes,
-            mappedNormal, painted, metalSurfaces, cutouts, selfLit);
+            mappedNormal, painted, metalSurfaces, cutouts, seeThrough, selfLit);
 std::putchar(10);
     if (outMin && outMax) {
         for (int axis = 0; axis < 3; ++axis) {

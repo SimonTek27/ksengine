@@ -119,6 +119,9 @@ struct NativeMesh {
     float alphaRef = 0.5f;
     // ksEmissive, added unlit on top of the shaded result.
     float emissive = 0.0f;
+    // material.blend != 0 (glass, windscreen, decals): drawn after the
+    // opaque pass, blended over what is already there, no depth write.
+    bool blended = false;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is
@@ -508,6 +511,8 @@ private:
     VkShaderModule m_fragModule = VK_NULL_HANDLE;
     VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
     VkPipeline m_pipeline = VK_NULL_HANDLE;
+    // Same shaders, alpha blend on and depth write off (see-through pass).
+    VkPipeline m_transparentPipeline = VK_NULL_HANDLE;
 
     // Descriptor set 0: FrameData UBO (sun + cascade matrices) + shadow
     // cascade array sampler — matches native_forward.frag exactly. Written

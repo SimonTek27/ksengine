@@ -210,5 +210,7 @@ void main() {
     float fogT = clamp(1.0 - exp(-heightFogAmount(frame.cameraPos.xyz, fragWorldPos)),
                        0.0, frame.fogParams.w);
 
-    outColor = vec4(mix(lit, frame.fogColor.rgb, fogT), fragColor.a);
+    // Alpha rides along so the see-through pipeline can blend glass and
+    // decals; the opaque pipeline ignores it (blend disabled).
+    outColor = vec4(mix(lit, frame.fogColor.rgb, fogT), albedoSample.a);
 }
