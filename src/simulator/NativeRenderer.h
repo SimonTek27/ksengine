@@ -861,7 +861,10 @@ private:
     // LUT (128x128, RG = scale/offset). All RGBA16F, all created in
     // createIblResources() (called from loadPipelines before the forward
     // set 0 is written) and destroyed with the device, not the swapchain.
-    bool m_iblWanted = false; // setIblEnabled()
+    // On by default: the prefilter/irradiance/BRDF chain is always built, and
+    // leaving it off fell back to a flat ambient that made every surface look
+    // like paper. setIblEnabled(false) still turns it off.
+    bool m_iblWanted = true; // setIblEnabled()
     bool m_iblReady = false;  // real maps uploaded (else 1x1 fallbacks)
     VkImage m_iblImages[3] = {};
     VkDeviceMemory m_iblMemory[3] = {};

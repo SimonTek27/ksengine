@@ -59,6 +59,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <filesystem>
 #include <vector>
 #include <string>
@@ -619,37 +620,97 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         }
     }
 
+    // Skin textures live next to the model, not inside it: AC keeps the body
+    // diffuse and its maps in skins/<id>/. The embedded copy is the file's
+    // default, so a file of the same name in the skin folder wins.
+    std::string skinDir;
+    {
+        std::error_code ec;
+        const std::filesystem::path carDir = std::filesystem::path(modelPath).parent_path();
+        const std::filesystem::path skins = carDir / "skins";
+        std::string wantedSkin;
+        if (const char* env = std::getenv("KS_SKIN"); env != nullptr && *env != 0)
+            wantedSkin = env;
+        if (!wantedSkin.empty()) {
+            const std::filesystem::path cand = skins / wantedSkin;
+            if (std::filesystem::is_directory(cand, ec)) skinDir = cand.string();
+            else {
+                std::fprintf(stderr, "[kn5] skin '%s' is not in %s",
+                             wantedSkin.c_str(), skins.string().c_str());
+                std::putchar(10);
+            }
+        }
+        if (skinDir.empty() && std::filesystem::is_directory(skins, ec)) {
+            std::vector<std::filesystem::path> folders;
+            for (const auto& entry : std::filesystem::directory_iterator(skins, ec))
+                if (entry.is_directory(ec)) folders.push_back(entry.path());
+            std::sort(folders.begin(), folders.end());
+            if (!folders.empty()) skinDir = folders.front().string();
+        }
+        if (!skinDir.empty()) {
+            std::fprintf(stderr, "[kn5] skin: %s", skinDir.c_str());
+            std::putchar(10);
+        }
+    }
+
+    auto readSkinTexture = [&](const std::string& wanted) -> std::vector<unsigned char> {
+        if (skinDir.empty()) return {};
+        std::error_code ec;
+        const std::filesystem::path candidates[2] = {
+            std::filesystem::path(skinDir) / wanted,
+            std::filesystem::path(skinDir) / "textures" / wanted};
+        for (const std::filesystem::path& candidate : candidates) {
+            if (!std::filesystem::is_regular_file(candidate, ec)) continue;
+            std::ifstream file(candidate, std::ios::binary);
+            if (!file) continue;
+            std::vector<unsigned char> bytes((std::istreambuf_iterator<char>(file)),
+                                             std::istreambuf_iterator<char>());
+            if (!bytes.empty()) return bytes;
+        }
+        return {};
+    };
+
     // Decodes a KN5 texture once and returns the key the mesh names. Empty
-    // when the file does not carry it, which leaves the surface untextured
-    // rather than failing the whole load.
+    // when neither the skin nor the file carries it, which leaves the surface
+    // untextured rather than failing the whole load.
     auto textureKey = [&](const std::string& wanted) -> std::string {
         if (wanted.empty()) return std::string();
         auto known = decodedTextures.find(wanted);
         if (known != decodedTextures.end()) return known->second;
+
         std::string key;
-        for (const auto& texture : parsed.file.textures) {
-            if (texture.name != wanted || texture.data.empty()) continue;
-            const std::string_view bytes(reinterpret_cast<const char*>(texture.data.data()),
+        // ksim owns the name of this cache entry, so the third-party file name
+        // stops at the door: the body is CARBODY here.
+        const std::string canonical = graphics::canonicalTextureName(wanted);
+        char cacheKey[200];
+        std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s", prefix.c_str(),
+                      canonical.c_str());
+
+        const std::vector<unsigned char> skinBytes = readSkinTexture(wanted);
+        std::string_view bytes;
+        if (!skinBytes.empty())
+            bytes = std::string_view(reinterpret_cast<const char*>(skinBytes.data()),
+                                     skinBytes.size());
+        else {
+            for (const auto& texture : parsed.file.textures) {
+                if (texture.name != wanted || texture.data.empty()) continue;
+                bytes = std::string_view(reinterpret_cast<const char*>(texture.data.data()),
                                          texture.data.size());
-            if (!ff::isDds(bytes)) break;
+                break;
+            }
+        }
+
+        if (!bytes.empty() && ff::isDds(bytes)) {
             const auto image = ff::decodeDds(bytes);
             if (!image.ok() || image.rgba.empty()) {
-                std::fprintf(stderr, "[kn5] texture %s: %s\n", wanted.c_str(),
+                std::fprintf(stderr, "[kn5] texture %s: %s", wanted.c_str(),
                              image.info.error.c_str());
-                break;
+                std::putchar(10);
+            } else if (m_vulkanRenderer->addTextureFromMemory(cacheKey, image.rgba,
+                                                              image.info.width,
+                                                              image.info.height)) {
+                key = cacheKey;
             }
-            char cacheKey[200];
-            // ksim owns the name of this cache entry, so the third-party file
-            // name stops at the door: the body is CARBODY here.
-            const std::string canonical = graphics::canonicalTextureName(wanted);
-            std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s", prefix.c_str(),
-                          canonical.c_str());
-            if (!m_vulkanRenderer->addTextureFromMemory(cacheKey, image.rgba, image.info.width,
-                                                        image.info.height)) {
-                break;
-            }
-            key = cacheKey;
-            break;
         }
         decodedTextures.emplace(wanted, key);
         return key;

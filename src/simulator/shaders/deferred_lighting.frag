@@ -76,9 +76,29 @@ float sampleShadow(vec3 worldPos, int cascadeIndex) {
     vec3 ndc = lightClip.xyz / lightClip.w;
     vec2 uv = ndc.xy * 0.5 + 0.5;
     if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return 1.0;
-    float storedDepth = texture(shadowCascades, vec3(uv, float(cascadeIndex))).r;
+
+    // ksShadow.frag writes gl_FragCoord.z, and the light projection is
+    // Vulkan clip space, so ndc.z and the stored value are the same [0,1]
+    // range - no remapping needed.
     float bias = 0.0015;
-    return (ndc.z - bias > storedDepth) ? 0.35 : 1.0;
+    // One tap per pixel is what made the shadow edges stair-step: the depth
+    // map stores a manual value, so the LINEAR sampler alone cannot soften a
+    // hard comparison. Nine taps over one texel, and the penumbra comes out of
+    // how many of them agree.
+    vec2 texel = 1.0 / vec2(textureSize(shadowCascades, 0).xy);
+    float lit = 0.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 offset = vec2(float(x), float(y)) * texel;
+            float storedDepth =
+                texture(shadowCascades, vec3(uv + offset, float(cascadeIndex))).r;
+            lit += (ndc.z - bias > storedDepth) ? 0.0 : 1.0;
+        }
+    }
+    lit /= 9.0;
+    // 0.35 is the old unlit floor: fully shadowed stays grey, not black, so a
+    // large caster does not read as a hole in the room.
+    return mix(0.35, 1.0, lit);
 }
 
 // Analytic integral of density * exp(-height * falloff) along the segment
