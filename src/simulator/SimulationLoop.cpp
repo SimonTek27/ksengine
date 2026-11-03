@@ -1,6 +1,7 @@
 #include <set>
 #include "engine/Graphics/MaterialPresets.h"
 #include "engine/Graphics/MaterialOverrides.h"
+#include "engine/Graphics/TextureNames.h"
 #include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
 /**
  * SimulationLoop.cpp — std-only
@@ -638,8 +639,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 break;
             }
             char cacheKey[200];
+            // ksim owns the name of this cache entry, so the third-party file
+            // name stops at the door: the body is CARBODY here.
+            const std::string canonical = graphics::canonicalTextureName(wanted);
             std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s", prefix.c_str(),
-                          wanted.c_str());
+                          canonical.c_str());
             if (!m_vulkanRenderer->addTextureFromMemory(cacheKey, image.rgba, image.info.width,
                                                         image.info.height)) {
                 break;
@@ -748,11 +752,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     overrides.presetFor(material.shader, material.name);
                 if (overrides.findEffective(material.name) != nullptr) ++overridden;
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
+    const std::string albedoName = graphics::canonicalTextureName(albedo);
                     std::printf(
                         "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f albedo=%-24s%s",
                         material.name.c_str(), material.shader.c_str(),
                         graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
-                        albedo.empty() ? "-" : albedo.c_str(),
+                        albedo.empty() ? "-" : albedoName.c_str(),
                         overrides.findEffective(material.name) != nullptr ? " (override)" : "");
                     std::putchar(10);
                 }
