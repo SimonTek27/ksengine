@@ -105,16 +105,21 @@ int main() {
         const std::vector<MenuItem> items = fresh.items();
         int separators = 0;
         for (const auto& item : items) separators += item.isSeparator ? 1 : 0;
-        KS_CHECK(separators == 2);
+        KS_CHECK(separators == 1);
         KS_CHECK(rowOf(fresh, "SINGLE PLAYER") >= 0);
-        KS_CHECK(rowOf(fresh, "MULTI PLAYER") >= 0);
-        KS_CHECK(rowOf(fresh, "GARAGE") >= 0);
-        KS_CHECK(rowOf(fresh, "REPLAY") >= 0);
-        KS_CHECK(rowOf(fresh, "CONTENT") >= 0);
+        KS_CHECK(rowOf(fresh, "MULTIPLAYER") >= 0);
         KS_CHECK(rowOf(fresh, "DRIVER") >= 0);
+        KS_CHECK(rowOf(fresh, "CONTENT") >= 0);
         KS_CHECK(rowOf(fresh, "SETTINGS") >= 0);
         KS_CHECK(rowOf(fresh, "EDITOR") >= 0);
-        KS_CHECK(rowOf(fresh, "QUIT") >= 0);
+        KS_CHECK(rowOf(fresh, "CREDITS") >= 0);
+        KS_CHECK(rowOf(fresh, "EXIT") >= 0);
+        // The garage and the replay screen are no longer rows of this screen:
+        // the garage opens from the in-car pause overlay, and REPLAY is reached
+        // from the content tools. A row reappearing here would be a second
+        // entrance nobody decided on.
+        KS_CHECK(rowOf(fresh, "GARAGE") < 0);
+        KS_CHECK(rowOf(fresh, "REPLAY") < 0);
         // The first row is the default selection and it is usable.
         KS_CHECK(fresh.selectedIndex() == 0);
     }
@@ -127,14 +132,13 @@ int main() {
     // ---------------------------------------------------------------------
     const MainRow graph[] = {
         {"SINGLE PLAYER", MenuState::Singleplayer},
-        {"MULTI PLAYER", MenuState::Multiplayer},
-        {"GARAGE", MenuState::Garage},
-        {"REPLAY", MenuState::Replay},
-        {"CONTENT", MenuState::ContentManager},
+        {"MULTIPLAYER", MenuState::Multiplayer},
         {"DRIVER", MenuState::Profile},
+        {"CONTENT", MenuState::ContentManager},
         {"SETTINGS", MenuState::Settings},
         {"EDITOR", MenuState::DevModeConfirm},
-        {"QUIT", MenuState::QuitConfirm},
+        {"CREDITS", MenuState::Credits},
+        {"EXIT", MenuState::QuitConfirm},
     };
     for (const MainRow& row : graph) {
         GameMenuOverlay menu;
@@ -164,7 +168,7 @@ int main() {
         GameMenuOverlay menu;
         int hosted = 0;
         menu.onHostServerRequested = [&]() { ++hosted; };
-        menu.setSelectedIndex(rowOf(menu, "MULTI PLAYER"));
+        menu.setSelectedIndex(rowOf(menu, "MULTIPLAYER"));
         KS_CHECK(menu.handleKeyPress(KEY_ENTER));
         const int host = rowOf(menu, "HOST SESSION");
         KS_CHECK(host >= 0);
@@ -235,8 +239,9 @@ int main() {
         GameMenuOverlay menu;
         int opened = 0;
         menu.onOpenPitStrategyRequested = [&]() { ++opened; };
-        menu.setSelectedIndex(rowOf(menu, "GARAGE"));
-        KS_CHECK(menu.handleKeyPress(KEY_ENTER));
+        // Reached from the pause overlay now, so it is opened directly here.
+        menu.openScreen(MenuState::Garage);
+        KS_CHECK(menu.state() == MenuState::Garage);
         const int pit = rowOf(menu, "PIT STRATEGY");
         KS_CHECK(pit >= 0);
         if (pit >= 0) {
@@ -253,7 +258,7 @@ int main() {
         GameMenuOverlay menu;
         int exits = 0;
         menu.onExitRequested = [&]() { ++exits; };
-        menu.setSelectedIndex(rowOf(menu, "QUIT"));
+        menu.setSelectedIndex(rowOf(menu, "EXIT"));
         KS_CHECK(menu.handleKeyPress(KEY_ENTER));
         KS_CHECK(menu.state() == MenuState::QuitConfirm);
         const int cancel = rowOf(menu, "CANCEL");
@@ -264,7 +269,7 @@ int main() {
             KS_CHECK(exits == 0);
             KS_CHECK(menu.state() == MenuState::Main);
         }
-        menu.setSelectedIndex(rowOf(menu, "QUIT"));
+        menu.setSelectedIndex(rowOf(menu, "EXIT"));
         KS_CHECK(menu.handleKeyPress(KEY_ENTER));
         const int confirm = rowOf(menu, "CONFIRM");
         KS_CHECK(confirm >= 0);

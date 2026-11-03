@@ -82,6 +82,13 @@ inline constexpr const char* kHelmet =
     "<path d=\"M4 15.4h9.6a3 3 0 0 0 3-3\"/>"
     "</svg>";
 
+// Info: a disc with the stem of an i, for the credits row.
+inline constexpr const char* kInfo =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<circle cx=\"12\" cy=\"12\" r=\"8.6\"/>"
+    "<path d=\"M12 10.8v5.8M12 7.4v.2\"/>"
+    "</svg>";
+
 // Exit: a door with the arrow leaving it.
 inline constexpr const char* kExit =
     "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
@@ -101,6 +108,7 @@ inline const char* source(const char* id) {
         {"user", kUser},
         {"download", kDownload},
         {"helmet", kHelmet},
+        {"info", kInfo},
         {"exit", kExit},
     };
     for (const auto& entry : kTable) {

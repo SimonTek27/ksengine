@@ -1,6 +1,10 @@
 /**
  * The startup screen (ksim) — the row of tiles the game opens on.
  *
+ * The rows are SINGLE PLAYER / MULTIPLAYER / DRIVER / CONTENT / SETTINGS, then
+ * EDITOR / CREDITS / EXIT, so eight tiles: five fit across the window and the
+ * strip scrolls for the rest.
+ *
  * What this pins, and why it is not just arithmetic:
  *
  *  - geometry: the tiles sit between the title bar and the hint bar, they never
@@ -61,7 +65,7 @@ int main() {
     // Geometry: five tiles, in order, between the two bars, none overlapping.
     // ---------------------------------------------------------------------
     {
-        const MainMenuLayout L = layoutMainMenu(1600, 900, 9, 0);
+        const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
         KS_CHECK(L.count == MainMenuLayout::kVisible);
         KS_CHECK(L.first == 0);
         for (int i = 0; i < L.count; ++i) {
@@ -86,12 +90,12 @@ int main() {
     // Scrolling: the window follows the selection; short rows do not scroll.
     // ---------------------------------------------------------------------
     {
-        const MainMenuLayout last = layoutMainMenu(1600, 900, 9, 8);
-        KS_CHECK(last.first == 4);
-        KS_CHECK(last.item[0] == 4);
-        KS_CHECK(last.item[last.count - 1] == 8);
-        KS_CHECK(layoutMainMenu(1600, 900, 9, 6).first == 4); // 6 - 2
-        KS_CHECK(layoutMainMenu(1600, 900, 9, 0).first == 0);
+        const MainMenuLayout last = layoutMainMenu(1600, 900, 8, 7);
+        KS_CHECK(last.first == 3); // 8 rows, 5 slots: last window starts at 3
+        KS_CHECK(last.item[0] == 3);
+        KS_CHECK(last.item[last.count - 1] == 7);
+        KS_CHECK(layoutMainMenu(1600, 900, 8, 6).first == 3); // 6 - 2, clamped
+        KS_CHECK(layoutMainMenu(1600, 900, 8, 0).first == 0);
 
         const MainMenuLayout shortRow = layoutMainMenu(1280, 720, 3, 2);
         KS_CHECK(shortRow.count == 3);
@@ -104,7 +108,7 @@ int main() {
     // Hit-test: a tile's centre is its row, the gap and the bars are nothing.
     // ---------------------------------------------------------------------
     {
-        const MainMenuLayout L = layoutMainMenu(1600, 900, 9, 0);
+        const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
         for (int i = 0; i < L.count; ++i) {
             KS_CHECK(mainMenuTileAt(L, L.tile[i].x + L.tile[i].w * 0.5f,
                                     L.tile[i].y + L.tile[i].h * 0.5f) == i);
@@ -118,19 +122,24 @@ int main() {
     // Navigation wraps at both ends.
     // ---------------------------------------------------------------------
     {
-        KS_CHECK(mainMenuStep(0, -1, 9) == 8);
-        KS_CHECK(mainMenuStep(8, +1, 9) == 0);
-        KS_CHECK(mainMenuStep(4, +1, 9) == 5);
-        KS_CHECK(mainMenuStep(4, -1, 9) == 3);
+        KS_CHECK(mainMenuStep(0, -1, 8) == 7);
+        KS_CHECK(mainMenuStep(7, +1, 8) == 0);
+        KS_CHECK(mainMenuStep(4, +1, 8) == 5);
+        KS_CHECK(mainMenuStep(4, -1, 8) == 3);
         KS_CHECK(mainMenuStep(0, +1, 0) == 0); // empty row: no index to land on
         KS_CHECK(mainMenuStep(7, +1, 3) == 0); // 7 clamps to the last row, then wraps
     }
 
     // ---------------------------------------------------------------------
-    // Content: every tile names a drawable icon and has something to say.
+    // The rows are the ones the game opens on, in order, each with an icon
+    // the SVG set can draw and something to say.
     // ---------------------------------------------------------------------
     {
         GameMenuOverlay menu;
+        static const char* kExpected[] = {
+            "SINGLE PLAYER", "MULTIPLAYER", "DRIVER", "CONTENT",
+            "SETTINGS", "EDITOR", "CREDITS", "EXIT",
+        };
         int tiles = 0;
         int separators = 0;
         for (const auto& item : menu.items()) {
@@ -143,11 +152,32 @@ int main() {
             KS_CHECK(ks::sim::ui::icons::get(item.icon) != nullptr);
             KS_CHECK(!item.description.empty());
         }
-        KS_CHECK(tiles == 9);
-        KS_CHECK(separators == 2);
-        // The game opens on MULTIPLAYER: the row order is the tile order.
-        KS_CHECK(rowOf(menu, "MULTI PLAYER") == 0);
-        KS_CHECK(rowOf(menu, "QUIT") == static_cast<int>(menu.items().size()) - 1);
+        KS_CHECK(tiles == 8);
+        KS_CHECK(separators == 1); // the gap before EDITOR
+        for (int i = 0; i < 8; ++i) KS_CHECK(rowOf(menu, kExpected[i]) >= 0);
+        KS_CHECK(rowOf(menu, "SINGLE PLAYER") == 0); // the game opens on it
+        KS_CHECK(rowOf(menu, "EXIT") == static_cast<int>(menu.items().size()) - 1);
+        // The garage and the replay screen are reached elsewhere now.
+        KS_CHECK(rowOf(menu, "GARAGE") < 0);
+        KS_CHECK(rowOf(menu, "REPLAY") < 0);
+    }
+
+    // ---------------------------------------------------------------------
+    // CREDITS is a real screen: usable rows, a claimed icon each, ESC back.
+    // ---------------------------------------------------------------------
+    {
+        GameMenuOverlay menu;
+        menu.openScreen(MenuState::Credits);
+        KS_CHECK(menu.state() == MenuState::Credits);
+        KS_CHECK(!menu.sectionTitle().empty());
+        KS_CHECK(rowOf(menu, "BACK") >= 0);
+        for (const auto& item : menu.items()) {
+            if (item.isSeparator) continue;
+            KS_CHECK(item.icon != nullptr);
+            KS_CHECK(ks::sim::ui::icons::get(item.icon) != nullptr);
+        }
+        KS_CHECK(menu.handleKeyPress(KEY_ESC));
+        KS_CHECK(menu.state() == MenuState::Main);
     }
 
     // ---------------------------------------------------------------------
@@ -159,30 +189,30 @@ int main() {
         hub.resize(1600, 900);
         KS_CHECK(hub.menu().isVisible());
         KS_CHECK(hub.menu().state() == MenuState::Main);
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTI PLAYER"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "SINGLE PLAYER"));
 
         KS_CHECK(hub.handleKey(KEY_RIGHT));
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "SINGLE PLAYER"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
         KS_CHECK(hub.handleKey(KEY_DOWN)); // DOWN walks the same row
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "CONTENT"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "DRIVER"));
         KS_CHECK(hub.handleKey(KEY_UP));
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "SINGLE PLAYER"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
 
         KS_CHECK(hub.handleKey(KEY_ENTER));
-        KS_CHECK(hub.menu().state() == MenuState::Singleplayer);
+        KS_CHECK(hub.menu().state() == MenuState::Multiplayer);
         KS_CHECK(hub.handleKey(KEY_ESC)); // back to the tiles
         KS_CHECK(hub.menu().state() == MenuState::Main);
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "SINGLE PLAYER"));
 
-        // LEFT from the first tile wraps to the last one.
-        hub.menu().setSelectedIndex(rowOf(hub.menu(), "MULTI PLAYER"));
+        // LEFT from the first tile wraps to the last one (EXIT).
         KS_CHECK(hub.handleKey(KEY_LEFT));
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "QUIT"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "EXIT"));
 
         // Hovering selects the tile under the cursor.
-        const MainMenuLayout L = layoutMainMenu(1600, 900, 9, 0);
-        hub.menu().setSelectedIndex(rowOf(hub.menu(), "MULTI PLAYER"));
+        const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
+        hub.menu().setSelectedIndex(rowOf(hub.menu(), "SINGLE PLAYER"));
         hub.handleMouseMove(L.tile[1].x + 12.f, L.tile[1].y + 12.f);
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "SINGLE PLAYER"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
 
         // ESC on the arrival screen offers to leave instead of hiding it.
         hub.menu().openScreen(MenuState::Main);
@@ -191,6 +221,7 @@ int main() {
         KS_CHECK(hub.menu().isVisible());
     }
 
-    std::printf("main_menu: geometry, scroll window, hit-test, icons, key and mouse paths OK\n");
+    std::printf("main_menu: geometry, scroll window, hit-test, icons, rows, "
+                "credits, key and mouse paths OK\n");
     return KS_TEST_RESULT("main_menu_test");
 }

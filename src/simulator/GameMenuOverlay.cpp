@@ -29,7 +29,8 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::Results: return "RESULTS";
     case MenuState::Pause: return "PAUSED";
     case MenuState::DevModeConfirm: return "EDITOR";
-    case MenuState::QuitConfirm: return "QUIT";
+    case MenuState::Credits: return "CREDITS";
+    case MenuState::QuitConfirm: return "EXIT";
     }
     return "MENU";
 }
@@ -80,28 +81,29 @@ void GameMenuOverlay::buildMainMenu()
 {
     m_items.clear();
     // The row order is the tile order of the startup screen (ui/MainMenu.h):
-    // the game opens on MULTIPLAYER, then the single-player path and the
-    // content screens. Every row names an icon, because a tile is drawn as its
-    // section's glyph behind the label.
-    m_items.push_back({ "MULTI PLAYER", "Online and LAN events, ranked or not",
-        [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
+    // the session first, then the driver, the content and the settings, then
+    // the three rows that do not open a part of the game. Every row names an
+    // icon, because a tile is drawn as its section's glyph behind the label.
+    //
+    // GARAGE and REPLAY used to live here. The garage is one level down, in
+    // the in-car pause overlay, where a running session is what a setup is
+    // for; this screen only opens it through the pause screen now.
     m_items.push_back({ "SINGLE PLAYER", "Practice, race and time attack",
         [this]() { switchMenu(MenuState::Singleplayer); }, false, true, "user" });
-    m_items.push_back({ "", "", nullptr, true });
-    m_items.push_back({ "CONTENT", "Cars, tracks and packages",
-        [this]() { switchMenu(MenuState::ContentManager); }, false, true, "download" });
-    m_items.push_back({ "GARAGE", "Setup, tyres and vehicle options",
-        [this]() { switchMenu(MenuState::Garage); }, false, true, "setup" });
-    m_items.push_back({ "REPLAY", "Playback and recording",
-        [this]() { switchMenu(MenuState::Replay); }, false, true, "restart" });
-    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "MULTIPLAYER", "Online and LAN events, ranked or not",
+        [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
     m_items.push_back({ "DRIVER", "Profile and career stats",
         [this]() { switchMenu(MenuState::Profile); }, false, true, "helmet" });
+    m_items.push_back({ "CONTENT", "Cars, tracks and packages",
+        [this]() { switchMenu(MenuState::ContentManager); }, false, true, "download" });
     m_items.push_back({ "SETTINGS", "Display, audio and input",
         [this]() { switchMenu(MenuState::Settings); }, false, true, "settings" });
+    m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "EDITOR", "Leave simulator and open the editor",
-        [this]() { switchMenu(MenuState::DevModeConfirm); }, false, true, "settings" });
-    m_items.push_back({ "QUIT", "Exit ksim",
+        [this]() { switchMenu(MenuState::DevModeConfirm); }, false, true, "setup" });
+    m_items.push_back({ "CREDITS", "What ksim is built from",
+        [this]() { switchMenu(MenuState::Credits); }, false, true, "info" });
+    m_items.push_back({ "EXIT", "Exit ksim",
         [this]() { switchMenu(MenuState::QuitConfirm); }, false, true, "exit" });
 }
 
@@ -467,6 +469,24 @@ void GameMenuOverlay::buildDevModeConfirm()
     m_items.push_back({ "CANCEL", "Stay in ksim", [this]() { goBack(); } });
 }
 
+void GameMenuOverlay::buildCreditsMenu()
+{
+    m_items.clear();
+    // Only what this screen can honestly claim: the project, the formats it
+    // reads and the paths it plays sound through. A credits page invented from
+    // names nobody checked would be worse than a short one.
+    m_items.push_back({ "KSIM", "Simulator, engine and tooling of the ks engine project",
+        nullptr, false, true, "drive" });
+    m_items.push_back({ "CONTENT", "Assetto Corsa car, track and showroom formats, read by ksim",
+        nullptr, false, true, "download" });
+    m_items.push_back({ "AUDIO", "Sample playback through WASAPI",
+        nullptr, false, true, "settings" });
+    m_items.push_back({ "INTERFACE", "Vector icons drawn from SVG sources inside the simulator",
+        nullptr, false, true, "user" });
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "exit" });
+}
+
 void GameMenuOverlay::buildQuitConfirm()
 {
     m_items.clear();
@@ -500,6 +520,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::TeamSelect: buildTeamSelectMenu(); break;
     case MenuState::Results: buildResultsMenu(); break;
     case MenuState::DevModeConfirm: buildDevModeConfirm(); break;
+    case MenuState::Credits: buildCreditsMenu(); break;
     case MenuState::QuitConfirm: buildQuitConfirm(); break;
     }
     // skip leading separators

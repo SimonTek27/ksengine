@@ -42,6 +42,7 @@ enum class MenuState {
     Results,
     Pause,
     DevModeConfirm,
+    Credits,
     QuitConfirm
 };
 
@@ -225,6 +226,7 @@ private:
     void buildTrackSelectMenu();
     void buildTeamSelectMenu();
     void buildResultsMenu();
+    void buildCreditsMenu();
     void buildDevModeConfirm();
     void buildQuitConfirm();
     void switchMenu(MenuState state);
