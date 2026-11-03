@@ -1,4 +1,5 @@
 #include "NativeRenderer.h"
+#include "engine/material/PngCodec.h" // grading strip decode
 #include "ShadowSystem.h"
 #include "TextureRuntime.h"
 // Roadmap 2.3: materials.txt reader (header-only) — pairs baked meshes with
@@ -756,8 +757,11 @@ struct TonemapPC {
     float sharpenTexelY;  // 52
     float sharpenAmount;  // 56  0 = off
     float sharpenPad;     // 60
+    // Post-processing preset grading, appended at the END (add-only rule).
+    float lutStrength;    // 64  0 = off
+    int32_t lutEnabled;   // 68  1 = sample the bound grading strip
 };
-static_assert(sizeof(TonemapPC) == 64, "TonemapPC must match tonemap.frag's ToneMapPC");
+static_assert(sizeof(TonemapPC) == 72, "TonemapPC must match tonemap.frag's ToneMapPC");
 
 // Bright-pass push constants (glareExtract.frag): threshold + soft knee in
 // scene-linear units, i.e. 1.0 is "already brighter than SDR paper white".
@@ -1743,6 +1747,56 @@ void NativeRenderer::clearStaticScene() {
     m_staticSceneMeshNames.clear();
 }
 
+bool NativeRenderer::uploadPendingColorLut() {
+    if (m_lutPendingPath.empty() || !m_textureRuntime) return false;
+    const std::string path = m_lutPendingPath;
+    m_lutPendingPath.clear();
+    ks::image::RawImage image;
+    std::string error;
+    if (!ks::image::loadImageFile(path, &image, &error) || image.isNull()) {
+        printf("[PP] colour grading LUT '%s' not decoded: %s\n", path.c_str(),
+               error.empty() ? "empty image" : error.c_str());
+        return false;
+    }
+    static const char* kKey = "__pplut__";
+    if (!m_textureRuntime->add(kKey, image.rgba.data(), static_cast<std::uint32_t>(image.width),
+                               static_cast<std::uint32_t>(image.height))) {
+        printf("[PP] colour grading LUT '%s' not uploaded\n", path.c_str());
+        return false;
+    }
+    VkSampler sampler = VK_NULL_HANDLE;
+    VkImageView view = m_textureRuntime->get(kKey, sampler);
+    if (view == VK_NULL_HANDLE || sampler == VK_NULL_HANDLE) return false;
+    m_lutView = view;
+    m_lutSampler = sampler;
+    m_lutReady = true;
+    printf("[PP] colour grading LUT: %s (%dx%d), strength %.2f\n", path.c_str(), image.width,
+           image.height, static_cast<double>(m_lutStrength));
+    return true;
+}
+
+bool NativeRenderer::loadColorLut(const std::string& path, float strength) {
+    m_lutStrength = strength;
+    m_lutReady = false;
+    m_lutView = VK_NULL_HANDLE;
+    m_lutSampler = VK_NULL_HANDLE;
+    m_lutPendingPath.clear();
+    if (path.empty()) return false;
+    // The preset is read before the renderer comes up, so the texture runtime
+    // may not exist yet: keep the request and upload it on the first recorded
+    // frame (writeDisplayDescriptorSets -> uploadPendingColorLut).
+    m_lutPendingPath = path;
+    if (!m_textureRuntime) return true;
+    ks::image::RawImage image;
+    std::string error;
+    if (!ks::image::loadImageFile(path, &image, &error) || image.isNull()) {
+        printf("[PP] colour grading LUT '%s' not decoded: %s\n", path.c_str(),
+               error.empty() ? "empty image" : error.c_str());
+        return false;
+    }
+    return uploadPendingColorLut();
+}
+
 bool NativeRenderer::addTextureFromMemory(const std::string& key,
                                           const std::vector<unsigned char>& rgba, int width,
                                           int height) {
@@ -1762,6 +1816,10 @@ std::size_t NativeRenderer::cachedTextureCount() const noexcept {
 }
 
 void NativeRenderer::clearTextureCache() {
+    // The LUT view lives in the cache that is about to be destroyed.
+    m_lutView = VK_NULL_HANDLE;
+    m_lutSampler = VK_NULL_HANDLE;
+    m_lutReady = false;
     if (m_textureRuntime) m_textureRuntime->clear();
     // Live descriptor sets still hold views into the images clear() just
     // destroyed: re-resolve every set now (DDS files reload lazily on the
@@ -2349,6 +2407,8 @@ void NativeRenderer::endFrame() {
             t.saturation = 1.0f;
             t.contrast = 1.0f;
             t.mode = m_tonemapMode;
+            t.lutStrength = m_lutStrength;
+            t.lutEnabled = (m_lutReady && m_lutStrength > 0.0f) ? 1 : 0;
             t.hdrOutput = m_hdrOutput ? 1 : 0;
             t.whiteNits = m_hdrWhiteNits;
             t.peakNits = kHdrPeakNits;
@@ -4081,13 +4141,13 @@ bool NativeRenderer::ensureDeferredResources() {
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[2]{};
-        for (int i = 0; i < 2; ++i)
+        VkDescriptorSetLayoutBinding bindings[3]{};
+        for (int i = 0; i < 3; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 2;
+        dslCi.bindingCount = 3;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
@@ -4734,7 +4794,19 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView) {
     bloomInfo.imageView = m_bloomViews[0];
     bloomInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[3]{};
+    // Grading strip (set 0, binding 2). Without a preset LUT the runtime's
+    // flat fallback is bound, so the set is always complete; pc.lutEnabled is
+    // what actually keeps the shader from sampling it.
+    if (!m_lutReady && !m_lutPendingPath.empty()) uploadPendingColorLut();
+    if (m_lutView == VK_NULL_HANDLE && m_textureRuntime) {
+        m_lutView = m_textureRuntime->get("__pplut_fallback__", m_lutSampler);
+    }
+    VkDescriptorImageInfo lutInfo{};
+    lutInfo.sampler = m_lutSampler;
+    lutInfo.imageView = m_lutView;
+    lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet writes[4]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -4756,7 +4828,14 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView) {
     writes[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[2].pImageInfo = &bloomInfo;
 
-    vkUpdateDescriptorSets(m_device, 3, writes, 0, nullptr);
+    writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[3].dstSet = m_displaySet;
+    writes[3].dstBinding = 2;
+    writes[3].descriptorCount = 1;
+    writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[3].pImageInfo = &lutInfo;
+
+    vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
 }
 
 } // namespace ks::sim

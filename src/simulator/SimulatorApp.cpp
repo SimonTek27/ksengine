@@ -484,6 +484,16 @@ static void initVulkanAndSimulation() {
             if (preset.display.tonemapMode >= 0 && preset.display.tonemapMode <= 4) {
                 g_nativeRenderer->setTonemapMode(preset.display.tonemapMode);
             }
+            // Exposure, tone curve and the grading strip all live in the
+            // display pass, which only the deferred path runs: a preset asks
+            // for it the way KS_HDR does instead of silently doing nothing.
+            g_nativeRenderer->setDeferred(true);
+            if (preset.colorLut.enabled && !preset.colorLut.file.empty()) {
+                const std::string lutPath = preset.colorLutPath(pfPath);
+                if (!g_nativeRenderer->loadColorLut(lutPath, preset.colorLut.strength)) {
+                    printf("[INIT] PP preset LUT not loaded: %s\n", lutPath.c_str());
+                }
+            }
             printf("[INIT] Post-processing preset \'%s\': exposure %.3f, tonemap %d, lut %s\n",
                    preset.name.c_str(),
                    static_cast<double>(preset.display.exposure),

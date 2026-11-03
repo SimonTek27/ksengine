@@ -448,6 +448,15 @@ public:
     // A material texture that never touches the disk: rgba is width*height*4.
     bool addTextureFromMemory(const std::string& key,
                               const std::vector<unsigned char>& rgba, int width, int height);
+    // Post-processing preset grading strip (system/ppfilters/<id>.lut.png:
+    // a 32^3 cube as a 1024x32 PNG). Applied by the display pass, which needs
+    // the deferred path, exactly like setExposure().
+    bool loadColorLut(const std::string& path, float strength = 1.0f);
+    /** Uploads the strip recorded by loadColorLut(); called from the
+     *  first recorded frame, once the texture runtime exists. */
+    bool uploadPendingColorLut();
+    void setColorLutStrength(float strength) { m_lutStrength = strength; }
+    bool colorLutReady() const { return m_lutReady; }
     std::size_t cachedTextureCount() const noexcept;
     void clearTextureCache();
 
@@ -643,6 +652,11 @@ private:
     VkDescriptorPool m_resolvePool = VK_NULL_HANDLE;
     VkDescriptorSet m_resolveSet = VK_NULL_HANDLE;
     VkSampler m_hdrSampler = VK_NULL_HANDLE;
+    VkImageView m_lutView = VK_NULL_HANDLE;  // grading strip, owned by the texture cache
+    VkSampler m_lutSampler = VK_NULL_HANDLE;
+    bool m_lutReady = false;
+    std::string m_lutPendingPath;  // requested before the texture runtime existed
+    float m_lutStrength = 0.0f;
     VkPipelineLayout m_resolveLayout = VK_NULL_HANDLE;
     VkPipeline m_resolvePipeline = VK_NULL_HANDLE;
     VkShaderModule m_resolveFragModule = VK_NULL_HANDLE;

@@ -27,6 +27,10 @@
 
 layout(set = 0, binding = 0) uniform sampler2D hdrBuffer;
 layout(set = 0, binding = 1) uniform sampler2D bloomBuffer;
+// Colour grading strip: a 32^3 cube flattened into 32 tiles of 32x32 laid out
+// horizontally (1024 x 32). Bound by NativeRenderer::loadColorLut(); when
+// pc.lutEnabled is 0 it is never sampled.
+layout(set = 0, binding = 2) uniform sampler2D gradeLut;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -51,6 +55,9 @@ layout(push_constant) uniform ToneMapPC {
     float sharpenTexelY; // 52
     float sharpenAmount; // 56
     float sharpenPad;    // 60
+    // Post-processing preset grading, appended at the END (add-only rule).
+    float lutStrength;   // 64  0 = off
+    int   lutEnabled;    // 68  1 = sample gradeLut
 } pc;
 
 layout(location = 0) in vec2 fragUV;
@@ -121,6 +128,25 @@ const mat3 SRGB_TO_BT2020 = mat3(
     0.32929986, 0.92927073, 0.08801331,
     0.04330665, 0.00162898, 0.89557256);
 
+// One tile of the grading strip: rg picks the texel inside the 32x32 tile,
+// slice picks the tile (the graded blue). Sampled at level 0 so the strip's
+// mip chain can never blend neighbouring blue slices together.
+vec3 lutTile(vec2 rg, float slice) {
+    float u = (slice * 32.0 + clamp(rg.r, 0.0, 1.0) * 31.0 + 0.5) / 1024.0;
+    float v = (clamp(rg.g, 0.0, 1.0) * 31.0 + 0.5) / 32.0;
+    return textureLod(gradeLut, vec2(u, v), 0.0).rgb;
+}
+
+// Trilinear read of the 32^3 cube: the two blue slices around c.b, blended.
+vec3 applyGradeLut(vec3 c) {
+    float b = clamp(c.b, 0.0, 1.0) * 31.0;
+    float b0 = floor(b);
+    float b1 = min(b0 + 1.0, 31.0);
+    vec3 lo = lutTile(c.rg, b0);
+    vec3 hi = lutTile(c.rg, b1);
+    return mix(lo, hi, b - b0);
+}
+
 void main() {
     // The HDR frame and the bloom buffer are both scene-linear and both
     // pre-exposure, so exposure lands on their sum (same order the old
@@ -159,6 +185,12 @@ void main() {
     y = mix(vec3(lum), y, pc.saturation);
     y = (y - 0.5) * pc.contrast + 0.5;
     y *= pc.colorFilter;
+
+    // Grading strip: after the curve and the colour block, so it works on the
+    // display-referred value it was authored against.
+    if (pc.lutEnabled != 0 && pc.lutStrength > 0.0) {
+        y = mix(y, applyGradeLut(clamp(y, 0.0, 1.0)), clamp(pc.lutStrength, 0.0, 1.0));
+    }
 
     if (pc.hdrOutput != 0) {
         // HDR10. The graded signal up to paper white is scaled to reference
