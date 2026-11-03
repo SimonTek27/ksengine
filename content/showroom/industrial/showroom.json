@@ -1,0 +1,24 @@
+{
+  "name": "Industrial",
+  "description": "Concrete floor, cold daylight, a hall that echoes.",
+  "model": "industrial.kn5",
+  "camera": {
+    "distance": 6.5,
+    "height": 1.7,
+    "angle": 35,
+    "fov": 50,
+    "rotation": 8,
+    "target_height": 0.6
+  },
+  "light": {
+    "sun_direction": [0.42, 0.78, 0.46],
+    "sun_color": [1.0, 0.97, 0.92],
+    "sun_intensity": 1.0,
+    "ambient_color": [0.34, 0.36, 0.40],
+    "ambient_intensity": 0.55
+  },
+  "audio": {
+    "ambience_volume": 0.6,
+    "music_volume": 0.5
+  }
+}

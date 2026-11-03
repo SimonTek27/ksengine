@@ -406,6 +406,17 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     return true;
 }
 
+bool SimulationLoop::openShowroom(const std::string& directory, std::string* error) {
+    m_showroomAudioLoaded = false;
+    return m_showroom.open(directory, error);
+}
+
+void SimulationLoop::closeShowroom() {
+    m_showroom.close();
+    m_showroomAudioLoaded = false;
+    if (m_audio) m_audio->stopShowroomAudio();
+}
+
 bool SimulationLoop::loadCarAudio(const std::string& carDirectory) {
     if (carDirectory.empty()) return false;
     if (!m_audio) {
@@ -774,6 +785,9 @@ void SimulationLoop::stop() {
 }
 
 void SimulationLoop::startSession(GameSessionMode mode) {
+    // A session starts from the showroom: the turntable stops owning the
+    // camera (and its music) the moment the player is driving.
+    closeShowroom();
     if (m_running) stop(); // picking a mode from the menu starts a fresh session
     // Configure BEFORE start(): beginRaceSession() reads the session byte
     // (countdown + RaceSessionManager type), the lap limit and the AI count.
@@ -1255,6 +1269,28 @@ void SimulationLoop::syncUiFromVehicle() {
 // has to be up to date before the frame starts, not halfway through it.
 void SimulationLoop::updateCamera(float dt) {
     if (!m_camera) return;
+
+    // Showroom: the camera rides the turntable and looks at the car. The
+    // chase camera would keep snapping to a body that is not being driven.
+    if (m_showroom.active()) {
+        if (m_viewW > 0 && m_viewH > 0)
+            m_camera->setAspectRatio(static_cast<float>(m_viewW) /
+                                     static_cast<float>(m_viewH));
+        // The tracks live in the audio object, which only exists once a car
+        // has been loaded: load them on the first frame they can be heard.
+        if (m_audio && !m_showroomAudioLoaded) {
+            m_audio->loadShowroomAudio(m_showroom.config().ambience,
+                                       m_showroom.config().music);
+            m_showroomAudioLoaded = true;
+        }
+        m_showroom.apply(dt, *m_camera);
+        m_camera->update(dt, mat4(), 0.0f); // free camera: view + projection
+        if (m_vulkanRenderer)
+            m_vulkanRenderer->setCamera(m_camera->viewMatrix(),
+                                        m_camera->projectionMatrix(),
+                                        m_camera->nearPlane(), m_camera->farPlane());
+        return;
+    }
 
     mat4 carBody;
     float speedKmh = 0.0f;

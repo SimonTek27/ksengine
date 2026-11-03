@@ -8,6 +8,7 @@
 #include "simulator/DashboardOverlay.h"
 #include "simulator/TelemetryOverlay.h"
 #include "simulator/GameMenuOverlay.h"
+#include "simulator/ShowroomConfig.h"
 #include "simulator/PitStrategyBridge.h" // roadmap 2.7: menu pit plan -> loop state
 #include "simulator/InputManager.h"
 #include "simulator/SetupGarage.h"
@@ -700,6 +701,30 @@ static void initSimulation() {
     if (const char* team = std::getenv("KS_TEAM"); team && team[0]) {
         if (!g_simulation->loadTeam(team))
             printf("[INIT] KS_TEAM load failed: %s\n", team);
+    }
+
+    // The game always opens in a showroom: content/showroom/<id>/showroom.json
+    // describes it (KS_SHOWROOM picks one, otherwise the first folder that has
+    // one). A checkout with no showroom keeps the plain startup scene instead
+    // of failing - the menu still opens.
+    {
+        ks::sim::ShowroomConfig showroom;
+        std::string showroomError;
+        if (ks::sim::loadStartupShowroom(showroom, &showroomError)) {
+            g_simulation->openShowroom(showroom.directory);
+            printf("[INIT] Showroom '%s' (%s) camera %.1f m, %.0f deg/s\n",
+                   showroom.name.c_str(), showroom.id.c_str(),
+                   static_cast<double>(showroom.cameraDistance),
+                   static_cast<double>(showroom.cameraRotationDegPerSec));
+            if (showroom.hasAmbience() || showroom.hasMusic())
+                printf("[INIT] Showroom audio: ambience %s, music %s\n",
+                       showroom.hasAmbience() ? showroom.ambience.formatName() : "none",
+                       showroom.hasMusic() ? showroom.music.formatName() : "none");
+            for (const auto& warning : showroom.warnings)
+                printf("[INIT] Showroom warning: %s\n", warning.c_str());
+        } else {
+            printf("[INIT] No showroom: %s\n", showroomError.c_str());
+        }
     }
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();

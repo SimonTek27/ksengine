@@ -21,6 +21,9 @@ public:
     vec3 position() const { return m_position; }
     vec3 forward() const { return m_forward; }
     void setPosition(const vec3& pos) { m_position = pos; }
+    /** Free mode: aim the camera by hand. The showroom turntable does this
+     *  every frame instead of driving it with the mouse. */
+    void setForward(const vec3& direction) { m_forward = direction.normalized(); }
 
     void setAspectRatio(float ar);
     void setFov(float fov) { m_fov = fov; }

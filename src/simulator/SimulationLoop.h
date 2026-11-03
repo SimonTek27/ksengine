@@ -1,5 +1,7 @@
 #pragma once
 
+#include "ShowroomScene.h"
+
 /**
  * SimulationLoop — fixed-timestep sim + NativeUiHub + GPU UI pass.
  * LapSectorTimer + shared-memory + UDP/TCP telemetry + TrackSurface.
@@ -131,6 +133,14 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
+    // --- showroom (content/showroom/<id>/showroom.json) -------------------
+    // The game opens in a showroom: while one is open the camera sits on its
+    // turntable instead of following a car nobody is driving, and its two
+    // optional tracks play. Starting a session closes it.
+    bool openShowroom(const std::string& directory, std::string* error = nullptr);
+    void closeShowroom();
+    bool showroomActive() const { return m_showroom.active(); }
+    const ShowroomScene& showroom() const { return m_showroom; }
     // Roadmap 2.8: load a team roster (dir or team.ini). The roster decides
     // driver names, race numbers, liveries, garage boxes and the grid slots
     // of the player and the AI at session start. No team = legacy identity.
@@ -397,6 +407,8 @@ private:
     NativeRenderer* m_vulkanRenderer = nullptr;
     std::unique_ptr<InputManager> m_input;
     std::unique_ptr<CameraController> m_camera;
+    ShowroomScene m_showroom;
+    bool m_showroomAudioLoaded = false;
     std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;
     std::unique_ptr<MultiCarManager> m_multiCar;
     FeatureHub m_features;

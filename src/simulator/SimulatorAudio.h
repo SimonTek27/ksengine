@@ -5,6 +5,7 @@
 #include "Audio3D.h"
 #include "AudioBankManager.h"
 #include "SoundsIniParser.h"
+#include "ShowroomConfig.h"
 #include "Audio/AudioTypes.h"
 #include <memory>
 #include <string>
@@ -75,6 +76,12 @@ public:
 
     bool loadCarAudio(const std::string& carDirectory);
     bool loadBank(const std::string& bankPath);
+
+    /** Showroom ambience and music: decoded once and looped on their own
+     *  channels while the showroom is open. An absent or undecodable track
+     *  is simply not heard - the showroom still opens. */
+    bool loadShowroomAudio(const ShowroomAudioTrack& ambience, const ShowroomAudioTrack& music);
+    void stopShowroomAudio();
 
     /**
      * Apply race/upgrade sound pack on top of baseline car audio.
@@ -169,6 +176,7 @@ public:
         ChEngineInt = 0, ChEngineExt, ChTurbo, ChWind, ChSkid, ChGearShift,
         ChBrakes, ChTransmission, ChBodywork, ChBackfire, ChLimiter,
         ChRainAmbient, ChRainCar, ChWiper, ChCspSkid, ChOtherCars, ChRolling,
+        ChShowroomAmbience, ChShowroomMusic,
         ChCount
     };
 
@@ -209,6 +217,15 @@ private:
     std::array<EngineLayer, ENGINE_LAYERS_PER_SET> m_engineIntLayers;
     std::array<EngineLayer, ENGINE_LAYERS_PER_SET> m_engineExtLayers;
     std::array<SfxSample, static_cast<int>(SoundCategory::Count)> m_sfxSamples;
+
+    // Showroom tracks: the files are the showroom's, not the car's, so they
+    // live outside the SoundCategory table and play on their own channels.
+    SfxSample m_showroomAmbience;
+    SfxSample m_showroomMusic;
+    float m_showroomAmbiencePos = 0.f;
+    float m_showroomMusicPos = 0.f;
+    bool m_showroomAmbienceOn = false;
+    bool m_showroomMusicOn = false;
     std::array<PlaybackState, static_cast<int>(SoundCategory::Count)> m_playback;
 
     AudioState m_state;

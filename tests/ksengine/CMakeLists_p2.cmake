@@ -247,3 +247,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ui_svg_icon_test.cpp")
     add_test(NAME ui_svg_icon_test COMMAND ui_svg_icon_test)
     set_tests_properties(ui_svg_icon_test PROPERTIES TIMEOUT 60)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/showroom_test.cpp")
+    # CameraController lives in the simulator (not the engine library), so the
+    # turntable is tested by compiling it into the test.
+    add_executable(showroom_test showroom_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/CameraController.cpp")
+    target_include_directories(showroom_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(showroom_test PRIVATE ksengine)
+    add_test(NAME showroom_test COMMAND showroom_test)
+    set_tests_properties(showroom_test PROPERTIES TIMEOUT 60)
+endif()

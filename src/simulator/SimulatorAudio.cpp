@@ -1,4 +1,7 @@
 #include "SimulatorAudio.h"
+
+#include <filesystem>
+#include <cstdio>
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
@@ -86,6 +89,56 @@ static WavFile loadWav(const std::string& path)
 SimulatorAudio::SimulatorAudio() = default;
 SimulatorAudio::~SimulatorAudio() { shutdown(); }
 
+bool SimulatorAudio::loadShowroomAudio(const ShowroomAudioTrack& ambience,
+                                         const ShowroomAudioTrack& music)
+{
+    stopShowroomAudio();
+
+    // wav is read directly, a bank is a container so its first PCM/float
+    // sample is extracted first (a bare file cannot name an event). Formats
+    // this build cannot decode are left silent, not fatal.
+    const auto decode = [](const ShowroomAudioTrack& track, SfxSample& out) -> bool {
+        if (!track.present() || !track.playable()) return false;
+        WavFile wav;
+        if (track.format == ShowroomAudioFormat::Bank) {
+            std::error_code ec;
+            const std::string temp =
+                (std::filesystem::temp_directory_path(ec) / "ksim_showroom_bank.wav").string();
+            if (ks::audio::extractBankSampleToWav(track.path, 0, temp)) wav = loadWav(temp);
+            std::remove(temp.c_str());
+        } else {
+            wav = loadWav(track.path);
+        }
+        if (!wav.valid || wav.samples.empty()) {
+            std::fprintf(stderr, "[audio] showroom %s could not be decoded: %s\n",
+                         track.baseName.c_str(), track.path.c_str());
+            return false;
+        }
+        out.samples = std::move(wav.samples);
+        out.sampleRate = wav.sampleRate > 0 ? wav.sampleRate : 44100;
+        out.channels = wav.channels > 0 ? wav.channels : 2;
+        out.loop = track.loop;
+        out.volume = track.volume;
+        return true;
+    };
+
+    m_showroomAmbienceOn = decode(ambience, m_showroomAmbience);
+    m_showroomMusicOn = decode(music, m_showroomMusic);
+    std::printf("[audio] showroom ambience=%s music=%s\n",
+                m_showroomAmbienceOn ? "on" : "off", m_showroomMusicOn ? "on" : "off");
+    return m_showroomAmbienceOn || m_showroomMusicOn;
+}
+
+void SimulatorAudio::stopShowroomAudio()
+{
+    m_showroomAmbienceOn = false;
+    m_showroomMusicOn = false;
+    m_showroomAmbiencePos = 0.f;
+    m_showroomMusicPos = 0.f;
+    m_showroomAmbience.samples.clear();
+    m_showroomMusic.samples.clear();
+}
+
 bool SimulatorAudio::initialize(bool withOutput)
 {
     if (m_initialized) return true;
@@ -118,6 +171,8 @@ bool SimulatorAudio::initialize(bool withOutput)
     m_mixer->addChannel("csp_skid");
     m_mixer->addChannel("other_cars");
     m_mixer->addChannel("rolling");
+    m_mixer->addChannel("showroom_ambience");
+    m_mixer->addChannel("showroom_music");
 
     if (withOutput) {
         m_wasapi->setRenderCallback([this](float* output, int frames, const AudioFormat& fmt) {
@@ -509,6 +564,46 @@ float SimulatorAudio::sampleAt(const std::vector<float>& samples, float position
     return samples[frame * totalChannels + channel] * (1.0f - frac) + samples[nextFrame * totalChannels + channel] * frac;
 }
 
+
+namespace {
+
+/** Mix one looping sample into a stereo channel buffer. Nearest frame with
+ *  linear interpolation: room tone and music are not transient, so this is
+ *  cheaper than a resampler and inaudible in use. */
+void mixShowroomLoop(float* out, int frames, int channels, int sampleRate,
+                     SimulatorAudio::SfxSample& sample, float& position, bool& on)
+{
+    if (!on || sample.samples.empty()) return;
+    const int srcChannels = sample.channels > 0 ? sample.channels : 2;
+    const int totalFrames = static_cast<int>(sample.samples.size()) / srcChannels;
+    if (totalFrames <= 0) {
+        on = false;
+        return;
+    }
+    const float step = static_cast<float>(sample.sampleRate) / static_cast<float>(sampleRate);
+    for (int i = 0; i < frames; ++i) {
+        if (position >= static_cast<float>(totalFrames)) {
+            if (!sample.loop) {
+                on = false;
+                break;
+            }
+            position -= static_cast<float>(totalFrames);
+        }
+        const int frame = static_cast<int>(position);
+        const int next = (frame + 1 < totalFrames) ? frame + 1 : 0;
+        const float frac = position - static_cast<float>(frame);
+        for (int c = 0; c < channels; ++c) {
+            const int sc = c < srcChannels ? c : 0;
+            const float a = sample.samples[static_cast<size_t>(frame) * srcChannels + sc];
+            const float b = sample.samples[static_cast<size_t>(next) * srcChannels + sc];
+            out[i * channels + c] += (a + (b - a) * frac) * sample.volume;
+        }
+        position += step;
+    }
+}
+
+} // namespace
+
 void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sampleRate)
 {
     float masterVol = m_masterVolume.load();
@@ -641,6 +736,21 @@ void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sa
         renderRolling(chBuf, bufFrames, 2, sampleRate);
     }
     m_mixer->setVolume(ChRolling, envVol * masterVol);
+
+    // Showroom tracks: the two channels exist for the whole run, so this is
+    // silent (and free) once a session has taken over.
+    if (float* ambience = m_mixer->channelBuffer(ChShowroomAmbience)) {
+        std::fill(ambience, ambience + bufFrames * 2, 0.0f);
+        mixShowroomLoop(ambience, bufFrames, 2, sampleRate, m_showroomAmbience,
+                        m_showroomAmbiencePos, m_showroomAmbienceOn);
+    }
+    if (float* music = m_mixer->channelBuffer(ChShowroomMusic)) {
+        std::fill(music, music + bufFrames * 2, 0.0f);
+        mixShowroomLoop(music, bufFrames, 2, sampleRate, m_showroomMusic,
+                        m_showroomMusicPos, m_showroomMusicOn);
+    }
+    m_mixer->setVolume(ChShowroomAmbience, masterVol);
+    m_mixer->setVolume(ChShowroomMusic, masterVol);
 
     m_mixer->mix(output, bufFrames, channels, sampleRate);
 
