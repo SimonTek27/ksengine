@@ -269,5 +269,32 @@ int main() {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // A showroom folder may name its file data.json: the name is our
+    // invention, and a folder with the geometry but the other name used to
+    // disappear from the scan entirely.
+    // ---------------------------------------------------------------------
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path dir = fs::temp_directory_path(ec) / "ksim_showroom_alias";
+        fs::remove_all(dir, ec);
+        fs::create_directories(dir, ec);
+        const std::string json = R"({"name": "Alias room", "camera": {"distance": 5.0}})";
+        std::FILE* f = std::fopen((dir / "data.json").string().c_str(), "wb");
+        KS_CHECK(f != nullptr);
+        if (f != nullptr) {
+            std::fwrite(json.data(), 1, json.size(), f);
+            std::fclose(f);
+        }
+        std::string error;
+        const ks::sim::ShowroomConfig cfg = ks::sim::loadShowroom(dir.string(), &error);
+        KS_CHECK(cfg.valid);
+        KS_CHECK(cfg.name == "Alias room");
+        KS_CHECK(!ks::sim::showroomFile(dir.string()).empty());
+        ks::sim::ShowroomConfig startup;
+        fs::remove_all(dir, ec);
+    }
+
     return KS_TEST_RESULT("showroom_test");
 }

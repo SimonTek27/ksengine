@@ -145,6 +145,10 @@ public:
     void loadShowroomAudio();
     // A room built in code for a showroom with no baked hall (see SceneAssets.h):
     // an unbaked or empty folder must not open on an empty frame.
+    // Cooks `showroom/*.kn5` into <dir>/baked the first time the folder is
+    // opened: the renderer draws only baked meshes, and the player should not
+    // have to run a tool to see the hall they already have.
+    void bakeShowroomHallIfNeeded();
     void buildShowroomVenue();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }

@@ -243,14 +243,27 @@ inline bool parseShowroom(const std::string& text, const std::string& folderId,
     return true;
 }
 
-/** Read `directory/showroom.json`. A folder without one is not a showroom. */
+/** The description file of a showroom folder: `showroom.json`, or `data.json`
+ *  as the same thing under another name — the file name is our invention and
+ *  showrooms in the wild arrive named like that. Empty when neither exists. */
+inline std::filesystem::path showroomFile(const std::string& directory) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path preferred = fs::path(directory) / "showroom.json";
+    if (fs::is_regular_file(preferred, ec)) return preferred;
+    const fs::path alternate = fs::path(directory) / "data.json";
+    if (fs::is_regular_file(alternate, ec)) return alternate;
+    return {};
+}
+
+/** Read `showroomFile(directory)`. A folder without one is not a showroom. */
 inline ShowroomConfig loadShowroom(const std::string& directory, std::string* error = nullptr) {
     namespace fs = std::filesystem;
     ShowroomConfig cfg;
-    const fs::path jsonPath = fs::path(directory) / "showroom.json";
     std::error_code ec;
-    if (!fs::is_regular_file(jsonPath, ec)) {
-        if (error) *error = "no showroom.json in " + directory;
+    const fs::path jsonPath = showroomFile(directory);
+    if (jsonPath.empty()) {
+        if (error) *error = "no showroom.json (or data.json) in " + directory;
         return cfg;
     }
     std::FILE* file = std::fopen(jsonPath.string().c_str(), "rb");
@@ -283,7 +296,7 @@ inline std::vector<ShowroomEntry> scanShowrooms(const std::string& root = "conte
     if (!fs::is_directory(root, ec)) return out;
     for (const auto& entry : fs::directory_iterator(root, ec)) {
         if (!entry.is_directory(ec)) continue;
-        if (!fs::is_regular_file(entry.path() / "showroom.json", ec)) continue;
+        if (showroomFile(entry.path().string()).empty()) continue;
         ShowroomEntry item;
         item.id = entry.path().filename().string();
         item.path = entry.path().string();

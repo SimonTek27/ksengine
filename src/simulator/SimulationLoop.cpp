@@ -10,6 +10,7 @@
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SceneAssets.h"
+#include "engine/FileFormat/Kn5Baker.h"
 #include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
 #include "GarageSpawn.h"     // rF2-like garage/grid placement (roadmap 2.8)
 #include "RainEffects.h"
@@ -433,38 +434,78 @@ void SimulationLoop::loadShowroomAudio() {
     m_showroomAudioLoaded = m_audio->loadShowroomAudio(cfg.ambience, cfg.music);
 }
 
+void SimulationLoop::bakeShowroomHallIfNeeded() {
+    const ShowroomConfig& cfg = m_showroom.config();
+    if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) return;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // The named model when it is there, otherwise the largest .kn5 in the
+    // folder — the venue rather than a decoration, the rule the track loader
+    // follows too.
+    fs::path model;
+    if (!cfg.model.empty()) {
+        const fs::path named = fs::path(cfg.directory) / cfg.model;
+        if (fs::is_regular_file(named, ec)) model = named;
+    }
+    if (model.empty()) {
+        uintmax_t largest = 0;
+        for (const auto& entry : fs::directory_iterator(cfg.directory, ec)) {
+            if (entry.path().extension() != ".kn5") continue;
+            const uintmax_t size = entry.file_size(ec);
+            if (size >= largest) {
+                largest = size;
+                model = entry.path();
+            }
+        }
+    }
+    if (model.empty()) return;
+
+    const fs::path out = fs::path(cfg.directory) / "baked";
+    const auto started = std::chrono::steady_clock::now();
+    const auto baked = ks::engine::fileformat::bakeKn5ToNativeMeshes(model.string(), out.string());
+    const double seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    if (!baked.ok()) {
+        std::fprintf(stderr, "[showroom] bake of %s failed: %s\n",
+                     model.filename().string().c_str(), baked.error.c_str());
+        return;
+    }
+    std::fprintf(stderr, "[showroom] baked %s: %d mesh(es), %d texture(s) in %.1f s\n",
+                 model.filename().string().c_str(), baked.meshes_written,
+                 baked.textures_written, seconds);
+}
+
 void SimulationLoop::loadShowroomHall() {
     if (!m_showroom.active()) return;
     const ShowroomConfig& cfg = m_showroom.config();
     namespace fs = std::filesystem;
 
-    if (!cfg.model.empty()) {
-        const fs::path model = fs::path(cfg.directory) / cfg.model;
-        if (!fs::is_regular_file(model)) {
-            std::fprintf(stderr, "[showroom] %s: no %s in the folder\n",
-                         cfg.id.c_str(), cfg.model.c_str());
-        } else {
-            // The hall is content like a circuit: the loader scans the folder
-            // for .kn5 and keeps the largest, which is the venue rather than a
-            // decoration. It also stamps track metadata and the menu's TRACK
-            // row, and those belong to the circuit the player will actually
-            // drive, so both are put back: only the meshes stay in the scene.
-            const std::string previousLabel = m_ui.menu().trackName();
-            if (loadTrackFolder(cfg.directory)) {
-                m_trackData = SimTrackData{};
-                m_trackLoaded = false;
-                m_ui.menu().setTrackName(previousLabel);
-                // The hall load swapped the static scene: the car has to be put
-                // back on it.
-                if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
-                std::printf("[showroom] hall %s loaded\n", cfg.model.c_str());
-                // A .kn5 without a bake leaves the scene as it was, and the
-                // renderer only draws baked meshes: only the file on disk is
-                // not enough to keep the player from staring at a black frame.
-                if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) return;
-            }
+    // A .kn5 on disk is not something the renderer can draw: it needs the bake,
+    // so make it here, once per folder. Cached in the folder afterwards.
+    bakeShowroomHallIfNeeded();
+
+    if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) {
+        // The hall is content like a circuit: the loader scans the folder for
+        // .kn5 and keeps the largest, which is the venue rather than a
+        // decoration. It also stamps track metadata and the menu's TRACK row,
+        // and those belong to the circuit the player will actually drive, so
+        // both are put back: only the meshes stay in the scene.
+        const std::string previousLabel = m_ui.menu().trackName();
+        if (loadTrackFolder(cfg.directory)) {
+            m_trackData = SimTrackData{};
+            m_trackLoaded = false;
+            m_ui.menu().setTrackName(previousLabel);
+            // The hall load swapped the static scene: the car has to be put
+            // back on it.
+            if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
+            std::printf("[showroom] hall %s loaded\n", cfg.directory.c_str());
+            return;
         }
     }
+    if (!cfg.model.empty() && !fs::is_regular_file(fs::path(cfg.directory) / cfg.model))
+        std::fprintf(stderr, "[showroom] %s: no %s in the folder\n",
+                     cfg.id.c_str(), cfg.model.c_str());
     buildShowroomVenue();
 }
 
