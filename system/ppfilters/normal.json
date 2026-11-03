@@ -103,7 +103,7 @@
   "colorLut": {
     "enabled": true,
     "strength": 1.0,
-    "file": "normal.lut.png"
+    "file": "normal.lut"
   },
   "display": {
     "exposure": 0.72,
@@ -148,7 +148,7 @@
     "kind": "post-processing filter",
     "notes": "Engine blocks carry the values of the source filter, section by section. colorLut points at the grading strip next to this file. display.tonemapMode follows the renderer enum (0 none, 1 Reinhard, 2 ACES, 3 Uncharted2, 4 Filmic). postEffects lists renderer capabilities the source filter has no value for: they carry the engine defaults, not measurements.",
     "sectionCount": 24,
-    "lut": "normal.lut.png",
+    "lut": "normal.lut",
     "provenance": "sections"
   },
   "sections": {
@@ -243,7 +243,7 @@
     "EXT_COLOR_GRADING": {
       "ENABLED": true,
       "STRENGTH": 1,
-      "LUT": "normal.lut.png"
+      "LUT": "normal.lut"
     },
     "EXT_DXGI_HDR": {
       "POST_TONEMAPPING": 1,
