@@ -408,7 +408,55 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
 
 bool SimulationLoop::openShowroom(const std::string& directory, std::string* error) {
     m_showroomAudioLoaded = false;
-    return m_showroom.open(directory, error);
+    if (!m_showroom.open(directory, error)) return false;
+    loadShowroomHall();
+    loadShowroomAudio();
+    return true;
+}
+
+void SimulationLoop::loadShowroomAudio() {
+    if (!m_showroom.active()) return;
+    const ShowroomConfig& cfg = m_showroom.config();
+    // Nothing to play: do not open an output device for a silent showroom.
+    if (!cfg.hasAmbience() && !cfg.hasMusic()) return;
+    if (!m_audio) {
+        // The showroom comes before any car, and the audio object used to be
+        // created by the car load, so its music never started. Same rule as
+        // loadCarAudio: a missing device leaves the showroom silent, not broken.
+        auto audio = std::make_unique<SimulatorAudio>();
+        if (!audio->initialize()) {
+            std::fprintf(stderr, "[showroom] no audio device, tracks stay silent\n");
+            return;
+        }
+        m_audio = std::move(audio);
+    }
+    m_showroomAudioLoaded = m_audio->loadShowroomAudio(cfg.ambience, cfg.music);
+}
+
+void SimulationLoop::loadShowroomHall() {
+    if (!m_showroom.active()) return;
+    const ShowroomConfig& cfg = m_showroom.config();
+    if (cfg.model.empty()) return;
+    namespace fs = std::filesystem;
+    const fs::path model = fs::path(cfg.directory) / cfg.model;
+    if (!fs::is_regular_file(model)) {
+        std::fprintf(stderr, "[showroom] %s: no %s in the folder, keeping the current scene\n",
+                     cfg.id.c_str(), cfg.model.c_str());
+        return;
+    }
+    // The hall is content like a circuit: the loader scans the folder for .kn5
+    // and keeps the largest, which is the venue rather than a decoration. It
+    // also stamps track metadata and the menu's TRACK row, and those belong to
+    // the circuit the player will actually drive, so both are put back: only
+    // the meshes stay in the scene.
+    const std::string previousLabel = m_ui.menu().trackName();
+    if (!loadTrackFolder(cfg.directory)) return;
+    m_trackData = SimTrackData{};
+    m_trackLoaded = false;
+    m_ui.menu().setTrackName(previousLabel);
+    // The hall load swapped the static scene: the car has to be put back on it.
+    if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
+    std::printf("[showroom] hall %s loaded\n", cfg.model.c_str());
 }
 
 void SimulationLoop::closeShowroom() {
@@ -1276,13 +1324,6 @@ void SimulationLoop::updateCamera(float dt) {
         if (m_viewW > 0 && m_viewH > 0)
             m_camera->setAspectRatio(static_cast<float>(m_viewW) /
                                      static_cast<float>(m_viewH));
-        // The tracks live in the audio object, which only exists once a car
-        // has been loaded: load them on the first frame they can be heard.
-        if (m_audio && !m_showroomAudioLoaded) {
-            m_audio->loadShowroomAudio(m_showroom.config().ambience,
-                                       m_showroom.config().music);
-            m_showroomAudioLoaded = true;
-        }
         m_showroom.apply(dt, *m_camera);
         m_camera->update(dt, mat4(), 0.0f); // free camera: view + projection
         if (m_vulkanRenderer)

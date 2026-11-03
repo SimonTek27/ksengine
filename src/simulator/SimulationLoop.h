@@ -138,6 +138,11 @@ public:
     // turntable instead of following a car nobody is driving, and its two
     // optional tracks play. Starting a session closes it.
     bool openShowroom(const std::string& directory, std::string* error = nullptr);
+    // Loads the hall meshes and the two tracks. Called from openShowroom, so
+    // the showroom is complete on the first frame instead of waiting for the
+    // audio object a car would otherwise create.
+    void loadShowroomHall();
+    void loadShowroomAudio();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }
     const ShowroomScene& showroom() const { return m_showroom; }

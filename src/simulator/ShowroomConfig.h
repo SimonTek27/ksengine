@@ -307,13 +307,25 @@ inline bool loadStartupShowroom(ShowroomConfig& out, std::string* error = nullpt
         return false;
     }
     const char* wanted = std::getenv("KS_SHOWROOM");
-    for (const auto& room : rooms) {
-        if (wanted != nullptr && *wanted != '\0' && room.id == wanted) {
-            out = loadShowroom(room.path, error);
-            return out.valid;
+    const bool asked = wanted != nullptr && *wanted != '\0';
+    const ShowroomEntry* chosen = nullptr;
+    if (asked) {
+        for (const auto& room : rooms) {
+            if (room.id == wanted) {
+                chosen = &room;
+                break;
+            }
         }
     }
-    out = loadShowroom(rooms.front().path, error);
+    const bool missing = asked && chosen == nullptr;
+    if (chosen == nullptr) chosen = &rooms.front(); // deterministic default
+    out = loadShowroom(chosen->path, error);
+    if (missing) {
+        // Silence here is expensive: an override that names a folder which is
+        // not there looks exactly like the override working.
+        out.warnings.push_back(std::string("KS_SHOWROOM='") + wanted +
+                               "' is not in content/showroom, opened '" + chosen->id + "'");
+    }
     return out.valid;
 }
 
