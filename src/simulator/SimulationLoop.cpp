@@ -10,7 +10,9 @@
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SceneAssets.h"
-#include "engine/FileFormat/Kn5Baker.h"
+#include "engine/FileFormat/Kn5Reader.h"
+#include <array>
+#include <functional>
 #include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
 #include "GarageSpawn.h"     // rF2-like garage/grid placement (roadmap 2.8)
 #include "RainEffects.h"
@@ -434,56 +436,10 @@ void SimulationLoop::loadShowroomAudio() {
     m_showroomAudioLoaded = m_audio->loadShowroomAudio(cfg.ambience, cfg.music);
 }
 
-void SimulationLoop::bakeShowroomHallIfNeeded() {
-    const ShowroomConfig& cfg = m_showroom.config();
-    if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) return;
-    namespace fs = std::filesystem;
-    std::error_code ec;
-
-    // The named model when it is there, otherwise the largest .kn5 in the
-    // folder — the venue rather than a decoration, the rule the track loader
-    // follows too.
-    fs::path model;
-    if (!cfg.model.empty()) {
-        const fs::path named = fs::path(cfg.directory) / cfg.model;
-        if (fs::is_regular_file(named, ec)) model = named;
-    }
-    if (model.empty()) {
-        uintmax_t largest = 0;
-        for (const auto& entry : fs::directory_iterator(cfg.directory, ec)) {
-            if (entry.path().extension() != ".kn5") continue;
-            const uintmax_t size = entry.file_size(ec);
-            if (size >= largest) {
-                largest = size;
-                model = entry.path();
-            }
-        }
-    }
-    if (model.empty()) return;
-
-    const fs::path out = fs::path(cfg.directory) / "baked";
-    const auto started = std::chrono::steady_clock::now();
-    const auto baked = ks::engine::fileformat::bakeKn5ToNativeMeshes(model.string(), out.string());
-    const double seconds =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    if (!baked.ok()) {
-        std::fprintf(stderr, "[showroom] bake of %s failed: %s\n",
-                     model.filename().string().c_str(), baked.error.c_str());
-        return;
-    }
-    std::fprintf(stderr, "[showroom] baked %s: %d mesh(es), %d texture(s) in %.1f s\n",
-                 model.filename().string().c_str(), baked.meshes_written,
-                 baked.textures_written, seconds);
-}
-
 void SimulationLoop::loadShowroomHall() {
     if (!m_showroom.active()) return;
     const ShowroomConfig& cfg = m_showroom.config();
     namespace fs = std::filesystem;
-
-    // A .kn5 on disk is not something the renderer can draw: it needs the bake,
-    // so make it here, once per folder. Cached in the folder afterwards.
-    bakeShowroomHallIfNeeded();
 
     if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) {
         // The hall is content like a circuit: the loader scans the folder for
@@ -503,10 +459,120 @@ void SimulationLoop::loadShowroomHall() {
             return;
         }
     }
+    // Nothing baked: read the .kn5 itself, in memory. No bake, no temporary
+    // files — the selected folder's own content is all the showroom uses.
+    if (loadShowroomHallFromKn5(cfg)) return;
     if (!cfg.model.empty() && !fs::is_regular_file(fs::path(cfg.directory) / cfg.model))
         std::fprintf(stderr, "[showroom] %s: no %s in the folder\n",
                      cfg.id.c_str(), cfg.model.c_str());
     buildShowroomVenue();
+}
+
+bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
+    if (!m_vulkanRenderer) return false;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+
+    // The named model when it is there, otherwise the largest .kn5 in the
+    // folder — the venue rather than a decoration.
+    fs::path model;
+    if (!cfg.model.empty()) {
+        const fs::path named = fs::path(cfg.directory) / cfg.model;
+        if (fs::is_regular_file(named, ec)) model = named;
+    }
+    if (model.empty()) {
+        uintmax_t largest = 0;
+        for (const auto& entry : fs::directory_iterator(cfg.directory, ec)) {
+            if (entry.path().extension() != ".kn5") continue;
+            const uintmax_t size = entry.file_size(ec);
+            if (size >= largest) {
+                largest = size;
+                model = entry.path();
+            }
+        }
+    }
+    if (model.empty()) return false;
+
+    const auto parsed = ::ks::engine::fileformat::parseKn5File(model.string());
+    if (!parsed.ok()) {
+        std::fprintf(stderr, "[showroom] %s unreadable: %s\n",
+                     model.filename().string().c_str(), parsed.error.c_str());
+        return false;
+    }
+
+    // Row-vector convention, as the parser stores each node's accumulated
+    // transform: the same arithmetic the offline baker applies before writing.
+    auto transform = [](const std::array<float, 16>& m, float x, float y, float z,
+                        float w, float out[3]) {
+        out[0] = x * m[0] + y * m[4] + z * m[8] + w * m[12];
+        out[1] = x * m[1] + y * m[5] + z * m[9] + w * m[13];
+        out[2] = x * m[2] + y * m[6] + z * m[10] + w * m[14];
+    };
+
+    int meshes = 0;
+    std::size_t vertices = 0;
+    std::function<void(const ::ks::engine::fileformat::Kn5Node&)> walk =
+        [&](const ::ks::engine::fileformat::Kn5Node& node) {
+            const auto& m = node.mesh;
+            if (node.node_class == ::ks::engine::fileformat::Kn5NodeClass::mesh && node.has_mesh &&
+                !m.indices.empty() && m.positions.size() >= 3) {
+                const std::size_t count = m.positions.size() / 3;
+                NativeMesh nm;
+                nm.vertices.resize(count);
+                for (std::size_t i = 0; i < count; ++i) {
+                    NativeVertex& v = nm.vertices[i];
+                    float p[3];
+                    transform(m.world, m.positions[i * 3], m.positions[i * 3 + 1],
+                              m.positions[i * 3 + 2], 1.f, p);
+                    v.px = p[0];
+                    v.py = p[1];
+                    v.pz = p[2];
+                    if (m.normals.size() >= (i + 1) * 3) {
+                        float n[3];
+                        transform(m.world, m.normals[i * 3], m.normals[i * 3 + 1],
+                                  m.normals[i * 3 + 2], 0.f, n);
+                        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                        if (len > 1e-6f) {
+                            v.nx = n[0] / len;
+                            v.ny = n[1] / len;
+                            v.nz = n[2] / len;
+                        } else {
+                            v.ny = 1.f;
+                        }
+                    } else {
+                        v.ny = 1.f;
+                    }
+                    if (m.uvs.size() >= (i + 1) * 2) {
+                        v.u = m.uvs[i * 2];
+                        v.v = m.uvs[i * 2 + 1];
+                    }
+                    v.r = 0.82f;
+                    v.g = 0.82f;
+                    v.b = 0.84f;
+                    v.a = 1.f;
+                }
+                nm.indices = m.indices;
+
+                char name[64];
+                std::snprintf(name, sizeof(name), "showroom_hall_%d", meshes);
+                m_vulkanRenderer->setMesh(name, nm);
+                const ks::ecs::Entity entity = scene().create();
+                if (entity != ks::ecs::kNullEntity) {
+                    scene().emplace<ks::ecs::Name>(entity, ks::ecs::Name{name});
+                    scene().emplace<ks::ecs::Transform>(entity);
+                    scene().emplace<ks::ecs::MeshInstance>(entity, ks::ecs::MeshInstance{name});
+                }
+                vertices += count;
+                ++meshes;
+            }
+            for (const auto& child : node.children) walk(child);
+        };
+    for (const auto& root : parsed.file.nodes) walk(root);
+    if (meshes == 0) return false;
+    std::fprintf(stderr,
+                 "[showroom] hall read from %s: %d mesh(es), %zu vertices, no files written\n",
+                 model.filename().string().c_str(), meshes, vertices);
+    return true;
 }
 
 void SimulationLoop::buildShowroomVenue() {
@@ -525,45 +591,18 @@ void SimulationLoop::buildShowroomVenue() {
                 venue.vertices.size() * sizeof(ks::sim::SolidBoxVertex));
     nm.indices = venue.indices;
     m_vulkanRenderer->clearStaticScene();
-    // The renderer exposes world-space geometry only through a baked folder:
-    // its setStaticMesh() is declared but never linked. So the room is written
-    // in the same "NMSH" form the baker produces, into the temp directory, and
-    // loaded from there: no content folder is touched and no bake is needed.
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const fs::path dir = fs::temp_directory_path(ec) / "ksim_showroom_venue";
-    if (ec) {
-        std::fprintf(stderr, "[showroom] venue: no temp directory\n");
-        return;
+    // In memory, and nothing else: the room is an ordinary mesh plus the
+    // entity that draws it, exactly like the car's placeholder box. No file is
+    // written anywhere — the showroom is content the game only reads.
+    m_vulkanRenderer->setMesh("showroom_venue", nm);
+    const ks::ecs::Entity venueEntity = scene().create();
+    if (venueEntity != ks::ecs::kNullEntity) {
+        scene().emplace<ks::ecs::Name>(venueEntity, ks::ecs::Name{"showroom_venue"});
+        scene().emplace<ks::ecs::Transform>(venueEntity);
+        scene().emplace<ks::ecs::MeshInstance>(venueEntity,
+                                              ks::ecs::MeshInstance{"showroom_venue"});
     }
-    fs::create_directories(dir, ec);
-    const uint32_t vcount = static_cast<uint32_t>(nm.vertices.size());
-    const uint32_t icount = static_cast<uint32_t>(nm.indices.size());
-    {
-        std::ofstream meshFile(dir / "showroom_venue.nmsh", std::ios::binary);
-        if (!meshFile) {
-            std::fprintf(stderr, "[showroom] venue: cannot write to %s\n", dir.string().c_str());
-            return;
-        }
-        meshFile.write("NMSH", 4);
-        meshFile.write(reinterpret_cast<const char*>(&vcount), 4);
-        meshFile.write(reinterpret_cast<const char*>(&icount), 4);
-        meshFile.write(reinterpret_cast<const char*>(nm.vertices.data()),
-                       static_cast<std::streamsize>(vcount * sizeof(NativeVertex)));
-        meshFile.write(reinterpret_cast<const char*>(nm.indices.data()),
-                       static_cast<std::streamsize>(icount * sizeof(uint32_t)));
-    }
-    {
-        std::ofstream manifest(dir / "manifest.txt", std::ios::binary);
-        manifest << "showroom_venue\n";
-    }
-    if (m_vulkanRenderer->loadMeshesFromManifest(dir.string()) <= 0) {
-        std::fprintf(stderr, "[showroom] venue: the room did not load from %s\n",
-                     dir.string().c_str());
-        return;
-    }
-    m_spawnedSceneDir.clear();
-    std::fprintf(stderr, "[showroom] no baked hall: venue built in code (%.0f x %.0f m, %.0f m high)\n",
+    std::fprintf(stderr, "[showroom] no baked hall: venue built in memory (%.0f x %.0f m, %.0f m high)\n",
                  halfWidth * 2.f, halfWidth * 2.f, height);
 }
 
@@ -1113,6 +1152,13 @@ void SimulationLoop::applyInput() {
     if (!m_input) return;
     const bool blocked = m_ui.blocksDrivingInput();
     if (!blocked) m_input->update();
+    // The pad drives the menu even while the menu is blocking the car's input:
+    // polled outside that branch, and handed to the UI path only, so a d-pad
+    // press can never reach the vehicle.
+    if (m_input) {
+        m_input->pollMenuNavigation();
+        if (const int padKey = m_input->takeMenuKey()) m_ui.handleKey(padKey);
+    }
     ks::engine::devices::InputState input;
     input.throttle = m_input->throttle();
     input.brake = m_input->brake();

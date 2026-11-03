@@ -177,6 +177,35 @@ bool InputManager::isDirectInputConnected() const {
 #endif
 }
 
+void InputManager::pollMenuNavigation() {
+    m_menuKey = 0;
+#ifdef _WIN32
+    if (!m_xinput || !m_xinput->isConnected()) {
+        m_padMenu = ui::PadButtons{};
+        return;
+    }
+    m_xinput->update();
+    // Dead zone is the pad's own for steering; the menu wants an unambiguous
+    // push, so the stick has to be well past half before it counts at all.
+    ui::PadButtons now;
+    now.up = m_xinput->dpadUp() || m_xinput->leftStickY() > 0.6;
+    now.down = m_xinput->dpadDown() || m_xinput->leftStickY() < -0.6;
+    now.left = m_xinput->dpadLeft() || m_xinput->leftStickX() < -0.6;
+    now.right = m_xinput->dpadRight() || m_xinput->leftStickX() > 0.6;
+    now.confirm = m_xinput->buttonA();
+    now.back = m_xinput->buttonB() || m_xinput->buttonStart();
+    // One step per press: the previous frame goes back in.
+    m_menuKey = ui::padMenuKey(now, m_padMenu);
+    m_padMenu = now;
+#endif
+}
+
+int InputManager::takeMenuKey() {
+    const int key = m_menuKey;
+    m_menuKey = 0;
+    return key;
+}
+
 void InputManager::processXInput() {
 #ifdef _WIN32
     m_xinput->update();

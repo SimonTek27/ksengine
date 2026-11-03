@@ -81,6 +81,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main_menu_test.cpp" AND
     add_test(NAME main_menu_test COMMAND main_menu_test)
 endif()
 
+# The pad-to-menu mapping: one key per press, so a held stick is one step.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pad_menu_test.cpp")
+    add_executable(pad_menu_test pad_menu_test.cpp)
+    target_include_directories(pad_menu_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    add_test(NAME pad_menu_test COMMAND pad_menu_test)
+endif()
+
 # Gate 2.13 — team/upgrades bridge consolidation: team.ini parser +
 # buildFieldFromTeam session field, upgrade catalog parser + appliedMods +
 # applyUpgradesToVehicleSimulator on a real VehicleSimulator (header-only

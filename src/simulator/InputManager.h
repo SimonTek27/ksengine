@@ -4,6 +4,7 @@
 // and written with its file helpers — see engine/Config/Json.h and
 // engine/assets/UserData.h.
 #include "engine/Config/Json.h"
+#include "ui/MenuInput.h"
 #include "engine/assets/UserData.h"
 
 #include <cctype>
@@ -282,6 +283,14 @@ public:
     bool shiftUp() const { return m_shiftUp; }
     bool shiftDown() const { return m_shiftDown; }
 
+    /** Menu navigation from the pad, as the virtual keys the UI already
+     *  understands (arrows / ENTER / ESC), one per press. Polled on every
+     *  frame, including the ones where driving input is blocked: the menu is
+     *  exactly when the pad has nothing else to do. */
+    void pollMenuNavigation();
+    /** The key one pad press asked for this frame, or 0. Consumes it. */
+    int takeMenuKey();
+
     bool hasXInput() const;
     bool isXInputConnected() const;
     bool hasDirectInput() const;
@@ -331,6 +340,8 @@ private:
     bool m_hasInjected = false;
 
     std::unordered_set<int> m_keys;
+    ui::PadButtons m_padMenu;
+    int m_menuKey = 0;
 
 #ifdef _WIN32
     std::unique_ptr<ks::device::XInputDevice> m_xinput;

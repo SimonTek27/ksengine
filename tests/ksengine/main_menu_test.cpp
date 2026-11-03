@@ -94,7 +94,15 @@ int main() {
         KS_CHECK(last.first == 3); // 8 rows, 5 slots: last window starts at 3
         KS_CHECK(last.item[0] == 3);
         KS_CHECK(last.item[last.count - 1] == 7);
-        KS_CHECK(layoutMainMenu(1600, 900, 8, 6).first == 3); // 6 - 2, clamped
+        // The window moves only when the selection leaves it: 6 is still
+        // inside the window that starts at 2, and 0 at 0.
+        KS_CHECK(layoutMainMenu(1600, 900, 8, 6).first == 2);
+        // A hovered tile must not scroll away from under the cursor.
+        for (int slot = 0; slot < MainMenuLayout::kVisible; ++slot) {
+            const MainMenuLayout hovered = layoutMainMenu(1600, 900, 8, slot);
+            KS_CHECK(hovered.first == 0);
+            KS_CHECK(hovered.item[slot] == slot);
+        }
         KS_CHECK(layoutMainMenu(1600, 900, 8, 0).first == 0);
 
         const MainMenuLayout shortRow = layoutMainMenu(1280, 720, 3, 2);
@@ -213,6 +221,18 @@ int main() {
         hub.menu().setSelectedIndex(rowOf(hub.menu(), "SINGLE PLAYER"));
         hub.handleMouseMove(L.tile[1].x + 12.f, L.tile[1].y + 12.f);
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
+
+        // A click activates the tile under the cursor (the mouse path), and
+        // the section it opens is the one under the pointer.
+        hub.menu().openScreen(MenuState::Main);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, true,
+                              L.tile[3].x + 12.f, L.tile[3].y + 12.f);
+        // The press alone must already have selected the tile under the
+        // cursor: that is the hover path the click builds on.
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "CONTENT"));
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.tile[3].x + 12.f, L.tile[3].y + 12.f);
+        KS_CHECK(hub.menu().state() == MenuState::ContentManager);
 
         // ESC on the arrival screen offers to leave instead of hiding it.
         hub.menu().openScreen(MenuState::Main);

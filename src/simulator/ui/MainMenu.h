@@ -37,8 +37,9 @@ struct MainMenuLayout {
 };
 
 /** Geometry for `tileCount` rows with row `selected` current. The window of
- *  visible tiles follows the selection, so the last tiles of a long row stay
- *  reachable without making the row smaller than a readable label. */
+ *  visible tiles follows the selection when it leaves the window, so the last
+ *  tiles of a long row stay reachable without making the row smaller than a
+ *  readable label. */
 inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) {
     MainMenuLayout L;
     const float W = static_cast<float>(w);
@@ -60,7 +61,12 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
 
     const int rows = std::max(0, tileCount);
     L.count = std::min(MainMenuLayout::kVisible, rows);
-    L.first = std::clamp(selected - 2, 0, std::max(0, rows - MainMenuLayout::kVisible));
+    // Keep the selection inside the window by moving the window as little as
+     // possible: only when it would fall off the right edge. Centring it
+     // instead scrolls the strip under the cursor, so a hovered tile slides
+     // away between press and release and the click opens its neighbour.
+    L.first = std::clamp(selected - (MainMenuLayout::kVisible - 1), 0,
+                         std::max(0, rows - MainMenuLayout::kVisible));
     for (int i = 0; i < L.count; ++i) {
         const int row = L.first + i;
         L.tile[i] = {margin + static_cast<float>(i) * (tileW + gap), top, tileW, tileH};
