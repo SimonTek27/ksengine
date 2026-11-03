@@ -46,10 +46,20 @@ static WavFile loadWav(const std::string& path)
         if (fread(&subSize, 4, 1, f) != 1) break;
 
         if (memcmp(subId, "fmt ", 4) == 0) {
+            // A fmt chunk is 16 bytes at least: format, channels, rate, byte
+            // rate, block align, bits per sample. The old parse read eight of
+            // them and then skipped "subSize - 10", landing two bytes short of
+            // the chunk end: the walk desynchronised and the data chunk was
+            // never found, so every wav came back empty.
+            const long chunkStart = ftell(f);
             fread(&audioFormat, 2, 1, f);
             fread(&numChannels, 2, 1, f);
             fread(&sampleRate, 4, 1, f);
-            fseek(f, subSize - 10, SEEK_CUR);
+            fseek(f, 6, SEEK_CUR);          // byte rate (4) + block align (2)
+            fread(&bitsPerSample, 2, 1, f); // the field the decode branches on
+            // Jump to the chunk end rather than trusting the length arithmetic:
+            // an extensible header carries a cbSize and more after this.
+            fseek(f, chunkStart + static_cast<long>(subSize), SEEK_SET);
         } else if (memcmp(subId, "data", 4) == 0) {
             audioData.resize(subSize);
             fread(audioData.data(), 1, subSize, f);
@@ -145,7 +155,12 @@ bool SimulatorAudio::initialize(bool withOutput)
 
     if (withOutput) {
         m_wasapi = std::make_unique<WASAPIOutput>();
-        if (!m_wasapi->initialize(0, 2, MIX_BUFFER_MS)) {
+        // 0/0 = take the device mix format as it is: forcing two channels on
+        // it produced AUDCLNT_E_UNSUPPORTED_FORMAT (0x88890008) on a device
+        // whose shared-mode format is not exactly 2ch at our rate, and the
+        // whole mixer then started without an output at all. The render
+        // callback already reads channels/sampleRate from the format.
+        if (!m_wasapi->initialize(0, 0, MIX_BUFFER_MS)) {
             printf("SimulatorAudio: WASAPIOutput initialize failed\n");
             m_wasapi.reset();
             return false;
