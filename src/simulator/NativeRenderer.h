@@ -76,6 +76,10 @@ struct NativeVertex {
 static_assert(sizeof(NativeVertex) == sizeof(float) * 12, "NativeVertex must stay tightly packed to match the shadow pipeline's vertex stride");
 
 struct NativeMesh {
+    // A backdrop must not cast: a closed sky dome would put its whole interior in
+    // shadow, and then nothing inside it could cast a shadow of its own. It still
+    // receives, so a car standing in the room does darken the floor.
+    bool castShadow = true;
     std::vector<NativeVertex> vertices;
     std::vector<uint32_t> indices;
     VkBuffer vertexBuffer = VK_NULL_HANDLE;

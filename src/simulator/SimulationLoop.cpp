@@ -590,6 +590,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 v.a = 1.f;
             }
             nm.indices = m.indices;
+            // A room read as a closed shell is a backdrop: it receives light and
+            // shadows but casts none, or the shell would shade everything inside it.
+            nm.castShadow = !faceInside;
 
             // The material's diffuse texture, decoded here and cached under a key the
             // mesh can name. A file that cannot be decoded simply leaves the surface
@@ -825,6 +828,7 @@ void SimulationLoop::buildShowroomVenue() {
     std::memcpy(nm.vertices.data(), venue.vertices.data(),
                 venue.vertices.size() * sizeof(ks::sim::SolidBoxVertex));
     nm.indices = venue.indices;
+    nm.castShadow = false; // the room is a backdrop, as in the .kn5 path
     // Same rule as the .kn5 path: the room is the scene, not a decoration on
     // top of the track that was loaded first.
     despawnSceneEntities();

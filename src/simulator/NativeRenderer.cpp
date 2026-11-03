@@ -2019,6 +2019,7 @@ void NativeRenderer::endFrame() {
                 VkBuffer vBufs[] = {mesh.vertexBuffer};
                 VkDeviceSize offsets[] = {0};
                 vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, vBufs, offsets);
+                if (!mesh.castShadow) continue; // backdrops do not shade the room
                 m_shadowMap->pushLightSpaceMatrix(m_commandBuffer, c, draw.model);
                 if (mesh.indexBuffer) {
                     vkCmdBindIndexBuffer(m_commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
