@@ -2,6 +2,7 @@
 
 #include "Config/IniFile.h"
 #include "FileFormat/Json.h"
+#include "ExtConfig.h"
 
 #include <algorithm>
 #include <cctype>
@@ -446,6 +447,13 @@ for (const char* owner : {"suspensions", "car"}) {
 }
         // No document ships the format version of the ini sections.
         for (Json& doc : docs) stripVersionHeaders(doc);
+        // ext_config.ini is model content: the skin's driver model and the nodes
+        // it hides join the model document, where the model is described.
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (names[i] != kModelDocument) continue;
+            mergeExtConfigIntoModel(carDir, docs[i]);
+            break;
+        }
         for (std::size_t i = 0; i < names.size(); ++i) {
             const fs::path out = documentPath(carDir, names[i]);
             fs::create_directories(out.parent_path(), ec);

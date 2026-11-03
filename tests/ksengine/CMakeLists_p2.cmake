@@ -304,6 +304,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ppfilter_preset_test.cpp")
     set_tests_properties(ppfilter_preset_test PROPERTIES TIMEOUT 60)
 endif()
 
+# ext_config.ini -> model.json (adapters/assetto_corsa/ExtConfig.h): the skin's
+# driver model and hidden nodes folded into the model document. Needs the Json
+# implementation, hence ksengine.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ext_config_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/adapters/assetto_corsa/ExtConfig.h")
+    add_executable(ext_config_test ext_config_test.cpp)
+    target_include_directories(ext_config_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(ext_config_test PRIVATE ksengine)
+    add_test(NAME ext_config_test COMMAND ext_config_test)
+    set_tests_properties(ext_config_test PROPERTIES TIMEOUT 60)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_preset_test.cpp")
     # Material preset table (engine/Graphics/MaterialPresets.h): header only,
     # so the test needs nothing but the include path.
