@@ -553,6 +553,8 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     int mappedNormal = 0;
     int painted = 0;
     int metalSurfaces = 0;
+    int cutouts = 0;
+    int selfLit = 0;
     std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
 
     // Folds a KN5 name to lower case: shader/mapping names are author-written
@@ -733,6 +735,22 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     nm.roughness = std::max(nm.roughness, 0.85f);
                     nm.metalness = 0.0f;
                 }
+
+                // Cut-outs: the file flags them either as alpha_tested
+                // (grilles, outlines) or as a blended surface (glass,
+                // decals, windscreen), and both need the same discard or
+                // the quad renders opaque.
+                if (material.alpha_tested != 0 || material.blend != 0) {
+                    const float ref = propertyFloat(material, "ksAlphaRef");
+                    nm.alphaTested = true;
+                    nm.alphaRef = ref > 0.0f ? ref : 0.5f;
+                    ++cutouts;
+                }
+                const float emissiveValue = propertyFloat(material, "ksEmissive");
+                if (emissiveValue > 0.0f) {
+                    nm.emissive = std::min(emissiveValue, 8.0f);
+                    ++selfLit;
+                }
             }
 
             // A room is looked at from inside it: faces that point away from the
@@ -788,9 +806,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     for (const auto& node : parsed.file.nodes) walk(node);
 
     if (meshes == 0) return false;
-    std::printf("[kn5] %s: %d mesh(es), %d with a normal map, %d painted, %d bare metal\n",
-                std::filesystem::path(modelPath).filename().string().c_str(), meshes, mappedNormal, painted,
-                metalSurfaces);
+    std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, %d cut-out, %d self-lit",
+            std::filesystem::path(modelPath).filename().string().c_str(), meshes,
+            mappedNormal, painted, metalSurfaces, cutouts, selfLit);
+std::putchar(10);
     if (outMin && outMax) {
         for (int axis = 0; axis < 3; ++axis) {
             outMin[axis] = bboxMin[axis];

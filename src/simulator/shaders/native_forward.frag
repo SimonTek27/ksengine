@@ -56,6 +56,9 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
     float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
     float brakeDisc;   // brief P6: >= 0.5 = brake disc (glow below)
+    float alphaTest;   // >= 0.5 = discard below alphaRef (KN5 alpha_tested)
+    float alphaRef;
+    float emissive;    // unlit term added after shading
 } material;
 
 const float PI = 3.14159265;
@@ -106,7 +109,12 @@ float heightFogAmount(vec3 camPos, vec3 worldPos) {
 void main() {
     // Roadmap 2.3: albedo = vertex colour × baked texture (white fallback
     // keeps untextured meshes byte-identical to the pre-2.3 path).
-    vec3 albedo = fragColor.rgb * texture(albedoMap, fragUV).rgb;
+    // One sample feeds both the cut-out test and the shading.
+    vec4 albedoSample = fragColor * texture(albedoMap, fragUV);
+    // KN5 alpha test: decals, grilles and light covers are cut out instead of
+    // drawn as opaque cards.
+    if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
+    vec3 albedo = albedoSample.rgb;
 
     vec3 N = normalize(fragNormal);
     // Normal map sampled unconditionally so the derivatives inside
@@ -190,6 +198,10 @@ void main() {
     // MaterialData, the heat from FrameData.brakeGlow.x (setBrakeGlow).
     lit += vec3(1.0, 0.25, 0.03) * (frame.brakeGlow.x * 1.5) *
            (material.brakeDisc >= 0.5 ? 1.0 : 0.0);
+
+    // Self-lit surfaces (ksEmissive): added after shading, so a lamp cover or
+    // a lit panel reads at full strength regardless of the light on it.
+    lit += albedo * material.emissive;
 
     // Height fog, same model the deferred path uses, so switching between
     // the two paths does not change the atmosphere. The clear colour is set

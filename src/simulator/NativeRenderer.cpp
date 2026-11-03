@@ -727,9 +727,14 @@ struct MaterialUBO {
     // this stays static per mesh. std140 rounds the block up to 16 anyway,
     // so the pad costs nothing.
     float brakeDisc = 0.0f;
-    float pad3[3] = {0.0f, 0.0f, 0.0f};
+    // KN5 surface flags, appended after the P6 flag (add-only rule): alpha test
+    // (0 = off) with its reference, and the unlit emissive term.
+    float alphaTest = 0.0f;
+    float alphaRef = 0.5f;
+    float emissive = 0.0f;
+    float pad3[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(MaterialUBO) == 32, "MaterialUBO is read as a std140 uniform block");
+static_assert(sizeof(MaterialUBO) == 48, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -1507,6 +1512,9 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
     ubo.clearcoat = mesh.clearcoat;
     ubo.brakeDisc = mesh.brakeDisc; // brief P6, name heuristic in setMesh()
+    ubo.alphaTest = mesh.alphaTested ? 1.0f : 0.0f;
+    ubo.alphaRef = mesh.alphaRef;
+    ubo.emissive = mesh.emissive;
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,

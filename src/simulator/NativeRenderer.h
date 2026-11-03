@@ -112,6 +112,13 @@ struct NativeMesh {
     // P3 — clear-coat flag from materials.txt cell 6 (>= 0.5 = coated).
     // Static per mesh, rides the same std140 block as the scalars above.
     float clearcoat = 0.0f;
+    // KN5 alpha test (material.alpha_tested + ksAlphaRef): fragments under the
+    // reference are discarded, so decals, grilles and light covers stop
+    // rendering as opaque cards.
+    bool alphaTested = false;
+    float alphaRef = 0.5f;
+    // ksEmissive, added unlit on top of the shaded result.
+    float emissive = 0.0f;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is

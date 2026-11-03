@@ -35,6 +35,9 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float normalScale; // 0 = keep the vertex normal, 1 = full perturbation
     float clearcoat;   // brief P3: materials.txt cell 6, >= 0.5 = coated
     float brakeDisc;   // brief P6: >= 0.5 = brake disc (glow rides FrameData)
+    float alphaTest;   // >= 0.5 = discard below alphaRef (KN5 alpha_tested)
+    float alphaRef;
+    float emissive;    // forward-only for now: the GBuffer has no free channel
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -68,7 +71,11 @@ void main() {
     // P1: roughness/metalness = scalar × map.r, white fallback = identity.
     float roughness = material.roughness * texture(roughnessMap, fragUV).r;
     float metalness = material.metalness * texture(metalnessMap, fragUV).r;
-    outAlbedoAO = vec4(fragColor.rgb * texture(albedoMap, fragUV).rgb, metalness);
+    vec4 albedoSample = fragColor * texture(albedoMap, fragUV);
+    // KN5 alpha test, same rule as native_forward.frag: without it a decal
+    // plane writes opaque albedo and the deferred path fills its quad.
+    if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
+    outAlbedoAO = vec4(albedoSample.rgb, metalness);
 
     // Normal comes from the material instead of the old hardcoded 0.75:
     // material.roughness feeds deferred_lighting.frag's GGX directly, so an
