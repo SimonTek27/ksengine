@@ -56,11 +56,25 @@ public:
         m_hallRadius = radius;
     }
 
+    /** Where the car ended up, in world space. The fixed views need it: the
+     *  turntable orbits the room, but a close-up has to orbit the car, and the
+     *  wheel view has to know which corner is nearest. */
+    void setCarBounds(float centreX, float centreZ, float halfX, float halfZ) {
+        m_carCentre = vec3(centreX, 0.f, centreZ);
+        m_carHalfX = halfX;
+        m_carHalfZ = halfZ;
+        m_carKnown = halfX > 0.1f || halfZ > 0.1f;
+    }
+
     void close() {
         m_active = false;
         m_hallRadius = 0.f;
         m_hallFloor = 0.f;
         m_hallCentre = vec3(0.f, 0.f, 0.f);
+        m_carCentre = vec3(0.f, 0.f, 0.f);
+        m_carHalfX = 0.f;
+        m_carHalfZ = 0.f;
+        m_carKnown = false;
     }
     bool active() const { return m_active; }
     const ShowroomConfig& config() const { return m_config; }
@@ -126,17 +140,34 @@ public:
         return m_view == View::Wheel ? 0.32f : m_config.lookAtHeight;
     }
 
+    /** The point the camera orbits: the car when a close view is asked for and
+     *  its bounds are known, the room otherwise. */
+    vec3 pivot() const {
+        return (m_view != View::Turntable && m_carKnown) ? m_carCentre : m_hallCentre;
+    }
+
     vec3 position() const {
         const float radians = viewAngleDeg() * (3.14159265f / 180.f);
         const float d = distance();
-        return {m_hallCentre.x + std::sin(radians) * d,
+        const vec3 centre = pivot();
+        return {centre.x + std::sin(radians) * d,
                 m_hallFloor + viewHeight(),
-                m_hallCentre.z + std::cos(radians) * d};
+                centre.z + std::cos(radians) * d};
     }
 
     /** What the camera looks at: the middle of the room, at the car's height. */
     vec3 target() const {
-        return {m_hallCentre.x, m_hallFloor + viewTargetHeight(), m_hallCentre.z};
+        if (m_view == View::Wheel && m_carKnown) {
+            // The arch nearest the camera, whichever way the model faces: the
+            // corner of the car on the camera's side of it.
+            const vec3 eye = position();
+            const float signX = eye.x >= m_carCentre.x ? 1.f : -1.f;
+            const float signZ = eye.z >= m_carCentre.z ? 1.f : -1.f;
+            return {m_carCentre.x + signX * m_carHalfX * 0.55f, m_hallFloor + 0.35f,
+                    m_carCentre.z + signZ * m_carHalfZ * 0.55f};
+        }
+        const vec3 centre = pivot();
+        return {centre.x, m_hallFloor + viewTargetHeight(), centre.z};
     }
 
     float angleDeg() const { return m_angleDeg; }
@@ -144,6 +175,10 @@ public:
 private:
     ShowroomConfig m_config;
     View m_view = View::Turntable;
+    vec3 m_carCentre{0.f, 0.f, 0.f};
+    float m_carHalfX = 0.f;
+    float m_carHalfZ = 0.f;
+    bool m_carKnown = false;
     float m_angleDeg = 0.f;
     bool m_active = false;
     vec3 m_hallCentre{0.f, 0.f, 0.f};

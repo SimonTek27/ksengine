@@ -968,6 +968,12 @@ bool SimulationLoop::loadCarMeshesFromKn5(const std::string& carDirectory) {
     std::fprintf(stderr,
                  "[scene] car visual: %d mesh(es) from %s, read in memory\n", meshes,
                  model.filename().string().c_str());
+    // The room's fixed views orbit the car, not the hall, and the wheel view
+    // needs to know which corner it is looking at.
+    if (m_showroom.active()) {
+        m_showroom.setCarBounds((mn[0] + mx[0]) * 0.5f, (mn[2] + mx[2]) * 0.5f,
+                                (mx[0] - mn[0]) * 0.5f, (mx[2] - mn[2]) * 0.5f);
+    }
     return true;
 }
 
