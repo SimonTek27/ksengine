@@ -60,6 +60,11 @@ public:
         camera.setPosition(position());
         camera.setForward((target() - camera.position()).normalized());
         camera.setFov(m_config.cameraFov);
+        // The cascade splits are derived from the camera's clip range: left at
+        // the engine default (10 km) the shadow map covers kilometres and a car
+        // casts no resolvable shadow at all. A room needs a room-sized range.
+        camera.setNearPlane(0.1f);
+        camera.setFarPlane(160.f);
     }
 
     /** Camera on the turntable: distance away, `cameraHeight` up, at the

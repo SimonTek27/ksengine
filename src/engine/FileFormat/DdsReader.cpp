@@ -462,7 +462,7 @@ DdsImage decodeDds(std::string_view bytes) {
         // Without it midday reads as dusk.
         auto encode = [](float v) {
             if (!(v > 0.f)) v = 0.f;
-            v *= 5.f;
+            v *= 4.2f;
             v = v / (1.f + v);
             v = std::pow(v, 1.f / 2.2f);
             if (v > 1.f) v = 1.f;

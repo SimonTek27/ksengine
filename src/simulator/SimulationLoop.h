@@ -157,6 +157,8 @@ public:
     bool loadCarMeshesFromKn5(const std::string& carDirectory);
     // A showroom without a car is an empty room: load one onto the turntable.
     void loadShowroomCar();
+    // The room's own sun, fog and exposure, applied when it opens.
+    void applyShowroomLight();
     void buildShowroomVenue();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }

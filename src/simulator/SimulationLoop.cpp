@@ -417,6 +417,9 @@ bool SimulationLoop::openShowroom(const std::string& directory, std::string* err
     loadShowroomHall();
     loadShowroomAudio();
     loadShowroomCar();
+    // Nothing else will: the menu sits in the idle branch of tick(), which
+    // returns before the weather update ever runs.
+    applyShowroomLight();
     return true;
 }
 
@@ -1622,22 +1625,34 @@ void SimulationLoop::publishSharedMemory() {
 #endif
 }
 
-void SimulationLoop::updateWeather(float dt) {
-    // A showroom comes with its own light. The file describes cold daylight over
-    // a concrete yard; without this the venue inherits whatever weather the sim
-    // had, which is why a sunny room looked like dusk.
-    if (m_showroom.active() && m_vulkanRenderer) {
+void SimulationLoop::applyShowroomLight() {
+    if (!m_showroom.active() || !m_vulkanRenderer) return;
+    {
         const ShowroomConfig& cfg = m_showroom.config();
         DirectionalLight light;
-        light.direction = {cfg.sunDirection[0], cfg.sunDirection[1], cfg.sunDirection[2]};
+        // The file points at the sun, the renderer wants the way the light
+        // travels (its own weather sun carries a negative y for daylight) —
+        // feeding it unconverted left the room lit by ambient alone.
+        light.direction = {-cfg.sunDirection[0], -cfg.sunDirection[1],
+                           -cfg.sunDirection[2]};
         light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
         light.intensity = cfg.sunIntensity;
         m_vulkanRenderer->setSun(light);
         m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
-                                 0.0002f, 0.004f);
+                                 0.0001f, 0.002f);
         // A photographed room is bright: without the extra stop the concrete and
         // the trees read as if the sun were going down.
-        m_vulkanRenderer->setExposure(1.6f);
+        m_vulkanRenderer->setExposure(1.35f);
+    }
+}
+
+void SimulationLoop::updateWeather(float dt) {
+    // A showroom comes with its own light. The menu runs the idle branch of
+    // tick(), which never reaches this function, so the room applies its light
+    // when it opens (see openShowroom) — this branch is for a session that
+    // carries one.
+    if (m_showroom.active()) {
+        applyShowroomLight();
         return;
     }
     // Roadmap 2.1 (P2.8): evolve the preset first — rain soaks the track,
