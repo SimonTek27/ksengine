@@ -748,11 +748,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     overrides.presetFor(material.shader, material.name);
                 if (overrides.findEffective(material.name) != nullptr) ++overridden;
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
-                    std::printf("[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f%s",
-                                material.name.c_str(), material.shader.c_str(),
-                                graphics::materialPreset(presetId).name, nm.roughness, nm.metalness,
-                                nm.clearcoat,
-                                overrides.findEffective(material.name) != nullptr ? " (override)" : "");
+                    std::printf(
+                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f albedo=%-24s%s",
+                        material.name.c_str(), material.shader.c_str(),
+                        graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
+                        albedo.empty() ? "-" : albedo.c_str(),
+                        overrides.findEffective(material.name) != nullptr ? " (override)" : "");
                     std::putchar(10);
                 }
                 if (presetId == graphics::MaterialPresetId::Paint) ++painted;
@@ -1998,8 +1999,13 @@ void SimulationLoop::render(float dt) {
         m_vulkanRenderer->drawUi(m_ui.renderer());
         m_vulkanRenderer->endFrame();
     } else if (m_uiGpu) {
-        m_uiGpu->uploadFrame(m_ui.renderer());
-        m_uiGpu->draw();
+        // KS_HIDE_MENU keeps the interface out of a capture: the fixed
+        // showroom views exist to judge materials, and the menu sits right
+        // on top of the car.
+        if (std::getenv("KS_HIDE_MENU") == nullptr) {
+            m_uiGpu->uploadFrame(m_ui.renderer());
+            m_uiGpu->draw();
+        }
     }
 }
 
