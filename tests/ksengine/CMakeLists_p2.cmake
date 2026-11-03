@@ -60,6 +60,27 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/game_menu_navigation_test.cpp" AND
     add_test(NAME game_menu_navigation_test COMMAND game_menu_navigation_test)
 endif()
 
+# The startup screen: the tile row the game opens on — its geometry, the
+# scrolling window, the hit-test, every tile's icon and the hub's key/mouse
+# paths. Compiles GameMenuOverlay.cpp directly (same pattern as above).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main_menu_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    # The hub is constructed by this test, so the overlays it owns and the
+    # font/text TUs come with it; everything else it uses is header-only.
+    add_executable(main_menu_test
+        main_menu_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/DashboardOverlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TelemetryOverlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/FontTtfLoader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/TextRenderer.cpp")
+    target_include_directories(main_menu_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(main_menu_test PRIVATE ksengine)
+    add_test(NAME main_menu_test COMMAND main_menu_test)
+endif()
+
 # Gate 2.13 — team/upgrades bridge consolidation: team.ini parser +
 # buildFieldFromTeam session field, upgrade catalog parser + appliedMods +
 # applyUpgradesToVehicleSimulator on a real VehicleSimulator (header-only

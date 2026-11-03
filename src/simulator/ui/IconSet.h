@@ -53,6 +53,35 @@ inline constexpr const char* kSettings =
     "M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1\"/>"
     "</svg>";
 
+// Two people: online and LAN play.
+inline constexpr const char* kUsers =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<circle cx=\"9\" cy=\"8\" r=\"3.6\"/>"
+    "<path d=\"M2.6 20.4c0-3.5 2.9-6 6.4-6s6.4 2.5 6.4 6\"/>"
+    "<path d=\"M16.2 5.2a3.6 3.6 0 0 1 0 6.9M17.6 14.8c2.3.7 3.9 2.6 3.9 5.1\"/>"
+    "</svg>";
+
+// One person: a session on your own.
+inline constexpr const char* kUser =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<circle cx=\"12\" cy=\"8\" r=\"3.8\"/>"
+    "<path d=\"M4.6 20.4c0-3.9 3.3-6.8 7.4-6.8s7.4 2.9 7.4 6.8\"/>"
+    "</svg>";
+
+// Download: an arrow into a tray, for extra content.
+inline constexpr const char* kDownload =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<path d=\"M12 3.4v11.2M7.8 10.4L12 14.6l4.2-4.2\"/>"
+    "<path d=\"M3.8 17.4v1.8a1.6 1.6 0 0 0 1.6 1.6h13.2a1.6 1.6 0 0 0 1.6-1.6v-1.8\"/>"
+    "</svg>";
+
+// Helmet: the driver's own page.
+inline constexpr const char* kHelmet =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<path d=\"M4 15.4a8 8 0 0 1 16 0v2.2a2.4 2.4 0 0 1-2.4 2.4H6.4A2.4 2.4 0 0 1 4 17.6z\"/>"
+    "<path d=\"M4 15.4h9.6a3 3 0 0 0 3-3\"/>"
+    "</svg>";
+
 // Exit: a door with the arrow leaving it.
 inline constexpr const char* kExit =
     "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
@@ -68,6 +97,10 @@ inline const char* source(const char* id) {
         {"restart", kRestart},
         {"setup", kSetup},
         {"settings", kSettings},
+        {"users", kUsers},
+        {"user", kUser},
+        {"download", kDownload},
+        {"helmet", kHelmet},
         {"exit", kExit},
     };
     for (const auto& entry : kTable) {

@@ -79,26 +79,30 @@ void GameMenuOverlay::startDriving(GameSessionMode mode)
 void GameMenuOverlay::buildMainMenu()
 {
     m_items.clear();
+    // The row order is the tile order of the startup screen (ui/MainMenu.h):
+    // the game opens on MULTIPLAYER, then the single-player path and the
+    // content screens. Every row names an icon, because a tile is drawn as its
+    // section's glyph behind the label.
+    m_items.push_back({ "MULTI PLAYER", "Online and LAN events, ranked or not",
+        [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
     m_items.push_back({ "SINGLE PLAYER", "Practice, race and time attack",
-        [this]() { switchMenu(MenuState::Singleplayer); } });
-    m_items.push_back({ "MULTI PLAYER", "Online and LAN sessions",
-        [this]() { switchMenu(MenuState::Multiplayer); } });
-    m_items.push_back({ "GARAGE", "Setup, tyres and vehicle options",
-        [this]() { switchMenu(MenuState::Garage); } });
-    m_items.push_back({ "REPLAY", "Playback and recording",
-        [this]() { switchMenu(MenuState::Replay); } });
+        [this]() { switchMenu(MenuState::Singleplayer); }, false, true, "user" });
+    m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "CONTENT", "Cars, tracks and packages",
-        [this]() { switchMenu(MenuState::ContentManager); } });
+        [this]() { switchMenu(MenuState::ContentManager); }, false, true, "download" });
+    m_items.push_back({ "GARAGE", "Setup, tyres and vehicle options",
+        [this]() { switchMenu(MenuState::Garage); }, false, true, "setup" });
+    m_items.push_back({ "REPLAY", "Playback and recording",
+        [this]() { switchMenu(MenuState::Replay); }, false, true, "restart" });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "DRIVER", "Profile and career stats",
-        [this]() { switchMenu(MenuState::Profile); } });
+        [this]() { switchMenu(MenuState::Profile); }, false, true, "helmet" });
     m_items.push_back({ "SETTINGS", "Display, audio and input",
-        [this]() { switchMenu(MenuState::Settings); } });
-    m_items.push_back({ "", "", nullptr, true });
+        [this]() { switchMenu(MenuState::Settings); }, false, true, "settings" });
     m_items.push_back({ "EDITOR", "Leave simulator and open the editor",
-        [this]() { switchMenu(MenuState::DevModeConfirm); } });
+        [this]() { switchMenu(MenuState::DevModeConfirm); }, false, true, "settings" });
     m_items.push_back({ "QUIT", "Exit ksim",
-        [this]() { switchMenu(MenuState::QuitConfirm); } });
+        [this]() { switchMenu(MenuState::QuitConfirm); }, false, true, "exit" });
 }
 
 void GameMenuOverlay::buildSingleplayerMenu()

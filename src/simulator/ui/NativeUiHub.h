@@ -5,6 +5,7 @@
  */
 #include "UiRenderer.h"
 #include "IconSet.h"
+#include "MainMenu.h"
 #include "TextRenderer.h"
 #include "UiInput.h"
 #include "FontTtfLoader.h"
@@ -19,6 +20,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <vector>
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
@@ -103,6 +105,27 @@ public:
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
+        // The startup screen is a horizontal row of tiles: the arrows walk
+        // the row (DOWN/UP included, so a pad mapped either way still moves),
+        // ENTER opens the section, and ESC offers to leave the game instead of
+        // hiding the menu the game opened on.
+        if (m_menu->isVisible() && m_menu->state() == MenuState::Main) {
+            const std::vector<int> rows = mainRows();
+            const int count = static_cast<int>(rows.size());
+            const int slot = mainSlot(rows, m_menu->selectedIndex());
+            if (count > 0) {
+                if (key == 0x27 || key == 0x28) { // RIGHT / DOWN
+                    m_menu->setSelectedIndex(rows[mainMenuStep(slot, +1, count)]);
+                    return true;
+                }
+                if (key == 0x25 || key == 0x26) { // LEFT / UP
+                    m_menu->setSelectedIndex(rows[mainMenuStep(slot, -1, count)]);
+                    return true;
+                }
+            }
+            if (key == 0x0D) { m_menu->activateSelection(); return true; }
+            if (key == 0x1B) { m_menu->openScreen(MenuState::QuitConfirm); return true; }
+        }
         if (m_menu->isVisible() && m_menu->handleKeyPress(key)) return true;
         if (m_chat->handleKey(key)) return true;
         // Y = cycle race HUD mode (T is taken by the telemetry overlay)
@@ -367,7 +390,161 @@ private:
                     sty(Color::rgba(0.55f, 0.55f, 0.60f, a), hintScale));
     }
 
+    // ---- startup screen: the tile row -----------------------------------
+
+    /** Main-screen rows with the separators dropped: those are the tiles. */
+    std::vector<int> mainRows() const {
+        std::vector<int> rows;
+        const auto& items = m_menu->items();
+        for (int i = 0; i < static_cast<int>(items.size()); ++i) {
+            if (!items[i].isSeparator) rows.push_back(i);
+        }
+        return rows;
+    }
+
+    /** Slot of a row inside that list (0 when it is not there). */
+    static int mainSlot(const std::vector<int>& rows, int row) {
+        for (int s = 0; s < static_cast<int>(rows.size()); ++s) {
+            if (rows[s] == row) return s;
+        }
+        return 0;
+    }
+
+    MainMenuLayout mainLayout(int w, int h) const {
+        const std::vector<int> rows = mainRows();
+        return layoutMainMenu(w, h, static_cast<int>(rows.size()),
+                              mainSlot(rows, m_menu->selectedIndex()));
+    }
+
+    /** A key cap and its label; returns where the next one starts. */
+    float keyHint(DrawList& dl, float x, const Rect& bar, const char* key,
+                  const char* label, float a) {
+        const float scale = 0.95f;
+        const float pad = 9.f;
+        const float capW = m_text.measureWidth(key, scale) + pad * 2.f;
+        const float capH = bar.h * 0.46f;
+        const float y = bar.y + (bar.h - capH) * 0.5f;
+        dl.addRectFilled({x, y, capW, capH}, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
+        dl.addRect({x, y, capW, capH}, Color::rgba(1.f, 1.f, 1.f, 0.22f * a), 1.f);
+        m_text.draw(dl, x + pad, y + capH * 0.24f, key,
+                    sty(Color::rgba(0.95f, 0.95f, 0.96f, a), scale));
+        m_text.draw(dl, x + capW + 9.f, y + capH * 0.24f, label,
+                    sty(Color::rgba(0.72f, 0.72f, 0.76f, a), scale));
+        return x + capW + 9.f + m_text.measureWidth(label, scale);
+    }
+
+    /** The screen the game opens on: one tile per section, the selected one
+     *  named large on the right with what it is for, the scene behind. */
+    void buildMainTiles(DrawList& dl, int w, int h) {
+        const float a = m_menu->fadeAlpha();
+        if (a <= 0.01f) return;
+        const float W = static_cast<float>(w);
+        const float H = static_cast<float>(h);
+        const MainMenuLayout L = mainLayout(w, h);
+        const std::vector<int> rows = mainRows();
+        const auto& items = m_menu->items();
+        const int selSlot = mainSlot(rows, m_menu->selectedIndex());
+
+        // The showroom is behind this screen, so it is dimmed rather than
+        // covered: the hall the game just loaded is part of the menu.
+        dl.addRectFilled({0.f, 0.f, W, H * 0.40f}, Color::rgba(0.f, 0.f, 0.f, 0.20f * a));
+        dl.addRectFilled({0.f, H * 0.30f, W, H * 0.70f}, Color::rgba(0.f, 0.f, 0.f, 0.32f * a));
+
+        dl.addRectFilled(L.topBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.60f * a));
+        dl.addLine(0.f, L.topBar.h, W, L.topBar.h,
+                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
+        m_text.draw(dl, L.home.x, L.home.y, "HOME",
+                    sty(Color::rgba(0.90f, 0.90f, 0.92f, a), 1.f, true));
+        if (const SvgIcon* mark = icons::get("drive")) {
+            mark->draw(dl, L.logo.x, L.logo.y, L.logo.w,
+                       Color::rgba(0.86f, 0.86f, 0.90f, 0.85f * a), 1.1f);
+        }
+
+        // The driver's plate, top right: the name and an avatar carrying the
+        // initial, which is all the profile art there is.
+        const std::string driver = m_menu->profile().name;
+        if (!driver.empty()) {
+            char initial = driver[0];
+            if (initial >= 'a' && initial <= 'z') initial = static_cast<char>(initial - 32);
+            const float nameScale = 1.05f;
+            const float nameW = m_text.measureWidth(driver, nameScale);
+            m_text.draw(dl, L.avatar.x - nameW - 16.f, L.avatar.y + L.avatar.h * 0.34f, driver,
+                        sty(Color::rgba(0.96f, 0.96f, 0.97f, a), nameScale));
+            dl.addRectFilled(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.12f * a));
+            dl.addRect(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.24f * a), 1.f);
+            const std::string initialText(1, initial);
+            const float iw = m_text.measureWidth(initialText, 1.35f);
+            m_text.draw(dl, L.avatar.x + (L.avatar.w - iw) * 0.5f, L.avatar.y + L.avatar.h * 0.30f,
+                        initialText, sty(Color::rgba(0.96f, 0.96f, 0.97f, a), 1.35f, true));
+        }
+
+        for (int i = 0; i < L.count; ++i) {
+            const int row = L.item[i];
+            if (row < 0) continue;
+            const MenuItem& item = items[row];
+            const Rect r = L.tile[i];
+            const bool selected = (i == selSlot);
+            const bool hover = (row == m_menu->hoverIndex());
+
+            dl.addRectFilled(r, Color::rgba(0.05f, 0.05f, 0.07f,
+                                           (selected ? 0.92f : (hover ? 0.80f : 0.68f)) * a));
+            if (const SvgIcon* icon = icons::get(item.icon)) {
+                const float size = r.w * 0.54f;
+                icon->draw(dl, r.x + r.w * 0.40f, r.y + r.h * 0.18f, size,
+                           Color::rgba(1.f, 1.f, 1.f, (selected ? 0.22f : 0.13f) * a), 1.f);
+            }
+            // The label sits on its own strip so the watermark behind never
+            // washes it out.
+            const float stripH = 44.f;
+            dl.addRectFilled({r.x, r.y + r.h - stripH, r.w, stripH},
+                             Color::rgba(0.f, 0.f, 0.f, 0.45f * a));
+            m_text.draw(dl, r.x + 14.f, r.y + r.h - stripH + 12.f, item.text,
+                        sty(selected ? Color::rgba(1.f, 1.f, 1.f, a)
+                                     : Color::rgba(0.82f, 0.82f, 0.86f, a),
+                            1.15f, selected));
+            if (selected) {
+                dl.addRectFilled({r.x, r.y + r.h - 3.f, r.w, 3.f},
+                                 Color::rgba(0.86f, 0.13f, 0.13f, a));
+                dl.addRect(r, Color::rgba(1.f, 1.f, 1.f, 0.18f * a), 1.f);
+            }
+        }
+
+        if (selSlot >= 0 && selSlot < L.count) {
+            const int row = L.item[selSlot];
+            if (row >= 0) {
+                const MenuItem& item = items[row];
+                const float slide = (1.f - m_menu->transitionProgress()) * 26.f;
+                const float titleScale = 2.5f;
+                const float titleW = m_text.measureWidth(item.text, titleScale);
+                dl.addRectFilled({L.title.x, L.title.y - 18.f, 56.f, 3.f},
+                                 Color::rgba(0.86f, 0.13f, 0.13f, a));
+                m_text.draw(dl, L.title.x + L.title.w - titleW + slide, L.title.y, item.text,
+                            sty(Color::rgba(1.f, 1.f, 1.f, a), titleScale, true));
+                if (!item.description.empty()) {
+                    dl.addTextWrapped(L.body.x + slide, L.body.y, item.description,
+                                      Color::rgba(0.87f, 0.87f, 0.90f, a), 1.3f, L.body.w);
+                }
+            }
+        }
+
+        dl.addRectFilled(L.bottomBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.80f * a));
+        dl.addLine(0.f, L.bottomBar.y, W, L.bottomBar.y,
+                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
+        const float afterEsc = keyHint(dl, L.home.x, L.bottomBar, "ESC", "EXIT", a);
+        keyHint(dl, afterEsc + 28.f, L.bottomBar, "ENTER", "CONFIRM", a);
+        const char* nav = "LEFT/RIGHT   select";
+        const float navW = m_text.measureWidth(nav, 0.95f);
+        m_text.draw(dl, W - L.home.x - navW, L.bottomBar.y + L.bottomBar.h * 0.30f, nav,
+                    sty(Color::rgba(0.55f, 0.55f, 0.60f, a), 0.95f));
+    }
+
     void updateMenuHover(float mx, float my, int w, int h) {
+        if (m_menu->state() == MenuState::Main) {
+            const int hover = mainMenuTileAt(mainLayout(w, h), mx, my);
+            m_menu->setHoverIndex(hover);
+            if (hover >= 0) m_menu->setSelectedIndex(hover);
+            return;
+        }
         if (m_menu->state() == MenuState::Pause) {
             const PauseBar bar = pauseBar(w, h);
             int hover = -1;
@@ -406,6 +583,12 @@ private:
         // to see, and it is navigated left/right.
         if (m_menu->state() == MenuState::Pause) {
             buildPauseBar(dl, w, h);
+            return;
+        }
+        // The arrival screen is the tile row, not the list: it is the first
+        // thing the player sees and it has to read as one.
+        if (m_menu->state() == MenuState::Main) {
+            buildMainTiles(dl, w, h);
             return;
         }
 

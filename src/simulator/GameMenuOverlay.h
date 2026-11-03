@@ -151,6 +151,13 @@ public:
      *  quit — never the pre-session "pick a car and a track" flow. */
     void openPauseMenu();
 
+    /** Open a screen directly: on the startup tile row a tile is not a row of
+     *  the current screen, so the hub reports the section the player picked. */
+    void openScreen(MenuState state) { switchMenu(state); }
+
+    /** Activate the selected row — the tile row's ENTER. */
+    void activateSelection() { activateSelected(); }
+
     std::function<void()> onExitRequested;
     // Fase 1 exit: the SINGLE PLAYER session rows report which session the
     // player picked (Practice / TimeAttack / Race) — SimulationLoop applies
