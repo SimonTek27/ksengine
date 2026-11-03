@@ -247,7 +247,137 @@ private:
         float accentW = 4.f;
     };
 
-    void updateMenuHover(float mx, float my, int /*w*/, int /*h*/) {
+    /** Horizontal in-car bar: one cell per action, icon above its label.
+     *  Painted and hit-tested from the same layout, so a click always lands on
+     *  the cell the player sees. */
+    struct PauseBar {
+        static constexpr int kMaxItems = 8;
+        Rect panel{};
+        Rect flag{};
+        Rect item[kMaxItems]{};
+        int menuIndex[kMaxItems]{};
+        int count = 0;
+    };
+
+    PauseBar pauseBar(int w, int h) const {
+        PauseBar bar;
+        const auto& items = m_menu->items();
+        int visible = 0;
+        int gaps = 0;
+        for (const auto& item : items) {
+            if (item.isSeparator) {
+                ++gaps;
+            } else if (visible < PauseBar::kMaxItems) {
+                ++visible;
+            }
+        }
+        if (visible == 0) return bar;
+
+        const float itemW = 150.f;
+        const float flagW = 46.f;
+        const float gapW = 18.f;
+        const float barH = 84.f;
+        const float barW = flagW + itemW * static_cast<float>(visible) +
+                           gapW * static_cast<float>(gaps);
+        const float x = (w - barW) * 0.5f;
+        // A little above centre: the car and the road ahead stay visible.
+        const float y = h * 0.40f + (1.f - m_menu->transitionProgress()) * 14.f;
+
+        bar.panel = {x, y, barW, barH};
+        bar.flag = {x + 14.f, y + (barH - 30.f) * 0.5f, 26.f, 30.f};
+
+        float cursor = x + flagW;
+        for (int i = 0; i < static_cast<int>(items.size()) && bar.count < visible; ++i) {
+            if (items[i].isSeparator) {
+                cursor += gapW;
+                continue;
+            }
+            bar.item[bar.count] = {cursor, y, itemW, barH};
+            bar.menuIndex[bar.count] = i;
+            cursor += itemW;
+            ++bar.count;
+        }
+        return bar;
+    }
+
+    void buildPauseBar(DrawList& dl, int w, int h) {
+        const float a = m_menu->fadeAlpha();
+        if (a <= 0.01f) return;
+        const PauseBar bar = pauseBar(w, h);
+        if (bar.count == 0) return;
+
+        dl.addRectFilled({0.f, 0.f, static_cast<float>(w), static_cast<float>(h)},
+                         Color::rgba(0.f, 0.f, 0.f, 0.30f * a));
+        dl.addRectFilled(bar.panel, Color::rgba(0.06f, 0.06f, 0.07f, 0.94f * a));
+        dl.addRect({bar.panel.x, bar.panel.y, bar.panel.w, 1.f},
+                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a));
+
+        // Session flag: a checkered block. Drawn as squares because the icon
+        // set is stroke-only and a checkered flag is solid colour.
+        const float squareW = bar.flag.w / 3.f;
+        const float squareH = bar.flag.h / 3.f;
+        for (int row = 0; row < 3; ++row) {
+            for (int col = 0; col < 3; ++col) {
+                const bool dark = ((row + col) % 2) == 0;
+                dl.addRectFilled({bar.flag.x + static_cast<float>(col) * squareW,
+                                  bar.flag.y + static_cast<float>(row) * squareH,
+                                  squareW, squareH},
+                                 dark ? Color::rgba(0.78f, 0.12f, 0.12f, a)
+                                      : Color::rgba(0.93f, 0.93f, 0.90f, a));
+            }
+        }
+
+        const auto& items = m_menu->items();
+        const int selected = m_menu->selectedIndex();
+        for (int i = 0; i < bar.count; ++i) {
+            const Rect& cell = bar.item[i];
+            const MenuItem& item = items[bar.menuIndex[i]];
+            const bool isSelected = bar.menuIndex[i] == selected;
+            const bool isHover = bar.menuIndex[i] == m_menu->hoverIndex();
+
+            if (isSelected || isHover) {
+                dl.addRectFilled({cell.x + 5.f, cell.y + 9.f, cell.w - 10.f, cell.h - 18.f},
+                                 Color::rgba(1.f, 1.f, 1.f, (isSelected ? 0.10f : 0.05f) * a));
+            }
+            if (isSelected) {
+                dl.addRectFilled({cell.x + 5.f, cell.y + cell.h - 11.f, cell.w - 10.f, 2.f},
+                                 Color::rgba(0.86f, 0.13f, 0.13f, a));
+            }
+
+            const float centreX = cell.x + cell.w * 0.5f;
+            const Color tint = isSelected ? Color::rgba(1.f, 1.f, 1.f, a)
+                                          : Color::rgba(0.70f, 0.70f, 0.74f, a);
+            if (const SvgIcon* icon = icons::get(item.icon)) {
+                const float size = 26.f;
+                icon->draw(dl, centreX - size * 0.5f, cell.y + 17.f, size, tint,
+                           isSelected ? 1.15f : 1.f);
+            }
+            // DrawList text is left-aligned, so the centring happens here.
+            const float labelScale = 0.92f;
+            const float labelW = m_text.measureWidth(item.text, labelScale);
+            m_text.draw(dl, centreX - labelW * 0.5f, cell.y + 51.f, item.text,
+                        sty(tint, labelScale, isSelected));
+        }
+
+        const char* hint = "LEFT/RIGHT  select     ENTER  confirm     ESC  back";
+        const float hintScale = 0.85f;
+        const float hintW = m_text.measureWidth(hint, hintScale);
+        m_text.draw(dl, static_cast<float>(w) * 0.5f - hintW * 0.5f,
+                    bar.panel.y + bar.panel.h + 16.f, hint,
+                    sty(Color::rgba(0.55f, 0.55f, 0.60f, a), hintScale));
+    }
+
+    void updateMenuHover(float mx, float my, int w, int h) {
+        if (m_menu->state() == MenuState::Pause) {
+            const PauseBar bar = pauseBar(w, h);
+            int hover = -1;
+            for (int i = 0; i < bar.count; ++i)
+                if (bar.item[i].contains(mx, my)) hover = bar.menuIndex[i];
+            m_menu->setHoverIndex(hover);
+            if (hover >= 0) m_menu->setSelectedIndex(hover);
+            return;
+        }
+
         MenuLayout L;
         const auto& items = m_menu->items();
         int hover = -1;
@@ -270,6 +400,14 @@ private:
     void buildCinematicMenu(DrawList& dl, int w, int h) {
         const float a = m_menu->fadeAlpha();
         if (a <= 0.01f) return;
+
+        // The in-car overlay is a horizontal bar, not the vertical list the
+        // pre-session screens use: it sits over a view the player still wants
+        // to see, and it is navigated left/right.
+        if (m_menu->state() == MenuState::Pause) {
+            buildPauseBar(dl, w, h);
+            return;
+        }
 
         const float t = m_menu->transitionProgress();
         const float slide = (1.f - t) * 40.f;

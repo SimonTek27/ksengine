@@ -407,6 +407,22 @@ int main() {
         KS_CHECK(rowOf(menu, "SINGLE PLAYER") < 0);
         KS_CHECK(rowOf(menu, "MULTI PLAYER") < 0);
 
+        // Every row names an icon the SVG set actually has: a typo would
+        // draw an empty cell rather than fail, so it is pinned here.
+        for (const auto& item : menu.items()) {
+            if (item.isSeparator) continue;
+            KS_CHECK(item.icon != nullptr);
+            KS_CHECK(ks::sim::ui::icons::get(item.icon) != nullptr);
+        }
+
+        // The bar is horizontal: RIGHT/LEFT walk it like DOWN/UP.
+        menu.openPauseMenu();
+        KS_CHECK(menu.selectedIndex() == rowOf(menu, "RESUME"));
+        KS_CHECK(menu.handleKeyPress(0x27)); // RIGHT
+        KS_CHECK(menu.selectedIndex() == rowOf(menu, "RESTART SESSION"));
+        KS_CHECK(menu.handleKeyPress(0x25)); // LEFT
+        KS_CHECK(menu.selectedIndex() == rowOf(menu, "RESUME"));
+
         // ESC on the pause screen resumes instead of swallowing the key.
         KS_CHECK(menu.handleKeyPress(KEY_ESC));
         KS_CHECK(!menu.isVisible());

@@ -600,6 +600,15 @@ bool GameMenuOverlay::handleKeyPress(int key)
     case 0x28: // DOWN
         m_selectedIndex = nextEnabled(m_selectedIndex, +1);
         return true;
+    // The in-car bar is horizontal, so LEFT/RIGHT are the same walk as
+    // UP/DOWN; on the vertical screens they are harmless equivalents and a
+    // pad mapped either way still moves the cursor.
+    case 0x25: // LEFT
+        m_selectedIndex = nextEnabled(m_selectedIndex, -1);
+        return true;
+    case 0x27: // RIGHT
+        m_selectedIndex = nextEnabled(m_selectedIndex, +1);
+        return true;
     case 0x0D: // ENTER
         activateSelected();
         return true;
