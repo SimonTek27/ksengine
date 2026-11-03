@@ -59,6 +59,8 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float alphaTest;   // >= 0.5 = discard below alphaRef (KN5 alpha_tested)
     float alphaRef;
     float emissive;    // unlit term added after shading
+    float opacity;     // multiplies the albedo alpha on a blended surface
+    float glassiness;  // 0 = decal, 1 = glass pane
 } material;
 
 const float PI = 3.14159265;
@@ -226,7 +228,22 @@ void main() {
     float fogT = clamp(1.0 - exp(-heightFogAmount(frame.cameraPos.xyz, fragWorldPos)),
                        0.0, frame.fogParams.w);
 
-    // Alpha rides along so the see-through pipeline can blend glass and
-    // decals; the opaque pipeline ignores it (blend disabled).
-    outColor = vec4(mix(lit, frame.fogColor.rgb, fogT), albedoSample.a);
+    // --- glass ----------------------------------------------------------
+    // A pane is not a lit surface: almost none of the diffuse survives, which is
+    // what made the windscreen read as a milky slab. What you see is the tint
+    // plus the reflection, and the reflection takes over towards grazing angles.
+    float fresnel = pow(1.0 - NdotV, 5.0);
+    float glass = clamp(material.glassiness, 0.0, 1.0);
+    vec3 surface = lit;
+    if (glass > 0.001) {
+        vec3 reflection = ambient * (0.30 + 0.70 * fresnel) + specular * (0.5 + fresnel);
+        surface = mix(lit, reflection + albedo * 0.05, glass);
+    }
+    // The authored alpha, the pane's own opacity, and Fresnel so the edge of a
+    // windscreen goes opaque while you look straight through the middle.
+    float alpha = clamp(albedoSample.a * material.opacity * (1.0 + 2.5 * fresnel * glass),
+                        0.0, 1.0);
+    // Premultiplied for the see-through pipeline; the opaque one ignores alpha,
+    // and with opacity 1 this is exactly the previous colour.
+    outColor = vec4(mix(surface, frame.fogColor.rgb, fogT) * alpha, alpha);
 }

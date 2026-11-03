@@ -846,6 +846,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (material.blend != 0) {
                     nm.blended = true;
                     nm.alphaTested = false; // the pass blends, it does not cut
+                    // Glass is a pane; a decal is not. The pane keeps a real
+                    // opacity and reflects, the decal only blends its own alpha.
+                    const bool pane = presetId == graphics::MaterialPresetId::Glass;
+                    nm.opacity = pane ? 0.30f : 1.0f;
+                    nm.glassiness = pane ? 1.0f : 0.0f;
                     nm.castShadow = false; // a pane casts no useful shadow
                     ++seeThrough;
                 }

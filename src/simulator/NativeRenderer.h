@@ -119,6 +119,10 @@ struct NativeMesh {
     float alphaRef = 0.5f;
     // ksEmissive, added unlit on top of the shaded result.
     float emissive = 0.0f;
+    // Glass: opacity scales the albedo alpha, glassiness (0..1) switches the
+    // shading to the pane model (reflection instead of diffuse).
+    float opacity = 1.0f;
+    float glassiness = 0.0f;
     // material.blend != 0 (glass, windscreen, decals): drawn after the
     // opaque pass, blended over what is already there, no depth write.
     bool blended = false;

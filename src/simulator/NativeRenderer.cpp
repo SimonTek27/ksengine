@@ -684,11 +684,14 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     // of a solid panel.
     VkPipelineColorBlendAttachmentState glassAtt = blendAtt;
     glassAtt.blendEnable = VK_TRUE;
-    glassAtt.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    // Premultiplied: the shader multiplies by alpha itself so a bright
+    // reflection on clear glass keeps its intensity instead of being scaled
+    // down twice.
+    glassAtt.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
     glassAtt.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     glassAtt.colorBlendOp = VK_BLEND_OP_ADD;
     glassAtt.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    glassAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    glassAtt.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     glassAtt.alphaBlendOp = VK_BLEND_OP_ADD;
     VkPipelineColorBlendStateCreateInfo glassBlend = colorBlend;
     glassBlend.pAttachments = &glassAtt;
@@ -755,7 +758,11 @@ struct MaterialUBO {
     float alphaTest = 0.0f;
     float alphaRef = 0.5f;
     float emissive = 0.0f;
-    float pad3[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    // Glass rides in the old padding, so the block stays 48 bytes and every
+    // field above keeps its offset.
+    float opacity = 1.0f;
+    float glassiness = 0.0f;
+    float pad3[2] = {0.0f, 0.0f};
 };
 static_assert(sizeof(MaterialUBO) == 48, "MaterialUBO is read as a std140 uniform block");
 
@@ -1538,6 +1545,8 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.alphaTest = mesh.alphaTested ? 1.0f : 0.0f;
     ubo.alphaRef = mesh.alphaRef;
     ubo.emissive = mesh.emissive;
+    ubo.opacity = mesh.opacity;
+    ubo.glassiness = mesh.glassiness;
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
