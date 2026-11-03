@@ -133,7 +133,7 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
-    // --- showroom (content/showroom/<id>/showroom.json) -------------------
+    // --- showroom (content/showrooms/<id>/showroom.json) -------------------
     // The game opens in a showroom: while one is open the camera sits on its
     // turntable instead of following a car nobody is driving, and its two
     // optional tracks play. Starting a session closes it.

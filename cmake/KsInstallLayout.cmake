@@ -31,7 +31,7 @@
 # Reference content shipped with the product. Deliberately *not* the whole
 # content/ tree: a developer's local content/cars must never end up in an
 # install (same rule as the historical POST_BUILD copies, roadmap 2.4).
-set(KS_LAYOUT_CONTENT_REFS content/baked content/cars/refcar content/examples content/showroom)
+set(KS_LAYOUT_CONTENT_REFS content/baked content/cars/refcar content/examples content/showrooms)
 
 # kssimserver startup configuration shipped with the install (a plain
 # directory-scope variable: it is read from both staging and install rules,

@@ -8,6 +8,10 @@
 
 #include "TrackLoader.h"
 
+// TrackLoader.h only forward-declares AiSpline; dereferencing it needs the
+// full definition.
+#include "engine/AI/AiFileReader.h"
+
 #include "KsTest.h"
 
 #include <cmath>
@@ -108,6 +112,33 @@ int main() {
         KS_CHECK(found);
     }
 
+    // AI spline fallback: a track folder that ships no .ai at all still gets a
+    // racing line from data/lanes.csv (findAiSpline -> readLanesCsv).
+    {
+        const fs::path trackDir = dir / "track_with_lanes_csv";
+        fs::create_directories(trackDir / "data");
+        writeFile(trackDir, "t.kn5", kn5Header(5));
+        std::ofstream lanes(trackDir / "data" / "lanes.csv");
+        lanes << "source_file,row_index,x,y,z,dist_m,speed,radius_m,edge_left,edge_right\n"
+                 "fast_lane.ai,0,0,0,0,0.000,30.0,1000.0,7.5,6.5\n"
+                 "fast_lane.ai,1,10,0,0,10.000,40.0,50.0,7.5,6.5\n"
+                 "fast_lane.ai,2,20,0,0,20.000,50.0,1000.0,7.5,6.5\n"
+                 "pit_lane.ai,0,100,0,0,0.000,20.0,500.0,3.0,3.0\n";
+        lanes.close();
+
+        auto t = loader.loadTrackFolder(trackDir.string());
+        KS_CHECK(t.kn5HeaderValidated);
+        KS_CHECK(t.aiSplineLoaded);
+        KS_CHECK(t.aiSplinePath == (trackDir / "data" / "lanes.csv").string());
+        // Guarded so a regression fails instead of dereferencing null.
+        KS_CHECK(t.aiSpline && t.aiSpline->size() == 3);
+        if (t.aiSpline && t.aiSpline->size() == 3) {
+            KS_CHECK(std::fabs(t.aiSpline->points[2].position.x - 20.0f) < 1e-6f);
+            KS_CHECK(std::fabs(t.aiSpline->points[1].curvature - 0.02f) < 1e-6f);
+            KS_CHECK(std::fabs(t.trackLength - 20.0f) < 1e-5f);
+        }
+    }
+
     // surfaces.ini parsing (roadmap 2.2): friction map + ROAD base grip.
     {
         const fs::path trackDir = dir / "track_with_surfaces";
@@ -129,6 +160,23 @@ int main() {
         KS_CHECK(std::fabs(t.surfaceFriction["GRASS"] - 0.55f) < 1e-5f);
         KS_CHECK(std::fabs(t.surfaceFriction["KERB"] - 0.8f) < 1e-5f);
         KS_CHECK(std::fabs(t.baseGrip - 1.05f) < 1e-5f);
+    }
+
+    // Optional on-disk check: the real Mugello folder, whose track dir ships
+    // no .ai at all — only data/lanes.csv. Skipped without that install.
+    const fs::path mugello =
+        "E:/ksimulator/content/tracks/mugello";
+    if (fs::is_directory(mugello) &&
+        !fs::exists(mugello / "ai" / "fast_lane.ai")) {
+        auto t = loader.loadTrackFolder(mugello.string());
+        KS_CHECK(t.kn5HeaderValidated);
+        KS_CHECK(t.aiSplineLoaded);
+        KS_CHECK(t.aiSpline && t.aiSpline->size() == 3374);
+        if (t.aiSpline && t.aiSpline->size() == 3374) {
+            KS_CHECK(t.aiSpline->closed);
+            KS_CHECK(std::fabs(t.aiSpline->totalDistance - 5195.87f) < 1.0f);
+            KS_CHECK(std::fabs(t.trackLength - 5195.87f) < 1.0f);
+        }
     }
 
     fs::remove_all(dir);

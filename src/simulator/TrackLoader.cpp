@@ -184,28 +184,46 @@ std::string TrackLoader::findAiSpline(const std::string& trackDirectory)
     fs::path aiDir = root / "ai";
     std::error_code error;
     std::vector<fs::path> candidateFiles;
-    if (!fs::is_directory(aiDir, error)) return {};
-    for (fs::directory_iterator it(aiDir, error), end; !error && it != end;
-         it.increment(error)) {
-        if (!it->is_regular_file(error)) continue;
-        std::string extension = it->path().extension().string();
-        for (char& c : extension)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        if (extension == ".ai" || extension == ".txt")
-            candidateFiles.push_back(it->path());
-    }
-    std::sort(candidateFiles.begin(), candidateFiles.end(), [](const fs::path& a, const fs::path& b) {
-        const auto extensionPriority = [](const fs::path& path) {
-            std::string extension = path.extension().string();
+    // Not an early return: a track with no ai/ dir still reaches the
+    // lanes.csv fallback below.
+    if (fs::is_directory(aiDir, error)) {
+        for (fs::directory_iterator it(aiDir, error), end; !error && it != end;
+             it.increment(error)) {
+            if (!it->is_regular_file(error)) continue;
+            std::string extension = it->path().extension().string();
             for (char& c : extension)
                 c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            return extension == ".ai" ? 0 : 1;
-        };
-        const int priorityA = extensionPriority(a);
-        const int priorityB = extensionPriority(b);
-        return priorityA != priorityB ? priorityA < priorityB : a < b;
-    });
-    return candidateFiles.empty() ? std::string() : candidateFiles.front().string();
+            if (extension == ".ai" || extension == ".txt")
+                candidateFiles.push_back(it->path());
+        }
+        std::sort(candidateFiles.begin(), candidateFiles.end(), [](const fs::path& a, const fs::path& b) {
+            const auto extensionPriority = [](const fs::path& path) {
+                std::string extension = path.extension().string();
+                for (char& c : extension)
+                    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                return extension == ".ai" ? 0 : 1;
+            };
+            const int priorityA = extensionPriority(a);
+            const int priorityB = extensionPriority(b);
+            return priorityA != priorityB ? priorityA < priorityB : a < b;
+        });
+    }
+    if (!candidateFiles.empty()) return candidateFiles.front().string();
+
+    // Fallback: a merged lanes.csv (fast_lane/ideal_line/pit_lane dumped as
+    // world-space rows). Track folders that ship no .ai at all would
+    // otherwise end up with aiSplineLoaded = false, leaving the AI and the
+    // starting grid without a racing line.
+    const fs::path lanesFallbacks[] = {
+        fs::path("data") / "lanes.csv",
+        "lanes.csv",
+    };
+    for (const fs::path& relativePath : lanesFallbacks) {
+        const fs::path p = root / relativePath;
+        if (fs::is_regular_file(p))
+            return p.string();
+    }
+    return {};
 }
 
 std::string TrackLoader::trackNameFromDirectory(const std::string& trackDirectory)

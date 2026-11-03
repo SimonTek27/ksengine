@@ -7,7 +7,7 @@
  * showroom - but the folder is flat and everything a showroom has to say lives
  * in one JSON:
  *
- *   content/showroom/<id>/
+ *   content/showrooms/<id>/
  *       showroom.json        this document
  *       <model>.kn5          optional: the hall itself
  *       ambience.<ext>       optional: room tone behind the car
@@ -276,7 +276,7 @@ struct ShowroomEntry {
 };
 
 /** Every subdirectory of `root` that holds a showroom.json, sorted by id. */
-inline std::vector<ShowroomEntry> scanShowrooms(const std::string& root = "content/showroom") {
+inline std::vector<ShowroomEntry> scanShowrooms(const std::string& root = "content/showrooms") {
     namespace fs = std::filesystem;
     std::vector<ShowroomEntry> out;
     std::error_code ec;
@@ -298,12 +298,12 @@ inline std::vector<ShowroomEntry> scanShowrooms(const std::string& root = "conte
 
 /** The showroom the game opens with: the one named by KS_SHOWROOM when it
  *  exists, otherwise the first folder that has a showroom.json. Never null
- *  unless content/showroom is empty, in which case the caller keeps its plain
+ *  unless content/showrooms is empty, in which case the caller keeps its plain
  *  startup scene. */
 inline bool loadStartupShowroom(ShowroomConfig& out, std::string* error = nullptr) {
     const std::vector<ShowroomEntry> rooms = scanShowrooms();
     if (rooms.empty()) {
-        if (error) *error = "content/showroom holds no showroom.json";
+        if (error) *error = "content/showrooms holds no showroom.json";
         return false;
     }
     const char* wanted = std::getenv("KS_SHOWROOM");
@@ -324,7 +324,7 @@ inline bool loadStartupShowroom(ShowroomConfig& out, std::string* error = nullpt
         // Silence here is expensive: an override that names a folder which is
         // not there looks exactly like the override working.
         out.warnings.push_back(std::string("KS_SHOWROOM='") + wanted +
-                               "' is not in content/showroom, opened '" + chosen->id + "'");
+                               "' is not in content/showrooms, opened '" + chosen->id + "'");
     }
     return out.valid;
 }

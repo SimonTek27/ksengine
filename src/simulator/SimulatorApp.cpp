@@ -703,7 +703,7 @@ static void initSimulation() {
             printf("[INIT] KS_TEAM load failed: %s\n", team);
     }
 
-    // The game always opens in a showroom: content/showroom/<id>/showroom.json
+    // The game always opens in a showroom: content/showrooms/<id>/showroom.json
     // describes it (KS_SHOWROOM picks one, otherwise the first folder that has
     // one). A checkout with no showroom keeps the plain startup scene instead
     // of failing - the menu still opens.

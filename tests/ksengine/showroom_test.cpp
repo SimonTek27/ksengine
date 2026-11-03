@@ -244,7 +244,7 @@ int main() {
         // the binary lives in the build tree, the content does not.
         const fs::path source = fs::path(__FILE__).parent_path().parent_path().parent_path();
         const ShowroomConfig cfg =
-            ks::sim::loadShowroom((source / "content/showroom/industrial").string());
+            ks::sim::loadShowroom((source / "content/showrooms/industrial").string());
         KS_CHECK(cfg.valid);
         KS_CHECK(cfg.name == "Industrial");
         KS_CHECK(cfg.cameraDistance > 0.f);

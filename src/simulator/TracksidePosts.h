@@ -31,6 +31,17 @@
 namespace ks {
 namespace sim {
 
+/// The one marshal mesh every track instances. The Vallelunga asset ships
+/// marshall_A_HI_010 (660 vertices, 908 triangles, 1.78 m tall, LOD 0-25 m)
+/// next to its low-detail twin marshall_A_LOW_010 (168 triangles, 23-250 m).
+/// Posts always use the high-detail one: extraction into the shared asset
+/// folder is `kn5baker --only marshall_A_HI_010 <track.kn5> objects3d/marshal`,
+/// so a generated track needs no marshal geometry of its own.
+inline constexpr const char* kMarshalMeshName = "marshall_A_HI_010";
+/// Baked asset folder, relative to the content root: manifest.txt + .nmsh +
+/// textures/, the shape NativeRenderer::loadMeshesFromManifest() reads.
+inline constexpr const char* kMarshalMeshAssetDir = "objects3d/marshal";
+
 /// A footprint a vehicle parks in: the safety-car bay at the pit exit, and any
 /// recovery vehicle spot the track authors later.
 struct TracksidePad {
@@ -59,6 +70,10 @@ struct MarshalPost {
     int corner = 0;       // corner this post belongs to (1-based, lap order)
     std::string side;     // "left" | "right"
     float station = 0.f;  // metres from the start line along the reference line
+    // Mesh instanced for this post. Defaults to the high-detail marshal, so a
+    // manifest that predates the field (or a track with no marshal geometry)
+    // still renders one post per worker.
+    std::string mesh = kMarshalMeshName;
     WorldPose pose;
     float radiusM = 40.f; // how far it watches
     MarshalActivity activity = MarshalActivity::Idle;
@@ -209,11 +224,9 @@ public:
                     post.side = textOf(object, "side");
                     post.station = static_cast<float>(scalarOf(object, "station"));
                     post.radiusM = kDefaultWatchRadiusM;
-                    // The tool writes flat x/y/z per post, the same shape the
-                    // rest of data.json uses - not a [x, y, z] triplet.
-                    post.pose.x = static_cast<float>(scalarOf(object, "x"));
-                    post.pose.y = static_cast<float>(scalarOf(object, "y"));
-                    post.pose.z = static_cast<float>(scalarOf(object, "z"));
+                    const std::string mesh = textOf(object, "mesh");
+                    if (!mesh.empty()) post.mesh = mesh;
+                    readPosition(object, post.pose);
                     if (post.corner > 0) {
                         m_posts.push_back(post);
                         any = true;
@@ -234,9 +247,7 @@ public:
                     window.substr(brace, end == std::string::npos ? std::string::npos : end - brace);
                 TracksidePad pad;
                 pad.index = 0;
-                pad.pose.x = static_cast<float>(scalarOf(object, "x"));
-                pad.pose.y = static_cast<float>(scalarOf(object, "y"));
-                pad.pose.z = static_cast<float>(scalarOf(object, "z"));
+                readPosition(object, pad.pose);
                 pad.radiusM = static_cast<float>(scalarOf(object, "radius_m"));
                 if (pad.radiusM <= 0.f) pad.radiusM = 8.f;
                 setSafetyCarPad(pad);
@@ -258,6 +269,47 @@ public:
     static constexpr float kDefaultWatchRadiusM = 40.f;
 
 private:
+    /// Post/bay position: flat x/y/z, which is what data.json carries today,
+    /// with the [x, y, z] "center" triplet as the fallback so a manifest in
+    /// either shape loads to real coordinates instead of the origin.
+    static void readPosition(const std::string& object, WorldPose& pose) {
+        if (findKey(object, "x") != std::string::npos) {
+            pose.x = static_cast<float>(scalarOf(object, "x"));
+            pose.y = static_cast<float>(scalarOf(object, "y"));
+            pose.z = static_cast<float>(scalarOf(object, "z"));
+            return;
+        }
+        double center[3] = {0.0, 0.0, 0.0};
+        if (!tripletOf(object, "center", center)) return;
+        pose.x = static_cast<float>(center[0]);
+        pose.y = static_cast<float>(center[1]);
+        pose.z = static_cast<float>(center[2]);
+    }
+
+    /// First three numbers of a [a, b, c] array stored under `key`.
+    static bool tripletOf(const std::string& text, const char* key, double out[3]) {
+        const std::size_t keyPos = findKey(text, key);
+        if (keyPos == std::string::npos) return false;
+        const std::size_t open = text.find('[', keyPos);
+        if (open == std::string::npos) return false;
+        const std::size_t close = text.find(']', open);
+        if (close == std::string::npos) return false;
+        const std::string body = text.substr(open + 1, close - open - 1);
+        const char* cursor = body.c_str();
+        for (int i = 0; i < 3; ++i) {
+            // strtod stops on the separator, not past it: skip the comma (and
+            // any space) between the three numbers or the second read fails.
+            while (*cursor && (*cursor == ',' || std::isspace(static_cast<unsigned char>(*cursor))))
+                ++cursor;
+            char* end = nullptr;
+            const double value = std::strtod(cursor, &end);
+            if (end == cursor) return false;
+            out[i] = value;
+            cursor = end;
+        }
+        return true;
+    }
+
     /// Index of the bracket that closes the one at `open` (depth-counted: the
     /// per-post [x, y, z] triplets would otherwise end the list immediately).
     static std::size_t matchingClose(const std::string& text, std::size_t open) {
