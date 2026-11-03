@@ -240,7 +240,11 @@ int main() {
 
     // --- the shipped showroom parses ---------------------------------------
     {
-        const ShowroomConfig cfg = ks::sim::loadShowroom("content/showroom/industrial");
+        // __FILE__ keeps this independent of the working directory CTest picks:
+        // the binary lives in the build tree, the content does not.
+        const fs::path source = fs::path(__FILE__).parent_path().parent_path().parent_path();
+        const ShowroomConfig cfg =
+            ks::sim::loadShowroom((source / "content/showroom/industrial").string());
         KS_CHECK(cfg.valid);
         KS_CHECK(cfg.name == "Industrial");
         KS_CHECK(cfg.cameraDistance > 0.f);
