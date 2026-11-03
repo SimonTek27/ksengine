@@ -447,8 +447,10 @@ private:
 
         // The showroom is behind this screen, so it is dimmed rather than
         // covered: the hall the game just loaded is part of the menu.
-        dl.addRectFilled({0.f, 0.f, W, H * 0.40f}, Color::rgba(0.f, 0.f, 0.f, 0.20f * a));
-        dl.addRectFilled({0.f, H * 0.30f, W, H * 0.70f}, Color::rgba(0.f, 0.f, 0.f, 0.32f * a));
+        // Enough shade for the labels to read, not enough to turn midday into
+        // dusk: the car sits in the middle of the screen and has to stay lit.
+        dl.addRectFilled({0.f, 0.f, W, H * 0.40f}, Color::rgba(0.f, 0.f, 0.f, 0.12f * a));
+        dl.addRectFilled({0.f, H * 0.30f, W, H * 0.36f}, Color::rgba(0.f, 0.f, 0.f, 0.06f * a));
 
         dl.addRectFilled(L.topBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.60f * a));
         dl.addLine(0.f, L.topBar.h, W, L.topBar.h,

@@ -457,8 +457,12 @@ DdsImage decodeDds(std::string_view bytes) {
         // albedo sampler expects. Alpha is dropped — a sky has none.
         const auto* floats = reinterpret_cast<const float*>(data);
         const std::size_t pixels = static_cast<std::size_t>(width) * height;
+        // Gain before the curve: a panorama is an unlit backdrop, so it has to
+        // survive being multiplied by the ambient term on its way to the screen.
+        // Without it midday reads as dusk.
         auto encode = [](float v) {
             if (!(v > 0.f)) v = 0.f;
+            v *= 5.f;
             v = v / (1.f + v);
             v = std::pow(v, 1.f / 2.2f);
             if (v > 1.f) v = 1.f;

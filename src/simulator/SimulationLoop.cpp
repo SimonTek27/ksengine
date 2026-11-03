@@ -847,6 +847,7 @@ void SimulationLoop::buildShowroomVenue() {
 
 void SimulationLoop::closeShowroom() {
     m_showroom.close();
+    if (m_vulkanRenderer) m_vulkanRenderer->setExposure(1.0f); // the track's own
     m_showroomAudioLoaded = false;
     if (m_audio) m_audio->stopShowroomAudio();
 }
@@ -1630,6 +1631,9 @@ void SimulationLoop::updateWeather(float dt) {
         m_vulkanRenderer->setSun(light);
         m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
                                  0.0002f, 0.004f);
+        // A photographed room is bright: without the extra stop the concrete and
+        // the trees read as if the sun were going down.
+        m_vulkanRenderer->setExposure(1.6f);
         return;
     }
     // Roadmap 2.1 (P2.8): evolve the preset first — rain soaks the track,

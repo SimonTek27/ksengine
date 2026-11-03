@@ -3,10 +3,10 @@
   "description": "Concrete floor, cold daylight, a hall that echoes.",
   "model": "industrial.kn5",
   "camera": {
-    "distance": 5.0,
-    "height": 1.25,
+    "distance": 4.6,
+    "height": 1.05,
     "angle": 35,
-    "fov": 45,
+    "fov": 55,
     "rotation": 8,
     "target_height": 0.5
   },
@@ -21,7 +21,7 @@
       0.97,
       0.92
     ],
-    "sun_intensity": 1.0,
+    "sun_intensity": 1.25,
     "ambient_color": [
       0.34,
       0.36,
