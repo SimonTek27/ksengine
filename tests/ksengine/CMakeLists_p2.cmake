@@ -236,3 +236,14 @@ if(TARGET ksnet AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_multiplayer.cpp" AN
     add_test(NAME test_multiplayer COMMAND test_multiplayer)
     set_tests_properties(test_multiplayer PROPERTIES TIMEOUT 60)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ui_svg_icon_test.cpp")
+    # Header-only on purpose: the icon set and the parser live in the
+    # simulator's ui/ headers, so the test needs no renderer or window.
+    add_executable(ui_svg_icon_test ui_svg_icon_test.cpp)
+    target_include_directories(ui_svg_icon_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    add_test(NAME ui_svg_icon_test COMMAND ui_svg_icon_test)
+    set_tests_properties(ui_svg_icon_test PROPERTIES TIMEOUT 60)
+endif()

@@ -4,6 +4,7 @@
  * Branding: ksim only.
  */
 #include "UiRenderer.h"
+#include "IconSet.h"
 #include "TextRenderer.h"
 #include "UiInput.h"
 #include "FontTtfLoader.h"
@@ -318,7 +319,21 @@ private:
             Color titleCol = selected
                 ? Color::rgba(1.f, 1.f, 1.f, a)
                 : Color::rgba(0.72f, 0.72f, 0.75f, a);
-            m_text.draw(dl, L.left + 8.f, iy + 10.f, it.text,
+            // The row's icon, when it names one: an SVG parsed once and
+            // stroked through the same tessellator as the rest of the UI, so
+            // it stays sharp at any size and tints with the row. The label
+            // moves right to leave it room.
+            float labelX = L.left + 8.f;
+            if (const SvgIcon* rowIcon = icons::get(it.icon)) {
+                const float iconSize = 20.f;
+                const Color iconCol = selected
+                    ? Color::rgba(1.f, 1.f, 1.f, a)
+                    : Color::rgba(0.66f, 0.66f, 0.70f, a);
+                rowIcon->draw(dl, labelX, iy + (L.rowH - 6.f - iconSize) * 0.5f + 1.f,
+                              iconSize, iconCol, selected ? 1.15f : 1.f);
+                labelX += iconSize + 12.f;
+            }
+            m_text.draw(dl, labelX, iy + 10.f, it.text,
                         sty(titleCol, selected ? 1.35f : 1.2f, selected));
 
             if (selected)

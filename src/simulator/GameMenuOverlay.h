@@ -66,6 +66,10 @@ struct MenuItem {
     std::function<void()> action;
     bool isSeparator = false;
     bool enabled = true;
+    /** Icon id from ui/IconSet.h, or nullptr for a row without one. An id,
+     *  not a picture: the overlay never learns how an icon is drawn, and the
+     *  hub resolves it against the SVG set when it paints the row. */
+    const char* icon = nullptr;
 };
 
 /** One line of the RESULTS screen (roadmap 1.3). */

@@ -429,21 +429,24 @@ void GameMenuOverlay::buildResultsMenu()
 void GameMenuOverlay::buildPauseMenu()
 {
     m_items.clear();
+    // Every row carries an icon id (ui/IconSet.h): the in-car overlay is the
+    // one screen a player sees while sitting in the box, and a list of bare
+    // words is hard to read at a glance from a rig.
     m_items.push_back({ "RESUME", "Back to the car",
-        [this]() { setVisible(false); } });
+        [this]() { setVisible(false); }, false, true, "drive" });
     m_items.push_back({ "RESTART SESSION",
         "Restart this session from the pits",
         [this]() {
             if (onRestartSessionRequested) onRestartSessionRequested();
             setVisible(false);
-        } });
+        }, false, true, "restart" });
     m_items.push_back({ "GARAGE", "Setup, tyres and vehicle options",
-        [this]() { switchMenu(MenuState::Garage); } });
+        [this]() { switchMenu(MenuState::Garage); }, false, true, "setup" });
     m_items.push_back({ "SETTINGS", "Display, audio and input",
-        [this]() { switchMenu(MenuState::Settings); } });
+        [this]() { switchMenu(MenuState::Settings); }, false, true, "settings" });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "QUIT", "Exit ksim",
-        [this]() { switchMenu(MenuState::QuitConfirm); } });
+        [this]() { switchMenu(MenuState::QuitConfirm); }, false, true, "exit" });
 }
 
 void GameMenuOverlay::openPauseMenu()
