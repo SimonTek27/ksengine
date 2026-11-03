@@ -148,6 +148,15 @@ public:
     // Reads the showroom's .kn5 straight into meshes in memory: no bake, no
     // temporary files, only the content the selected folder already holds.
     bool loadShowroomHallFromKn5(const ShowroomConfig& cfg);
+    // Shared .kn5 reader: mesh nodes of any file (venue or car) become NativeMeshes
+    // with their own textures decoded in memory. Nothing is written to disk.
+    bool loadKn5Meshes(const std::string& modelPath, const std::string& prefix,
+                       bool faceInside, std::vector<ks::ecs::Entity>* entities, float outMin[3],
+                       float outMax[3], int* outMeshes);
+    // The car's own model, when it has one and no bake was made for it.
+    bool loadCarMeshesFromKn5(const std::string& carDirectory);
+    // A showroom without a car is an empty room: load one onto the turntable.
+    void loadShowroomCar();
     void buildShowroomVenue();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }

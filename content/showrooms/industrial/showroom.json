@@ -3,18 +3,30 @@
   "description": "Concrete floor, cold daylight, a hall that echoes.",
   "model": "industrial.kn5",
   "camera": {
-    "distance": 6.5,
-    "height": 1.7,
+    "distance": 5.0,
+    "height": 1.25,
     "angle": 35,
-    "fov": 50,
+    "fov": 45,
     "rotation": 8,
-    "target_height": 0.6
+    "target_height": 0.5
   },
   "light": {
-    "sun_direction": [0.42, 0.78, 0.46],
-    "sun_color": [1.0, 0.97, 0.92],
+    "sun_direction": [
+      0.42,
+      0.78,
+      0.46
+    ],
+    "sun_color": [
+      1.0,
+      0.97,
+      0.92
+    ],
     "sun_intensity": 1.0,
-    "ambient_color": [0.34, 0.36, 0.40],
+    "ambient_color": [
+      0.34,
+      0.36,
+      0.4
+    ],
     "ambient_intensity": 0.55
   },
   "audio": {

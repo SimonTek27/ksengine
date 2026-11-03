@@ -416,7 +416,55 @@ bool SimulationLoop::openShowroom(const std::string& directory, std::string* err
     if (!m_showroom.open(directory, error)) return false;
     loadShowroomHall();
     loadShowroomAudio();
+    loadShowroomCar();
     return true;
+}
+
+void SimulationLoop::loadShowroomCar() {
+    if (!m_vulkanRenderer || !m_showroom.active()) return;
+    // A real model already on the stage is left alone; the placeholder box is not
+    // a car, so the room still has to find one.
+    if (!m_carVisualEntities.empty()) {
+        bool placeholder = false;
+        if (m_carVisualEntities.size() == 1)
+            if (auto* mesh = scene().tryGet<ks::ecs::MeshInstance>(m_carVisualEntities.front()))
+                placeholder = mesh->meshName == "car_placeholder";
+        if (!placeholder) return;
+    }
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    std::string carDirectory = m_carDir;
+    if (carDirectory.empty()) {
+        // The room is a turntable: with no car selected yet, put the first one
+        // that ships with a model on it. Cars sit next to the showrooms in the
+        // content folder, so no path needs to be configured for this.
+        const fs::path carsRoot =
+            fs::path(m_showroom.config().directory).parent_path().parent_path() / "cars";
+        std::vector<fs::path> candidates;
+        for (const auto& entry : fs::directory_iterator(carsRoot, ec))
+            if (entry.is_directory(ec)) candidates.push_back(entry.path());
+        std::sort(candidates.begin(), candidates.end());
+        for (const auto& dir : candidates) {
+            bool hasModel = false;
+            for (const auto& file : fs::directory_iterator(dir, ec)) {
+                if (file.path().extension() != ".kn5") continue;
+                hasModel = true;
+                break;
+            }
+            if (hasModel) {
+                carDirectory = dir.string();
+                break;
+            }
+        }
+    }
+    if (carDirectory.empty()) {
+        std::fprintf(stderr, "[showroom] no car to show: no model in %s\n",
+                     (fs::path(m_showroom.config().directory).parent_path().parent_path() /
+                      "cars").string().c_str());
+        return;
+    }
+    ensureCarVisual(carDirectory);
+    std::fprintf(stderr, "[showroom] car on the turntable: %s\n", carDirectory.c_str());
 }
 
 void SimulationLoop::loadShowroomAudio() {
@@ -470,6 +518,188 @@ void SimulationLoop::loadShowroomHall() {
     buildShowroomVenue();
 }
 
+// One .kn5 reader for both the venue and the car: parse the file in memory, turn every
+// mesh node into a NativeMesh, name each one with a prefix, and hand the entity that
+// draws it back to the caller. Textures are decoded from the file itself — the
+// showroom is only allowed to read its content, so nothing is written anywhere.
+bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::string& prefix,
+                                   bool faceInside, std::vector<ks::ecs::Entity>* entities,
+                                   float outMin[3], float outMax[3], int* outMeshes) {
+    if (!m_vulkanRenderer) return false;
+    namespace ff = ::ks::engine::fileformat;
+    ff::Kn5ParseOptions parseOptions;
+    parseOptions.keep_texture_data = true; // the albedo is inside the file
+    const auto parsed = ff::parseKn5File(modelPath, parseOptions);
+    if (!parsed.ok()) {
+        std::fprintf(stderr, "[kn5] %s unreadable: %s\n", modelPath.c_str(),
+                     parsed.error.c_str());
+        return false;
+    }
+
+    // Row-vector convention, as the parser stores each node's accumulated transform:
+    // the same arithmetic the offline baker applies before writing.
+    auto transform = [](const std::array<float, 16>& m, float x, float y, float z,
+                        float w, float out[3]) {
+        out[0] = x * m[0] + y * m[4] + z * m[8] + w * m[12];
+        out[1] = x * m[1] + y * m[5] + z * m[9] + w * m[13];
+        out[2] = x * m[2] + y * m[6] + z * m[10] + w * m[14];
+    };
+
+    int meshes = 0;
+    std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
+    float bboxMin[3] = {1e9f, 1e9f, 1e9f};
+    float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
+    std::function<void(const ff::Kn5Node&)> walk = [&](const ff::Kn5Node& node) {
+        const auto& m = node.mesh;
+        if (node.node_class == ff::Kn5NodeClass::mesh && node.has_mesh &&
+            !m.indices.empty() && m.positions.size() >= 3) {
+            const std::size_t count = m.positions.size() / 3;
+            NativeMesh nm;
+            nm.vertices.resize(count);
+            for (std::size_t i = 0; i < count; ++i) {
+                NativeVertex& v = nm.vertices[i];
+                float pos[3];
+                transform(m.world, m.positions[i * 3], m.positions[i * 3 + 1],
+                          m.positions[i * 3 + 2], 1.f, pos);
+                v.px = pos[0];
+                v.py = pos[1];
+                v.pz = pos[2];
+                if (m.normals.size() >= (i + 1) * 3) {
+                    float n[3];
+                    transform(m.world, m.normals[i * 3], m.normals[i * 3 + 1],
+                              m.normals[i * 3 + 2], 0.f, n);
+                    const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+                    if (len > 1e-6f) {
+                        v.nx = n[0] / len;
+                        v.ny = n[1] / len;
+                        v.nz = n[2] / len;
+                    } else {
+                        v.ny = 1.f;
+                    }
+                } else {
+                    v.ny = 1.f;
+                }
+                if (m.uvs.size() >= (i + 1) * 2) {
+                    v.u = m.uvs[i * 2];
+                    v.v = m.uvs[i * 2 + 1];
+                }
+                // White: the albedo carries the colour, so nothing is tinted twice.
+                v.r = 1.f;
+                v.g = 1.f;
+                v.b = 1.f;
+                v.a = 1.f;
+            }
+            nm.indices = m.indices;
+
+            // The material's diffuse texture, decoded here and cached under a key the
+            // mesh can name. A file that cannot be decoded simply leaves the surface
+            // untextured rather than failing the load.
+            if (m.material_id >= 0 &&
+                m.material_id < static_cast<std::int32_t>(parsed.file.materials.size())) {
+                const auto& material =
+                    parsed.file.materials[static_cast<std::size_t>(m.material_id)];
+                std::string wanted = material.mappings.empty()
+                                         ? std::string{}
+                                         : material.mappings.front().texture;
+                for (const auto& mapping : material.mappings)
+                    if (mapping.slot == 0 && !mapping.texture.empty()) {
+                        wanted = mapping.texture;
+                        break;
+                    }
+                if (!wanted.empty()) {
+                    auto known = decodedTextures.find(wanted);
+                    if (known == decodedTextures.end()) {
+                        std::string key;
+                        for (const auto& texture : parsed.file.textures) {
+                            if (texture.name != wanted || texture.data.empty()) continue;
+                            const std::string_view bytes(
+                                reinterpret_cast<const char*>(texture.data.data()),
+                                texture.data.size());
+                            if (!ff::isDds(bytes)) break;
+                            const auto image = ff::decodeDds(bytes);
+                            if (!image.ok() || image.rgba.empty()) {
+                                std::fprintf(stderr, "[kn5] texture %s: %s\n",
+                                             wanted.c_str(), image.info.error.c_str());
+                                break;
+                            }
+                            char cacheKey[160];
+                            std::snprintf(cacheKey, sizeof(cacheKey), "kn5://%s/%s",
+                                          prefix.c_str(), wanted.c_str());
+                            if (!m_vulkanRenderer->addTextureFromMemory(
+                                    cacheKey, image.rgba, image.info.width, image.info.height))
+                                break;
+                            key = cacheKey;
+                            break;
+                        }
+                        known = decodedTextures.emplace(wanted, key).first;
+                    }
+                    if (!known->second.empty()) nm.albedoTexture = known->second;
+                }
+            }
+
+            // A room is looked at from inside it: faces that point away from the
+            // middle would be culled and the room would vanish. A car is looked at
+            // from outside, so it keeps the winding its author gave it.
+            if (faceInside) {
+                float centroid[3] = {0.f, 0.f, 0.f};
+                for (const NativeVertex& v : nm.vertices) {
+                    centroid[0] += v.px;
+                    centroid[1] += v.py;
+                    centroid[2] += v.pz;
+                }
+                if (count > 0) {
+                    centroid[0] /= static_cast<float>(count);
+                    centroid[1] /= static_cast<float>(count);
+                    centroid[2] /= static_cast<float>(count);
+                }
+                float facing = 0.f;
+                for (const NativeVertex& v : nm.vertices)
+                    facing += v.nx * (v.px - centroid[0]) + v.ny * (v.py - centroid[1]) +
+                              v.nz * (v.pz - centroid[2]);
+                if (facing > 0.f) {
+                    for (std::size_t k = 0; k + 2 < nm.indices.size(); k += 3)
+                        std::swap(nm.indices[k + 1], nm.indices[k + 2]);
+                    for (NativeVertex& v : nm.vertices) {
+                        v.nx = -v.nx;
+                        v.ny = -v.ny;
+                        v.nz = -v.nz;
+                    }
+                }
+            }
+
+            const std::string name = prefix + std::to_string(meshes);
+            m_vulkanRenderer->setMesh(name, nm);
+            const ks::ecs::Entity entity = scene().create();
+            if (entity != ks::ecs::kNullEntity) {
+                scene().emplace<ks::ecs::Name>(entity, ks::ecs::Name{name});
+                scene().emplace<ks::ecs::Transform>(entity);
+                scene().emplace<ks::ecs::MeshInstance>(entity, ks::ecs::MeshInstance{name});
+                if (entities) entities->push_back(entity);
+            }
+            for (const NativeVertex& v : nm.vertices) {
+                const float pos[3] = {v.px, v.py, v.pz};
+                for (int axis = 0; axis < 3; ++axis) {
+                    if (pos[axis] < bboxMin[axis]) bboxMin[axis] = pos[axis];
+                    if (pos[axis] > bboxMax[axis]) bboxMax[axis] = pos[axis];
+                }
+            }
+            ++meshes;
+        }
+        for (const auto& child : node.children) walk(child);
+    };
+    for (const auto& node : parsed.file.nodes) walk(node);
+
+    if (meshes == 0) return false;
+    if (outMin && outMax) {
+        for (int axis = 0; axis < 3; ++axis) {
+            outMin[axis] = bboxMin[axis];
+            outMax[axis] = bboxMax[axis];
+        }
+    }
+    if (outMeshes) *outMeshes = meshes;
+    return true;
+}
+
 bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
     if (!m_vulkanRenderer) return false;
     namespace fs = std::filesystem;
@@ -495,226 +725,88 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
     }
     if (model.empty()) return false;
 
-    // keep_texture_data: the hall's albedo lives inside the .kn5, and this
-    // path is not allowed to write it out, so it is decoded from memory.
-    ::ks::engine::fileformat::Kn5ParseOptions parseOptions;
-    parseOptions.keep_texture_data = true;
-    const auto parsed = ::ks::engine::fileformat::parseKn5File(model.string(), parseOptions);
-    if (!parsed.ok()) {
-        std::fprintf(stderr, "[showroom] %s unreadable: %s\n",
-                     model.filename().string().c_str(), parsed.error.c_str());
-        return false;
-    }
-
-    // What is on screen right now belongs to whatever was loaded before this
-    // showroom: the track scene, its meshes and its entities. A venue read from
-    // its own .kn5 replaces all of it, the same way loadTrackFolder() does for a
-    // baked hall. Without this the room is drawn inside the track and the
-    // player sees the track — which is exactly what happened.
+    // What is on screen right now belongs to whatever was loaded before this showroom:
+    // the track scene, its meshes and its entities. A venue read from its own .kn5
+    // replaces all of it, the same way loadTrackFolder() does for a baked hall.
     despawnSceneEntities();
     m_vulkanRenderer->clearStaticScene();
     m_spawnedSceneDir.clear();
 
-    // Row-vector convention, as the parser stores each node's accumulated
-    // transform: the same arithmetic the offline baker applies before writing.
-    auto transform = [](const std::array<float, 16>& m, float x, float y, float z,
-                        float w, float out[3]) {
-        out[0] = x * m[0] + y * m[4] + z * m[8] + w * m[12];
-        out[1] = x * m[1] + y * m[5] + z * m[9] + w * m[13];
-        out[2] = x * m[2] + y * m[6] + z * m[10] + w * m[14];
-    };
-
+    float mn[3] = {0.f, 0.f, 0.f};
+    float mx[3] = {0.f, 0.f, 0.f};
     int meshes = 0;
-    std::size_t vertices = 0;
-    std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
-    // Where the hall actually sits: an AC venue is not centred on the engine
-    // origin, so orbiting (0,0,0) can point the camera at empty space.
-    float bboxMin[3] = {1e9f, 1e9f, 1e9f};
-    float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
-    std::function<void(const ::ks::engine::fileformat::Kn5Node&)> walk =
-        [&](const ::ks::engine::fileformat::Kn5Node& node) {
-            const auto& m = node.mesh;
-            if (node.node_class == ::ks::engine::fileformat::Kn5NodeClass::mesh && node.has_mesh &&
-                !m.indices.empty() && m.positions.size() >= 3) {
-                const std::size_t count = m.positions.size() / 3;
-                NativeMesh nm;
-                nm.vertices.resize(count);
-                for (std::size_t i = 0; i < count; ++i) {
-                    NativeVertex& v = nm.vertices[i];
-                    float p[3];
-                    transform(m.world, m.positions[i * 3], m.positions[i * 3 + 1],
-                              m.positions[i * 3 + 2], 1.f, p);
-                    v.px = p[0];
-                    v.py = p[1];
-                    v.pz = p[2];
-                    if (m.normals.size() >= (i + 1) * 3) {
-                        float n[3];
-                        transform(m.world, m.normals[i * 3], m.normals[i * 3 + 1],
-                                  m.normals[i * 3 + 2], 0.f, n);
-                        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-                        if (len > 1e-6f) {
-                            v.nx = n[0] / len;
-                            v.ny = n[1] / len;
-                            v.nz = n[2] / len;
-                        } else {
-                            v.ny = 1.f;
-                        }
-                    } else {
-                        v.ny = 1.f;
-                    }
-                    if (m.uvs.size() >= (i + 1) * 2) {
-                        v.u = m.uvs[i * 2];
-                        v.v = m.uvs[i * 2 + 1];
-                    }
-                    v.r = 0.82f;
-                    v.g = 0.82f;
-                    v.b = 0.84f;
-                    v.a = 1.f;
-                }
-                nm.indices = m.indices;
+    if (!loadKn5Meshes(model.string(), "showroom_hall_", true, nullptr, mn, mx, &meshes)) {
+        std::fprintf(stderr, "[showroom] %s: no mesh in %s\n", cfg.id.c_str(),
+                     model.filename().string().c_str());
+        return false;
+    }
 
-                // The material's diffuse texture, decoded here and cached under a key
-                // the mesh can name: the room then renders with its own look instead of
-                // a flat shell, and still writes nothing.
-                if (m.material_id >= 0 &&
-                    m.material_id < static_cast<std::int32_t>(parsed.file.materials.size())) {
-                    const auto& material =
-                        parsed.file.materials[static_cast<std::size_t>(m.material_id)];
-                    std::string wanted = material.mappings.empty()
-                                             ? std::string{}
-                                             : material.mappings.front().texture;
-                    for (const auto& mapping : material.mappings)
-                        if (mapping.slot == 0 && !mapping.texture.empty()) {
-                            wanted = mapping.texture;
-                            break;
-                        }
-                    if (wanted.empty()) {
-                        std::fprintf(stderr, "[showroom] hall material %s has no texture\n",
-                                     material.name.c_str());
-                    } else {
-                        auto known = decodedTextures.find(wanted);
-                        if (known == decodedTextures.end()) {
-                            std::string key;
-                            const ::ks::engine::fileformat::Kn5Texture* source = nullptr;
-                            for (const auto& texture : parsed.file.textures)
-                                if (texture.name == wanted) {
-                                    source = &texture;
-                                    break;
-                                }
-                            if (!source) {
-                                std::fprintf(stderr, "[showroom] hall texture %s not in the file\n",
-                                             wanted.c_str());
-                            } else if (source->data.empty()) {
-                                std::fprintf(stderr, "[showroom] hall texture %s has no payload\n",
-                                             wanted.c_str());
-                            } else {
-                                const std::string_view bytes(
-                                    reinterpret_cast<const char*>(source->data.data()),
-                                    source->data.size());
-                                if (!::ks::engine::fileformat::isDds(bytes)) {
-                                    std::fprintf(stderr, "[showroom] hall texture %s is not DDS\n",
-                                                 wanted.c_str());
-                                } else {
-                                    const auto image =
-                                        ::ks::engine::fileformat::decodeDds(bytes);
-                                    if (!image.ok() || image.rgba.empty()) {
-                                        std::fprintf(stderr,
-                                                     "[showroom] hall texture %s decode failed: %s\n",
-                                                     wanted.c_str(),
-                                                     image.info.error.c_str());
-                                    } else {
-                                        char cacheKey[128];
-                                        std::snprintf(cacheKey, sizeof(cacheKey), "showroom://%s/%s",
-                                                      cfg.id.c_str(), wanted.c_str());
-                                        if (m_vulkanRenderer->addTextureFromMemory(
-                                                cacheKey, image.rgba, image.info.width,
-                                                image.info.height)) {
-                                            key = cacheKey;
-                                            std::fprintf(stderr,
-                                                         "[showroom] hall albedo %s decoded in memory (%dx%d, no file)\n",
-                                                         wanted.c_str(), image.info.width,
-                                                         image.info.height);
-                                        } else {
-                                            std::fprintf(stderr,
-                                                         "[showroom] hall albedo %s upload failed\n",
-                                                         wanted.c_str());
-                                        }
-                                    }
-                                }
-                            }
-                            known = decodedTextures.emplace(wanted, key).first;
-                        }
-                        if (!known->second.empty()) nm.albedoTexture = known->second;
-                    }
-                }
+    const float sizeX = mx[0] - mn[0];
+    const float sizeY = mx[1] - mn[1];
+    const float sizeZ = mx[2] - mn[2];
+    const float radius =
+        0.5f * std::sqrt(sizeX * sizeX + sizeY * sizeY + sizeZ * sizeZ);
+    // The camera frames the room it actually loaded: its own centre, on its own
+    // floor, never further out than half the radius.
+    m_showroom.setHallBounds((mn[0] + mx[0]) * 0.5f, (mn[2] + mx[2]) * 0.5f, mn[1], radius);
+    std::fprintf(stderr, "[showroom] hall read from %s: %d mesh(es), no files written\n",
+                 model.filename().string().c_str(), meshes);
+    std::fprintf(stderr, "[showroom] hall bounds x[%.1f..%.1f] y[%.1f..%.1f] z[%.1f..%.1f] radius %.1f\n",
+                 mn[0], mx[0], mn[1], mx[1], mn[2], mx[2], radius);
+    // The hall owned the static scene for a moment: put the car back on it.
+    if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
+    return true;
+}
 
-                char name[64];
-                std::snprintf(name, sizeof(name), "showroom_hall_%d", meshes);
-                m_vulkanRenderer->setMesh(name, nm);
-                const ks::ecs::Entity entity = scene().create();
-                if (entity != ks::ecs::kNullEntity) {
-                    scene().emplace<ks::ecs::Name>(entity, ks::ecs::Name{name});
-                    scene().emplace<ks::ecs::Transform>(entity);
-                    scene().emplace<ks::ecs::MeshInstance>(entity, ks::ecs::MeshInstance{name});
-                }
-                // A hall is looked at from inside it. Faces pointing away
-                // from the mesh's own middle would be culled away and the room
-                // would be invisible from the only place the camera stands:
-                // flip winding and normals so the inside is what is drawn.
-                float centroid[3] = {0.f, 0.f, 0.f};
-                for (const NativeVertex& v : nm.vertices) {
-                    centroid[0] += v.px;
-                    centroid[1] += v.py;
-                    centroid[2] += v.pz;
-                }
-                if (count > 0) {
-                    centroid[0] /= static_cast<float>(count);
-                    centroid[1] /= static_cast<float>(count);
-                    centroid[2] /= static_cast<float>(count);
-                }
-                float facing = 0.f;
-                for (const NativeVertex& v : nm.vertices) {
-                    facing += v.nx * (v.px - centroid[0]) + v.ny * (v.py - centroid[1]) +
-                              v.nz * (v.pz - centroid[2]);
-                }
-                if (facing > 0.f) {
-                    for (std::size_t i = 0; i + 2 < nm.indices.size(); i += 3)
-                        std::swap(nm.indices[i + 1], nm.indices[i + 2]);
-                    for (NativeVertex& v : nm.vertices) {
-                        v.nx = -v.nx;
-                        v.ny = -v.ny;
-                        v.nz = -v.nz;
-                    }
-                }
-                for (const NativeVertex& v : nm.vertices) {
-                    const float p[3] = {v.px, v.py, v.pz};
-                    for (int axis = 0; axis < 3; ++axis) {
-                        if (p[axis] < bboxMin[axis]) bboxMin[axis] = p[axis];
-                        if (p[axis] > bboxMax[axis]) bboxMax[axis] = p[axis];
-                    }
-                }
-                vertices += count;
-                ++meshes;
-            }
-            for (const auto& child : node.children) walk(child);
-        };
-    for (const auto& root : parsed.file.nodes) walk(root);
-    if (meshes == 0) return false;
-    const vec3 centre{(bboxMin[0] + bboxMax[0]) * 0.5f, bboxMin[1],
-                      (bboxMin[2] + bboxMax[2]) * 0.5f};
-    const float sizeX = bboxMax[0] - bboxMin[0];
-    const float sizeY = bboxMax[1] - bboxMin[1];
-    const float sizeZ = bboxMax[2] - bboxMin[2];
-    const float radius = 0.5f * std::sqrt(sizeX * sizeX + sizeY * sizeY + sizeZ * sizeZ);
-    m_showroom.setHallBounds(centre.x, centre.z, bboxMin[1], radius);
+bool SimulationLoop::loadCarMeshesFromKn5(const std::string& carDirectory) {
+    if (!m_vulkanRenderer || carDirectory.empty()) return false;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    // The car's own model: the file named like its folder, otherwise the largest
+    // .kn5 that is not one of the distance copies.
+    // The car's own model: the file named like its folder, otherwise the biggest
+    // one. A LOD copy is only skipped when something else is available — some
+    // folders ship nothing but LODs, and a LOD is still the car.
+    const std::string stem = fs::path(carDirectory).filename().string();
+    fs::path model;
+    fs::path bestLod;
+    fs::path bestAny;
+    uintmax_t bestLodSize = 0;
+    uintmax_t bestAnySize = 0;
+    for (const auto& entry : fs::directory_iterator(carDirectory, ec)) {
+        if (entry.path().extension() != ".kn5") continue;
+        const std::string name = entry.path().stem().string();
+        const uintmax_t size = entry.file_size(ec);
+        if (name == stem) {
+            model = entry.path();
+            break;
+        }
+        const bool lod = name.find("LOD") != std::string::npos ||
+                         name.find("lod") != std::string::npos;
+        if (size > bestAnySize) {
+            bestAnySize = size;
+            bestAny = entry.path();
+        }
+        if (!lod && size > bestLodSize) {
+            bestLodSize = size;
+            bestLod = entry.path();
+        }
+    }
+    if (model.empty()) model = !bestLod.empty() ? bestLod : bestAny;
+    if (model.empty()) {
+        std::fprintf(stderr, "[kn5] no model in %s\n", carDirectory.c_str());
+        return false;
+    }
+
+    float mn[3] = {0.f, 0.f, 0.f};
+    float mx[3] = {0.f, 0.f, 0.f};
+    int meshes = 0;
+    if (!loadKn5Meshes(model.string(), "car_model_", false, &m_carVisualEntities, mn, mx,
+                       &meshes))
+        return false;
     std::fprintf(stderr,
-                 "[showroom] hall read from %s: %d mesh(es), %zu vertices, no files written\n",
-                 model.filename().string().c_str(), meshes, vertices);
-    std::fprintf(stderr,
-                 "[showroom] hall bounds x[%.1f..%.1f] y[%.1f..%.1f] z[%.1f..%.1f] "
-                 "centre(%.1f, %.1f, %.1f) radius %.1f\n",
-                 bboxMin[0], bboxMax[0], bboxMin[1], bboxMax[1], bboxMin[2], bboxMax[2],
-                 centre.x, centre.y, centre.z, radius);
+                 "[scene] car visual: %d mesh(es) from %s, read in memory\n", meshes,
+                 model.filename().string().c_str());
     return true;
 }
 
@@ -1526,6 +1618,20 @@ void SimulationLoop::publishSharedMemory() {
 }
 
 void SimulationLoop::updateWeather(float dt) {
+    // A showroom comes with its own light. The file describes cold daylight over
+    // a concrete yard; without this the venue inherits whatever weather the sim
+    // had, which is why a sunny room looked like dusk.
+    if (m_showroom.active() && m_vulkanRenderer) {
+        const ShowroomConfig& cfg = m_showroom.config();
+        DirectionalLight light;
+        light.direction = {cfg.sunDirection[0], cfg.sunDirection[1], cfg.sunDirection[2]};
+        light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
+        light.intensity = cfg.sunIntensity;
+        m_vulkanRenderer->setSun(light);
+        m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
+                                 0.0002f, 0.004f);
+        return;
+    }
     // Roadmap 2.1 (P2.8): evolve the preset first — rain soaks the track,
     // dry air dries it (dt == 0 while paused leaves the state untouched) —
     // then mirror the result so visuals, audio and TrackSurface all read
@@ -2039,6 +2145,11 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
                      m_carVisualEntities.size(), baked.c_str(), suffix.c_str());
         return;
     }
+    // No bake, but the car's own .kn5 is right there: read it in memory, materials
+    // included, so the showroom shows the car instead of a box.
+    // A bake folder may exist and still yield no mesh; what matters is whether any
+    // car visual was actually created.
+    if (m_carVisualEntities.empty() && loadCarMeshesFromKn5(m_carDir)) return;
     // Solid placeholder box (ROADMAP 1.2 "placeholder solido"): ~4.4x1.8 m
     // body spanning y -0.40..1.00 in vehicle-local space, so the car is
     // visible even when no visual asset exists.
