@@ -1,3 +1,4 @@
+#include "engine/Graphics/MaterialPresets.h"
 #include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
 /**
  * SimulationLoop.cpp — std-only
@@ -697,45 +698,23 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     nm.roughness = std::sqrt(2.0f / (exponent + 2.0f));
                 }
                 // What the surface is, from the shader and material names the
-                // file ships (a 499P alone uses twelve of them): damage_dirt is
-                // the painted bodywork shader, tyres/windscreen/glass name
-                // themselves, rims and discs are the bare-metal parts.
-                const std::string shader = lower(material.shader);
-                const std::string matName = lower(material.name);
-                auto mentions = [](const std::string& text, const char* needle) {
-                    return text.find(needle) != std::string::npos;
-                };
-                const bool isPaint = mentions(shader, "damage_dirt") ||
-                                     mentions(shader, "carpaint") ||
-                                     mentions(matName, "paint");
-                const bool isMetal = mentions(shader, "chrome") ||
-                                     mentions(shader, "metal") ||
-                                     mentions(shader, "brakedisc") ||
-                                     mentions(matName, "rim") ||
-                                     mentions(matName, "disc");
-                const bool isGlass = mentions(shader, "windscreen") ||
-                                     mentions(shader, "glass");
-                const bool isRubber = mentions(shader, "tyres") ||
-                                      mentions(matName, "tyre");
-                if (isPaint) {
-                    // Lacquered bodywork: a clear coat over the base, and the
-                    // base glossier than the raw exponent suggests.
-                    nm.clearcoat = 1.0f;
-                    nm.roughness = std::min(nm.roughness, 0.14f);
-                    ++painted;
-                } else if (isMetal) {
-                    nm.metalness = 0.9f;
-                    nm.roughness = std::min(nm.roughness, 0.28f);
+                // file ships (a 499P alone uses twelve of them). The preset carries
+                // the roughness/metalness/clearcoat a chrome trim, a tyre or a
+                // carbon panel should have, and the authored ksSpecularEXP only
+                // moves the roughness as far as that preset allows
+                // (engine/Graphics/MaterialPresets.h). Without this every surface
+                // of the car read as the same flat dielectric.
+                const graphics::MaterialPreset& preset =
+                    graphics::resolveMaterialPreset(material.shader, material.name);
+                const graphics::MaterialSurface surface = graphics::applyMaterialPreset(preset, nm.roughness);
+                nm.roughness = surface.roughness;
+                nm.metalness = surface.metalness;
+                nm.clearcoat = surface.clearcoat;
+                if (preset.id == graphics::MaterialPresetId::Paint) ++painted;
+                if (preset.id == graphics::MaterialPresetId::BrushedMetal ||
+                    preset.id == graphics::MaterialPresetId::Chrome ||
+                    preset.id == graphics::MaterialPresetId::BrakeDisc)
                     ++metalSurfaces;
-                } else if (isGlass) {
-                    nm.roughness = std::min(nm.roughness, 0.04f);
-                    nm.metalness = 0.0f;
-                } else if (isRubber) {
-                    // Rubber is matte: the exponent authored on a tyre is not
-                    // a glossy one, and clamping keeps the tread from shining.
-                    nm.roughness = std::max(nm.roughness, 0.85f);
-                    nm.metalness = 0.0f;
-                }
 
                 // Cut-outs: the file flags them either as alpha_tested
                 // (grilles, outlines) or as a blended surface (glass,

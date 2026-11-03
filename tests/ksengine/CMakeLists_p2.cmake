@@ -303,3 +303,13 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ppfilter_preset_test.cpp")
     add_test(NAME ppfilter_preset_test COMMAND ppfilter_preset_test)
     set_tests_properties(ppfilter_preset_test PROPERTIES TIMEOUT 60)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_preset_test.cpp")
+    # Material preset table (engine/Graphics/MaterialPresets.h): header only,
+    # so the test needs nothing but the include path.
+    add_executable(material_preset_test material_preset_test.cpp)
+    target_include_directories(material_preset_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    add_test(NAME material_preset_test COMMAND material_preset_test)
+    set_tests_properties(material_preset_test PROPERTIES TIMEOUT 60)
+endif()
