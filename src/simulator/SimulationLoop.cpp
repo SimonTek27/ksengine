@@ -1,3 +1,4 @@
+#include <set>
 #include "engine/Graphics/MaterialPresets.h"
 #include "engine/Graphics/MaterialOverrides.h"
 #include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
@@ -589,6 +590,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     // the presets alone decide, which is what every car gets by default.
     graphics::MaterialOverrides overrides;
     int overridden = 0;
+    // KS_MATERIAL_DEBUG lists each material once with the preset it landed
+    // on, which is the only way to see why a surface looks the way it does.
+    const bool debugMaterials = std::getenv("KS_MATERIAL_DEBUG") != nullptr;
+    std::set<std::string> printedMaterials;
     {
         std::error_code ec;
         std::string overridePath;
@@ -742,6 +747,14 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 const graphics::MaterialPresetId presetId =
                     overrides.presetFor(material.shader, material.name);
                 if (overrides.findEffective(material.name) != nullptr) ++overridden;
+                if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
+                    std::printf("[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f%s",
+                                material.name.c_str(), material.shader.c_str(),
+                                graphics::materialPreset(presetId).name, nm.roughness, nm.metalness,
+                                nm.clearcoat,
+                                overrides.findEffective(material.name) != nullptr ? " (override)" : "");
+                    std::putchar(10);
+                }
                 if (presetId == graphics::MaterialPresetId::Paint) ++painted;
                 if (presetId == graphics::MaterialPresetId::BrushedMetal ||
                     presetId == graphics::MaterialPresetId::Chrome ||

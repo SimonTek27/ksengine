@@ -12,6 +12,7 @@
 #include "ShowroomConfig.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 namespace ks {
@@ -19,12 +20,29 @@ namespace sim {
 
 class ShowroomScene {
 public:
+    /** A fixed viewpoint for judging materials up close. The turntable is
+     *  right for the menu and useless for inspecting a rim, so
+     *  KS_SHOWROOM_VIEW=side|wheel|front|rear parks the camera on the car
+     *  and stops the orbit. */
+    enum class View { Turntable, Side, Wheel, Front, Rear };
+
+    static View viewFromEnvironment() {
+        const char* wanted = std::getenv("KS_SHOWROOM_VIEW");
+        if (wanted == nullptr || *wanted == 0) return View::Turntable;
+        const std::string name = wanted;
+        if (name == "side") return View::Side;
+        if (name == "wheel") return View::Wheel;
+        if (name == "front") return View::Front;
+        if (name == "rear") return View::Rear;
+        return View::Turntable;
+    }
     /** Load `directory/showroom.json` and start the turntable. */
     bool open(const std::string& directory, std::string* error = nullptr) {
         ShowroomConfig config = loadShowroom(directory, error);
         if (!config.valid) return false;
         m_config = std::move(config);
         m_angleDeg = m_config.cameraAngleDeg;
+        m_view = viewFromEnvironment();
         m_active = true;
         return true;
     }
@@ -51,7 +69,9 @@ public:
      *  A showroom with rotation 0 stands still. */
     void apply(float dt, CameraController& camera) {
         if (!m_active) return;
-        if (dt > 0.f) {
+        // A fixed view does not orbit: the point of parking on the car is to
+        // look at the same surface between two runs.
+        if (dt > 0.f && m_view == View::Turntable) {
             m_angleDeg += m_config.cameraRotationDegPerSec * dt;
             m_angleDeg = std::fmod(m_angleDeg, 360.f);
             if (m_angleDeg < 0.f) m_angleDeg += 360.f;
@@ -72,29 +92,58 @@ public:
     /** How far out the camera sits: what the file asked for, unless the hall
      *  is big enough to need more room than that. */
     float distance() const {
+        if (m_view == View::Wheel) return 2.1f;
+        if (m_view == View::Side) return 4.0f;
+        if (m_view == View::Front || m_view == View::Rear) return 4.4f;
         // Never so far that the camera leaves the room: a 63 m dome is a
         // background, not a place to stand outside of.
         const float cap = m_hallRadius > 1.f ? m_hallRadius * 0.5f : m_config.cameraDistance;
         return cap < m_config.cameraDistance ? cap : m_config.cameraDistance;
     }
 
+    float viewAngleDeg() const {
+        switch (m_view) {
+        case View::Side: return 90.f;
+        case View::Wheel: return 62.f;
+        case View::Front: return 0.f;
+        case View::Rear: return 180.f;
+        default: return m_angleDeg;
+        }
+    }
+
+    float viewHeight() const {
+        switch (m_view) {
+        case View::Wheel: return 0.55f;
+        case View::Side: return 0.85f;
+        case View::Front: return 0.95f;
+        case View::Rear: return 0.95f;
+        default: return m_config.cameraHeight;
+        }
+    }
+
+    float viewTargetHeight() const {
+        // The wheel view aims at the arch, not at the roof line.
+        return m_view == View::Wheel ? 0.32f : m_config.lookAtHeight;
+    }
+
     vec3 position() const {
-        const float radians = m_angleDeg * (3.14159265f / 180.f);
+        const float radians = viewAngleDeg() * (3.14159265f / 180.f);
         const float d = distance();
         return {m_hallCentre.x + std::sin(radians) * d,
-                m_hallFloor + m_config.cameraHeight,
+                m_hallFloor + viewHeight(),
                 m_hallCentre.z + std::cos(radians) * d};
     }
 
     /** What the camera looks at: the middle of the room, at the car's height. */
     vec3 target() const {
-        return {m_hallCentre.x, m_hallFloor + m_config.lookAtHeight, m_hallCentre.z};
+        return {m_hallCentre.x, m_hallFloor + viewTargetHeight(), m_hallCentre.z};
     }
 
     float angleDeg() const { return m_angleDeg; }
 
 private:
     ShowroomConfig m_config;
+    View m_view = View::Turntable;
     float m_angleDeg = 0.f;
     bool m_active = false;
     vec3 m_hallCentre{0.f, 0.f, 0.f};
