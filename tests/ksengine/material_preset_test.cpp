@@ -6,6 +6,7 @@
 // unique), and that the authored ksSpecularEXP only moves the roughness as far
 // as each preset allows.
 
+#include "engine/Graphics/MaterialOverrides.h"
 #include "engine/Graphics/MaterialPresets.h"
 
 #include <cmath>
@@ -113,6 +114,29 @@ int main() {
     checkNear(applyMaterialPreset(paint, 7.0f).roughness, 1.0f * paint.authoredWeight +
                                                               paint.roughness * (1.0f - paint.authoredWeight),
               1e-4, "an absurd exponent is clamped to one");
+
+    // --- per-car overrides ------------------------------------------------
+    MaterialOverrides overrides;
+    const std::string json =
+        R"json({"schema": "ksengine.material_presets/1", "materials": {"MAIN_PAINT": {"preset": "chrome", "roughness": 0.31}, "TYRES": {"metalness": 0.5}}})json";
+    std::string why;
+    check(overrides.parse(json, &why), "a small override file parses");
+    check(overrides.size() == 2, "every entry is kept");
+    const MaterialOverrideEntry* paintedEntry = overrides.find("main_paint");
+    check(paintedEntry != nullptr, "lookup is case-insensitive");
+    check(paintedEntry != nullptr && paintedEntry->hasPreset &&
+              paintedEntry->preset == MaterialPresetId::Chrome,
+          "an override can rename the preset");
+    const MaterialSurface overridden =
+        overrides.resolve("ksPerPixelMultiMap_damage_dirt", "MAIN_PAINT", 0.6f);
+    checkNear(overridden.roughness, 0.31, 1e-5, "a pinned roughness wins");
+    checkNear(overridden.metalness, 1.0, 1e-5, "the renamed preset supplies metalness");
+    const MaterialSurface untouched =
+        overrides.resolve("ksPerPixelMultiMap_damage_dirt", "EXT", 0.6f);
+    check(untouched.roughness > 0.09f, "a material with no entry keeps its preset");
+    MaterialOverrides broken;
+    check(!broken.parse("not json", nullptr), "garbage is rejected");
+    check(broken.empty(), "a rejected file leaves nothing behind");
 
     if (g_failures == 0) std::printf("material_preset_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;

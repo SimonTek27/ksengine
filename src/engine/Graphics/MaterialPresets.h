@@ -87,6 +87,20 @@ inline std::string materialLower(const std::string& text) {
     return out;
 }
 
+inline float materialClamp(float value, float low, float high) {
+    return value < low ? low : (value > high ? high : value);
+}
+
+/** Preset by its name, nullptr when the string names nothing known. */
+inline const MaterialPreset* materialPresetByName(const std::string& presetName) {
+    std::size_t count = 0;
+    const MaterialPreset* table = materialPresetTable(count);
+    const std::string wanted = materialLower(presetName);
+    for (std::size_t i = 0; i < count; ++i)
+        if (wanted == table[i].name) return &table[i];
+    return nullptr;
+}
+
 inline bool materialMentions(const std::string& text, const char* needle) {
     return text.find(needle) != std::string::npos;
 }

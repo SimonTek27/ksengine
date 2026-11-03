@@ -1,4 +1,5 @@
 #include "engine/Graphics/MaterialPresets.h"
+#include "engine/Graphics/MaterialOverrides.h"
 #include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
 /**
  * SimulationLoop.cpp — std-only
@@ -583,6 +584,35 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         return -1.0f;
     };
 
+    // Per-car material overrides: material_presets.json next to the model,
+    // or the file KS_MATERIAL_PRESETS points at. Absent (or broken) means
+    // the presets alone decide, which is what every car gets by default.
+    graphics::MaterialOverrides overrides;
+    int overridden = 0;
+    {
+        std::error_code ec;
+        std::string overridePath;
+        if (const char* env = std::getenv("KS_MATERIAL_PRESETS");
+            env != nullptr && *env != 0)
+            overridePath = env;
+        else {
+            const std::filesystem::path sibling =
+                std::filesystem::path(modelPath).parent_path() / "material_presets.json";
+            if (std::filesystem::is_regular_file(sibling, ec)) overridePath = sibling.string();
+        }
+        if (!overridePath.empty()) {
+            std::string why;
+            if (overrides.loadFile(overridePath, &why)) {
+                std::fprintf(stderr, "[materials] %zu override(s) from %s",
+                             overrides.size(), overridePath.c_str());
+            } else {
+                std::fprintf(stderr, "[materials] %s ignored: %s",
+                             overridePath.c_str(), why.c_str());
+            }
+            std::putchar(10);
+        }
+    }
+
     // Decodes a KN5 texture once and returns the key the mesh names. Empty
     // when the file does not carry it, which leaves the surface untextured
     // rather than failing the whole load.
@@ -704,16 +734,18 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 // moves the roughness as far as that preset allows
                 // (engine/Graphics/MaterialPresets.h). Without this every surface
                 // of the car read as the same flat dielectric.
-                const graphics::MaterialPreset& preset =
-                    graphics::resolveMaterialPreset(material.shader, material.name);
-                const graphics::MaterialSurface surface = graphics::applyMaterialPreset(preset, nm.roughness);
+                const graphics::MaterialSurface surface =
+                    overrides.resolve(material.shader, material.name, nm.roughness);
                 nm.roughness = surface.roughness;
                 nm.metalness = surface.metalness;
                 nm.clearcoat = surface.clearcoat;
-                if (preset.id == graphics::MaterialPresetId::Paint) ++painted;
-                if (preset.id == graphics::MaterialPresetId::BrushedMetal ||
-                    preset.id == graphics::MaterialPresetId::Chrome ||
-                    preset.id == graphics::MaterialPresetId::BrakeDisc)
+                const graphics::MaterialPresetId presetId =
+                    overrides.presetFor(material.shader, material.name);
+                if (overrides.find(material.name) != nullptr) ++overridden;
+                if (presetId == graphics::MaterialPresetId::Paint) ++painted;
+                if (presetId == graphics::MaterialPresetId::BrushedMetal ||
+                    presetId == graphics::MaterialPresetId::Chrome ||
+                    presetId == graphics::MaterialPresetId::BrakeDisc)
                     ++metalSurfaces;
 
                 // Cut-outs: the file flags them either as alpha_tested
@@ -802,6 +834,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
             std::filesystem::path(modelPath).filename().string().c_str(), meshes,
             mappedNormal, painted, metalSurfaces, cutouts, seeThrough, selfLit);
 std::putchar(10);
+        if (overridden > 0) {
+            std::printf("  %d material override(s) applied", overridden);
+            std::putchar(10);
+        }
     if (outMin && outMax) {
         for (int axis = 0; axis < 3; ++axis) {
             outMin[axis] = bboxMin[axis];
