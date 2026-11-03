@@ -436,27 +436,94 @@ void SimulationLoop::loadShowroomAudio() {
 void SimulationLoop::loadShowroomHall() {
     if (!m_showroom.active()) return;
     const ShowroomConfig& cfg = m_showroom.config();
-    if (cfg.model.empty()) return;
     namespace fs = std::filesystem;
-    const fs::path model = fs::path(cfg.directory) / cfg.model;
-    if (!fs::is_regular_file(model)) {
-        std::fprintf(stderr, "[showroom] %s: no %s in the folder, keeping the current scene\n",
-                     cfg.id.c_str(), cfg.model.c_str());
+
+    if (!cfg.model.empty()) {
+        const fs::path model = fs::path(cfg.directory) / cfg.model;
+        if (!fs::is_regular_file(model)) {
+            std::fprintf(stderr, "[showroom] %s: no %s in the folder\n",
+                         cfg.id.c_str(), cfg.model.c_str());
+        } else {
+            // The hall is content like a circuit: the loader scans the folder
+            // for .kn5 and keeps the largest, which is the venue rather than a
+            // decoration. It also stamps track metadata and the menu's TRACK
+            // row, and those belong to the circuit the player will actually
+            // drive, so both are put back: only the meshes stay in the scene.
+            const std::string previousLabel = m_ui.menu().trackName();
+            if (loadTrackFolder(cfg.directory)) {
+                m_trackData = SimTrackData{};
+                m_trackLoaded = false;
+                m_ui.menu().setTrackName(previousLabel);
+                // The hall load swapped the static scene: the car has to be put
+                // back on it.
+                if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
+                std::printf("[showroom] hall %s loaded\n", cfg.model.c_str());
+                // A .kn5 without a bake leaves the scene as it was, and the
+                // renderer only draws baked meshes: only the file on disk is
+                // not enough to keep the player from staring at a black frame.
+                if (!ks::sim::findBakedManifestDir(cfg.directory).empty()) return;
+            }
+        }
+    }
+    buildShowroomVenue();
+}
+
+void SimulationLoop::buildShowroomVenue() {
+    if (!m_vulkanRenderer) return; // headless: nothing to put on screen
+    const ShowroomConfig& cfg = m_showroom.config();
+    // The room has to hold the turntable whatever distance the file asked for,
+    // or a wide orbit ends up looking at a wall from the wrong side.
+    const float halfWidth = cfg.cameraDistance * 2.5f > 12.f ? cfg.cameraDistance * 2.5f : 12.f;
+    const float height = cfg.cameraHeight * 3.f > 7.f ? cfg.cameraHeight * 3.f : 7.f;
+    const ks::sim::ShowroomVenue venue = ks::sim::makeShowroomVenue(halfWidth, height);
+    NativeMesh nm;
+    static_assert(sizeof(ks::sim::SolidBoxVertex) == sizeof(NativeVertex),
+                  "SolidBoxVertex must be memcpy-compatible with NativeVertex");
+    nm.vertices.resize(venue.vertices.size());
+    std::memcpy(nm.vertices.data(), venue.vertices.data(),
+                venue.vertices.size() * sizeof(ks::sim::SolidBoxVertex));
+    nm.indices = venue.indices;
+    m_vulkanRenderer->clearStaticScene();
+    // The renderer exposes world-space geometry only through a baked folder:
+    // its setStaticMesh() is declared but never linked. So the room is written
+    // in the same "NMSH" form the baker produces, into the temp directory, and
+    // loaded from there: no content folder is touched and no bake is needed.
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "ksim_showroom_venue";
+    if (ec) {
+        std::fprintf(stderr, "[showroom] venue: no temp directory\n");
         return;
     }
-    // The hall is content like a circuit: the loader scans the folder for .kn5
-    // and keeps the largest, which is the venue rather than a decoration. It
-    // also stamps track metadata and the menu's TRACK row, and those belong to
-    // the circuit the player will actually drive, so both are put back: only
-    // the meshes stay in the scene.
-    const std::string previousLabel = m_ui.menu().trackName();
-    if (!loadTrackFolder(cfg.directory)) return;
-    m_trackData = SimTrackData{};
-    m_trackLoaded = false;
-    m_ui.menu().setTrackName(previousLabel);
-    // The hall load swapped the static scene: the car has to be put back on it.
-    if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
-    std::printf("[showroom] hall %s loaded\n", cfg.model.c_str());
+    fs::create_directories(dir, ec);
+    const uint32_t vcount = static_cast<uint32_t>(nm.vertices.size());
+    const uint32_t icount = static_cast<uint32_t>(nm.indices.size());
+    {
+        std::ofstream meshFile(dir / "showroom_venue.nmsh", std::ios::binary);
+        if (!meshFile) {
+            std::fprintf(stderr, "[showroom] venue: cannot write to %s\n", dir.string().c_str());
+            return;
+        }
+        meshFile.write("NMSH", 4);
+        meshFile.write(reinterpret_cast<const char*>(&vcount), 4);
+        meshFile.write(reinterpret_cast<const char*>(&icount), 4);
+        meshFile.write(reinterpret_cast<const char*>(nm.vertices.data()),
+                       static_cast<std::streamsize>(vcount * sizeof(NativeVertex)));
+        meshFile.write(reinterpret_cast<const char*>(nm.indices.data()),
+                       static_cast<std::streamsize>(icount * sizeof(uint32_t)));
+    }
+    {
+        std::ofstream manifest(dir / "manifest.txt", std::ios::binary);
+        manifest << "showroom_venue\n";
+    }
+    if (m_vulkanRenderer->loadMeshesFromManifest(dir.string()) <= 0) {
+        std::fprintf(stderr, "[showroom] venue: the room did not load from %s\n",
+                     dir.string().c_str());
+        return;
+    }
+    m_spawnedSceneDir.clear();
+    std::fprintf(stderr, "[showroom] no baked hall: venue built in code (%.0f x %.0f m, %.0f m high)\n",
+                 halfWidth * 2.f, halfWidth * 2.f, height);
 }
 
 void SimulationLoop::closeShowroom() {

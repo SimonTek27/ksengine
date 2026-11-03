@@ -8,6 +8,7 @@
  * path out of the folder) and the camera maths the game runs at startup.
  */
 #include "KsTest.h"
+#include "simulator/SceneAssets.h"
 #include "simulator/ShowroomConfig.h"
 #include "simulator/ShowroomScene.h"
 
@@ -248,6 +249,24 @@ int main() {
         KS_CHECK(cfg.valid);
         KS_CHECK(cfg.name == "Industrial");
         KS_CHECK(cfg.cameraDistance > 0.f);
+    }
+
+    // ---------------------------------------------------------------------
+    // The venue built in code: an unbaked showroom still has to show a room,
+    // and every face has to look inward or the camera ends up inside a wall.
+    // ---------------------------------------------------------------------
+    {
+        const ks::sim::ShowroomVenue venue = ks::sim::makeShowroomVenue(12.f, 7.f);
+        KS_CHECK(venue.vertices.size() == 24); // six quads: floor, ceiling, four walls
+        KS_CHECK(venue.indices.size() == 36);
+        for (const auto& v : venue.vertices) {
+            // Vector from the vertex back to the middle of the room.
+            const float toCentreX = -v.px;
+            const float toCentreY = 3.5f - v.py;
+            const float toCentreZ = -v.pz;
+            const float dot = v.nx * toCentreX + v.ny * toCentreY + v.nz * toCentreZ;
+            KS_CHECK(dot > 0.f);
+        }
     }
 
     return KS_TEST_RESULT("showroom_test");

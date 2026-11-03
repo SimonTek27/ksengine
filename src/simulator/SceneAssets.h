@@ -107,4 +107,71 @@ inline std::string findBakedManifestDir(const std::string& contentDir) {
     return std::string();
 }
 
+
+// A room to stand the car in when nothing is baked for the showroom: a floor,
+// four walls and a ceiling, wound so every face looks inward.
+//
+// Without it an unbaked showroom is a menu drawn over a black frame, which is
+// exactly what an empty or freshly copied showroom folder produces: the .kn5 is
+// there, the bake is not, and the renderer only draws baked meshes. A venue in
+// code costs a few dozen vertices and makes the screen never empty.
+struct ShowroomVenue {
+    std::vector<SolidBoxVertex> vertices;
+    std::vector<uint32_t> indices;
+};
+
+inline ShowroomVenue makeShowroomVenue(float halfWidth, float height,
+                                       float r = 0.20f, float g = 0.21f, float b = 0.24f) {
+    ShowroomVenue venue;
+    auto quad = [&](const float ptsIn[4][3], const float n[3]) {
+        const uint32_t base = static_cast<uint32_t>(venue.vertices.size());
+        for (int i = 0; i < 4; ++i) {
+            SolidBoxVertex sv;
+            sv.px = ptsIn[i][0]; sv.py = ptsIn[i][1]; sv.pz = ptsIn[i][2];
+            sv.nx = n[0]; sv.ny = n[1]; sv.nz = n[2];
+            sv.u = (i == 1 || i == 2) ? 1.f : 0.f;
+            sv.v = (i >= 2) ? 1.f : 0.f;
+            sv.r = r; sv.g = g; sv.b = b; sv.a = 1.f;
+            venue.vertices.push_back(sv);
+        }
+        for (const uint32_t i : {0u, 1u, 2u, 0u, 2u, 3u})
+            venue.indices.push_back(base + i);
+    };
+    // The winding of each face is copied from makeSolidBox(), which is already
+    // the one the forward pipeline culls against; the normals point inside.
+    const float W = halfWidth;
+    const float H = height;
+    {
+        const float n[3] = {0, 1, 0}; // floor
+        const float p[4][3] = {{-W, 0.f, -W}, {-W, 0.f, W}, {W, 0.f, W}, {W, 0.f, -W}};
+        quad(p, n);
+    }
+    {
+        const float n[3] = {0, -1, 0}; // ceiling
+        const float p[4][3] = {{-W, H, W}, {W, H, W}, {W, H, -W}, {-W, H, -W}};
+        quad(p, n);
+    }
+    {
+        const float n[3] = {0, 0, 1}; // back wall, z = -W
+        const float p[4][3] = {{-W, 0.f, -W}, {W, 0.f, -W}, {W, H, -W}, {-W, H, -W}};
+        quad(p, n);
+    }
+    {
+        const float n[3] = {0, 0, -1}; // front wall, z = +W
+        const float p[4][3] = {{W, 0.f, W}, {-W, 0.f, W}, {-W, H, W}, {W, H, W}};
+        quad(p, n);
+    }
+    {
+        const float n[3] = {1, 0, 0}; // left wall, x = -W
+        const float p[4][3] = {{-W, 0.f, -W}, {-W, H, -W}, {-W, H, W}, {-W, 0.f, W}};
+        quad(p, n);
+    }
+    {
+        const float n[3] = {-1, 0, 0}; // right wall, x = +W
+        const float p[4][3] = {{W, 0.f, W}, {W, H, W}, {W, H, -W}, {W, 0.f, -W}};
+        quad(p, n);
+    }
+    return venue;
+}
+
 } // namespace ks::sim

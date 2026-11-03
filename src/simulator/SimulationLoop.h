@@ -143,6 +143,9 @@ public:
     // audio object a car would otherwise create.
     void loadShowroomHall();
     void loadShowroomAudio();
+    // A room built in code for a showroom with no baked hall (see SceneAssets.h):
+    // an unbaked or empty folder must not open on an empty frame.
+    void buildShowroomVenue();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }
     const ShowroomScene& showroom() const { return m_showroom; }
