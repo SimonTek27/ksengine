@@ -1,14 +1,16 @@
 #pragma once
 /**
- * The nodes a skin hides.
+ * The nodes the content hides.
  *
- * A skin's ext_config.ini hides helper nodes the model must not show: the
- * driver's own head inside the helmet, the KERS level digits, the fuel and
- * high-beam warnings, the brake-disc hub decals. AC writes those names in
- * HIDE lists, wildcards included (KERS_LEVEL_? is every KERS level), and the
- * converter folds them into the car's documents as EXT_CONFIG.HIDDEN_NODES.
- * This header answers the only question the renderer asks: does this node name
- * match something the content hides?
+ * Two files name them, and both end up here:
+ *   - a car's documents (model.json, driver.json) carry the car-level
+ *     EXT_CONFIG.HIDDEN_NODES, from the car-root ext_config.ini;
+ *   - the active skin's skins/<id>/skin.json carries what that skin hides, split
+ *     into its MODEL and DRIVER blocks.
+ *
+ * AC writes those names in HIDE lists, wildcards included (KERS_LEVEL_? is every
+ * KERS level). This header answers the only question the renderer asks: does
+ * this node name match something the loaded content hides?
  *
  * Matching is the one AC uses: case-insensitive, '?' is exactly one character,
  * '*' is any run of them. A hidden node takes its children with it, which is
@@ -53,14 +55,10 @@ inline bool nodeNameMatches(const std::string& pattern, const std::string& name)
     return p == pattern.size();
 }
 
-/** The patterns a document carries under EXT_CONFIG.HIDDEN_NODES. */
-inline void appendHiddenNodes(const Json& document, std::vector<std::string>& out) {
-    if (!document.isObject() || !document.contains("EXT_CONFIG")) return;
-    const Json& block = document["EXT_CONFIG"];
-    if (!block.isObject() || !block.contains("HIDDEN_NODES")) return;
-    const Json& nodes = block["HIDDEN_NODES"];
-    if (!nodes.isArray()) return;
-    for (const Json& node : nodes) {
+/** Appends the strings of a JSON array of node names, skipping repeats. */
+inline void appendNodeList(const Json& list, std::vector<std::string>& out) {
+    if (!list.isArray()) return;
+    for (const Json& node : list) {
         if (!node.isString()) continue;
         const std::string name = node.toString();
         if (name.empty()) continue;
@@ -69,7 +67,19 @@ inline void appendHiddenNodes(const Json& document, std::vector<std::string>& ou
     }
 }
 
-/** The hidden-node set of a car, and the test the walk asks for each node. */
+/** A block that carries HIDDEN_NODES: EXT_CONFIG, or a skin's MODEL/DRIVER. */
+inline void appendBlockHiddenNodes(const Json& block, std::vector<std::string>& out) {
+    if (!block.isObject() || !block.contains("HIDDEN_NODES")) return;
+    appendNodeList(block["HIDDEN_NODES"], out);
+}
+
+/** The car-level patterns of a document (model.json or driver.json). */
+inline void appendHiddenNodes(const Json& document, std::vector<std::string>& out) {
+    if (!document.isObject() || !document.contains("EXT_CONFIG")) return;
+    appendBlockHiddenNodes(document["EXT_CONFIG"], out);
+}
+
+/** The hidden-node set of what is loaded, and the test the walk asks for each node. */
 struct HiddenNodes {
     std::vector<std::string> patterns;
 
@@ -82,7 +92,15 @@ struct HiddenNodes {
         patterns.push_back(pattern);
     }
 
+    /** Car-level patterns: model.json or driver.json. */
     void addDocument(const Json& document) { appendHiddenNodes(document, patterns); }
+
+    /** The active skin's patterns: skins/<id>/skin.json. */
+    void addSkinDocument(const Json& skin) {
+        if (!skin.isObject()) return;
+        if (skin.contains("MODEL")) appendBlockHiddenNodes(skin["MODEL"], patterns);
+        if (skin.contains("DRIVER")) appendBlockHiddenNodes(skin["DRIVER"], patterns);
+    }
 
     /** True when the content hides this node name. */
     bool hides(const std::string& name) const {

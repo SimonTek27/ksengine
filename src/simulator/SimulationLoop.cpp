@@ -682,6 +682,26 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         if (!skinDir.empty()) {
             std::fprintf(stderr, "[kn5] skin: %s", skinDir.c_str());
             std::putchar(10);
+            // The skin's own ext_config.ini, folded into its folder as skin.json:
+            // what this skin hides and the driver model it asks for. Only the
+            // loaded skin applies, which is what a per-skin file means.
+            if (std::getenv("KS_SHOW_HIDDEN") == nullptr) {
+                const std::filesystem::path skinDocument =
+                    std::filesystem::path(skinDir) / "skin.json";
+                if (std::filesystem::is_regular_file(skinDocument, ec)) {
+                    std::ifstream skinFile(skinDocument, std::ios::binary);
+                    const std::string skinText((std::istreambuf_iterator<char>(skinFile)),
+                                               std::istreambuf_iterator<char>());
+                    bool parsedSkin = false;
+                    const ks::Json skinJson = ks::Json::parse(skinText, &parsedSkin);
+                    if (parsedSkin) {
+                        hiddenNodes.addSkinDocument(skinJson);
+                        std::fprintf(stderr, "[kn5] skin ext_config: %zu hidden node(s)",
+                                     hiddenNodes.size());
+                        std::putchar(10);
+                    }
+                }
+            }
         }
     }
 

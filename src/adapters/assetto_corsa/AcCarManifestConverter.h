@@ -450,6 +450,8 @@ for (const char* owner : {"suspensions", "car"}) {
         // ext_config.ini carries two subjects and each goes to its own document:
         // the driver model and the driver's hidden nodes to the driver document,
         // the model replacements and the model's hidden nodes to the model one.
+        // A skin's own file is not car data: it is written to that skin's
+        // skin.json, where the skin's textures already live.
         {
             std::size_t modelIndex = 0;
             std::size_t driverIndex = 0;
@@ -458,6 +460,7 @@ for (const char* owner : {"suspensions", "car"}) {
                 if (names[i] == kDriverDocument) driverIndex = i;
             }
             mergeExtConfig(carDir, docs[modelIndex], docs[driverIndex]);
+            writeSkinDocuments(carDir);
         }
         for (std::size_t i = 0; i < names.size(); ++i) {
             const fs::path out = documentPath(carDir, names[i]);

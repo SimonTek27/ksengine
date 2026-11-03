@@ -1,16 +1,19 @@
-// Qt-free test for the ext_config.ini merge (src/adapters/assetto_corsa/ExtConfig.h).
+// Qt-free test for the ext_config.ini split (src/adapters/assetto_corsa/ExtConfig.h).
 //
 // The 499P's skin ships the file this is written against: a driver model, two
-// hidden driver nodes and two MODEL_REPLACEMENT blocks with HIDE lists. The test
-// builds the same folder shape in a temp directory and checks that each subject
-// reaches the document that owns it — driver to driver.json, model to model.json —
-// with wildcards intact, and that merging twice does not duplicate anything.
+// hidden driver nodes and two MODEL_REPLACEMENT blocks with HIDE lists. A skin's
+// file belongs to the skin, so it becomes skins/<id>/skin.json; a car-root file
+// belongs to the car and is folded into model.json and driver.json. The test
+// builds both shapes in a temp directory and checks where each part lands, that
+// the car documents never carry skin data, and that the matcher the renderer
+// uses (Graphics/HiddenNodes.h) reads both.
 
 #include "adapters/assetto_corsa/ExtConfig.h"
 #include "Graphics/HiddenNodes.h"
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 namespace {
@@ -27,19 +30,8 @@ void check(bool condition, const char* what) {
     }
 }
 
-bool hasNode(const Json& document, const std::string& node) {
-    if (!document.contains("EXT_CONFIG")) return false;
-    const Json& block = document["EXT_CONFIG"];
-    if (!block.contains("HIDDEN_NODES")) return false;
-    for (const auto& value : block["HIDDEN_NODES"])
-        if (value.toString() == node) return true;
-    return false;
-}
-
-int nodeCount(const Json& document) {
-    if (!document.contains("EXT_CONFIG")) return 0;
-    const Json& block = document["EXT_CONFIG"];
-    if (!block.contains("HIDDEN_NODES")) return 0;
+int nodeCount(const Json& block) {
+    if (!block.isObject() || !block.contains("HIDDEN_NODES")) return 0;
     int count = 0;
     for (const auto& value : block["HIDDEN_NODES"]) {
         (void)value;
@@ -48,10 +40,41 @@ int nodeCount(const Json& document) {
     return count;
 }
 
-bool hasSection(const Json& document, const std::string& section) {
-    if (!document.contains("EXT_CONFIG")) return false;
-    const Json& block = document["EXT_CONFIG"];
-    return block.contains("SECTIONS") && block["SECTIONS"].contains(section);
+bool hasNode(const Json& block, const std::string& node) {
+    if (!block.isObject() || !block.contains("HIDDEN_NODES")) return false;
+    for (const auto& value : block["HIDDEN_NODES"])
+        if (value.toString() == node) return true;
+    return false;
+}
+
+bool hasSection(const Json& block, const std::string& section) {
+    return block.isObject() && block.contains("SECTIONS") && block["SECTIONS"].contains(section);
+}
+
+const std::string kSkinIni =
+    "[DRIVER3D_MODEL]\n"
+    "NAME=rh_bell_helmet_driver_19\n"
+    "POSITION=0.0,0.0,0.0\n"
+    "\n"
+    "[DRIVER3D_HIDE_OBJECT_0]\n"
+    "NAME=DRIVER:HELMET\n"
+    "\n"
+    "[DRIVER3D_HIDE_OBJECT_1]\n"
+    "NAME=DRIVER:GEO_Driver_FACE\n"
+    "\n"
+    "[MODEL_REPLACEMENT_...]\n"
+    "FILE =  ferrari_499p_LODA.kn5\n"
+    "HIDE =  KERS_LEVEL_?, DISPLAY_FUEL_WARNING, DISPLAY_HIGHBEAM, DISPLAY_MONITOR_001\n"
+    "\n"
+    "[MODEL_REPLACEMENT_0]\n"
+    "FILE = ferrari_499p_LODA.kn5\n"
+    "HIDE = GEO_BD_Disc_Hub_LF_Decal,GEO_BD_Disc_Hub_LR_Decal\n";
+
+void writeText(const std::filesystem::path& path, const std::string& text) {
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary);
+    out << text;
 }
 
 } // namespace
@@ -60,19 +83,23 @@ int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     using namespace ks::assetto_corsa;
 
-    // `ext_config_test --print-block <carDir>` prints the EXT_CONFIG blocks the
-    // converter would fold into the car's documents, so an installed car is
-    // refreshed with the same code that produced it instead of a hand-written copy.
-    if (argc == 3 && std::string(argv[1]) == "--print-block") {
+    // `ext_config_test --print-content <carDir>` prints what the converter would
+    // write for that car — the car documents' blocks and every skin's skin.json —
+    // so an installed car is refreshed with the same code that produces it.
+    if (argc == 3 && std::string(argv[1]) == "--print-content") {
+        const fs::path carDir(argv[2]);
+        Json printed = Json::object();
         Json model = Json::object();
         Json driver = Json::object();
-        if (mergeExtConfig(fs::path(argv[2]), model, driver) == 0) {
-            std::printf("no ext_config.ini under %s\n", argv[2]);
-            return 1;
-        }
-        Json printed = Json::object();
-        if (model.contains("EXT_CONFIG")) printed.insert("model", model["EXT_CONFIG"]);
-        if (driver.contains("EXT_CONFIG")) printed.insert("driver", driver["EXT_CONFIG"]);
+        mergeExtConfig(carDir, model, driver);
+        Json documents = Json::object();
+        if (model.contains("EXT_CONFIG")) documents.insert("model", model["EXT_CONFIG"]);
+        if (driver.contains("EXT_CONFIG")) documents.insert("driver", driver["EXT_CONFIG"]);
+        printed.insert("documents", documents);
+        Json skins = Json::object();
+        for (const std::string& id : skinsWithExtConfig(carDir))
+            skins.insert(id, skinDocument(carDir / "skins" / id, id));
+        printed.insert("skins", skins);
         std::printf("%s\n", printed.dump(true).c_str());
         return 0;
     }
@@ -80,76 +107,66 @@ int main(int argc, char** argv) {
     const fs::path root = fs::temp_directory_path() / "ksim_ext_config_test";
     std::error_code ec;
     fs::remove_all(root, ec);
-    fs::create_directories(root / "skins" / "2024_AFCorse_LeMans_50", ec);
+    writeText(root / "skins" / "2024_AFCorse_LeMans_50" / "ext_config.ini", kSkinIni);
 
-    const std::string skinIni =
-        "[DRIVER3D_MODEL]\n"
-        "NAME=rh_bell_helmet_driver_19\n"
-        "POSITION=0.0,0.0,0.0\n"
-        "\n"
-        "[DRIVER3D_HIDE_OBJECT_0]\n"
-        "NAME=DRIVER:HELMET\n"
-        "\n"
-        "[DRIVER3D_HIDE_OBJECT_1]\n"
-        "NAME=DRIVER:GEO_Driver_FACE\n"
-        "\n"
-        "[MODEL_REPLACEMENT_...]\n"
-        "FILE =  ferrari_499p_LODA.kn5\n"
-        "HIDE =  KERS_LEVEL_?, DISPLAY_FUEL_WARNING, DISPLAY_HIGHBEAM, DISPLAY_MONITOR_001\n"
-        "\n"
-        "[MODEL_REPLACEMENT_0]\n"
-        "FILE = ferrari_499p_LODA.kn5\n"
-        "HIDE = GEO_BD_Disc_Hub_LF_Decal,GEO_BD_Disc_Hub_LR_Decal\n";
+    // A skin's file becomes that skin's skin.json, split by subject.
+    check(writeSkinDocuments(root) == 1, "the skin's ext_config.ini is written");
+    const fs::path skinPath = root / "skins" / "2024_AFCorse_LeMans_50" / "skin.json";
+    check(fs::is_regular_file(skinPath, ec), "skins/<id>/skin.json exists");
     {
-        std::ofstream out(root / "skins" / "2024_AFCorse_LeMans_50" / "ext_config.ini",
-                          std::ios::binary);
-        out << skinIni;
+        std::ifstream in(skinPath, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        bool ok = false;
+        const Json skin = Json::parse(text, &ok);
+        check(ok, "skin.json parses");
+        check(skin.contains("SKIN") && skin["SKIN"].toString() == "2024_AFCorse_LeMans_50",
+              "skin.json names its skin");
+        check(skin.contains("MODEL") && skin.contains("DRIVER"), "skin.json holds both subjects");
+        check(nodeCount(skin["MODEL"]) == 6, "the model's nodes are in the skin's MODEL block");
+        check(hasNode(skin["MODEL"], "KERS_LEVEL_?"), "a wildcard survives into skin.json");
+        check(hasSection(skin["MODEL"], "MODEL_REPLACEMENT_..."), "model sections stay model");
+        check(nodeCount(skin["DRIVER"]) == 2, "the driver's nodes are in the skin's DRIVER block");
+        check(hasSection(skin["DRIVER"], "DRIVER3D_MODEL"), "the driver model stays with the driver");
+        check(skin["DRIVER"].contains("MODEL_NAME") &&
+                  skin["DRIVER"]["MODEL_NAME"].toString() == "rh_bell_helmet_driver_19",
+              "the driver model name is the one the file names");
+        check(!hasSection(skin["MODEL"], "DRIVER3D_MODEL"), "no driver section in the MODEL block");
     }
 
+    // Writing again is idempotent, and the car documents carry no skin data.
+    check(writeSkinDocuments(root) == 1, "rewriting the skin document counts one file");
     Json model = Json::object();
     Json driver = Json::object();
-    model.insert("GRAPHICS", Json::object());
+    check(mergeExtConfig(root, model, driver) == 0, "a car without ext_config.ini reports zero");
+    check(!model.contains("EXT_CONFIG") && !driver.contains("EXT_CONFIG"),
+          "no skin data leaks into model.json or driver.json");
 
-    const int files = mergeExtConfig(root, model, driver);
-    check(files == 1, "the skin file is read");
+    // A block left by an older run is rebuilt away, not kept.
+    {
+        Json stale = Json::object();
+        stale.insert("EXT_CONFIG", Json::object());
+        mergeExtConfig(root, stale, driver);
+        check(!stale.contains("EXT_CONFIG"), "a stale EXT_CONFIG is removed");
+    }
 
-    // The driver's part belongs to the driver document.
-    check(driver.contains("EXT_CONFIG"), "driver.json gains EXT_CONFIG");
-    check(hasNode(driver, "DRIVER:HELMET"), "a DRIVER3D_HIDE_OBJECT name is hidden");
-    check(hasNode(driver, "DRIVER:GEO_Driver_FACE"), "the second hidden driver node is there");
-    check(nodeCount(driver) == 2, "the driver document holds only the driver's nodes");
-    check(hasSection(driver, "DRIVER3D_MODEL"), "the driver model section stays with the driver");
-    check(hasSection(driver, "DRIVER3D_HIDE_OBJECT_0"), "its hide sections go there too");
-    check(driver["EXT_CONFIG"].contains("DRIVER3D_MODEL_NAME") &&
-              driver["EXT_CONFIG"]["DRIVER3D_MODEL_NAME"].toString() ==
-                  "rh_bell_helmet_driver_19",
-          "the driver model name is the one the file names");
+    // The car-root file is the car's own: it lands in the documents, split by
+    // subject, and no SKINS table is written anywhere.
+    const fs::path carRoot = root / "carroot";
+    writeText(carRoot / "ext_config.ini",
+              "[DRIVER3D_HIDE_OBJECT_0]\nNAME=DRIVER:HELMET\n"
+              "[MODEL_REPLACEMENT_0]\nHIDE=DISPLAY_HIGHBEAM\n");
+    Json carModel = Json::object();
+    Json carDriver = Json::object();
+    check(mergeExtConfig(carRoot, carModel, carDriver) == 1, "the car-root file is read");
+    check(hasNode(carModel["EXT_CONFIG"], "DISPLAY_HIGHBEAM"), "a model HIDE goes to model.json");
+    check(hasNode(carDriver["EXT_CONFIG"], "DRIVER:HELMET"), "a driver hide goes to driver.json");
+    check(!hasSection(carModel["EXT_CONFIG"], "DRIVER3D_HIDE_OBJECT_0"),
+          "the driver's sections stay out of model.json");
+    check(!carModel["EXT_CONFIG"].contains("SKINS") && !carDriver["EXT_CONFIG"].contains("SKINS"),
+          "no SKINS table in the car documents");
 
-    // The model's part belongs to the model document.
-    check(model.contains("EXT_CONFIG"), "model.json gains EXT_CONFIG");
-    check(hasNode(model, "KERS_LEVEL_?"), "a wildcard HIDE entry is kept as a wildcard");
-    check(hasNode(model, "GEO_BD_Disc_Hub_LF_Decal"), "a comma-separated HIDE list is split");
-    check(nodeCount(model) == 6, "the model document holds only the model's nodes");
-    check(hasSection(model, "MODEL_REPLACEMENT_..."), "a MODEL_REPLACEMENT section is model content");
-    check(!hasSection(model, "DRIVER3D_MODEL"), "the driver model does not leak into the model");
-    check(!model["EXT_CONFIG"].contains("DRIVER3D_MODEL_NAME"),
-          "no driver fields in the model block");
-
-    // Each skin keeps its own sections, split the same way.
-    check(model["EXT_CONFIG"].contains("SKINS") &&
-              model["EXT_CONFIG"]["SKINS"].contains("2024_AFCorse_LeMans_50"),
-          "the skin keeps its model sections");
-    check(driver["EXT_CONFIG"].contains("SKINS") &&
-              driver["EXT_CONFIG"]["SKINS"].contains("2024_AFCorse_LeMans_50"),
-          "the skin keeps its driver sections");
-
-    // Idempotent: a second merge rebuilds the same blocks instead of appending.
-    mergeExtConfig(root, model, driver);
-    check(nodeCount(model) == 6 && nodeCount(driver) == 2,
-          "merging twice does not duplicate nodes");
-
-    // The matcher the renderer uses on every node name (Graphics/HiddenNodes.h):
-    // AC's '?' is one character, '*' any run, names compare case-insensitively.
+    // The renderer's matcher reads both sources and hides by AC's rules.
     {
         using ks::graphics::HiddenNodes;
         using ks::graphics::nodeNameMatches;
@@ -160,36 +177,22 @@ int main(int argc, char** argv) {
         check(!nodeNameMatches("DRIVER:HELMET", "DRIVER:GEO_Driver_FACE"),
               "a plain name matches only itself");
 
+        std::ifstream in(skinPath, std::ios::binary);
+        const std::string text((std::istreambuf_iterator<char>(in)),
+                               std::istreambuf_iterator<char>());
+        bool skinParsed = false;
+        const Json skin = Json::parse(text, &skinParsed);
+        check(skinParsed, "skin.json parses for the matcher");
         HiddenNodes hidden;
-        hidden.addDocument(model);
-        hidden.addDocument(driver);
-        check(hidden.size() == 8, "both documents contribute their patterns");
+        hidden.addSkinDocument(skin);
+        hidden.addDocument(carDriver);
+        // The car-root file hides DRIVER:HELMET too, so the union is still eight.
+        check(hidden.size() == 8, "the skin and the car contribute one pattern set");
         check(hidden.hides("DRIVER:GEO_Driver_FACE"), "a driver node is hidden");
-        check(hidden.hides("KERS_LEVEL_3"), "a wildcard pattern reaches the level digits");
+        check(hidden.hides("KERS_LEVEL_3"), "a wildcard reaches the level digits");
         check(hidden.hides("GEO_BD_Disc_Hub_LR_Decal"), "a hub decal is hidden");
         check(!hidden.hides("GEO_BD_Wheel_RR"), "a node nobody hides stays");
     }
-
-    // A car without the file is left alone, in both documents.
-    Json untouchedModel = Json::object();
-    Json untouchedDriver = Json::object();
-    check(mergeExtConfig(root / "skins", untouchedModel, untouchedDriver) == 0,
-          "a folder without ext_config.ini reports zero files");
-    check(!untouchedModel.contains("EXT_CONFIG") && !untouchedDriver.contains("EXT_CONFIG"),
-          "and neither document is touched");
-
-    // A file with only model sections writes only the model document.
-    const fs::path modelOnly = root / "modelonly";
-    fs::create_directories(modelOnly, ec);
-    {
-        std::ofstream out(modelOnly / "ext_config.ini", std::ios::binary);
-        out << "[MODEL_REPLACEMENT_0]\nHIDE = SOME_DECAL\n";
-    }
-    Json onlyModel = Json::object();
-    Json onlyDriver = Json::object();
-    mergeExtConfig(modelOnly, onlyModel, onlyDriver);
-    check(onlyModel.contains("EXT_CONFIG") && !onlyDriver.contains("EXT_CONFIG"),
-          "a model-only file leaves the driver document untouched");
 
     fs::remove_all(root, ec);
     if (g_failures == 0) std::printf("ext_config_test: all checks passed\n");
