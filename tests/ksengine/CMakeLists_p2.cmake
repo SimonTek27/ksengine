@@ -290,3 +290,16 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/showroom_test.cpp")
     add_test(NAME showroom_test COMMAND showroom_test)
     set_tests_properties(showroom_test PROPERTIES TIMEOUT 60)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ppfilter_preset_test.cpp")
+    # Post-processing preset loader (engine/Config/PPFilterPreset.h): needs the
+    # shipped system/ppfilters/*.json, hence KS_SOURCE_DIR.
+    add_executable(ppfilter_preset_test ppfilter_preset_test.cpp)
+    target_include_directories(ppfilter_preset_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_compile_definitions(ppfilter_preset_test PRIVATE
+        KS_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    target_link_libraries(ppfilter_preset_test PRIVATE ksengine)
+    add_test(NAME ppfilter_preset_test COMMAND ppfilter_preset_test)
+    set_tests_properties(ppfilter_preset_test PROPERTIES TIMEOUT 60)
+endif()

@@ -24,6 +24,8 @@
 #include "engine/material/PngCodec.h"
 #include "engine/physics/PhysicsProfiler.h" // roadmap 2.14: exit dump (KS_PROFILE=1)
 #include "engine/physics/VehicleSimulator.h"
+#include "engine/Config/PPFilterPreset.h" // KS_PPFILTER preset
+#include "engine/assets/Paths.h"         // system/ppfilters/<id>.json
 #include "engine/Config/EngineSettings.h"
 #include "engine/Engine.h"
 #include "engine/assets/UserData.h"
@@ -456,6 +458,39 @@ static void initVulkanAndSimulation() {
             printf("[INIT] Tonemap: %s\n", tm);
         } else {
             printf("[INIT] KS_TONEMAP '%s' unknown (none|reinhard|aces|uncharted2|filmic), keeping default\n", tm);
+        }
+    }
+
+    // Post-processing filter preset (system/ppfilters/<id>.json, schema
+    // "ksengine.ppfilter/1", see engine/Config/PPFilterPreset.h). Opt-in
+    // like the switches around it: nothing changes unless KS_PPFILTER names
+    // a preset id ("normal") or a path, so the default image stays the one
+    // the other knobs produce. The preset display block wins over the
+    // KS_EXPOSURE/KS_TONEMAP values set above.
+    if (const char* pfName = std::getenv("KS_PPFILTER")) {
+        std::string pfPath = pfName;
+        const bool hasSuffix = pfPath.size() >= 5 &&
+            pfPath.compare(pfPath.size() - 5, 5, ".json") == 0;
+        if (!hasSuffix) {
+            pfPath = ks::engine::assets::Paths::ppFiltersFile(pfPath + ".json");
+        }
+        ks::engine::config::PPFilterPreset preset;
+        std::string pfError;
+        if (ks::engine::config::PPFilterPreset::loadFile(pfPath, preset, &pfError)) {
+            ks::engine::config::PPFilterPreset::instance() = preset;
+            if (preset.display.exposure > 0.0f) {
+                g_nativeRenderer->setExposure(preset.display.exposure);
+            }
+            if (preset.display.tonemapMode >= 0 && preset.display.tonemapMode <= 4) {
+                g_nativeRenderer->setTonemapMode(preset.display.tonemapMode);
+            }
+            printf("[INIT] Post-processing preset \'%s\': exposure %.3f, tonemap %d, lut %s\n",
+                   preset.name.c_str(),
+                   static_cast<double>(preset.display.exposure),
+                   preset.display.tonemapMode,
+                   preset.colorLut.file.empty() ? "none" : preset.colorLut.file.c_str());
+        } else {
+            printf("[INIT] KS_PPFILTER \'%s\' not loaded: %s\n", pfName, pfError.c_str());
         }
     }
 

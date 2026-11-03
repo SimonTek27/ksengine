@@ -1,0 +1,418 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "Normal",
+  "description": "Balanced look with a filmic curve and a grading strip.",
+  "category": "natural",
+  "autoExposure": {
+    "enabled": true,
+    "delay": 0.0,
+    "min": 0.0,
+    "max": 1.49,
+    "target": 0.2,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": true
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.72,
+    "gamma": 1.36,
+    "function": 2,
+    "mappingFactor": 33.38,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": true,
+    "quality": 5,
+    "apertureFNumber": 3.3,
+    "imageSensorHeight": 0.29,
+    "baseFOV": 90.0,
+    "adaptiveApertureFactor": 0.55,
+    "apertureParameter": 3.0,
+    "apertureFrontLevels": 4,
+    "apertureBackLevels": 4,
+    "backgroundMaskThreshold": 0.11,
+    "edgeQuality": 4,
+    "apertureShape": 1
+  },
+  "chromaticAberration": {
+    "enabled": false,
+    "samples": 5,
+    "lateralDispersion": [
+      0.005,
+      0.005
+    ],
+    "uniformDispersion": [
+      0.0005,
+      0.0005
+    ]
+  },
+  "vignetting": {
+    "strength": 1e-06,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 5,
+    "ghost": false,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 2.0,
+    "shape": 12,
+    "blur": true,
+    "threshold": 3.2,
+    "brightPass": true
+  },
+  "godRays": {
+    "enabled": true,
+    "useSunLight": true,
+    "diffractionRing": 0.1,
+    "diffractionRingRadius": 3.0,
+    "diffractionRingAttenuation": 0.1,
+    "diffractionRingOuterColor": [
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "color": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "length": 7.0,
+    "glareRatio": 0.015,
+    "angleAttenuation": 8.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 1.0,
+    "brightness": 1.01,
+    "contrast": 1.0,
+    "sepia": 0.0,
+    "colorTemp": 6026,
+    "whiteBalance": 6500
+  },
+  "colorLut": {
+    "enabled": true,
+    "strength": 1.0,
+    "file": "normal.lut.png"
+  },
+  "display": {
+    "exposure": 0.72,
+    "tonemapMode": 2
+  },
+  "postEffects": {
+    "bloom": {
+      "enabled": true,
+      "intensity": 0.5
+    },
+    "fog": {
+      "enabled": false,
+      "density": 0.01
+    },
+    "motionBlur": {
+      "enabled": false,
+      "strength": 1.0,
+      "samples": 8,
+      "maxLength": 0.03
+    },
+    "ssao": {
+      "enabled": false,
+      "radius": 0.5,
+      "intensity": 1.0,
+      "bias": 0.02
+    },
+    "ssr": {
+      "enabled": false,
+      "maxDistance": 8.0,
+      "intensity": 1.0,
+      "roughnessThreshold": 0.6
+    },
+    "taa": {
+      "enabled": false
+    },
+    "hdrOutput": {
+      "enabled": true
+    }
+  },
+  "_meta": {
+    "format": "ksengine.ppfilter/1",
+    "kind": "post-processing filter",
+    "notes": "Engine blocks carry the values of the source filter, section by section. colorLut points at the grading strip next to this file. display.tonemapMode follows the renderer enum (0 none, 1 Reinhard, 2 ACES, 3 Uncharted2, 4 Filmic). postEffects lists renderer capabilities the source filter has no value for: they carry the engine defaults, not measurements.",
+    "sectionCount": 24,
+    "lut": "normal.lut.png",
+    "provenance": "sections"
+  },
+  "sections": {
+    "ABOUT": {
+      "AUTHOR": "",
+      "NOTES": "",
+      "VERSION": 1.0
+    },
+    "AIRYDISC": {
+      "AIRY_DISC_DISPERSION_ENABLED": 1,
+      "ENABLED": false,
+      "WAVELENGTH": 500
+    },
+    "ANTIALIAS": {
+      "ENABLED": true,
+      "END_DISTANCE": 1000,
+      "START_DISTANCE": 0.1
+    },
+    "AUTO_EXPOSURE": {
+      "DELAY": 0,
+      "ENABLED": true,
+      "INFLUENCED_BY_GLARE": 1,
+      "MAX": 1.49,
+      "METERING_HEIGHT": 100,
+      "METERING_OFFSET_X": 0,
+      "METERING_OFFSET_Y": 0,
+      "METERING_WIDTH": 100,
+      "MIN": 0,
+      "TARGET": 0.2
+    },
+    "CHROMATIC_ABERRATION": {
+      "ENABLED": false,
+      "LATERAL_DISPERSION": [
+        0.005,
+        0.005
+      ],
+      "SAMPLES": 5,
+      "UNIFORM_DISPERSION": [
+        0.0005,
+        0.0005
+      ]
+    },
+    "COLOR": {
+      "BRIGHTNESS": 1.01,
+      "COLOR_TEMP": 6026,
+      "CONTRAST": 1,
+      "HUE": 0,
+      "SATURATION": 1,
+      "SEPIA": 0,
+      "WHITE_BALANCE": 6500
+    },
+    "DIAPHRAGM": {
+      "ROTATE_OFFSET": 2,
+      "ROTATE_SCALE": 0,
+      "TYPE": 1
+    },
+    "DOF": {
+      "ADAPTIVE_APERTURE_FACTOR": 0.55,
+      "APERTURE_BACK_LEVELS_NUMBER": 4,
+      "APERTURE_FRONT_LEVELS_NUMBER": 4,
+      "APERTURE_F_NUMBER": 3.3,
+      "APERTURE_PARAMETER": 3,
+      "APERTURE_SHAPE": 1,
+      "BACKGROUND_MASK_THRESHOLD": 0.11,
+      "BASE_FOV": 90,
+      "EDGE_QUALITY": 4,
+      "ENABLED": true,
+      "IMAGE_SENSOR_HEIGHT": 0.29,
+      "QUALITY": 5
+    },
+    "EXT_AE_ADJUSTMENT": {
+      "ADAPTATION_SCALE": 1,
+      "ADAPTATION_SENSITIVITY": 0.44,
+      "ADAPTATION_SPEED_LIMIT": 5.25,
+      "DARK_ADAPTATION_SCALE": 0.5,
+      "DARK_ADAPTATION_SENSITIVITY": 0.46,
+      "DARK_ADAPTATION_SPEED_LIMIT": 5.5,
+      "ENABLED": false,
+      "LIGHT_DARK_EXPOSURE_BORDER": 1
+    },
+    "EXT_AUTO_EXPOSURE": {
+      "METERING_AREA_DEBUG": 0,
+      "METERING_AREA_OFFSET": [
+        0.0,
+        -0.05
+      ],
+      "METERING_AREA_SIZE": [
+        0.34,
+        0.09
+      ]
+    },
+    "EXT_COLOR_GRADING": {
+      "ENABLED": true,
+      "STRENGTH": 1,
+      "LUT": "normal.lut.png"
+    },
+    "EXT_DXGI_HDR": {
+      "POST_TONEMAPPING": 1,
+      "SUPPORTED": 0
+    },
+    "EXT_GLARE": {
+      "ANAMORPHIC_COLOR_0": [
+        0.0,
+        0.192506,
+        0.825325,
+        1.0
+      ],
+      "ANAMORPHIC_COLOR_1": [
+        0.9999,
+        0.999958,
+        1.0,
+        1.0
+      ],
+      "ANAMORPHIC_PARAM_0": 4.403006,
+      "ANAMORPHIC_PARAM_1": 10
+    },
+    "EXT_GLARE_FIRSTPERSON_SHAPE": {
+      "ENABLED": false,
+      "SHAPE_AFTERIMAGE_LENGTH": 0.5,
+      "SHAPE_AFTERIMAGE_LUMINANCE": 0.66,
+      "SHAPE_BLOOM_DISPERSION": 0.55,
+      "SHAPE_BLOOM_DISPERSION_BASE_LEVEL": 0.66,
+      "SHAPE_BLOOM_LUMINANCE": 3,
+      "SHAPE_GHOST_DISTORTION": 0,
+      "SHAPE_GHOST_HALO_LUMINANCE": 0.005,
+      "SHAPE_GHOST_LUMINANCE": 0.16,
+      "SHAPE_GHOST_SHARPENESS": 0,
+      "SHAPE_LUMINANCE": 0.3,
+      "SHAPE_STAR_DISPERSION": 0.06,
+      "SHAPE_STAR_FORCE_DISPERSION": 0,
+      "SHAPE_STAR_INCLINATION_ANGLE": 3,
+      "SHAPE_STAR_LENGTH": 2.61,
+      "SHAPE_STAR_LUMINANCE": 2.07,
+      "SHAPE_STAR_ROTATION": 1,
+      "SHAPE_STAR_SECONDARY_LENGTH": 2.76,
+      "SHAPE_STAR_STREAKS_NUMBER": 2
+    },
+    "EXT_HDR": {
+      "FILMIC_CONTRAST": 0.49
+    },
+    "FEEDBACK": {
+      "ASPECT_RATIO": 0,
+      "CURRENT_WEIGHT": -0.05,
+      "ENABLED": false,
+      "TIME": 0.1,
+      "WEIGHT": 0.05
+    },
+    "GLARE": {
+      "AFTER_IMAGE": 0,
+      "ANAMORPHIC": 0,
+      "BLOOM_FILTER_THRESHOLD": 0.0005,
+      "BLOOM_GAUSSIAN_RADIUS_SCALE": 1.6,
+      "BLOOM_LUMINANCE_GAMMA": 1.01,
+      "BLOOM_NUM_LEVELS": 32,
+      "BLUR": 40,
+      "BRIGHT_PASS": 1,
+      "ENABLED": true,
+      "GENERATION_RANGE_SCALE": 0.073,
+      "GHOST": 0,
+      "GHOST_CONCENTRIC_DISTORTION": 0,
+      "LUMINANCE": 2,
+      "PRECISION": 0,
+      "QUALITY": 5,
+      "SHAPE": 12,
+      "SHAPE_AFTERIMAGE_LENGTH": 0,
+      "SHAPE_AFTERIMAGE_LUMINANCE": 0,
+      "SHAPE_BLOOM_DISPERSION": 0,
+      "SHAPE_BLOOM_DISPERSION_BASE_LEVEL": 0,
+      "SHAPE_BLOOM_LUMINANCE": 3,
+      "SHAPE_GHOST_DISTORTION": 0,
+      "SHAPE_GHOST_HALO_LUMINANCE": 0.005,
+      "SHAPE_GHOST_LUMINANCE": 0,
+      "SHAPE_GHOST_SHARPENESS": 0,
+      "SHAPE_LUMINANCE": 1,
+      "SHAPE_STAR_DISPERSION": 0.26,
+      "SHAPE_STAR_FORCE_DISPERSION": 0,
+      "SHAPE_STAR_INCLINATION_ANGLE": 3,
+      "SHAPE_STAR_LENGTH": 0.09,
+      "SHAPE_STAR_LUMINANCE": 0.55,
+      "SHAPE_STAR_ROTATION": 0,
+      "SHAPE_STAR_SECONDARY_LENGTH": 0.67,
+      "SHAPE_STAR_STREAKS_NUMBER": 2,
+      "STAR_FILTER_THRESHOLD": 0.0004,
+      "STAR_LENGTH_FOV_DEPENDENCE": 0.46,
+      "STAR_SOFTNESS": 1,
+      "THRESHOLD": 3.2,
+      "USE_CUSTOM_SHAPE": 1
+    },
+    "GODRAYS": {
+      "ANGLE_ATTENUATION": 8,
+      "COLOR": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "DEPTH_MASK_THRESHOLD": 0.999999999,
+      "DIFFRACTION_RING": 0.1,
+      "DIFFRACTION_RING_ATTENUATION": 0.1,
+      "DIFFRACTION_RING_OUTER_COLOR": [
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "DIFFRACTION_RING_RADIUS": 3,
+      "DIFFRACTION_RING_SPECTRUM_ORDER": 1,
+      "ENABLED": true,
+      "GLARE_RATIO": 0.015,
+      "LENGTH": 7.0,
+      "NOISE_FREQUENCY": 1,
+      "NOISE_MASK": 0.01,
+      "USE_SUN_LIGHT": 1
+    },
+    "HEAT_SHIMMER": {
+      "ENABLED": true,
+      "HEAT_PARTICLE_COLOR": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "HEAT_PARTICLE_COORD": 1.5,
+      "HEAT_PARTICLE_FRACTAL_OCTAVES": 3,
+      "HEAT_PARTICLE_INTENSITY_MULT": 0.3,
+      "HEAT_PARTICLE_LIFE_MULT": 1.0,
+      "HEAT_PARTICLE_MAX_NUMBER": 10,
+      "HEAT_PARTICLE_MIN_INTENSITY": 0.15,
+      "HEAT_PARTICLE_MIN_LIFE": 0.75,
+      "HEAT_PARTICLE_MIN_VELOCITY": 0,
+      "HEAT_PARTICLE_POSITION_VELOCITY": [
+        0.0,
+        0.0,
+        0.2
+      ],
+      "HEAT_PARTICLE_RADIUS": 0.75,
+      "HEAT_PARTICLE_RADIUS_VELOCITY_MULT": 0.1,
+      "HEAT_PARTICLE_SHIMMER": 0.004,
+      "HEAT_PARTICLE_VELOCITY_MULT": 0.2
+    },
+    "LENSDISTORTION": {
+      "ENABLED": false,
+      "ROUNDNESS": 0.05,
+      "SMOOTHNESS": 1.0
+    },
+    "OPTIMIZATIONS": {
+      "FIXED_WIDTH": 0
+    },
+    "TONEMAPPING": {
+      "EXPOSURE": 0.72,
+      "FUNCTION": 2,
+      "GAMMA": 1.36,
+      "HDR": 1,
+      "MAPPING_FACTOR": 33.38,
+      "OFFSET_X": 0,
+      "OFFSET_Y": 0,
+      "SCALE_HEIGHT": 1,
+      "SCALE_WIDTH": 1
+    },
+    "VARIOUS": {
+      "APERTURE_RESULT_BLUR_MOD": 1
+    },
+    "VIGNETTING": {
+      "FOV_DEPENDENCE": 0,
+      "STRENGTH": 1e-06
+    }
+  }
+}

@@ -1,3 +1,4 @@
+#include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
 /**
  * SimulationLoop.cpp — std-only
  * 1 kHz physics + LapSectorTimer + SM + UDP + TCP telemetry
@@ -1641,8 +1642,13 @@ void SimulationLoop::applyShowroomLight() {
         m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
                                  0.0001f, 0.002f);
         // A photographed room is bright: without the extra stop the concrete and
-        // the trees read as if the sun were going down.
-        m_vulkanRenderer->setExposure(1.35f);
+        // the trees read as if the sun were going down. A post-processing
+        // preset, when one is loaded (KS_PPFILTER), owns the display exposure
+        // instead: it is the value the filter was written around, and the room
+        // stop below is only the fallback for the no-preset case.
+        const float presetExposure =
+            ks::engine::config::PPFilterPreset::instance().display.exposure;
+        m_vulkanRenderer->setExposure(presetExposure > 0.0f ? presetExposure : 1.35f);
     }
 }
 
