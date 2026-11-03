@@ -511,6 +511,10 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
 
     int meshes = 0;
     std::size_t vertices = 0;
+    // Where the hall actually sits: an AC venue is not centred on the engine
+    // origin, so orbiting (0,0,0) can point the camera at empty space.
+    float bboxMin[3] = {1e9f, 1e9f, 1e9f};
+    float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
     std::function<void(const ::ks::engine::fileformat::Kn5Node&)> walk =
         [&](const ::ks::engine::fileformat::Kn5Node& node) {
             const auto& m = node.mesh;
@@ -562,6 +566,42 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
                     scene().emplace<ks::ecs::Transform>(entity);
                     scene().emplace<ks::ecs::MeshInstance>(entity, ks::ecs::MeshInstance{name});
                 }
+                // A hall is looked at from inside it. Faces pointing away
+                // from the mesh's own middle would be culled away and the room
+                // would be invisible from the only place the camera stands:
+                // flip winding and normals so the inside is what is drawn.
+                float centroid[3] = {0.f, 0.f, 0.f};
+                for (const NativeVertex& v : nm.vertices) {
+                    centroid[0] += v.px;
+                    centroid[1] += v.py;
+                    centroid[2] += v.pz;
+                }
+                if (count > 0) {
+                    centroid[0] /= static_cast<float>(count);
+                    centroid[1] /= static_cast<float>(count);
+                    centroid[2] /= static_cast<float>(count);
+                }
+                float facing = 0.f;
+                for (const NativeVertex& v : nm.vertices) {
+                    facing += v.nx * (v.px - centroid[0]) + v.ny * (v.py - centroid[1]) +
+                              v.nz * (v.pz - centroid[2]);
+                }
+                if (facing > 0.f) {
+                    for (std::size_t i = 0; i + 2 < nm.indices.size(); i += 3)
+                        std::swap(nm.indices[i + 1], nm.indices[i + 2]);
+                    for (NativeVertex& v : nm.vertices) {
+                        v.nx = -v.nx;
+                        v.ny = -v.ny;
+                        v.nz = -v.nz;
+                    }
+                }
+                for (const NativeVertex& v : nm.vertices) {
+                    const float p[3] = {v.px, v.py, v.pz};
+                    for (int axis = 0; axis < 3; ++axis) {
+                        if (p[axis] < bboxMin[axis]) bboxMin[axis] = p[axis];
+                        if (p[axis] > bboxMax[axis]) bboxMax[axis] = p[axis];
+                    }
+                }
                 vertices += count;
                 ++meshes;
             }
@@ -569,9 +609,21 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
         };
     for (const auto& root : parsed.file.nodes) walk(root);
     if (meshes == 0) return false;
+    const vec3 centre{(bboxMin[0] + bboxMax[0]) * 0.5f, bboxMin[1],
+                      (bboxMin[2] + bboxMax[2]) * 0.5f};
+    const float sizeX = bboxMax[0] - bboxMin[0];
+    const float sizeY = bboxMax[1] - bboxMin[1];
+    const float sizeZ = bboxMax[2] - bboxMin[2];
+    const float radius = 0.5f * std::sqrt(sizeX * sizeX + sizeY * sizeY + sizeZ * sizeZ);
+    m_showroom.setHallBounds(centre.x, centre.z, bboxMin[1], radius);
     std::fprintf(stderr,
                  "[showroom] hall read from %s: %d mesh(es), %zu vertices, no files written\n",
                  model.filename().string().c_str(), meshes, vertices);
+    std::fprintf(stderr,
+                 "[showroom] hall bounds x[%.1f..%.1f] y[%.1f..%.1f] z[%.1f..%.1f] "
+                 "centre(%.1f, %.1f, %.1f) radius %.1f\n",
+                 bboxMin[0], bboxMax[0], bboxMin[1], bboxMax[1], bboxMin[2], bboxMax[2],
+                 centre.x, centre.y, centre.z, radius);
     return true;
 }
 

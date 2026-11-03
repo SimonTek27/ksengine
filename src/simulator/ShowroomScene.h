@@ -29,7 +29,21 @@ public:
         return true;
     }
 
-    void close() { m_active = false; }
+    /** Where the hall actually is, from the meshes that were loaded. Until a
+     *  hall sets this, the turntable orbits the engine origin — which is only
+     *  right when the venue happens to be centred there. */
+    void setHallBounds(float centreX, float centreZ, float floorY, float radius) {
+        m_hallCentre = vec3(centreX, 0.f, centreZ);
+        m_hallFloor = floorY;
+        m_hallRadius = radius;
+    }
+
+    void close() {
+        m_active = false;
+        m_hallRadius = 0.f;
+        m_hallFloor = 0.f;
+        m_hallCentre = vec3(0.f, 0.f, 0.f);
+    }
     bool active() const { return m_active; }
     const ShowroomConfig& config() const { return m_config; }
 
@@ -50,14 +64,27 @@ public:
 
     /** Camera on the turntable: distance away, `cameraHeight` up, at the
      *  current angle (0 = in front of the car, +90 = to its right). */
-    vec3 position() const {
-        const float radians = m_angleDeg * (3.14159265f / 180.f);
-        return {std::sin(radians) * m_config.cameraDistance, m_config.cameraHeight,
-                std::cos(radians) * m_config.cameraDistance};
+    /** How far out the camera sits: what the file asked for, unless the hall
+     *  is big enough to need more room than that. */
+    float distance() const {
+        // Never so far that the camera leaves the room: a 63 m dome is a
+        // background, not a place to stand outside of.
+        const float cap = m_hallRadius > 1.f ? m_hallRadius * 0.5f : m_config.cameraDistance;
+        return cap < m_config.cameraDistance ? cap : m_config.cameraDistance;
     }
 
-    /** What the camera looks at: the car's middle, not its roof. */
-    vec3 target() const { return {0.f, m_config.lookAtHeight, 0.f}; }
+    vec3 position() const {
+        const float radians = m_angleDeg * (3.14159265f / 180.f);
+        const float d = distance();
+        return {m_hallCentre.x + std::sin(radians) * d,
+                m_hallFloor + m_config.cameraHeight,
+                m_hallCentre.z + std::cos(radians) * d};
+    }
+
+    /** What the camera looks at: the middle of the room, at the car's height. */
+    vec3 target() const {
+        return {m_hallCentre.x, m_hallFloor + m_config.lookAtHeight, m_hallCentre.z};
+    }
 
     float angleDeg() const { return m_angleDeg; }
 
@@ -65,6 +92,9 @@ private:
     ShowroomConfig m_config;
     float m_angleDeg = 0.f;
     bool m_active = false;
+    vec3 m_hallCentre{0.f, 0.f, 0.f};
+    float m_hallFloor = 0.f;
+    float m_hallRadius = 0.f;
 };
 
 } // namespace sim
