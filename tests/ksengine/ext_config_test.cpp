@@ -2,16 +2,14 @@
 //
 // The 499P's skin ships the file this is written against: a driver model, two
 // hidden driver nodes and two MODEL_REPLACEMENT blocks with HIDE lists. The test
-// builds the same folder shape in a temp directory and checks that everything
-// lands in the model document, wildcards and all, and that merging twice does
-// not duplicate anything.
+// builds the same folder shape in a temp directory and checks that each subject
+// reaches the document that owns it — driver to driver.json, model to model.json —
+// with wildcards intact, and that merging twice does not duplicate anything.
 
 #include "adapters/assetto_corsa/ExtConfig.h"
 
 #include <cstdio>
 #include <filesystem>
-#include <string>
-#include <fstream>
 #include <string>
 
 namespace {
@@ -28,19 +26,18 @@ void check(bool condition, const char* what) {
     }
 }
 
-bool containsNode(const Json& model, const std::string& node) {
-    if (!model.contains("EXT_CONFIG")) return false;
-    const Json& block = model["EXT_CONFIG"];
+bool hasNode(const Json& document, const std::string& node) {
+    if (!document.contains("EXT_CONFIG")) return false;
+    const Json& block = document["EXT_CONFIG"];
     if (!block.contains("HIDDEN_NODES")) return false;
-    for (const auto& value : block["HIDDEN_NODES"]) {
+    for (const auto& value : block["HIDDEN_NODES"])
         if (value.toString() == node) return true;
-    }
     return false;
 }
 
-int hiddenCount(const Json& model) {
-    if (!model.contains("EXT_CONFIG")) return 0;
-    const Json& block = model["EXT_CONFIG"];
+int nodeCount(const Json& document) {
+    if (!document.contains("EXT_CONFIG")) return 0;
+    const Json& block = document["EXT_CONFIG"];
     if (!block.contains("HIDDEN_NODES")) return 0;
     int count = 0;
     for (const auto& value : block["HIDDEN_NODES"]) {
@@ -50,23 +47,32 @@ int hiddenCount(const Json& model) {
     return count;
 }
 
+bool hasSection(const Json& document, const std::string& section) {
+    if (!document.contains("EXT_CONFIG")) return false;
+    const Json& block = document["EXT_CONFIG"];
+    return block.contains("SECTIONS") && block["SECTIONS"].contains(section);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
     using namespace ks::assetto_corsa;
 
-    // `ext_config_test --print-block <carDir>` prints the EXT_CONFIG block the
-    // converter would fold into model.json, so an installed car is refreshed with
-    // the same code that produced it instead of a hand-written copy.
+    // `ext_config_test --print-block <carDir>` prints the EXT_CONFIG blocks the
+    // converter would fold into the car's documents, so an installed car is
+    // refreshed with the same code that produced it instead of a hand-written copy.
     if (argc == 3 && std::string(argv[1]) == "--print-block") {
         Json model = Json::object();
-        if (mergeExtConfigIntoModel(fs::path(argv[2]), model) == 0 ||
-            !model.contains("EXT_CONFIG")) {
+        Json driver = Json::object();
+        if (mergeExtConfig(fs::path(argv[2]), model, driver) == 0) {
             std::printf("no ext_config.ini under %s\n", argv[2]);
             return 1;
         }
-        std::printf("%s\n", model["EXT_CONFIG"].dump(true).c_str());
+        Json printed = Json::object();
+        if (model.contains("EXT_CONFIG")) printed.insert("model", model["EXT_CONFIG"]);
+        if (driver.contains("EXT_CONFIG")) printed.insert("driver", driver["EXT_CONFIG"]);
+        std::printf("%s\n", printed.dump(true).c_str());
         return 0;
     }
 
@@ -100,34 +106,67 @@ int main(int argc, char** argv) {
     }
 
     Json model = Json::object();
+    Json driver = Json::object();
     model.insert("GRAPHICS", Json::object());
 
-    const int files = mergeExtConfigIntoModel(root, model);
+    const int files = mergeExtConfig(root, model, driver);
     check(files == 1, "the skin file is read");
-    check(model.contains("EXT_CONFIG"), "the model document gains EXT_CONFIG");
-    check(containsNode(model, "DRIVER:HELMET"), "a DRIVER3D_HIDE_OBJECT name is hidden");
-    check(containsNode(model, "DRIVER:GEO_Driver_FACE"), "the second hidden node is there");
-    check(containsNode(model, "KERS_LEVEL_?"), "a wildcard HIDE entry is kept as a wildcard");
-    check(containsNode(model, "GEO_BD_Disc_Hub_LF_Decal"), "a comma-separated HIDE list is split");
-    check(hiddenCount(model) == 8, "every distinct hidden node is kept, once");
 
-    const Json& block = model["EXT_CONFIG"];
-    check(block.contains("DRIVER3D_MODEL_NAME"), "the driver model name is folded in");
-    if (block.contains("DRIVER3D_MODEL_NAME"))
-        check(block["DRIVER3D_MODEL_NAME"].toString() == "rh_bell_helmet_driver_19",
-              "the driver model name is the one the file names");
-    check(block.contains("SKINS") && block["SKINS"].contains("2024_AFCorse_LeMans_50"),
-          "the skin keeps its own sections");
+    // The driver's part belongs to the driver document.
+    check(driver.contains("EXT_CONFIG"), "driver.json gains EXT_CONFIG");
+    check(hasNode(driver, "DRIVER:HELMET"), "a DRIVER3D_HIDE_OBJECT name is hidden");
+    check(hasNode(driver, "DRIVER:GEO_Driver_FACE"), "the second hidden driver node is there");
+    check(nodeCount(driver) == 2, "the driver document holds only the driver's nodes");
+    check(hasSection(driver, "DRIVER3D_MODEL"), "the driver model section stays with the driver");
+    check(hasSection(driver, "DRIVER3D_HIDE_OBJECT_0"), "its hide sections go there too");
+    check(driver["EXT_CONFIG"].contains("DRIVER3D_MODEL_NAME") &&
+              driver["EXT_CONFIG"]["DRIVER3D_MODEL_NAME"].toString() ==
+                  "rh_bell_helmet_driver_19",
+          "the driver model name is the one the file names");
 
-    // Idempotent: a second merge rebuilds the same block instead of appending.
-    mergeExtConfigIntoModel(root, model);
-    check(hiddenCount(model) == 8, "merging twice does not duplicate nodes");
+    // The model's part belongs to the model document.
+    check(model.contains("EXT_CONFIG"), "model.json gains EXT_CONFIG");
+    check(hasNode(model, "KERS_LEVEL_?"), "a wildcard HIDE entry is kept as a wildcard");
+    check(hasNode(model, "GEO_BD_Disc_Hub_LF_Decal"), "a comma-separated HIDE list is split");
+    check(nodeCount(model) == 6, "the model document holds only the model's nodes");
+    check(hasSection(model, "MODEL_REPLACEMENT_..."), "a MODEL_REPLACEMENT section is model content");
+    check(!hasSection(model, "DRIVER3D_MODEL"), "the driver model does not leak into the model");
+    check(!model["EXT_CONFIG"].contains("DRIVER3D_MODEL_NAME"),
+          "no driver fields in the model block");
 
-    // A car without the file is left alone.
-    Json untouched = Json::object();
-    check(mergeExtConfigIntoModel(root / "skins", untouched) == 0,
+    // Each skin keeps its own sections, split the same way.
+    check(model["EXT_CONFIG"].contains("SKINS") &&
+              model["EXT_CONFIG"]["SKINS"].contains("2024_AFCorse_LeMans_50"),
+          "the skin keeps its model sections");
+    check(driver["EXT_CONFIG"].contains("SKINS") &&
+              driver["EXT_CONFIG"]["SKINS"].contains("2024_AFCorse_LeMans_50"),
+          "the skin keeps its driver sections");
+
+    // Idempotent: a second merge rebuilds the same blocks instead of appending.
+    mergeExtConfig(root, model, driver);
+    check(nodeCount(model) == 6 && nodeCount(driver) == 2,
+          "merging twice does not duplicate nodes");
+
+    // A car without the file is left alone, in both documents.
+    Json untouchedModel = Json::object();
+    Json untouchedDriver = Json::object();
+    check(mergeExtConfig(root / "skins", untouchedModel, untouchedDriver) == 0,
           "a folder without ext_config.ini reports zero files");
-    check(!untouched.contains("EXT_CONFIG"), "and the document is untouched");
+    check(!untouchedModel.contains("EXT_CONFIG") && !untouchedDriver.contains("EXT_CONFIG"),
+          "and neither document is touched");
+
+    // A file with only model sections writes only the model document.
+    const fs::path modelOnly = root / "modelonly";
+    fs::create_directories(modelOnly, ec);
+    {
+        std::ofstream out(modelOnly / "ext_config.ini", std::ios::binary);
+        out << "[MODEL_REPLACEMENT_0]\nHIDE = SOME_DECAL\n";
+    }
+    Json onlyModel = Json::object();
+    Json onlyDriver = Json::object();
+    mergeExtConfig(modelOnly, onlyModel, onlyDriver);
+    check(onlyModel.contains("EXT_CONFIG") && !onlyDriver.contains("EXT_CONFIG"),
+          "a model-only file leaves the driver document untouched");
 
     fs::remove_all(root, ec);
     if (g_failures == 0) std::printf("ext_config_test: all checks passed\n");

@@ -1,6 +1,6 @@
 #pragma once
 /**
- * AC's ext_config.ini, folded into the car's model document.
+ * AC's ext_config.ini, folded into the car's documents.
  *
  * A skin folder carries ext_config.ini, and that file changes the model more
  * than any other piece of content: it names the driver model, lists the nodes a
@@ -8,23 +8,26 @@
  * (MODEL_REPLACEMENT_*). ksim read none of it, so a car kept its default driver
  * and every helper mesh the skin wanted gone.
  *
- * This header reads the file (the car-root one and every skins/<id>/ one) and
- * merges it into data/model.json, which is the document that already describes
- * the model. Nothing is invented: sections are copied verbatim, and the only
- * derived entry is HIDDEN_NODES, the deduplicated union of the names the file
- * asks to hide, wildcards included (KERS_LEVEL_? stays a wildcard).
+ * The file carries two subjects, so it is split the way the documents already
+ * split their sources: DRIVER3D_* sections are the driver and land in
+ * driver.json (the document driver3d.ini already goes to), MODEL_* sections are
+ * the model and land in model.json. A hidden node follows the section that hides
+ * it: the driver's own nodes stay with the driver, the model's nodes with the
+ * model. Sections of any other kind are model content.
  *
- * Layout written into model.json:
+ * Layout written into each document:
  *
  *   "EXT_CONFIG": {
- *     "HIDDEN_NODES": ["DRIVER:HELMET", "KERS_LEVEL_?", ...],
+ *     "HIDDEN_NODES": ["DRIVER:HELMET", ...],
  *     "SECTIONS": { "DRIVER3D_MODEL": { "NAME": ..., "POSITION": ... }, ... },
- *     "SKINS": { "2024_AFCorse_LeMans_50": { "SECTIONS": {...} } },
- *     "IMPORTED_FROM": ["ext_config.ini", "skins/<id>/ext_config.ini"]
+ *     "SKINS": { "2024_AFCorse_LeMans_50": { "SECTIONS": {...}, ... } },
+ *     "IMPORTED_FROM": ["ext_config.ini", "skins/<id>/ext_config.ini"],
+ *     "DRIVER3D_MODEL_NAME": ..., "DRIVER3D_MODEL_POSITION": ...   // driver only
  *   }
  *
- * Merging twice is a no-op: the block is rebuilt from the .ini files, so the
- * result depends only on content, never on how many times it ran.
+ * Nothing is invented: sections are copied verbatim. Wildcards stay wildcards
+ * (KERS_LEVEL_? is not expanded). Merging twice is a no-op, because the block is
+ * rebuilt from the .ini files rather than appended to.
  */
 #include "FileFormat/Json.h"
 
@@ -37,14 +40,6 @@
 
 namespace ks {
 namespace assetto_corsa {
-
-struct ExtConfigSummary {
-    std::vector<std::string> hiddenNodes; // union, file order, deduplicated
-    std::string driverModel;
-    std::string driverPosition;
-    int files = 0;
-    int sections = 0;
-};
 
 namespace ext_config_detail {
 
@@ -65,6 +60,7 @@ inline std::string unquoteText(const std::string& text) {
     return text;
 }
 
+/** Case-insensitive prefix test: AC is not consistent about the case of its keys. */
 inline bool beginsWith(const std::string& text, const char* prefix) {
     const std::string head(prefix);
     if (text.size() < head.size()) return false;
@@ -94,31 +90,50 @@ inline std::vector<std::string> splitList(const std::string& text) {
     return items;
 }
 
-inline void addHidden(ExtConfigSummary& summary, const std::vector<std::string>& names) {
-    for (const std::string& name : names) {
-        if (std::find(summary.hiddenNodes.begin(), summary.hiddenNodes.end(), name) !=
-            summary.hiddenNodes.end())
-            continue;
-        summary.hiddenNodes.push_back(name);
-    }
+inline void addUnique(std::vector<std::string>& list, const std::string& value) {
+    if (value.empty()) return;
+    if (std::find(list.begin(), list.end(), value) != list.end()) return;
+    list.push_back(value);
 }
 
-inline void addHidden(ExtConfigSummary& summary, const std::string& name) {
-    addHidden(summary, std::vector<std::string>{name});
+inline void addUnique(std::vector<std::string>& list, const std::vector<std::string>& values) {
+    for (const std::string& value : values) addUnique(list, value);
 }
 
-inline Json& objectAt(Json& parent, const std::string& key) {
-    if (!parent.contains(key) || !parent[key].isObject()) parent.insert(key, Json::object());
-    return parent[key];
+/** One [SECTION] of the file, with its entries in file order. */
+struct Section {
+    std::string name;
+    Json entries = Json::object();
+    bool driverOwned = false; // DRIVER3D_*: the driver's business, not the model's
+};
+
+/** One ext_config.ini, read. */
+struct ParsedConfig {
+    std::vector<Section> sections;
+    std::vector<std::string> driverHidden; // nodes hidden by DRIVER3D_HIDE_OBJECT_*
+    std::vector<std::string> modelHidden;  // nodes hidden by MODEL_REPLACEMENT_*.HIDE
+    std::string driverModel;
+    std::string driverPosition;
+};
+
+inline bool isDriverSection(const std::string& name) { return beginsWith(name, "DRIVER3D_"); }
+
+inline Section& sectionAt(ParsedConfig& parsed, const std::string& name) {
+    for (Section& section : parsed.sections)
+        if (section.name == name) return section;
+    Section fresh;
+    fresh.name = name;
+    fresh.driverOwned = isDriverSection(name);
+    parsed.sections.push_back(fresh);
+    return parsed.sections.back();
 }
 
 } // namespace ext_config_detail
 
-/** Read one ext_config.ini into `sections` (section -> key -> value) and collect
- *  the model-relevant entries into `summary`. Returns false when the file
- *  cannot be opened; an empty file is a valid, empty config. */
-inline bool readExtConfigFile(const std::filesystem::path& file, Json& sections,
-                             ExtConfigSummary& summary) {
+/** Read one ext_config.ini. Returns false when the file cannot be opened; an
+ *  empty file is a valid, empty config. */
+inline bool readExtConfigFile(const std::filesystem::path& file,
+                             ext_config_detail::ParsedConfig& parsed) {
     using namespace ext_config_detail;
     std::ifstream in(file, std::ios::binary);
     if (!in) return false;
@@ -131,8 +146,7 @@ inline bool readExtConfigFile(const std::filesystem::path& file, Json& sections,
         if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') continue;
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             group = trimText(trimmed.substr(1, trimmed.size() - 2));
-            ++summary.sections;
-            objectAt(sections, group);
+            sectionAt(parsed, group);
             continue;
         }
         const std::size_t separator = trimmed.find_first_of("=:");
@@ -141,41 +155,119 @@ inline bool readExtConfigFile(const std::filesystem::path& file, Json& sections,
         const std::string value = unquoteText(trimText(trimmed.substr(separator + 1)));
         if (key.empty()) continue;
 
-        Json& bucket = objectAt(sections, group);
-        if (!bucket.contains(key)) bucket.insert(key, Json(value));
+        Section& section = sectionAt(parsed, group);
+        if (!section.entries.contains(key)) section.entries.insert(key, Json(value));
 
         if (beginsWith(group, "DRIVER3D_HIDE_OBJECT") && beginsWith(key, "NAME"))
-            addHidden(summary, value);
+            addUnique(parsed.driverHidden, value);
         if (beginsWith(group, "MODEL_REPLACEMENT") && beginsWith(key, "HIDE"))
-            addHidden(summary, splitList(value));
+            addUnique(parsed.modelHidden, splitList(value));
         if (beginsWith(group, "DRIVER3D_MODEL")) {
-            if (beginsWith(key, "NAME")) summary.driverModel = value;
-            if (beginsWith(key, "POSITION")) summary.driverPosition = value;
+            if (beginsWith(key, "NAME")) parsed.driverModel = value;
+            if (beginsWith(key, "POSITION")) parsed.driverPosition = value;
         }
     }
-    ++summary.files;
     return true;
 }
 
+namespace ext_config_detail {
+
+inline std::vector<Section> sectionsOf(const ParsedConfig& parsed, bool driver) {
+    std::vector<Section> out;
+    for (const Section& section : parsed.sections)
+        if (section.driverOwned == driver) out.push_back(section);
+    return out;
+}
+
+inline Json sectionsJson(const std::vector<Section>& sections) {
+    Json out = Json::object();
+    for (const Section& section : sections)
+        if (!out.contains(section.name)) out.insert(section.name, section.entries);
+    return out;
+}
+
+inline Json namesJson(const std::vector<std::string>& names) {
+    Json out = Json::array();
+    for (const std::string& name : names) out.push_back(Json(name));
+    return out;
+}
+
+/** One subject of one file: what a document needs to know about that file. */
+inline Json documentBlock(const ParsedConfig& parsed, bool driver, const Json& skins,
+                          const std::vector<std::string>& files) {
+    Json block = Json::object();
+    block.insert("HIDDEN_NODES",
+                 namesJson(driver ? parsed.driverHidden : parsed.modelHidden));
+    block.insert("SECTIONS", sectionsJson(sectionsOf(parsed, driver)));
+    if (!skins.isEmpty()) block.insert("SKINS", skins);
+    block.insert("IMPORTED_FROM", namesJson(files));
+    if (driver && !parsed.driverModel.empty())
+        block.insert("DRIVER3D_MODEL_NAME", Json(parsed.driverModel));
+    if (driver && !parsed.driverPosition.empty())
+        block.insert("DRIVER3D_MODEL_POSITION", Json(parsed.driverPosition));
+    return block;
+}
+
+} // namespace ext_config_detail
+
 /** Fold `carDir/ext_config.ini` and every `carDir/skins/<id>/ext_config.ini`
- *  into the model document under EXT_CONFIG. Returns the number of files read;
- *  a car without ext_config.ini is left untouched. */
-inline int mergeExtConfigIntoModel(const std::filesystem::path& carDir, Json& modelDocument) {
+ *  into the model and driver documents: the driver's sections (DRIVER3D_*, its
+ *  hidden nodes, the driver model) go to `driverDocument`, everything else to
+ *  `modelDocument`. A document with nothing for its subject is left untouched.
+ *  Returns the number of files read. */
+inline int mergeExtConfig(const std::filesystem::path& carDir, Json& modelDocument,
+                         Json& driverDocument) {
     using namespace ext_config_detail;
     namespace fs = std::filesystem;
+    using ext_config_detail::ParsedConfig;
 
-    ExtConfigSummary summary;
-    Json rootSections = Json::object();
-    Json skins = Json::object();
-    Json importedFrom = Json::array();
-    int files = 0;
+    ParsedConfig root;
+    ParsedConfig model;  // everything the model document needs, files folded in
+    ParsedConfig driver; // everything the driver document needs
+    Json modelSkins = Json::object();
+    Json driverSkins = Json::object();
+    std::vector<std::string> files;
+    int read = 0;
 
-    const fs::path rootFile = carDir / "ext_config.ini";
+    auto fold = [&](const ParsedConfig& parsed, const std::string& label,
+                    const std::string& skinName) {
+        for (const Section& section : parsed.sections) {
+            const bool toDriver = section.driverOwned;
+            std::vector<Section>& target = toDriver ? driver.sections : model.sections;
+            target.push_back(section);
+        }
+        addUnique(model.modelHidden, parsed.modelHidden);
+        addUnique(driver.driverHidden, parsed.driverHidden);
+        if (driver.driverModel.empty()) driver.driverModel = parsed.driverModel;
+        if (driver.driverPosition.empty()) driver.driverPosition = parsed.driverPosition;
+
+        if (!skinName.empty()) {
+            Json modelEntry = Json::object();
+            const std::vector<Section> modelSections = sectionsOf(parsed, false);
+            if (!modelSections.empty()) modelEntry.insert("SECTIONS", sectionsJson(modelSections));
+            if (!parsed.modelHidden.empty())
+                modelEntry.insert("HIDDEN_NODES", namesJson(parsed.modelHidden));
+            if (!modelEntry.isEmpty()) modelSkins.insert(skinName, modelEntry);
+
+            Json driverEntry = Json::object();
+            const std::vector<Section> driverSections = sectionsOf(parsed, true);
+            if (!driverSections.empty()) driverEntry.insert("SECTIONS", sectionsJson(driverSections));
+            if (!parsed.driverHidden.empty())
+                driverEntry.insert("HIDDEN_NODES", namesJson(parsed.driverHidden));
+            if (!parsed.driverModel.empty())
+                driverEntry.insert("DRIVER3D_MODEL_NAME", Json(parsed.driverModel));
+            if (!parsed.driverPosition.empty())
+                driverEntry.insert("DRIVER3D_MODEL_POSITION", Json(parsed.driverPosition));
+            if (!driverEntry.isEmpty()) driverSkins.insert(skinName, driverEntry);
+        }
+        files.push_back(label);
+        ++read;
+    };
+
     std::error_code ec;
-    if (fs::is_regular_file(rootFile, ec) && readExtConfigFile(rootFile, rootSections, summary)) {
-        importedFrom.push_back(Json(std::string("ext_config.ini")));
-        ++files;
-    }
+    const fs::path rootFile = carDir / "ext_config.ini";
+    if (fs::is_regular_file(rootFile, ec) && readExtConfigFile(rootFile, root))
+        fold(root, "ext_config.ini", std::string());
 
     const fs::path skinsDir = carDir / "skins";
     if (fs::is_directory(skinsDir, ec)) {
@@ -186,46 +278,32 @@ inline int mergeExtConfigIntoModel(const std::filesystem::path& carDir, Json& mo
         for (const fs::path& folder : folders) {
             const fs::path file = folder / "ext_config.ini";
             if (!fs::is_regular_file(file, ec)) continue;
-            ExtConfigSummary skinSummary;
-            Json skinSections = Json::object();
-            if (!readExtConfigFile(file, skinSections, skinSummary)) continue;
-            Json skinEntry = Json::object();
-            skinEntry.insert("SECTIONS", skinSections);
-            if (!skinSummary.driverModel.empty())
-                skinEntry.insert("DRIVER3D_MODEL",
-                                 Json(skinSummary.driverModel +
-                                      (skinSummary.driverPosition.empty()
-                                           ? std::string()
-                                           : (" @ " + skinSummary.driverPosition))));
-            skins.insert(folder.filename().string(), skinEntry);
-            // The skin's hides apply to the car as a whole: a skin that removes a
-            // helper node wants it gone whichever skin is loaded.
-            addHidden(summary, skinSummary.hiddenNodes);
-            if (summary.driverModel.empty()) summary.driverModel = skinSummary.driverModel;
-            if (summary.driverPosition.empty())
-                summary.driverPosition = skinSummary.driverPosition;
-            importedFrom.push_back(
-                Json(std::string("skins/") + folder.filename().string() + "/ext_config.ini"));
-            ++files;
+            ParsedConfig parsed;
+            if (!readExtConfigFile(file, parsed)) continue;
+            fold(parsed, "skins/" + folder.filename().string() + "/ext_config.ini",
+                 folder.filename().string());
         }
     }
 
-    if (files == 0) return 0;
+    if (read == 0) return 0;
 
-    Json block = Json::object();
-    Json hidden = Json::array();
-    for (const std::string& node : summary.hiddenNodes) hidden.push_back(Json(node));
-    block.insert("HIDDEN_NODES", hidden);
-    block.insert("SECTIONS", rootSections);
-    if (!skins.isEmpty()) block.insert("SKINS", skins);
-    block.insert("IMPORTED_FROM", importedFrom);
-    if (!summary.driverModel.empty()) block.insert("DRIVER3D_MODEL_NAME", Json(summary.driverModel));
-    if (!summary.driverPosition.empty())
-        block.insert("DRIVER3D_MODEL_POSITION", Json(summary.driverPosition));
+    const bool modelHasContent =
+        !model.sections.empty() || !model.modelHidden.empty() || !modelSkins.isEmpty();
+    const bool driverHasContent =
+        !driver.sections.empty() || !driver.driverHidden.empty() ||
+        !driver.driverModel.empty() || !driverSkins.isEmpty();
 
-    if (modelDocument.contains("EXT_CONFIG")) modelDocument.remove("EXT_CONFIG");
-    modelDocument.insert("EXT_CONFIG", block);
-    return files;
+    if (modelHasContent) {
+        if (modelDocument.contains("EXT_CONFIG")) modelDocument.remove("EXT_CONFIG");
+        modelDocument.insert("EXT_CONFIG",
+                             documentBlock(model, false, modelSkins, files));
+    }
+    if (driverHasContent) {
+        if (driverDocument.contains("EXT_CONFIG")) driverDocument.remove("EXT_CONFIG");
+        driverDocument.insert("EXT_CONFIG",
+                              documentBlock(driver, true, driverSkins, files));
+    }
+    return read;
 }
 
 } // namespace assetto_corsa
