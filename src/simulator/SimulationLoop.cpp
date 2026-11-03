@@ -741,7 +741,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 nm.clearcoat = surface.clearcoat;
                 const graphics::MaterialPresetId presetId =
                     overrides.presetFor(material.shader, material.name);
-                if (overrides.find(material.name) != nullptr) ++overridden;
+                if (overrides.findEffective(material.name) != nullptr) ++overridden;
                 if (presetId == graphics::MaterialPresetId::Paint) ++painted;
                 if (presetId == graphics::MaterialPresetId::BrushedMetal ||
                     presetId == graphics::MaterialPresetId::Chrome ||

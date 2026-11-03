@@ -138,6 +138,28 @@ int main() {
     check(!broken.parse("not json", nullptr), "garbage is rejected");
     check(broken.empty(), "a rejected file leaves nothing behind");
 
+    // --- wildcard keys ------------------------------------------------------
+    MaterialOverrides patterns;
+    const std::string wild =
+        R"json({"materials": {"DECAL_07": {"roughness": 0.9}, "DECAL_*": {"roughness": 0.5}, "DECAL_07_*": {"roughness": 0.7}, "*_GLASS": {"preset": "glass"}, "*": {"metalness": 0.25}}})json";
+    check(patterns.parse(wild, nullptr), "wildcard keys parse");
+    check(patterns.patternCount() == 4, "patterns are kept apart from exact keys");
+    check(patterns.findEffective(
+              "DECAL_08") != nullptr, "a DECAL_* key catches DECAL_08");
+    checkNear(patterns.resolve(
+                  "", "DECAL_07", 0.3f).roughness, 0.9, 1e-5,
+              "an exact key beats every wildcard");
+    checkNear(patterns.resolve(
+                  "", "DECAL_07_A", 0.3f).roughness, 0.7, 1e-5,
+              "the most specific pattern wins");
+    check(patterns.presetFor(
+              "", "EXT_GLASS") == MaterialPresetId::Glass,
+          "a wildcard can carry a preset");
+    check(patterns.findEffective(
+              "MAIN_PAINT") != nullptr, "the catch-all still matches");
+    check(materialWildcardMatch("AB*", "AB"), "a star can match nothing");
+    check(!materialWildcardMatch("AB?", "AB"), "a question mark needs a character");
+
     if (g_failures == 0) std::printf("material_preset_test: all checks passed\n");
     return g_failures == 0 ? 0 : 1;
 }
