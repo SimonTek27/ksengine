@@ -7,6 +7,7 @@
 // with wildcards intact, and that merging twice does not duplicate anything.
 
 #include "adapters/assetto_corsa/ExtConfig.h"
+#include "Graphics/HiddenNodes.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -146,6 +147,28 @@ int main(int argc, char** argv) {
     mergeExtConfig(root, model, driver);
     check(nodeCount(model) == 6 && nodeCount(driver) == 2,
           "merging twice does not duplicate nodes");
+
+    // The matcher the renderer uses on every node name (Graphics/HiddenNodes.h):
+    // AC's '?' is one character, '*' any run, names compare case-insensitively.
+    {
+        using ks::graphics::HiddenNodes;
+        using ks::graphics::nodeNameMatches;
+        check(nodeNameMatches("KERS_LEVEL_?", "KERS_LEVEL_1"), "'?' matches one character");
+        check(!nodeNameMatches("KERS_LEVEL_?", "KERS_LEVEL_12"), "'?' does not match two");
+        check(nodeNameMatches("DRIVER:HELMET", "driver:helmet"), "names match case-insensitively");
+        check(nodeNameMatches("DISPLAY_*", "DISPLAY_MONITOR_001"), "'*' matches a run");
+        check(!nodeNameMatches("DRIVER:HELMET", "DRIVER:GEO_Driver_FACE"),
+              "a plain name matches only itself");
+
+        HiddenNodes hidden;
+        hidden.addDocument(model);
+        hidden.addDocument(driver);
+        check(hidden.size() == 8, "both documents contribute their patterns");
+        check(hidden.hides("DRIVER:GEO_Driver_FACE"), "a driver node is hidden");
+        check(hidden.hides("KERS_LEVEL_3"), "a wildcard pattern reaches the level digits");
+        check(hidden.hides("GEO_BD_Disc_Hub_LR_Decal"), "a hub decal is hidden");
+        check(!hidden.hides("GEO_BD_Wheel_RR"), "a node nobody hides stays");
+    }
 
     // A car without the file is left alone, in both documents.
     Json untouchedModel = Json::object();

@@ -2,6 +2,8 @@
 #include "engine/Graphics/MaterialPresets.h"
 #include "engine/Graphics/MaterialOverrides.h"
 #include "engine/Graphics/TextureNames.h"
+#include "engine/Graphics/HiddenNodes.h" // the nodes a skin's ext_config.ini hides
+#include "engine/FileFormat/Json.h"
 #include "engine/Config/PPFilterPreset.h" // loaded preset (KS_PPFILTER)
 /**
  * SimulationLoop.cpp — std-only
@@ -563,6 +565,36 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     int selfLit = 0;
     std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
 
+    // The nodes the content hides: a skin's ext_config.ini names them and the
+    // converter folds them into the car's documents, so the list is read where
+    // the model is described. A venue ships no model document and hides nothing.
+    // KS_SHOW_HIDDEN turns hiding off, which is the only way to see what a skin
+    // actually removes.
+    graphics::HiddenNodes hiddenNodes;
+    int hiddenSkipped = 0;
+    if (std::getenv("KS_SHOW_HIDDEN") == nullptr) {
+        std::error_code documentError;
+        const std::filesystem::path carFolder =
+            std::filesystem::path(modelPath).parent_path();
+        for (const char* document : {"model.json", "driver.json"}) {
+            const std::filesystem::path file = carFolder / "data" / document;
+            if (!std::filesystem::is_regular_file(file, documentError)) continue;
+            std::ifstream in(file, std::ios::binary);
+            if (!in) continue;
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            bool parsedDocument = false;
+            const ks::Json parsedJson = ks::Json::parse(text, &parsedDocument);
+            if (!parsedDocument) continue;
+            hiddenNodes.addDocument(parsedJson);
+        }
+        if (!hiddenNodes.empty()) {
+            std::fprintf(stderr, "[kn5] ext_config: %zu hidden node pattern(s)",
+                         hiddenNodes.size());
+            std::putchar(10);
+        }
+    }
+
     // Folds a KN5 name to lower case: shader/mapping names are author-written
     // and inconsistent about it ("Normal", "normal", "KS_NM").
     auto lower = [](const std::string& text) {
@@ -718,6 +750,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     float bboxMin[3] = {1e9f, 1e9f, 1e9f};
     float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
     std::function<void(const ff::Kn5Node&)> walk = [&](const ff::Kn5Node& node) {
+        // A hidden node takes its children with it: that is what hiding a group
+        // in the editor means, and the driver's face sits under its own group.
+        if (hiddenNodes.hides(node.name)) {
+            ++hiddenSkipped;
+            return;
+        }
         const auto& m = node.mesh;
         if (node.node_class == ff::Kn5NodeClass::mesh && node.has_mesh &&
             !m.indices.empty() && m.positions.size() >= 3) {
@@ -921,6 +959,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
 std::putchar(10);
         if (overridden > 0) {
             std::printf("  %d material override(s) applied", overridden);
+            std::putchar(10);
+        }
+        if (hiddenSkipped > 0) {
+            std::printf("  ext_config hides %d node(s)", hiddenSkipped);
             std::putchar(10);
         }
     if (outMin && outMax) {
