@@ -1996,7 +1996,11 @@ void SimulationLoop::render(float dt) {
         // Roadmap P1: sprite quads, recorded with the same draw list (before
         // the UI overlay so the HUD is never covered by world-space dust).
         updateAndDrawParticles(dt);
-        m_vulkanRenderer->drawUi(m_ui.renderer());
+        // KS_HIDE_MENU keeps the interface out of a capture (see the m_uiGpu
+        // branch below, which is the other way the UI can reach a frame).
+        if (std::getenv("KS_HIDE_MENU") == nullptr) {
+            m_vulkanRenderer->drawUi(m_ui.renderer());
+        }
         m_vulkanRenderer->endFrame();
     } else if (m_uiGpu) {
         // KS_HIDE_MENU keeps the interface out of a capture: the fixed
