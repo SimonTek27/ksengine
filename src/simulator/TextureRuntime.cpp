@@ -137,6 +137,22 @@ VkImageView TextureRuntime::get(const std::string& path, VkSampler& outSampler,
     return inserted->second.view;
 }
 
+bool TextureRuntime::add(const std::string& key, const std::uint8_t* rgba,
+                         std::uint32_t width, std::uint32_t height) {
+    if (key.empty() || !ready()) return false;
+    const std::string cacheKey = normalizedKey(key);
+    if (m_textures.find(cacheKey) != m_textures.end()) return true; // already uploaded
+    Texture texture;
+    if (!uploadRgba(rgba, width, height, texture)) return false;
+    m_failedPaths.erase(cacheKey); // a real payload beats an earlier miss
+    const auto [inserted, wasInserted] = m_textures.emplace(cacheKey, texture);
+    if (!wasInserted) {
+        destroyTexture(texture);
+        return true;
+    }
+    return true;
+}
+
 void TextureRuntime::clear() {
     for (auto& [_, texture] : m_textures) {
         destroyTexture(texture);

@@ -50,6 +50,9 @@ enum class DdsFormat {
     bc3,
     raw,        // mask-driven RGB(A), 8/16/24/32 bits per pixel
     luminance,  // 8-bit grayscale (DDPF_LUMINANCE), alpha if a mask says so
+    // 4 x IEEE float per pixel, written by tools as the D3DFMT code 116 in the
+    // FourCC field instead of a tag. AC's showroom skies are stored this way.
+    rgba32f,
 };
 
 // Human-readable tag for a DdsFormat ("BC1/DXT1", "uncompressed RGBA8", ...).

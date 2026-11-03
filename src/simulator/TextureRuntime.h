@@ -41,6 +41,13 @@ public:
     VkImageView get(const std::string& path, VkSampler& outSampler,
                     bool flatNormalFallback = false);
 
+    // Registers a texture decoded outside the DDS cache — a hall read straight
+    // from its own .kn5, where the payload is in memory and the showroom is not
+    // allowed to write a file. Keyed like a path, so the material descriptor
+    // resolves it through get() with no special case in the draw path.
+    bool add(const std::string& key, const std::uint8_t* rgba, std::uint32_t width,
+             std::uint32_t height);
+
     // Drops successfully loaded texture images but keeps the fallback valid.
     // Failed paths are also forgotten so a corrected file can be retried.
     void clear();

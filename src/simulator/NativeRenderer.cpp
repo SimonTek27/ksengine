@@ -1743,6 +1743,14 @@ void NativeRenderer::clearStaticScene() {
     m_staticSceneMeshNames.clear();
 }
 
+bool NativeRenderer::addTextureFromMemory(const std::string& key,
+                                          const std::vector<unsigned char>& rgba, int width,
+                                          int height) {
+    if (!m_textureRuntime || rgba.empty() || width <= 0 || height <= 0) return false;
+    return m_textureRuntime->add(key, rgba.data(), static_cast<uint32_t>(width),
+                                 static_cast<uint32_t>(height));
+}
+
 VkImageView NativeRenderer::textureView(const std::string& path, VkSampler& outSampler) {
     outSampler = VK_NULL_HANDLE;
     if (!m_textureRuntime) return VK_NULL_HANDLE;

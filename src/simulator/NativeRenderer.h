@@ -441,6 +441,9 @@ public:
     // destruction; callers must not destroy them. This is the texture-loading
     // half of the material pipeline. Descriptor binding remains per-material.
     VkImageView textureView(const std::string& path, VkSampler& outSampler);
+    // A material texture that never touches the disk: rgba is width*height*4.
+    bool addTextureFromMemory(const std::string& key,
+                              const std::vector<unsigned char>& rgba, int width, int height);
     std::size_t cachedTextureCount() const noexcept;
     void clearTextureCache();
 

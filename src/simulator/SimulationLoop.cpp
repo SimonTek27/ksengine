@@ -13,6 +13,8 @@
 #include "engine/FileFormat/Kn5Reader.h"
 #include <array>
 #include <functional>
+#include "engine/FileFormat/DdsReader.h" // hall albedo decoded from the .kn5, in memory
+#include <map>
 #include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
 #include "GarageSpawn.h"     // rF2-like garage/grid placement (roadmap 2.8)
 #include "RainEffects.h"
@@ -493,12 +495,25 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
     }
     if (model.empty()) return false;
 
-    const auto parsed = ::ks::engine::fileformat::parseKn5File(model.string());
+    // keep_texture_data: the hall's albedo lives inside the .kn5, and this
+    // path is not allowed to write it out, so it is decoded from memory.
+    ::ks::engine::fileformat::Kn5ParseOptions parseOptions;
+    parseOptions.keep_texture_data = true;
+    const auto parsed = ::ks::engine::fileformat::parseKn5File(model.string(), parseOptions);
     if (!parsed.ok()) {
         std::fprintf(stderr, "[showroom] %s unreadable: %s\n",
                      model.filename().string().c_str(), parsed.error.c_str());
         return false;
     }
+
+    // What is on screen right now belongs to whatever was loaded before this
+    // showroom: the track scene, its meshes and its entities. A venue read from
+    // its own .kn5 replaces all of it, the same way loadTrackFolder() does for a
+    // baked hall. Without this the room is drawn inside the track and the
+    // player sees the track — which is exactly what happened.
+    despawnSceneEntities();
+    m_vulkanRenderer->clearStaticScene();
+    m_spawnedSceneDir.clear();
 
     // Row-vector convention, as the parser stores each node's accumulated
     // transform: the same arithmetic the offline baker applies before writing.
@@ -511,6 +526,7 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
 
     int meshes = 0;
     std::size_t vertices = 0;
+    std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
     // Where the hall actually sits: an AC venue is not centred on the engine
     // origin, so orbiting (0,0,0) can point the camera at empty space.
     float bboxMin[3] = {1e9f, 1e9f, 1e9f};
@@ -556,6 +572,81 @@ bool SimulationLoop::loadShowroomHallFromKn5(const ShowroomConfig& cfg) {
                     v.a = 1.f;
                 }
                 nm.indices = m.indices;
+
+                // The material's diffuse texture, decoded here and cached under a key
+                // the mesh can name: the room then renders with its own look instead of
+                // a flat shell, and still writes nothing.
+                if (m.material_id >= 0 &&
+                    m.material_id < static_cast<std::int32_t>(parsed.file.materials.size())) {
+                    const auto& material =
+                        parsed.file.materials[static_cast<std::size_t>(m.material_id)];
+                    std::string wanted = material.mappings.empty()
+                                             ? std::string{}
+                                             : material.mappings.front().texture;
+                    for (const auto& mapping : material.mappings)
+                        if (mapping.slot == 0 && !mapping.texture.empty()) {
+                            wanted = mapping.texture;
+                            break;
+                        }
+                    if (wanted.empty()) {
+                        std::fprintf(stderr, "[showroom] hall material %s has no texture\n",
+                                     material.name.c_str());
+                    } else {
+                        auto known = decodedTextures.find(wanted);
+                        if (known == decodedTextures.end()) {
+                            std::string key;
+                            const ::ks::engine::fileformat::Kn5Texture* source = nullptr;
+                            for (const auto& texture : parsed.file.textures)
+                                if (texture.name == wanted) {
+                                    source = &texture;
+                                    break;
+                                }
+                            if (!source) {
+                                std::fprintf(stderr, "[showroom] hall texture %s not in the file\n",
+                                             wanted.c_str());
+                            } else if (source->data.empty()) {
+                                std::fprintf(stderr, "[showroom] hall texture %s has no payload\n",
+                                             wanted.c_str());
+                            } else {
+                                const std::string_view bytes(
+                                    reinterpret_cast<const char*>(source->data.data()),
+                                    source->data.size());
+                                if (!::ks::engine::fileformat::isDds(bytes)) {
+                                    std::fprintf(stderr, "[showroom] hall texture %s is not DDS\n",
+                                                 wanted.c_str());
+                                } else {
+                                    const auto image =
+                                        ::ks::engine::fileformat::decodeDds(bytes);
+                                    if (!image.ok() || image.rgba.empty()) {
+                                        std::fprintf(stderr,
+                                                     "[showroom] hall texture %s decode failed: %s\n",
+                                                     wanted.c_str(),
+                                                     image.info.error.c_str());
+                                    } else {
+                                        char cacheKey[128];
+                                        std::snprintf(cacheKey, sizeof(cacheKey), "showroom://%s/%s",
+                                                      cfg.id.c_str(), wanted.c_str());
+                                        if (m_vulkanRenderer->addTextureFromMemory(
+                                                cacheKey, image.rgba, image.info.width,
+                                                image.info.height)) {
+                                            key = cacheKey;
+                                            std::fprintf(stderr,
+                                                         "[showroom] hall albedo %s decoded in memory (%dx%d, no file)\n",
+                                                         wanted.c_str(), image.info.width,
+                                                         image.info.height);
+                                        } else {
+                                            std::fprintf(stderr,
+                                                         "[showroom] hall albedo %s upload failed\n",
+                                                         wanted.c_str());
+                                        }
+                                    }
+                                }
+                            }
+                            known = decodedTextures.emplace(wanted, key).first;
+                        }
+                        if (!known->second.empty()) nm.albedoTexture = known->second;
+                    }
+                }
 
                 char name[64];
                 std::snprintf(name, sizeof(name), "showroom_hall_%d", meshes);
@@ -642,6 +733,10 @@ void SimulationLoop::buildShowroomVenue() {
     std::memcpy(nm.vertices.data(), venue.vertices.data(),
                 venue.vertices.size() * sizeof(ks::sim::SolidBoxVertex));
     nm.indices = venue.indices;
+    // Same rule as the .kn5 path: the room is the scene, not a decoration on
+    // top of the track that was loaded first.
+    despawnSceneEntities();
+    m_spawnedSceneDir.clear();
     m_vulkanRenderer->clearStaticScene();
     // In memory, and nothing else: the room is an ordinary mesh plus the
     // entity that draws it, exactly like the car's placeholder box. No file is

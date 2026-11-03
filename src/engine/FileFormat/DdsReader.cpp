@@ -1,3 +1,4 @@
+#include <cmath>
 #include "DdsReader.h"
 
 #include <algorithm>
@@ -287,6 +288,8 @@ DdsFormat resolveFormat(Header& header, std::string_view bytes,
         case kFourCcDxt4:
         case kFourCcDxt5:
             return DdsFormat::bc3;
+        case 116: // D3DFMT_A32B32G32R32F, written where a FourCC tag belongs
+            return DdsFormat::rgba32f;
         case kFourCcDx10:
             break;
         default:
@@ -352,6 +355,9 @@ DdsFormat resolveFormat(Header& header, std::string_view bytes,
 }
 
 std::size_t bytesNeeded(const Header& header, DdsFormat format) {
+    if (format == DdsFormat::rgba32f)
+        return static_cast<std::size_t>(header.width) *
+               static_cast<std::size_t>(header.height) * 16u;
     if (format == DdsFormat::bc1 || format == DdsFormat::bc2) {
         return 8u * ((header.width + 3) / 4) * ((header.height + 3) / 4);
     }
@@ -364,6 +370,7 @@ std::size_t bytesNeeded(const Header& header, DdsFormat format) {
 } // namespace
 
 const char* ddsFormatName(DdsFormat format) {
+    if (format == DdsFormat::rgba32f) return "A32B32G32R32F (HDR)";
     switch (format) {
     case DdsFormat::bc1: return "BC1/DXT1";
     case DdsFormat::bc2: return "BC2/DXT3";
@@ -443,6 +450,28 @@ DdsImage decodeDds(std::string_view bytes) {
                           static_cast<std::size_t>(height) * 4,
                       0);
     const auto* data = reinterpret_cast<const std::uint8_t*>(bytes.data()) + offset;
+
+    if (format == DdsFormat::rgba32f) {
+        // Linear radiance out of a panorama: Reinhard keeps the bright sky from
+        // clipping to white, and the gamma step puts it back in the space the
+        // albedo sampler expects. Alpha is dropped — a sky has none.
+        const auto* floats = reinterpret_cast<const float*>(data);
+        const std::size_t pixels = static_cast<std::size_t>(width) * height;
+        auto encode = [](float v) {
+            if (!(v > 0.f)) v = 0.f;
+            v = v / (1.f + v);
+            v = std::pow(v, 1.f / 2.2f);
+            if (v > 1.f) v = 1.f;
+            return static_cast<std::uint8_t>(v * 255.f + 0.5f);
+        };
+        for (std::size_t i = 0; i < pixels; ++i) {
+            image.rgba[i * 4 + 0] = encode(floats[i * 4 + 0]);
+            image.rgba[i * 4 + 1] = encode(floats[i * 4 + 1]);
+            image.rgba[i * 4 + 2] = encode(floats[i * 4 + 2]);
+            image.rgba[i * 4 + 3] = 255;
+        }
+        return image;
+    }
 
     if (format == DdsFormat::bc1 || format == DdsFormat::bc2 ||
         format == DdsFormat::bc3) {
