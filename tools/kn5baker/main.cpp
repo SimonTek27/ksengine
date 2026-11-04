@@ -52,8 +52,9 @@ int usage() {
     std::fprintf(stderr,
                  "usage: kn5baker <input.kn5> <output_directory>\n"
                  "       kn5baker --validate <input.kn5>\n"
-                 "       kn5baker [--only <name_substring>] [--skip <name_substring>]\n"
-                 "                [--recentre] <input.kn5> <output_directory>\n");
+                 "       kn5baker [--only <name_substring>]... [--skip <name_substring>]\n"
+                 "                [--recentre] <input.kn5> <output_directory>\n"
+                 "       (--only repeats: several parts of one assembly bake together)\n");
     return 2;
 }
 
@@ -63,15 +64,26 @@ std::string lower(std::string value) {
     return value;
 }
 
-// Collects every mesh node whose name contains `needle` (case-insensitive).
+// Collects every mesh node whose name contains any of `needles` (case-insensitive),
+// once each: one walk, so a node that matches two needles is still baked once.
+// Several needles are how a part that only makes sense with its companions is
+// pulled out together — a helmet with its HANS, say, which must keep the two
+// meshes' positions relative to each other.
 // Transforms are already accumulated into Kn5Mesh::world by the reader, so the
 // flat copy stays where the asset put it.
-void collectMatching(const std::vector<Kn5Node>& nodes, const std::string& needle,
-                     std::vector<Kn5Node>& out) {
+void collectMatchingAny(const std::vector<Kn5Node>& nodes,
+                        const std::vector<std::string>& needles,
+                        std::vector<Kn5Node>& out) {
     for (const Kn5Node& node : nodes) {
-        if (node.has_mesh && lower(node.name).find(needle) != std::string::npos)
-            out.push_back(node);
-        collectMatching(node.children, needle, out);
+        if (node.has_mesh) {
+            const std::string name = lower(node.name);
+            for (const std::string& needle : needles) {
+                if (name.find(needle) == std::string::npos) continue;
+                out.push_back(node);
+                break;
+            }
+        }
+        collectMatchingAny(node.children, needles, out);
     }
 }
 
@@ -225,7 +237,7 @@ int report(const std::string& input, const std::string& output_dir,
 }
 
 int bake(const std::string& input, const std::string& output_dir,
-         const std::string& only, const std::string& skip, bool recentre) {
+         const std::vector<std::string>& only, const std::string& skip, bool recentre) {
     if (only.empty() && skip.empty() && !recentre)
         return report(input, output_dir,
                       ks::engine::fileformat::bakeKn5ToNativeMeshes(input, output_dir));
@@ -239,16 +251,23 @@ int bake(const std::string& input, const std::string& output_dir,
     }
 
     if (!only.empty()) {
+        std::vector<std::string> needles;
+        std::string wanted;
+        for (const std::string& needle : only) {
+            needles.push_back(lower(needle));
+            if (!wanted.empty()) wanted += ", ";
+            wanted += needle;
+        }
         std::vector<Kn5Node> kept;
-        collectMatching(parsed.file.nodes, lower(only), kept);
+        collectMatchingAny(parsed.file.nodes, needles, kept);
         if (kept.empty()) {
             std::fprintf(stderr, "kn5baker: %s: no mesh name contains '%s'\n",
-                         input.c_str(), only.c_str());
+                         input.c_str(), wanted.c_str());
             return 1;
         }
         parsed.file.nodes = std::move(kept);
         std::printf("kn5baker: %zu mesh(es) matched '%s'\n", parsed.file.nodes.size(),
-                    only.c_str());
+                    wanted.c_str());
     }
     if (!skip.empty()) {
         int before = 0, skinned = 0;
@@ -281,7 +300,7 @@ int main(int argc, char** argv) {
     int next = 1;
     bool validate_only = false;
     bool recentre = false;
-    std::string only;
+    std::vector<std::string> only;
     std::string skip;
     while (next < argc) {
         const std::string_view arg = argv[next];
@@ -289,7 +308,7 @@ int main(int argc, char** argv) {
             validate_only = true;
             ++next;
         } else if (arg == "--only" && next + 1 < argc) {
-            only = argv[next + 1];
+            only.emplace_back(argv[next + 1]);
             next += 2;
         } else if (arg == "--skip" && next + 1 < argc) {
             skip = argv[next + 1];

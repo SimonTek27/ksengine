@@ -37,16 +37,17 @@ namespace sim {
 /// ONCE into the shared prop folder, recentred on its own footprint so it can
 /// stand at any coordinate:
 ///
-///   kn5baker --only marshall_A_HI_010 --recentre <track.kn5> content/objects3D/marshal
+///   kn5baker --only marshall_A_HI_010 --recentre <track.kn5> content/characters/marshal
 ///
 /// A track then carries only the coordinates of its posts, and its own bake
 /// leaves the marshal out with `--skip marshall_A_`: one copy of the geometry,
 /// referenced by position from every track.
 inline constexpr const char* kMarshalMeshName = "marshall_A_HI_010";
-/// Shared asset folder, relative to the content root: manifest.txt + .nmsh +
-/// textures/, the shape NativeRenderer::loadMeshFromFile() reads. Loaded once
-/// and instanced at each post, never as static scene at a baked-in position.
-inline constexpr const char* kMarshalAssetDir = "objects3D/marshal";
+/// Shared asset folder, relative to the content root, under the characters
+/// folder where the people of a session live: manifest.txt + .nmsh + textures/,
+/// the shape NativeRenderer::loadMeshFromFile() reads. Loaded once and
+/// instanced at each post, never as static scene at a baked-in position.
+inline constexpr const char* kMarshalAssetDir = "characters/marshal";
 
 /// A footprint a vehicle parks in: the safety-car bay at the pit exit, and any
 /// recovery vehicle spot the track authors later.
