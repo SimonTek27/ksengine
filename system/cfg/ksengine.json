@@ -146,11 +146,6 @@
         "landsAs": null
       },
       {
-        "feature": "fakeShadows",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
         "feature": "tyreVisuals",
         "status": "missing",
         "landsAs": null,
