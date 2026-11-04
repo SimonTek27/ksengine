@@ -3353,8 +3353,11 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
 
     if (!m_particlesInit) {
         m_particlesInit = true;
+        // The config owns the switch (video.particles); KS_PARTICLES=1 still
+        // forces the emitters on for a capture, whatever the file says.
         const char* flag = std::getenv("KS_PARTICLES");
-        m_particlesWanted = flag && *flag && std::atoi(flag) != 0;
+        const bool envForced = flag && *flag && std::atoi(flag) != 0;
+        m_particlesWanted = envForced || m_particlesConfig;
         if (m_particlesWanted) {
             m_particles.setSeed(20251004u);
             ParticleEmitter dust;
@@ -3378,7 +3381,10 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
             // the default image is untouched.
             m_particles.addEmitter(rainfx::makeRainEmitter());   // index 1
             m_particles.addEmitter(rainfx::makeSprayEmitter());  // index 2
-            std::fprintf(stderr, "[particles] KS_PARTICLES=1: dust + rain + spray emitters up to %d sprites\n",
+            std::fprintf(stderr,
+                         "[particles] emitters on (config %d, KS_PARTICLES %d): "
+                         "dust + rain + spray up to %d sprites\n",
+                         m_particlesConfig ? 1 : 0, envForced ? 1 : 0,
                          ParticleSystem::kMaxParticles);
         }
     }

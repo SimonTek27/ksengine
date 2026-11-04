@@ -280,6 +280,11 @@ public:
     TelemetryOverlay* telemetry() { return &m_ui.telemetry(); }
     // Frame pacing for the config's video.frameLimit: 0 leaves the frame free
     // (vsync still caps it), any other value sleeps the rest of the budget.
+    // Particle emitters (dust, rain column, wheel spray) from video.particles.
+    // KS_PARTICLES=1 still forces them on, for a capture.
+    void setParticlesEnabled(bool on) { m_particlesConfig = on; }
+    bool particlesEnabled() const { return m_particlesConfig; }
+
     void setFrameLimit(int fps) { m_frameLimit = fps > 0 ? fps : 0; }
     int frameLimit() const { return m_frameLimit; }
 
@@ -462,6 +467,7 @@ private:
 
     bool m_particlesWanted = false;
     bool m_particlesInit = false;
+    bool m_particlesConfig = false;
     ks::engine::graphics::ParticleSystem m_particles;
     std::vector<float> m_particleQuads;
 

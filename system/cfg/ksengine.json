@@ -58,6 +58,7 @@
     "anisotropicFiltering": 8,
     "shadowMapSize": 2048,
     "mirrorResolution": "128x512",
+    "particles": true,
     "sources": [
       {
         "feature": "windowOutput",
@@ -129,15 +130,15 @@
       },
       {
         "feature": "particles",
-        "status": "partial",
-        "landsAs": "billboard sprite quads",
-        "note": "ParticleSystem feeds the billboard pass with dust, a rain column and wheel spray; the emitters only start with KS_PARTICLES=1, the config does not drive them yet."
+        "status": "live",
+        "landsAs": "billboard sprite quads (dust, rain, spray)",
+        "note": "video.particles starts the ParticleSystem emitters and the billboard pass draws them; KS_PARTICLES=1 still forces them on for a capture."
       },
       {
         "feature": "rain",
-        "status": "partial",
-        "landsAs": "weather rain shading + spray",
-        "note": "The lighting pass takes rain intensity and track wetness from the weather state; falling drops and wheel spray are particle emitters gated by KS_PARTICLES=1."
+        "status": "live",
+        "landsAs": "weather rain shading + drops/spray",
+        "note": "The lighting pass reads rain intensity and track wetness from the weather every frame, and the drops and spray come from the particle emitters video.particles starts."
       },
       {
         "feature": "windscreenEffects",
