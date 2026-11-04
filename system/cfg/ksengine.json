@@ -1,1 +1,908 @@
-{}
+{
+  "schema": 1,
+  "engine": {
+    "name": "KinetiKa Simulator",
+    "config": "system/cfg/ksengine.json",
+    "playerOverrides": "user/<player>/settings.json",
+    "precedence": "system/cfg first, user file second, later wins per key",
+    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and where every Content Manager page and Custom Shaders Patch module lands. Only physics.fixedDt, audio.master, assist.tc and assist.abs are consumed by the runtime today; every other key is documentation and is ignored by the loader, so it can never break a session."
+  },
+  "effectiveKeys": [
+    "physics.fixedDt",
+    "audio.master",
+    "assist.tc",
+    "assist.abs"
+  ],
+  "physics": {
+    "fixedDt": 0.008333333333333333,
+    "note": "Fixed simulation step in seconds, accepted range 1e-5..1.0; 1/120 is the compiled default."
+  },
+  "assist": {
+    "tc": 0,
+    "abs": 0,
+    "note": "Driver aids applied from the setup at start-up only, 0..12."
+  },
+  "settings": {
+    "entries": [
+      "video",
+      "audio",
+      "controls"
+    ],
+    "from": [
+      "cm:settings/content-manager",
+      "cm:settings/assetto-corsa",
+      "cm:settings/custom-shaders-patch"
+    ],
+    "note": "Content Manager splits its settings across three panels; in KinetiKa they are three entries of the same SETTINGS screen, with the Custom Shaders Patch pages folded into the two below (image) and one (input)."
+  },
+  "video": {
+    "resolution": "1920x1080",
+    "resolutions": [
+      "1920x1080",
+      "1600x900",
+      "1280x720"
+    ],
+    "fullscreen": false,
+    "vsync": true,
+    "frameLimit": 0,
+    "ssao": false,
+    "ssr": false,
+    "motionBlur": false,
+    "exposure": 0.72,
+    "tonemap": "ACES",
+    "tonemaps": [
+      "NONE",
+      "REINHARD",
+      "ACES",
+      "UNCHARTED2",
+      "FILMIC"
+    ],
+    "postProcessFilter": "Normal",
+    "hdrOutput": false,
+    "msaa": 1,
+    "anisotropicFiltering": 8,
+    "shadowMapSize": 2048,
+    "mirrorResolution": "128x512",
+    "sources": [
+      {
+        "from": "ac:cfg/video.ini",
+        "status": "live",
+        "landsAs": "resolution, fullscreen, vsync, anisotropic, shadow map, AA samples",
+        "note": "Resolution, fullscreen and vsync switch the window and the swapchain at runtime; anisotropic filtering and the shadow map size are fixed when assets load."
+      },
+      {
+        "from": "csp:graphics_adjustments",
+        "status": "partial",
+        "landsAs": "exposure, tonemap",
+        "note": "Only the parts the display pass honours: exposure and tone curve. The rest of the page has no equivalent pass."
+      },
+      {
+        "from": "csp:lighting_fx",
+        "status": "missing",
+        "landsAs": null,
+        "note": "No emissive/light bloom chain in the deferred path."
+      },
+      {
+        "from": "csp:extra_fx",
+        "status": "missing",
+        "landsAs": null,
+        "note": "No SSGI, no screen-space shadows accumulation."
+      },
+      {
+        "from": "csp:reflections_fx",
+        "status": "partial",
+        "landsAs": "ssr",
+        "note": "Screen-space reflections exist; planar/mirror reflections do not."
+      },
+      {
+        "from": "csp:smart_mirror",
+        "status": "missing",
+        "landsAs": null,
+        "note": "No mirror pass; the Value is kept for reference only."
+      },
+      {
+        "from": "csp:smart_shadows",
+        "status": "partial",
+        "landsAs": "shadowMapSize",
+        "note": "One cascade shadow map at a fixed size, no per-frame retargeting."
+      },
+      {
+        "from": "csp:shadowed_wheels",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:colorful_shadowing",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:custom_rendering_modes",
+        "status": "partial",
+        "landsAs": "deferred pass",
+        "note": "Forward and deferred paths exist; the list of named modes does not."
+      },
+      {
+        "from": "csp:data_gbuffer",
+        "status": "partial",
+        "landsAs": "deferred gbuffer",
+        "note": "The deferred path has its own gbuffer layout; per-material overrides are not loaded."
+      },
+      {
+        "from": "csp:grass_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:particles_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:rain_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:windscreen_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:skidmarks_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:fake_shadows_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:tyres_fx",
+        "status": "missing",
+        "landsAs": null,
+        "note": "Tyres render as plain meshes; no deformation or flat-spot visuals."
+      },
+      {
+        "from": "csp:weather_fx",
+        "status": "partial",
+        "landsAs": "weather preset",
+        "note": "A weather state drives sun and sky values; the shader-level weather system is absent."
+      },
+      {
+        "from": "csp:yebisest",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:dxgi_tweaks",
+        "status": "missing",
+        "landsAs": null,
+        "note": "Vulkan swapchain: no DXGI present hooks."
+      },
+      {
+        "from": "csp:vr_tweaks",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:triple_custom",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:neck",
+        "status": "missing",
+        "landsAs": null,
+        "note": "Camera is rigid; no head physics."
+      },
+      {
+        "from": "csp:freer_camera",
+        "status": "partial",
+        "landsAs": "orbit camera",
+        "note": "A free orbit camera exists for the showroom and the menu backdrop."
+      },
+      {
+        "from": "csp:chaser_camera",
+        "status": "partial",
+        "landsAs": "chase camera",
+        "note": "Chase and cockpit views exist, without the spring/offset tuning of the page."
+      },
+      {
+        "from": "ac:cfg/camera_manager",
+        "status": "partial",
+        "landsAs": "chase / cockpit cameras",
+        "note": "Two views exist and switch; the page's per-camera bookmarks are not read."
+      },
+      {
+        "from": "ac:cfg/camera_onboard",
+        "status": "partial",
+        "landsAs": "cockpit view",
+        "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
+      },
+      {
+        "from": "ac:cfg/triple_screen",
+        "status": "missing",
+        "landsAs": null,
+        "note": "One window, one swapchain: no triple-head splitting or side-angle correction."
+      },
+      {
+        "from": "cm:settings/assetto-corsa/video",
+        "status": "partial",
+        "landsAs": "video page",
+        "note": "The page lists only the knobs the renderer reads back; MSAA, mip LOD bias and frame latency have no implementation."
+      },
+      {
+        "from": "cm:tools/pp-filter-editor",
+        "status": "partial",
+        "landsAs": "postProcessFilter",
+        "note": "Presets are loaded from system/ppfilters at start-up; there is no editor."
+      }
+    ]
+  },
+  "audio": {
+    "master": 0.8,
+    "engineVolume": 1.0,
+    "environmentVolume": 1.0,
+    "showroomAmbience": true,
+    "showroomMusic": true,
+    "sources": [
+      {
+        "from": "ac:cfg/audio.ini",
+        "status": "partial",
+        "landsAs": "master",
+        "note": "Master is a real setting. Engine, wind, tyre and opponent levels are driven per frame by the session, so they are not exposed as preferences."
+      },
+      {
+        "from": "csp:music",
+        "status": "live",
+        "landsAs": "showroom music channel",
+        "note": "The showroom plays ambience and music with declick and headroom; there is no playlists page."
+      },
+      {
+        "from": "cm:settings/content-manager/audio",
+        "status": "live",
+        "landsAs": "master volume row"
+      }
+    ]
+  },
+  "controls": {
+    "keyboard": {
+      "throttle": "W",
+      "brake": "S",
+      "steerLeft": "A",
+      "steerRight": "D",
+      "shiftUp": "E",
+      "shiftDown": "Q",
+      "handbrake": "SPACE"
+    },
+    "file": "user/<player>/controls.json",
+    "sources": [
+      {
+        "from": "ac:cfg/controls.ini",
+        "status": "partial",
+        "landsAs": "keyboard rebind page",
+        "note": "Keyboard only: seven actions, each captured and swapped so two actions never share a key. Arrow keys stay reserved."
+      },
+      {
+        "from": "ac:cfg/ff_post_process",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:gamepad_fx",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:ffb_tweaks",
+        "status": "missing",
+        "landsAs": null,
+        "note": "No force feedback device path yet."
+      },
+      {
+        "from": "csp:g27_lights",
+        "status": "missing",
+        "landsAs": null,
+        "note": "No wheel LED or rev-light output: the input path is keyboard only, and a device that reports LEDs is ignored."
+      },
+      {
+        "from": "csp:data_controls_props",
+        "status": "partial",
+        "landsAs": "action labels",
+        "note": "The action names live in code, not in a data file."
+      },
+      {
+        "from": "csp:data_hotkeys_supported",
+        "status": "partial",
+        "landsAs": "global hotkeys",
+        "note": "F5/F11/T/P exist as fixed bindings."
+      },
+      {
+        "from": "ac:cfg/trackir",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "ac:cfg/oculus",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "ac:cfg/openvr",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "singleplayer": {
+    "modes": [
+      "Practice",
+      "TimeAttack",
+      "Race"
+    ],
+    "assistTc": 0,
+    "assistAbs": 0,
+    "fixedDt": 0.008333333333333333,
+    "weather": "clear",
+    "sources": [
+      {
+        "from": "cm:drive/quick-drive",
+        "status": "live",
+        "landsAs": "PRACTICE / TIME ATTACK / RACE rows",
+        "note": "Each row starts a session with its own lap countdown and grid."
+      },
+      {
+        "from": "ac:cfg/race.ini",
+        "status": "partial",
+        "landsAs": "session setup",
+        "note": "Car, track and AI count come from the chosen content; AI level and fixed setup are not exposed."
+      },
+      {
+        "from": "ac:cfg/assists.ini",
+        "status": "partial",
+        "landsAs": "assist.tc, assist.abs",
+        "note": "Applied from the setup at start-up only."
+      },
+      {
+        "from": "ac:cfg/gameplay.ini",
+        "status": "partial",
+        "landsAs": "physics flags",
+        "note": "Car collisions are always on; the collision radius is fixed."
+      },
+      {
+        "from": "csp:new_behaviour",
+        "status": "partial",
+        "landsAs": "vehicle model",
+        "note": "Gearbox, clutch and tyre model are the engine's own; the page's extra systems are not ported."
+      },
+      {
+        "from": "csp:small_tweaks",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "multiplayer": {
+    "hostPort": 40000,
+    "serverBrowser": true,
+    "chat": true,
+    "voice": false,
+    "spectating": false,
+    "sources": [
+      {
+        "from": "cm:online/server-list",
+        "status": "live",
+        "landsAs": "SERVER BROWSER row"
+      },
+      {
+        "from": "cm:online/host",
+        "status": "live",
+        "landsAs": "HOST ON 40000 row",
+        "note": "A notice is raised whether the host starts or refuses to."
+      },
+      {
+        "from": "ac:cfg/race.ini",
+        "status": "partial",
+        "landsAs": "session rules",
+        "note": "No password, slot list or booking."
+      },
+      {
+        "from": "csp:spectating",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:chat_shortcuts",
+        "status": "partial",
+        "landsAs": "chat",
+        "note": "Free text chat exists; binds and emoji do not."
+      },
+      {
+        "from": "csp:data_emoji",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:mumble_plugin",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_spectator_brightness_fix",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:tools/server-manager",
+        "status": "partial",
+        "landsAs": "host row",
+        "note": "kssimserver.exe ships next to the simulator; there is no in-menu manager."
+      }
+    ]
+  },
+  "profile": {
+    "fields": [
+      "name",
+      "nationality",
+      "raceNumber",
+      "bio",
+      "helmetDesign"
+    ],
+    "statsFile": "user/<player>/stats.json",
+    "stats": [
+      "wins",
+      "poles",
+      "podiums",
+      "totalRaces",
+      "bestLapTime",
+      "personalBests"
+    ],
+    "sources": [
+      {
+        "from": "cm:career",
+        "status": "partial",
+        "landsAs": "PROFILE stats block",
+        "note": "Career totals are kept and written to stats.json; there is no championship progression."
+      },
+      {
+        "from": "csp:data_countries",
+        "status": "live",
+        "landsAs": "nationality picker",
+        "note": "The picker list is compiled in rather than read from the CSP data file."
+      }
+    ]
+  },
+  "garage": {
+    "upgrades": true,
+    "pitStrategyEntry": true,
+    "setupEditor": false,
+    "sources": [
+      {
+        "from": "cm:content/cars/setup",
+        "status": "partial",
+        "landsAs": "upgrade rows",
+        "note": "Upgrade packages cycle and apply; there is no per-parameter setup screen."
+      },
+      {
+        "from": "ac:cfg/showroom_start",
+        "status": "partial",
+        "landsAs": "garage view",
+        "note": "The showroom is a real scene (content/showrooms/industrial)."
+      },
+      {
+        "from": "csp:car_instruments",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:brakedisc_fx",
+        "status": "partial",
+        "landsAs": "brake glow",
+        "note": "Discs glow with temperature; there is no glow texture or spark set."
+      },
+      {
+        "from": "csp:walking_out",
+        "status": "partial",
+        "landsAs": "leave garage / return to box",
+        "note": "Pit lane phases exist; the driver does not walk."
+      },
+      {
+        "from": "csp:data_setup_names",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:surfaces_fx",
+        "status": "partial",
+        "landsAs": "track surface grip",
+        "note": "Surface names map to friction; the per-surface effects are not rendered."
+      }
+    ]
+  },
+  "pitStrategy": {
+    "fuelTargetL": 60.0,
+    "jobs": [
+      "tyres",
+      "body",
+      "suspension",
+      "aero",
+      "engine"
+    ],
+    "serviceRequest": true,
+    "compoundChoice": false,
+    "sources": [
+      {
+        "from": "ac:cfg/race.ini",
+        "status": "live",
+        "landsAs": "CONFIRM PLAN",
+        "note": "Fuel target and repair jobs are handed to the pit service."
+      },
+      {
+        "from": "cm:content/cars/pit",
+        "status": "partial",
+        "landsAs": "REQUEST SERVICE",
+        "note": "The service runs when the car is stopped in the box; tyre compound choice is not implemented."
+      }
+    ]
+  },
+  "replay": {
+    "record": true,
+    "load": true,
+    "maxSizeMb": 26,
+    "qualityLevel": 3,
+    "autosave": true,
+    "folder": "user/<player>/replay",
+    "sources": [
+      {
+        "from": "cm:replay",
+        "status": "live",
+        "landsAs": "RECORD / LOAD rows"
+      },
+      {
+        "from": "ac:cfg/replay.ini",
+        "status": "partial",
+        "landsAs": "maxSizeMb, qualityLevel, autosave",
+        "note": "Size and sampling rate are read as documented defaults; autosave counts are not enforced per session type."
+      }
+    ]
+  },
+  "contentManager": {
+    "cars": true,
+    "tracks": true,
+    "teams": true,
+    "showrooms": [
+      "industrial"
+    ],
+    "skins": false,
+    "archives": false,
+    "sources": [
+      {
+        "from": "cm:content/cars",
+        "status": "live",
+        "landsAs": "CARS page",
+        "note": "content/cars folders; kn5 meshes and power curves are read at load."
+      },
+      {
+        "from": "cm:content/tracks",
+        "status": "live",
+        "landsAs": "TRACKS page"
+      },
+      {
+        "from": "cm:content/driver-suits",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:content/helmets",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:content/showrooms",
+        "status": "partial",
+        "landsAs": "garage scene",
+        "note": "One showroom is installed; the page's preview grid does not exist."
+      },
+      {
+        "from": "cm:content/misc/skins",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:tools/unpacker",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:tracks",
+        "status": "partial",
+        "landsAs": "track.ini",
+        "note": "Track data is read per track; the CSP track catalogue is not loaded."
+      },
+      {
+        "from": "csp:track_adjustments",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_manifest",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_standard_content",
+        "status": "partial",
+        "landsAs": "content scan",
+        "note": "Folders are scanned directly; there is no standard-content allow list."
+      },
+      {
+        "from": "csp:data_alt_mapping",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "carSelect": {
+    "filters": [
+      "class",
+      "year",
+      "brand"
+    ],
+    "filtersLive": [
+      "brand"
+    ],
+    "sources": [
+      {
+        "from": "cm:content/cars/filters",
+        "status": "partial",
+        "landsAs": "CARS page",
+        "note": "Scrolling list with the car folder name; class and year filters are declared but not applied."
+      },
+      {
+        "from": "csp:data_car_classes",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_car_years",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_paintable",
+        "status": "partial",
+        "landsAs": "body material",
+        "note": "Car bodywork maps to the CARBODY material; paintable regions are not declared per car."
+      },
+      {
+        "from": "csp:data_oem_colors_modern",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_oem_colors_vintage",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:cars",
+        "status": "missing",
+        "landsAs": null,
+        "note": "Per-car CSP data files are not parsed."
+      }
+    ]
+  },
+  "trackSelect": {
+    "layouts": true,
+    "sources": [
+      {
+        "from": "cm:content/tracks",
+        "status": "live",
+        "landsAs": "TRACKS page"
+      },
+      {
+        "from": "csp:tracks",
+        "status": "partial",
+        "landsAs": "track.ini",
+        "note": "Layouts come from the track folder; CSP layout metadata is ignored."
+      }
+    ]
+  },
+  "teamSelect": {
+    "roster": "content/teams",
+    "sources": [
+      {
+        "from": "cm:content/driver-suits",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:content/helmets",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_helmets",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_human_materials",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "results": {
+    "rows": [
+      "position",
+      "driver",
+      "bestLap",
+      "laps",
+      "status"
+    ],
+    "sources": [
+      {
+        "from": "cm:drive/results",
+        "status": "live",
+        "landsAs": "RESULTS screen",
+        "note": "Positions, best lap, disqualification and finish state are shown per driver."
+      },
+      {
+        "from": "ac:cfg/race.ini",
+        "status": "partial",
+        "landsAs": "results rows",
+        "note": "No export, no championship points."
+      }
+    ]
+  },
+  "pause": {
+    "actions": [
+      "resume",
+      "restart",
+      "garage",
+      "pitStrategy",
+      "settings",
+      "quit"
+    ],
+    "photoMode": "partial",
+    "sources": [
+      {
+        "from": "cm:drive/pause",
+        "status": "live",
+        "landsAs": "pause bar",
+        "note": "Rounded cards, resume/restart/garage/settings/quit."
+      },
+      {
+        "from": "csp:nice_screenshots",
+        "status": "partial",
+        "landsAs": "photo mode",
+        "note": "A photo mode with free camera exists; the page's filters and DOF do not."
+      }
+    ]
+  },
+  "home": {
+    "tiles": true,
+    "headerBar": [
+      "home",
+      "back",
+      "forward",
+      "refresh",
+      "notifications",
+      "player",
+      "audio",
+      "vr",
+      "pad",
+      "clock"
+    ],
+    "notifications": true,
+    "sources": [
+      {
+        "from": "cm:launcher",
+        "status": "live",
+        "landsAs": "tile row",
+        "note": "Startup tiles open the sections directly."
+      },
+      {
+        "from": "ac:cfg/launcher.ini",
+        "status": "partial",
+        "landsAs": "window title and startup section",
+        "note": "No launcher page: the simulator opens on the tiles."
+      },
+      {
+        "from": "csp:gui",
+        "status": "partial",
+        "landsAs": "header bar",
+        "note": "The header (clock, notifications, quick actions) is the part of CSP's GUI page that has a counterpart; its widget list does not."
+      },
+      {
+        "from": "csp:taskbar",
+        "status": "partial",
+        "landsAs": "header bar"
+      },
+      {
+        "from": "csp:splashscreen",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "credits": {
+    "sources": [
+      {
+        "from": "cm:about",
+        "status": "live",
+        "landsAs": "CREDITS screen"
+      },
+      {
+        "from": "csp:data_credits",
+        "status": "missing",
+        "landsAs": null
+      }
+    ]
+  },
+  "devMode": {
+    "enabled": false,
+    "sources": [
+      {
+        "from": "csp:general",
+        "status": "missing",
+        "landsAs": null,
+        "note": "The patch's core switches have no counterpart; the runtime is its own engine."
+      },
+      {
+        "from": "csp:lua_tools",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:module_lw",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_imgui_symbols",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_apps_allowed_to_pause",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "csp:data_apps_virtual_tyres_fix",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "ac:cfg/python",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "ac:cfg/time_limited_test",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "from": "cm:settings/assetto-corsa/dev",
+        "status": "partial",
+        "landsAs": "DEV MODE row",
+        "note": "The row opens a confirmation screen; the mode itself only logs."
+      }
+    ]
+  },
+  "quit": {
+    "sources": [
+      {
+        "from": "cm:quit",
+        "status": "live",
+        "landsAs": "QUIT confirmation",
+        "note": "Settings are written back before the window closes."
+      }
+    ]
+  }
+}
