@@ -915,6 +915,8 @@ static void initSimulation() {
         const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
         const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
         const int ssgi = videoConfig.boolAt("ssgi", false) ? 1 : 0;
+        const double ssgiRadius = videoConfig.numberAt("ssgiRadius", 0.05);
+        const double ssgiIntensity = videoConfig.numberAt("ssgiIntensity", 1.0);
         const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
         const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
         const bool headPhysics = videoConfig.boolAt("headPhysics", true);
@@ -936,13 +938,17 @@ static void initSimulation() {
             }
             renderer->setSsao(ssao != 0);
             renderer->setSsr(ssr != 0);
-            renderer->setSsgi(ssgi != 0);
+            renderer->setSsgi(ssgi != 0,
+                              ssgiRadius > 0.0 ? static_cast<float>(ssgiRadius) : 0.05f,
+                              ssgiIntensity > 0.0 ? static_cast<float>(ssgiIntensity) : 1.0f);
             if (ssgi != 0) {
                 // SSGI is gathered by the deferred lighting shader, which the
                 // forward path never runs: asking for it means asking for that
                 // path, exactly like the KS_SSAO / KS_SSR env switches above.
                 renderer->setDeferred(true);
                 printf("[INIT] Render path: deferred (video.ssgi)\n");
+                printf("[INIT] SSGI: on (radius %.3f, intensity %.2f)\n",
+                       ssgiRadius, ssgiIntensity);
             }
 
             renderer->setMotionBlur(motionBlur != 0);

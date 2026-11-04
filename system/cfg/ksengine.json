@@ -60,6 +60,8 @@
     "mirrorResolution": "128x512",
     "particles": true,
     "ssgi": false,
+    "ssgiRadius": 0.05,
+    "ssgiIntensity": 1.0,
     "sources": [
       {
         "feature": "windowOutput",
@@ -83,7 +85,7 @@
         "feature": "ssgi",
         "status": "partial",
         "landsAs": "inline screen-space indirect bounce",
-        "note": "The bounce is gathered inline by the deferred lighting pass from neighbouring GBuffer world positions and albedos. video.ssgi turns it on and also switches the render path to deferred, because the forward path never runs that shader (off by default). The two ssgi compute shaders build but nothing dispatches them: they still want G-buffer storage images this renderer does not expose."
+        "note": "The bounce is gathered inline by the deferred lighting pass from neighbouring GBuffer world positions and albedos. video.ssgi turns it on, video.ssgiRadius (screen UV) and video.ssgiIntensity tune it, and enabling it also switches the render path to deferred, because the forward path never runs that shader (off by default). The two ssgi compute shaders build but nothing dispatches them: they still want G-buffer storage images this renderer does not expose."
       },
       {
         "feature": "screenSpaceReflections",
