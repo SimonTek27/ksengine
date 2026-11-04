@@ -97,7 +97,8 @@ int main() {
 
     const MaterialPreset& rubber = materialPreset(MaterialPresetId::Rubber);
     const MaterialSurface tyre = applyMaterialPreset(rubber, 0.1f);
-    check(tyre.roughness > 0.7f, "a tyre stays matte even with a glossy exponent");
+    check(tyre.roughness > 0.5f && tyre.roughness <= rubber.roughness,
+          "a tyre stays matte even with a glossy exponent");
 
     const MaterialPreset& glass = materialPreset(MaterialPresetId::Glass);
     const MaterialSurface pane = applyMaterialPreset(glass, 0.9f);

@@ -58,7 +58,7 @@ inline const MaterialPreset* materialPresetTable(std::size_t& count) {
     static const MaterialPreset kPresets[] = {
         {MaterialPresetId::BrakeDisc, "brake_disc", 0.32f, 1.00f, 0.00f, 0.40f},
         {MaterialPresetId::Glass, "glass", 0.02f, 0.00f, 0.00f, 0.00f},
-        {MaterialPresetId::Rubber, "rubber", 0.85f, 0.00f, 0.00f, 0.15f},
+        {MaterialPresetId::Rubber, "rubber", 0.62f, 0.00f, 0.00f, 0.15f},
         {MaterialPresetId::Carbon, "carbon", 0.18f, 0.20f, 1.00f, 0.25f},
         {MaterialPresetId::Chrome, "chrome", 0.05f, 1.00f, 0.00f, 0.10f},
         {MaterialPresetId::BrushedMetal, "brushed_metal", 0.22f, 1.00f, 0.00f, 0.40f},

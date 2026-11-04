@@ -624,6 +624,19 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         return -1.0f;
     };
 
+    // First three floats of a vector property (ksDiffuse and friends). AC
+    // keeps every property in a 40-byte ValueA/B/C/D block; a vec3 starts at
+    // offset 0 exactly like the scalars above.
+    auto propertyVec3 = [](const ff::Kn5Material& material, const char* name,
+                          float out[3]) -> bool {
+        for (const auto& property : material.properties) {
+            if (property.name != name) continue;
+            std::memcpy(out, property.value.data(), sizeof(float) * 3);
+            return true;
+        }
+        return false;
+    };
+
     // Per-car material overrides: material_presets.json next to the model,
     // or the file KS_MATERIAL_PRESETS points at. Absent (or broken) means
     // the presets alone decide, which is what every car gets by default.
@@ -730,7 +743,35 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     // Decodes a KN5 texture once and returns the key the mesh names. Empty
     // when neither the skin nor the file carries it, which leaves the surface
     // untextured rather than failing the whole load.
-    auto textureKey = [&](const std::string& wanted) -> std::string {
+    // Box-halves an RGBA image in place; the caller loops it. A showroom floor
+    // is 40 m wide and its albedo is a photograph, so the top mips are the only
+    // ones that read as a surface instead of as noise.
+    auto halveImage = [](std::vector<unsigned char>& rgba, int& width, int& height) {
+        if (width < 4 || height < 4) return;
+        const int dstW = width / 2;
+        const int dstH = height / 2;
+        std::vector<unsigned char> out(static_cast<std::size_t>(dstW) * dstH * 4u);
+        for (int y = 0; y < dstH; ++y) {
+            for (int x = 0; x < dstW; ++x) {
+                unsigned sum[4] = {0, 0, 0, 0};
+                for (int sy = 0; sy < 2; ++sy) {
+                    for (int sx = 0; sx < 2; ++sx) {
+                        const unsigned char* s =
+                            rgba.data() + (static_cast<std::size_t>(y * 2 + sy) * width +
+                                          (x * 2 + sx)) * 4u;
+                        for (int c = 0; c < 4; ++c) sum[c] += s[c];
+                    }
+                }
+                unsigned char* d = out.data() + (static_cast<std::size_t>(y) * dstW + x) * 4u;
+                for (int c = 0; c < 4; ++c) d[c] = static_cast<unsigned char>(sum[c] / 4u);
+            }
+        }
+        rgba.swap(out);
+        width = dstW;
+        height = dstH;
+    };
+
+    auto textureKey = [&](const std::string& wanted, bool soften) -> std::string {
         if (wanted.empty()) return std::string();
         auto known = decodedTextures.find(wanted);
         if (known != decodedTextures.end()) return known->second;
@@ -763,10 +804,17 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 std::fprintf(stderr, "[kn5] texture %s: %s", wanted.c_str(),
                              image.info.error.c_str());
                 std::putchar(10);
-            } else if (m_vulkanRenderer->addTextureFromMemory(cacheKey, image.rgba,
-                                                              image.info.width,
-                                                              image.info.height)) {
-                key = cacheKey;
+            } else {
+                std::vector<unsigned char> rgba = image.rgba;
+                int width = image.info.width;
+                int height = image.info.height;
+                if (soften) {
+                    for (int pass = 0; pass < 4; ++pass) halveImage(rgba, width, height);
+                }
+                if (m_vulkanRenderer->addTextureFromMemory(
+                        cacheKey, rgba, width, height)) {
+                    key = cacheKey;
+                }
             }
         }
         decodedTextures.emplace(wanted, key);
@@ -833,22 +881,59 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 const auto& material =
                     parsed.file.materials[static_cast<std::size_t>(m.material_id)];
 
-                // Albedo: slot 0, else the first mapping the file lists.
-                std::string albedo = material.mappings.empty()
-                                         ? std::string{}
-                                         : material.mappings.front().texture;
+                // Albedo: the mapping the file names as diffuse, else the
+                // first one it lists. Slot 0 is not a reliable answer — on a
+                // reflection shader it is the environment probe, and painting
+                // `*_Ref` as diffuse is what turned the showroom floor into a
+                // white speckled sheet instead of a surface.
+                std::string albedo;
+                std::string fallbackAlbedo;
                 std::string normal;
                 for (const auto& mapping : material.mappings) {
-                    if (mapping.slot == 0 && !mapping.texture.empty()) albedo = mapping.texture;
+                    if (mapping.texture.empty()) continue;
+                    const std::string mappingName = lower(mapping.name);
                     // The normal map is authored under its own mapping name
-                    // ("Normal", "NormalDetail"), not a fixed slot.
-                    if (lower(mapping.name).find("normal") != std::string::npos) {
+                    // ("Normal", "NormalDetail"), not a fixed slot, and it is
+                    // never the colour.
+                    if (mappingName.find("normal") != std::string::npos) {
                         normal = mapping.texture;
+                        continue;
+                    }
+                    if (mappingName.find("diffuse") != std::string::npos) {
+                        albedo = mapping.texture;
+                        continue;
+                    }
+                    if (fallbackAlbedo.empty()) fallbackAlbedo = mapping.texture;
+                }
+                if (albedo.empty()) albedo = fallbackAlbedo;
+                // "..._Ref" names an environment/reflection probe: it carries
+                // the room reflected in a surface, not the surface's own colour.
+                // A venue is the exception: its hall is painted with exactly such
+                // a map, and that map — softened above — is the room's only light.
+                if (!faceInside) {
+                    std::string base = albedo;
+                    const std::size_t dot = base.find_last_of('.');
+                    if (dot != std::string::npos) base.resize(dot);
+                    const std::string folded = lower(base);
+                    const bool probe = folded.size() >= 4 &&
+                                       folded.compare(folded.size() - 4, 4, "_ref") == 0;
+                    if (probe) albedo.clear();
+                }
+                nm.albedoTexture = textureKey(albedo, faceInside);
+                // No diffuse authored: the surface keeps the colour the file
+                // gives it (ksDiffuse) instead of rendering as flat white.
+                if (!faceInside && albedo.empty()) {
+                    float authored[3] = {1.f, 1.f, 1.f};
+                    if (propertyVec3(material, "ksDiffuse", authored)) {
+                        for (NativeVertex& v : nm.vertices) {
+                            v.r = std::min(std::max(authored[0], 0.f), 1.f);
+                            v.g = std::min(std::max(authored[1], 0.f), 1.f);
+                            v.b = std::min(std::max(authored[2], 0.f), 1.f);
+                        }
                     }
                 }
-                nm.albedoTexture = textureKey(albedo);
                 if (!normal.empty() && normal != albedo) {
-                    nm.normalTexture = textureKey(normal);
+                    nm.normalTexture = textureKey(normal, false);
                     if (!nm.normalTexture.empty()) ++mappedNormal;
                 }
 
