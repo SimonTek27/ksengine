@@ -467,7 +467,13 @@ static void initVulkanAndSimulation() {
     // a preset id ("normal") or a path, so the default image stays the one
     // the other knobs produce. The preset display block wins over the
     // KS_EXPOSURE/KS_TONEMAP values set above.
-    if (const char* pfName = std::getenv("KS_PPFILTER")) {
+    // The shipped "normal" preset is the baseline look: without KS_PPFILTER the
+    // image was whatever the raw knobs produced, which is the flat picture the
+    // showroom kept showing. KS_PPFILTER=none turns the grading off again, and
+    // naming another preset still picks that one.
+    const char* pfName = std::getenv("KS_PPFILTER");
+    if (pfName == nullptr || pfName[0] == 0) pfName = "normal";
+    if (std::string(pfName) != "none") {
         std::string pfPath = pfName;
         const bool hasSuffix = pfPath.size() >= 5 &&
             pfPath.compare(pfPath.size() - 5, 5, ".json") == 0;
