@@ -132,7 +132,28 @@ public:
     static constexpr const char* kTonemapNames[kTonemapCount] = {
         "NONE", "REINHARD", "ACES", "UNCHARTED2", "FILMIC"};
 
+    // Resolutions the page offers: window sizes, not fullscreen modes.
+    static constexpr int kResolutionCount = 3;
+    static constexpr int kResolutionWidths[kResolutionCount] = {1920, 1600, 1280};
+    static constexpr int kResolutionHeights[kResolutionCount] = {1080, 900, 720};
+    static int resolutionWidth(int index) {
+        const int i = index < 0 ? 0
+                                : (index >= kResolutionCount ? kResolutionCount - 1 : index);
+        return kResolutionWidths[i];
+    }
+    static int resolutionHeight(int index) {
+        const int i = index < 0 ? 0
+                                : (index >= kResolutionCount ? kResolutionCount - 1 : index);
+        return kResolutionHeights[i];
+    }
+    /** Closest offered resolution to the window the renderer reports. */
+    static int resolutionIndexFor(int width, int height);
+
     struct MenuOptions {
+        int resolutionIndex = 0;
+        bool fullscreen = false;
+        bool vsync = true;
+        bool motionBlur = false;
         int exposureIndex = kExposureCount - 1;
         int tonemap = 2; // ACES, the renderer's own default
         bool ssao = false;
@@ -248,6 +269,9 @@ public:
     /** Read the current values back before the page is built: the app
      *  hooks this, so a knob moved by a session or a preset shows up. */
     std::function<void(MenuOptions&)> onOptionsRefresh;
+    /** The window is resized outside the menu: the app owns the handle and
+     *  WM_SIZE rebuilds the swapchain from it. */
+    std::function<void(int width, int height)> onResolutionRequested;
     // Roadmap 3.1 - network actions from the MULTI PLAYER section.
     std::function<void()> onHostServerRequested;
     std::function<void()> onOpenServerBrowserRequested;

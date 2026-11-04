@@ -400,6 +400,7 @@ bool NativeRenderer::createSwapChain(VkSurfaceKHR surface, uint32_t width, uint3
                 static_cast<double>(m_hdrWhiteNits), static_cast<double>(kHdrPeakNits));
     m_swapChainFormat = chosen.format;
 
+    m_surface = surface;
     VkExtent2D extent = caps.currentExtent.width != UINT32_MAX
         ? caps.currentExtent
         : VkExtent2D{std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width),
@@ -422,7 +423,26 @@ bool NativeRenderer::createSwapChain(VkSurfaceKHR surface, uint32_t width, uint3
     sCi.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sCi.preTransform = caps.currentTransform;
     sCi.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    sCi.presentMode = VK_PRESENT_MODE_FIFO_KHR; // vsync; always supported
+    // FIFO is always supported; IMMEDIATE is the honest "no vsync" (it
+    // presents as soon as the image is ready instead of waiting for vblank).
+    VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+    if (!m_vsync) {
+        uint32_t modeCount = 0;
+        if (vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, surface,
+                                                      &modeCount, nullptr) == VK_SUCCESS &&
+            modeCount > 0) {
+            std::vector<VkPresentModeKHR> modes(modeCount);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(m_physicalDevice, surface,
+                                                      &modeCount, modes.data());
+            for (VkPresentModeKHR mode : modes) {
+                if (mode == VK_PRESENT_MODE_IMMEDIATE_KHR) presentMode = mode;
+            }
+        }
+        if (presentMode == VK_PRESENT_MODE_FIFO_KHR)
+            fprintf(stderr, "[NativeRenderer] vsync off: IMMEDIATE unsupported, "
+                            "keeping FIFO\n");
+    }
+    sCi.presentMode = presentMode;
     sCi.clipped = VK_TRUE;
 
     if (vkCreateSwapchainKHR(m_device, &sCi, nullptr, &m_swapChain) != VK_SUCCESS) {
@@ -529,6 +549,16 @@ bool NativeRenderer::createSwapChain(VkSurfaceKHR surface, uint32_t width, uint3
     }
 
     return true;
+}
+
+void NativeRenderer::setVsync(bool enabled)
+{
+    if (m_vsync == enabled) return;
+    m_vsync = enabled;
+    if (!m_device || m_surface == VK_NULL_HANDLE) return; // device not up yet
+    createSwapChain(m_surface, m_swapChainExtent.width, m_swapChainExtent.height);
+    fprintf(stderr, "[NativeRenderer] vsync: %s\n",
+            enabled ? "on (FIFO)" : "off (IMMEDIATE)");
 }
 
 bool NativeRenderer::recreateSwapChain(uint32_t width, uint32_t height) {

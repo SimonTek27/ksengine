@@ -25,7 +25,7 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::Replay: return "REPLAY";
     case MenuState::ContentManager: return "CONTENT";
     case MenuState::Settings: return "SETTINGS";
-    case MenuState::Options: return "OPTIONS";
+    case MenuState::Options: return "VIDEO";
     case MenuState::Controls: return "CONTROLS";
     case MenuState::CarSelect: return "SELECT CAR";
     case MenuState::TrackSelect: return "SELECT TRACK";
@@ -329,7 +329,7 @@ void GameMenuOverlay::buildContentManagerMenu()
 void GameMenuOverlay::buildSettingsMenu()
 {
     m_items.clear();
-    m_items.push_back({ "GRAPHICS", "Exposure, tone curve and post effects",
+    m_items.push_back({ "VIDEO", "Resolution, image and quality",
         [this]() { openOptions(); }, false, true, "settings" });
     m_items.push_back({ "AUDIO", "Master, engine and environment volumes",
         [this]() { openOptionsAudio(); }, false, true, "speaker" });
@@ -341,6 +341,18 @@ void GameMenuOverlay::buildSettingsMenu()
         [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); },
         false, true, "vr" });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
+}
+
+int GameMenuOverlay::resolutionIndexFor(int width, int height)
+{
+    int best = 0;
+    int bestDelta = 1 << 30;
+    for (int i = 0; i < kResolutionCount; ++i) {
+        const int delta = std::abs(kResolutionWidths[i] - width) +
+                          std::abs(kResolutionHeights[i] - height);
+        if (delta < bestDelta) { bestDelta = delta; best = i; }
+    }
+    return best;
 }
 
 int GameMenuOverlay::exposureIndexFor(float exposure)
@@ -382,10 +394,60 @@ void GameMenuOverlay::applyOptions()
 
 void GameMenuOverlay::buildOptionsMenu()
 {
+    // Laid out like Content Manager's Video page: resolution and frame pacing
+    // first, then quality, then image, then sound. Only knobs the renderer or
+    // the mixer really honours are listed: no MSAA row while the pipelines are
+    // built with one sample, no shadow resolution while the map size is fixed.
     m_items.clear();
     char label[96];
     const MenuOptions& o = m_options;
+    const auto toggleRow = [this](const char* name, bool MenuOptions::*field,
+                                  const char* description) {
+        char text[96];
+        std::snprintf(text, sizeof(text), "%s  [%s]", name,
+                      (m_options.*field) ? "ON" : "OFF");
+        m_items.push_back({ text, description, [this, field]() {
+            m_options.*field = !(m_options.*field);
+            applyOptions();
+        }, false, true, "settings" });
+    };
 
+    std::snprintf(label, sizeof(label), "RESOLUTION  %dx%d",
+                  resolutionWidth(o.resolutionIndex),
+                  resolutionHeight(o.resolutionIndex));
+    m_items.push_back({ label, "Window size; fullscreen follows the monitor",
+        [this]() {
+            m_options.resolutionIndex =
+                (m_options.resolutionIndex + 1) % kResolutionCount;
+            if (onResolutionRequested)
+                onResolutionRequested(resolutionWidth(m_options.resolutionIndex),
+                                      resolutionHeight(m_options.resolutionIndex));
+            applyOptions();
+        }, false, true, "settings" });
+
+    // FULLSCREEN goes through the window path F11 already uses, and the value
+    // is re-read from the window style every time the page opens.
+    std::snprintf(label, sizeof(label), "FULLSCREEN  [%s]",
+                  o.fullscreen ? "ON" : "OFF");
+    m_items.push_back({ label, "Window or exclusive monitor",
+        [this]() {
+            m_options.fullscreen = !m_options.fullscreen;
+            if (onToggleFullscreenRequested) onToggleFullscreenRequested();
+            applyOptions();
+        }, false, true, "vr" });
+
+    toggleRow("VSYNC", &MenuOptions::vsync,
+              "FIFO when on, immediate present when off");
+
+    m_items.push_back({ "", "", nullptr, true });
+    toggleRow("SSAO", &MenuOptions::ssao,
+              "Ambient occlusion, deferred pass only");
+    toggleRow("SSR", &MenuOptions::ssr,
+              "Screen-space reflections, deferred pass only");
+    toggleRow("MOTION BLUR", &MenuOptions::motionBlur,
+              "Resolve-pass blur while the camera moves");
+
+    m_items.push_back({ "", "", nullptr, true });
     std::snprintf(label, sizeof(label), "EXPOSURE  %.2f",
                   static_cast<double>(exposureValue(o.exposureIndex)));
     m_items.push_back({ label, "Display exposure of the final image",
@@ -401,48 +463,20 @@ void GameMenuOverlay::buildOptionsMenu()
             applyOptions();
         }, false, true, "settings" });
 
-    std::snprintf(label, sizeof(label), "SSAO  [%s]", o.ssao ? "ON" : "OFF");
-    m_items.push_back({ label, "Ambient occlusion, deferred pass only",
-        [this]() {
-            m_options.ssao = !m_options.ssao;
-            applyOptions();
-        }, false, true, "settings" });
-
-    std::snprintf(label, sizeof(label), "SSR  [%s]", o.ssr ? "ON" : "OFF");
-    m_items.push_back({ label, "Screen-space reflections, deferred pass only",
-        [this]() {
-            m_options.ssr = !m_options.ssr;
-            applyOptions();
-        }, false, true, "settings" });
-
     m_items.push_back({ "", "", nullptr, true });
-
-    // One row per mixer channel the player can turn down. The step is 10% and
-    // wraps to silence, so a knob can be walked to any value without a slider.
-    const auto volumeRow = [this](const char* name, float MenuOptions::*field,
-                                  const char* description) {
-        char text[64];
-        std::snprintf(text, sizeof(text), "%s  %.0f%%", name,
-                      static_cast<double>(m_options.*field * 100.f));
-        m_items.push_back({ text, description, [this, field]() {
-            float value = m_options.*field;
-            value = value > 0.899f
-                        ? 0.f
-                        : std::min(1.f, std::round((value + 0.1f) * 10.f) / 10.f);
-            m_options.*field = value;
+    // Only the master gain is a setting: the engine and environment channels
+    // are the session's (silent in the showroom, live in the car).
+    std::snprintf(label, sizeof(label), "MASTER VOLUME  %.0f%%",
+                  static_cast<double>(o.masterVolume * 100.f));
+    m_items.push_back({ label, "Everything the simulator plays",
+        [this]() {
+            const float value = m_options.masterVolume;
+            m_options.masterVolume = value > 0.899f
+                ? 0.f
+                : std::min(1.f, std::round((value + 0.1f) * 10.f) / 10.f);
             applyOptions();
         }, false, true, "speaker" });
-    };
-    // Only the master gain belongs here: the engine and environment channels
-    // are the session's (silent in the showroom, live in the car), so showing
-    // them as settings would be a lie.
-    volumeRow("MASTER VOLUME", &MenuOptions::masterVolume,
-              "Everything the simulator plays");
 
-    m_items.push_back({ "", "", nullptr, true });
-    m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
-        [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); },
-        false, true, "vr" });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }

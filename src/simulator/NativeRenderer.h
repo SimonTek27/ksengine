@@ -407,6 +407,11 @@ public:
     // height * 4 == screenshotPixels().size()): turns those bytes into an
     // image without guessing the row pitch. Roadmap 2.4/2.5.
     const VkExtent2D& extent() const { return m_swapChainExtent; }
+    /** Present mode is fixed when the swapchain is created: FIFO when on,
+     *  IMMEDIATE when off and the surface offers it. Switching rebuilds the
+     *  swapchain instead of pretending a flag changes anything. */
+    void setVsync(bool enabled);
+    bool vsync() const { return m_vsync; }
 
     // UI overlay GPU pass. SimulationLoop owns the pass (it builds the font
     // atlas + per-frame dynamic VB/IB); NativeRenderer keeps it alive and
@@ -494,6 +499,8 @@ private:
     VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
     VkFormat m_swapChainFormat = VK_FORMAT_B8G8R8A8_UNORM;
     VkExtent2D m_swapChainExtent{};
+    VkSurfaceKHR m_surface = VK_NULL_HANDLE; // kept so setVsync can rebuild
+    bool m_vsync = true;
     std::vector<VkImage> m_swapChainImages;
     std::vector<VkImageView> m_swapChainImageViews;
     std::vector<VkFramebuffer> m_swapChainFramebuffers;

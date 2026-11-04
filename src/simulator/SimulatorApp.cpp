@@ -885,12 +885,16 @@ static void initSimulation() {
         printf("Settings panel: %s\n", panel.c_str());
     };
 
-    // --- OPTIONS: the page reads the engine back and writes to it ----------
-    // One reader, used both to seed the page and to refresh it whenever it
-    // opens: the exposure shown is the one the ppfilter preset left behind,
-    // never a guess made once at startup.
+    // --- VIDEO: the page reads the renderer back and writes to it ----------
+    // Resolution and fullscreen are window state, not renderer state: the app
+    // owns the HWND, so they go through the two callbacks below.
     const auto readOptions = [](ks::sim::GameMenuOverlay::MenuOptions& options) {
         if (auto* renderer = g_simulation->renderer()) {
+            options.resolutionIndex = ks::sim::GameMenuOverlay::resolutionIndexFor(
+                static_cast<int>(renderer->extent().width),
+                static_cast<int>(renderer->extent().height));
+            options.vsync = renderer->vsync();
+            options.motionBlur = renderer->isMotionBlur();
             options.exposureIndex =
                 ks::sim::GameMenuOverlay::exposureIndexFor(renderer->exposure());
             options.tonemap = renderer->tonemapMode();
@@ -899,19 +903,36 @@ static void initSimulation() {
         }
         if (auto* audio = g_simulation->audio())
             options.masterVolume = audio->masterVolume();
+        // The window style is the truth for fullscreen: F11 changes it too.
+        const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
+        options.fullscreen = (style & WS_OVERLAPPEDWINDOW) == 0;
     };
     {
         ks::sim::GameMenuOverlay::MenuOptions options =
             g_simulation->ui().menu().options();
         readOptions(options);
         g_simulation->ui().menu().setOptions(options);
-        printf("[INIT] Options seeded: exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n", static_cast<double>(
+        printf("[INIT] Video seeded: %dx%d, fullscreen %d, vsync %d, motion blur %d, exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n",
+               ks::sim::GameMenuOverlay::resolutionWidth(options.resolutionIndex),
+               ks::sim::GameMenuOverlay::resolutionHeight(options.resolutionIndex),
+               options.fullscreen ? 1 : 0, options.vsync ? 1 : 0,
+               options.motionBlur ? 1 : 0,
+               static_cast<double>(
                    ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
                ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
                options.ssao ? 1 : 0, options.ssr ? 1 : 0,
                static_cast<double>(options.masterVolume * 100.f));
     }
     uiMenu->onOptionsRefresh = readOptions;
+    uiMenu->onResolutionRequested = [](int width, int height) {
+        if (!g_hWnd) return;
+        RECT rc{0, 0, width, height};
+        const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
+        AdjustWindowRect(&rc, style, FALSE);
+        SetWindowPos(g_hWnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        printf("[MENU] video: window %dx%d requested\n", width, height);
+    };
     uiMenu->onOptionsChanged = [](const ks::sim::GameMenuOverlay::MenuOptions& options) {
         if (auto* renderer = g_simulation->renderer()) {
             renderer->setExposure(
@@ -919,13 +940,18 @@ static void initSimulation() {
             renderer->setTonemapMode(options.tonemap);
             renderer->setSsao(options.ssao);
             renderer->setSsr(options.ssr);
+            renderer->setMotionBlur(options.motionBlur);
+            if (options.motionBlur) renderer->setDeferred(true); // resolve pass only
+            renderer->setVsync(options.vsync);
         }
         if (auto* audio = g_simulation->audio())
             audio->setMasterVolume(options.masterVolume);
-        printf("[MENU] options: exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n", static_cast<double>(
+        printf("[MENU] video: vsync %d, motion blur %d, ssao %d, ssr %d, exposure %.2f, tonemap %s, volume %.0f\n",
+               options.vsync ? 1 : 0, options.motionBlur ? 1 : 0,
+               options.ssao ? 1 : 0, options.ssr ? 1 : 0,
+               static_cast<double>(
                    ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
                ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
-               options.ssao ? 1 : 0, options.ssr ? 1 : 0,
                static_cast<double>(options.masterVolume * 100.f));
     };
     uiMenu->onDevModeRequested = []() {
