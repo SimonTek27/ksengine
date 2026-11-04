@@ -33,6 +33,13 @@ public:
                      float throttle, float brake, float steering);
     bool isRecording() const { return m_recording; }
 
+    /** Cap recording size (MB of in-memory frames) and sampling quality 1..5
+     *  (maps to ~15..60 Hz). From replay.maxSizeMb / qualityLevel in ksengine.json. */
+    void setMaxSizeMb(int mb) { m_maxSizeMb = mb > 0 ? mb : 26; }
+    void setQualityLevel(int q) { m_qualityLevel = std::clamp(q, 1, 5); }
+    int maxSizeMb() const { return m_maxSizeMb; }
+    int qualityLevel() const { return m_qualityLevel; }
+
     bool loadReplay(const std::string& filePath);
     bool saveReplay(const std::string& filePath);
     void startPlayback();
@@ -65,6 +72,8 @@ private:
     bool m_recording = false;
     std::chrono::steady_clock::time_point m_recordStart;
     std::vector<ReplayFrame> m_frames;
+    int m_maxSizeMb = 26;
+    int m_qualityLevel = 3;
 
     bool m_playing = false;
     float m_playbackTime = 0;
