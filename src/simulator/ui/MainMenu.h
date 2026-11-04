@@ -23,14 +23,20 @@ struct MainMenuLayout {
      *  tiles rather than empty space, so the sections the menu carries are on
      *  screen instead of waiting behind a scroll nothing announces. */
     static constexpr int kMaxSlots = 12;
-    /** Header quick actions: clock, sound, the VR screen, the controller. */
+    /** Header quick actions: sound, the VR screen, the controller, then the
+     *  clock — which is always the last element in the bar. */
     static constexpr int kQuickCount = 4;
+    static constexpr int kClockSlot = kQuickCount - 1;
+    /** Navigation in the bar's left corner: back, forward, refresh. */
+    static constexpr int kNavCount = 3;
 
     Rect tile[kMaxSlots]{};
     int item[kMaxSlots] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}; // row per slot
     int count = 0;                             // slots actually used
     int perRow = 0;                            // tiles on the top row
     Rect quick[kQuickCount]{};                 // the header's quick actions
+    Rect nav[kNavCount]{};                     // back, forward, refresh
+    float margin = 0.f;                        // the bar's left inset
     int first = 0;                             // first row on screen
     Rect strip{};
     Rect topBar{};
@@ -57,21 +63,37 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     const float rowGap = H * 0.018f;
 
     L.topBar = {0.f, 0.f, W, H * 0.078f};
-    L.home = {margin, H * 0.024f, W * 0.24f, H * 0.034f};
+    L.margin = margin;
     L.logo = {margin, H * 0.052f, H * 0.03f, H * 0.03f};
-    L.avatar = {W - margin - H * 0.052f, H * 0.014f, H * 0.052f, H * 0.052f};
+    const float mid = L.topBar.h * 0.5f;
 
-    // Quick actions live in the bar, not in the tile row that picks a
-    // section: they are laid out right to left, ending before the driver's
-    // plate, and the name drawn beside it has its own space reserved.
+    // Navigation sits in the bar's left corner with the section's name after
+    // it: three flat buttons, the moves a window puts there.
+    {
+        const float buttonSize = H * 0.030f;
+        const float buttonGap = W * 0.007f;
+        float x = margin;
+        for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
+            L.nav[i] = {x, mid - buttonSize * 0.5f, buttonSize, buttonSize};
+            x += buttonSize + buttonGap;
+        }
+        L.home = {x + W * 0.010f, H * 0.024f, W * 0.24f, H * 0.034f};
+    }
+
+    // The clock closes the bar, so the row is laid out right to left from the
+    // margin: the clock ends up last, the time reads in the gap reserved
+    // before it, and the driver's plate sits to the left of the row.
     {
         const float iconSize = H * 0.036f;
         const float iconGap = W * 0.014f;
-        float right = L.avatar.x - W * 0.09f;
+        const float clockGap = W * 0.075f; // room for "HH:MM" before the clock
+        float right = W - margin;
         for (int i = MainMenuLayout::kQuickCount - 1; i >= 0; --i) {
-            L.quick[i] = {right - iconSize, (L.topBar.h - iconSize) * 0.5f, iconSize, iconSize};
-            right -= iconSize + iconGap;
+            L.quick[i] = {right - iconSize, mid - iconSize * 0.5f, iconSize, iconSize};
+            right -= iconSize + (i == MainMenuLayout::kClockSlot ? clockGap : iconGap);
         }
+        const float plate = H * 0.052f;
+        L.avatar = {right - plate, mid - plate * 0.5f, plate, plate};
     }
     const int rows = std::max(0, tileCount);
     L.count = std::min(MainMenuLayout::kMaxSlots, rows);

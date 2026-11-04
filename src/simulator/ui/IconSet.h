@@ -136,6 +136,25 @@ inline constexpr const char* kClock =
     "<path d=\"M12 7.6V12l3.2 2\"/>"
     "</svg>";
 
+// Back: the bar's first navigation control, a chevron pointing left.
+inline constexpr const char* kBack =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.6\">"
+    "<path d=\"M14.6 5.6L8.2 12l6.4 6.4\"/>"
+    "</svg>";
+
+// Forward: the same chevron the other way.
+inline constexpr const char* kForward =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.6\">"
+    "<path d=\"M9.4 5.6L15.8 12l-6.4 6.4\"/>"
+    "</svg>";
+
+// Refresh: a ring left open at the top right, with the arrow head closing it.
+inline constexpr const char* kRefresh =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.6\">"
+    "<path d=\"M19.6 12a7.6 7.6 0 1 1-2.3-5.4\"/>"
+    "<path d=\"M19.9 4.4v5h-5\"/>"
+    "</svg>";
+
 /** SVG source for an id, or nullptr when the id is not in the set. */
 inline const char* source(const char* id) {
     if (id == nullptr || *id == '\0') return nullptr;
@@ -155,6 +174,9 @@ inline const char* source(const char* id) {
         {"keyboard", kKeyboard},
         {"clock", kClock},
         {"pad", kPad},
+        {"back", kBack},
+        {"forward", kForward},
+        {"refresh", kRefresh},
     };
     for (const auto& entry : kTable) {
         if (std::strcmp(entry.id, id) == 0) return entry.svg;

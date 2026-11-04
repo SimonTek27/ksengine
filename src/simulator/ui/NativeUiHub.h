@@ -74,6 +74,10 @@ public:
         m_viewH = height;
         m_renderer.setViewport(width, height);
 
+        // Whatever moved the menu - a key, a tile, a callback from the loop -
+        // the trail the bar's arrows walk follows it.
+        syncNavHistory();
+
         m_input.beginFrame();
         m_renderer.beginFrame();
         auto& dl = m_renderer.list();
@@ -174,8 +178,13 @@ public:
         if (m_mp->isVisible() && m_mp->handleMouse(e)) return true;
 
         if (m_menu->isVisible() || m_menu->fadeAlpha() > 0.5f) {
+            syncNavHistory();
             updateMenuHover(e.x, e.y, m_viewW, m_viewH);
             if (e.type == MouseEventType::Up && e.button == MouseButton::Left) {
+                if (m_navHover >= 0) {
+                    activateNav(m_navHover);
+                    return true;
+                }
                 if (m_quickHover >= 0) {
                     // A header quick action is a switch, not a section.
                     activateQuick(m_quickHover);
@@ -474,57 +483,7 @@ private:
         dl.addRectFilled({0.f, 0.f, W, H * 0.40f}, Color::rgba(0.f, 0.f, 0.f, 0.12f * a));
         dl.addRectFilled({0.f, H * 0.30f, W, H * 0.36f}, Color::rgba(0.f, 0.f, 0.f, 0.06f * a));
 
-        dl.addRectFilled(L.topBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.60f * a));
-        dl.addLine(0.f, L.topBar.h, W, L.topBar.h,
-                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
-        m_text.draw(dl, L.home.x, L.home.y, "HOME",
-                    sty(Color::rgba(0.90f, 0.90f, 0.92f, a), 1.f, true));
-
-        // The driver's plate, top right: the name and an avatar carrying the
-        // initial, which is all the profile art there is.
-        const std::string driver = m_menu->profile().name;
-        if (!driver.empty()) {
-            char initial = driver[0];
-            if (initial >= 'a' && initial <= 'z') initial = static_cast<char>(initial - 32);
-            const float nameScale = 1.05f;
-            const float nameW = m_text.measureWidth(driver, nameScale);
-            m_text.draw(dl, L.avatar.x - nameW - 16.f, L.avatar.y + L.avatar.h * 0.34f, driver,
-                        sty(Color::rgba(0.96f, 0.96f, 0.97f, a), nameScale));
-            dl.addRectFilled(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.12f * a));
-            dl.addRect(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.24f * a), 1.f);
-            const std::string initialText(1, initial);
-            const float iw = m_text.measureWidth(initialText, 1.35f);
-            m_text.draw(dl, L.avatar.x + (L.avatar.w - iw) * 0.5f, L.avatar.y + L.avatar.h * 0.30f,
-                        initialText, sty(Color::rgba(0.96f, 0.96f, 0.97f, a), 1.35f, true));
-        }
-
-        // Header quick actions: the clock reads the local time, the other
-        // three open what they stand for. Same bar, so the row of sections
-        // starts below them.
-        {
-            static const char* kQuickIcons[MainMenuLayout::kQuickCount] = {
-                "clock", "speaker", "vr", "pad"};
-            for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
-                const Rect& r = L.quick[i];
-                const bool hot = (i == m_quickHover);
-                if (hot) dl.addRectFilled(r, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
-                const Color tint = hot ? Color::rgba(1.f, 1.f, 1.f, a)
-                                       : Color::rgba(0.74f, 0.74f, 0.78f, a);
-                if (const SvgIcon* icon = icons::get(kQuickIcons[i])) {
-                    const float inset = r.w * 0.16f;
-                    icon->draw(dl, r.x + inset, r.y + inset, r.w - inset * 2.f, tint, 1.f);
-                }
-            }
-            const std::time_t now = std::time(nullptr);
-            std::tm local{};
-            if (const std::tm* fromClock = std::localtime(&now)) local = *fromClock;
-            char timeText[16];
-            std::snprintf(timeText, sizeof(timeText), "%02d:%02d", local.tm_hour, local.tm_min);
-            const float tw = m_text.measureWidth(timeText, 1.f);
-            const Rect& first = L.quick[0];
-            m_text.draw(dl, first.x - tw - 10.f, first.y + first.h * 0.22f, timeText,
-                        sty(Color::rgba(0.88f, 0.88f, 0.90f, a), 1.f));
-        }
+        drawHeader(dl, w, h);
 
         for (int i = 0; i < L.count; ++i) {
             // The strip counts slots, the menu counts rows, and the separators
@@ -598,12 +557,88 @@ private:
         dl.addRectFilled(L.bottomBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.80f * a));
         dl.addLine(0.f, L.bottomBar.y, W, L.bottomBar.y,
                    Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
-        const float afterEsc = keyHint(dl, L.home.x, L.bottomBar, "ESC", "EXIT", a);
+        const float afterEsc = keyHint(dl, L.margin, L.bottomBar, "ESC", "EXIT", a);
         keyHint(dl, afterEsc + 28.f, L.bottomBar, "ENTER", "CONFIRM", a);
         const char* nav = "LEFT/RIGHT   select";
         const float navW = m_text.measureWidth(nav, 0.95f);
         m_text.draw(dl, W - L.home.x - navW, L.bottomBar.y + L.bottomBar.h * 0.30f, nav,
                     sty(Color::rgba(0.55f, 0.55f, 0.60f, a), 0.95f));
+    }
+
+    /** The bar every screen wears: navigation and the section's name on the
+     *  left, the driver's plate and the quick actions on the right, the clock
+     *  closing it. Painted from the layout that hit-tests it, so a button the
+     *  player sees is a button they can press. */
+    void drawHeader(DrawList& dl, int w, int h) {
+        const float a = m_menu->fadeAlpha();
+        const MainMenuLayout L = mainLayout(w, h);
+        dl.addRectFilled(L.topBar, Color::rgba(0.03f, 0.03f, 0.04f, 0.60f * a));
+        dl.addLine(0.f, L.topBar.h, static_cast<float>(w), L.topBar.h,
+                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
+
+        // Back / forward / refresh, flat and unlabelled, with the screen's name
+        // after them: the bar reads left to right like a window's.
+        static const char* kNavIcons[MainMenuLayout::kNavCount] = {
+            "back", "forward", "refresh"};
+        for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
+            const Rect& r = L.nav[i];
+            const bool live = navEnabled(i);
+            const bool hot = live && (i == m_navHover);
+            if (hot) dl.addRectFilled(r, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
+            const float alpha = live ? (hot ? 1.f : 0.70f) : 0.20f;
+            if (const SvgIcon* icon = icons::get(kNavIcons[i])) {
+                const float inset = r.w * 0.18f;
+                icon->draw(dl, r.x + inset, r.y + inset, r.w - inset * 2.f,
+                           Color::rgba(0.92f, 0.92f, 0.95f, alpha * a), 1.f);
+            }
+        }
+
+        const std::string label = (m_menu->state() == MenuState::Main)
+            ? std::string("HOME") : m_menu->sectionTitle();
+        m_text.draw(dl, L.home.x, L.home.y, label,
+                    sty(Color::rgba(0.90f, 0.90f, 0.92f, a), 1.f, true));
+
+        // The driver's plate: the name and an avatar carrying the initial,
+        // which is all the profile art there is.
+        const std::string driver = m_menu->profile().name;
+        if (!driver.empty()) {
+            char initial = driver[0];
+            if (initial >= 'a' && initial <= 'z') initial = static_cast<char>(initial - 32);
+            const float nameScale = 1.05f;
+            const float nameW = m_text.measureWidth(driver, nameScale);
+            m_text.draw(dl, L.avatar.x - nameW - 16.f, L.avatar.y + L.avatar.h * 0.34f, driver,
+                        sty(Color::rgba(0.96f, 0.96f, 0.97f, a), nameScale));
+            dl.addRectFilled(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.12f * a));
+            dl.addRect(L.avatar, Color::rgba(1.f, 1.f, 1.f, 0.24f * a), 1.f);
+            const std::string initialText(1, initial);
+            const float iw = m_text.measureWidth(initialText, 1.35f);
+            m_text.draw(dl, L.avatar.x + (L.avatar.w - iw) * 0.5f, L.avatar.y + L.avatar.h * 0.30f,
+                        initialText, sty(Color::rgba(0.96f, 0.96f, 0.97f, a), 1.35f, true));
+        }
+
+        // The quick actions, and then the clock, which is the last element.
+        static const char* kQuickIcons[MainMenuLayout::kQuickCount] = {
+            "speaker", "vr", "pad", "clock"};
+        for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
+            const Rect& r = L.quick[i];
+            const bool hot = (i == m_quickHover);
+            if (hot) dl.addRectFilled(r, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
+            const Color tint = hot ? Color::rgba(1.f, 1.f, 1.f, a)
+                                   : Color::rgba(0.74f, 0.74f, 0.78f, a);
+            if (const SvgIcon* icon = icons::get(kQuickIcons[i])) {
+                const float inset = r.w * 0.16f;
+                icon->draw(dl, r.x + inset, r.y + inset, r.w - inset * 2.f, tint, 1.f);
+            }
+        }
+        const std::time_t now = std::time(nullptr);
+        std::tm local{};
+        if (const std::tm* fromClock = std::localtime(&now)) local = *fromClock;
+        char timeText[16];
+        std::snprintf(timeText, sizeof(timeText), "%02d:%02d", local.tm_hour, local.tm_min);
+        const float tw = m_text.measureWidth(timeText, 1.f);
+        const Rect& clock = L.quick[MainMenuLayout::kClockSlot];
+        m_text.draw(dl, clock.x - tw - 10.f, clock.y + clock.h * 0.22f, timeText,
+                    sty(Color::rgba(0.88f, 0.88f, 0.90f, a), 1.f));
     }
 
     /** Header quick action under the cursor, or -1. */
@@ -615,26 +650,99 @@ private:
         return -1;
     }
 
-    /** The header's four icons: the clock reads the time, the other three act. */
+    /** The bar's three moves, in layout order. */
+    enum class NavAction { Back = 0, Forward = 1, Refresh = 2 };
+
+    bool navEnabled(int index) const {
+        if (index == static_cast<int>(NavAction::Back)) return m_navPos > 0;
+        if (index == static_cast<int>(NavAction::Forward))
+            return m_navPos + 1 < m_navHistory.size();
+        return true; // refresh always has a screen to rebuild
+    }
+
+    void openHistoryState() {
+        const MenuState target = m_navHistory[m_navPos];
+        if (target == m_menu->state()) return;
+        m_menu->openScreen(target);
+        // This move retraces a step of the trail, it does not add one.
+        m_navLast = target;
+    }
+
+    void activateNav(int index) {
+        switch (static_cast<NavAction>(index)) {
+        case NavAction::Back:
+            if (m_navPos == 0) return;
+            --m_navPos;
+            openHistoryState();
+            break;
+        case NavAction::Forward:
+            if (m_navPos + 1 >= m_navHistory.size()) return;
+            ++m_navPos;
+            openHistoryState();
+            break;
+        case NavAction::Refresh:
+            // The rows come from the menu's own builders, so re-opening the
+            // screen is what picking up whatever changed behind it means.
+            m_menu->openScreen(m_menu->state());
+            break;
+        }
+    }
+
+    /** Records the state the player just entered: a new step drops whatever
+     *  was left ahead of it, the way a browser's trail does. */
+    void syncNavHistory() {
+        const MenuState now = m_menu->state();
+        if (now == m_navLast) return;
+        m_navLast = now;
+        if (m_navHistory.empty()) {
+            m_navHistory.push_back(now);
+            m_navPos = 0;
+            return;
+        }
+        if (m_navPos + 1 < m_navHistory.size())
+            m_navHistory.resize(m_navPos + 1);
+        m_navHistory.push_back(now);
+        m_navPos = m_navHistory.size() - 1;
+        if (m_navHistory.size() > 64) {
+            m_navHistory.erase(m_navHistory.begin());
+            m_navPos -= 1;
+        }
+    }
+
+    /** The bar's four icons: sound, the VR screen, the controller, then the
+     *  clock, which is a readout and opens nothing. */
     void activateQuick(int index) {
         switch (index) {
-        case 1: // sound: the audio page of the settings panel
+        case 0: // sound: the audio page of the settings panel
             if (m_menu->onOpenSettingsPanelRequested)
                 m_menu->onOpenSettingsPanelRequested("audio");
             break;
-        case 2: // the VR screen
+        case 1: // the VR screen
             if (m_menu->onToggleFullscreenRequested) m_menu->onToggleFullscreenRequested();
             break;
-        case 3: // controller: the bindings screen
+        case 2: // controller: the bindings screen
             m_menu->openScreen(MenuState::Controls);
             break;
         default:
-            break; // the clock is a readout, nothing to open
+            break; // the clock
         }
     }
 
     void updateMenuHover(float mx, float my, int w, int h) {
         m_quickHover = -1;
+        m_navHover = -1;
+        // The bar belongs to every screen but the in-car pause overlay, which
+        // brings a bar of its own.
+        if (m_menu->state() != MenuState::Pause) {
+            const MainMenuLayout bar = mainLayout(w, h);
+            for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
+                if (bar.nav[i].contains(mx, my)) m_navHover = i;
+            }
+            if (m_navHover >= 0) {
+                m_menu->setHoverIndex(-1);
+                return;
+            }
+        }
         if (m_menu->state() == MenuState::Main) {
             const int quick = quickIconAt(mx, my, w, h);
             if (quick >= 0) {
@@ -700,10 +808,9 @@ private:
         dl.addRectFilled({0, 0, (float)w, (float)h}, Color::rgba(0.f, 0.f, 0.f, 0.72f * a));
         dl.addRectFilled({0, 0, 8.f, (float)h}, Color::rgba(0.85f, 0.12f, 0.12f, 0.9f * a));
 
-        m_text.draw(dl, 72.f + slide, 48.f, "KSIM",
-                    sty(Color::rgba(1, 1, 1, a), 2.4f, true));
-        m_text.draw(dl, 72.f + slide, 88.f, m_menu->sectionTitle(),
-                    sty(Color::rgba(0.75f, 0.75f, 0.78f, a), 1.1f));
+        // Every screen keeps the bar: the section's name is in it, so the
+        // wordmark that used to sit here is gone.
+        drawHeader(dl, w, h);
 
         char ctx[128];
         // ASCII only: the atlas covers 32..126, so a middle dot rendered as??.
@@ -839,6 +946,12 @@ private:
     int m_viewW = 1280, m_viewH = 720;
     bool m_inCarMenuAllowed = true;   // pre-session: always
     int m_quickHover = -1;            // header quick action under the cursor
+    int m_navHover = -1;              // bar navigation button under the cursor
+    // The trail the bar's arrows walk: the states the player went through, in
+    // order, and where in it they are now.
+    std::vector<MenuState> m_navHistory{MenuState::Main};
+    size_t m_navPos = 0;
+    MenuState m_navLast = MenuState::Main;
 
     std::unique_ptr<GameMenuOverlay> m_menu;
     std::unique_ptr<DashboardOverlay> m_dash;

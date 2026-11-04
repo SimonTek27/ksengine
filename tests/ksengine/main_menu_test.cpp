@@ -104,15 +104,25 @@ int main() {
         KS_CHECK(L.body.y > L.title.y);
         KS_CHECK(L.body.y + L.body.h <= L.bottomBar.y + 1.f);
         KS_CHECK(L.avatar.x + L.avatar.w <= 1600.f);
-        // Header quick actions: four icons inside the top bar, left of the
-        // driver plate, laid out without overlapping.
+        // Bar navigation: three buttons in the left corner, before the name.
+        for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
+            KS_CHECK(L.nav[i].w > 0.f && L.nav[i].h > 0.f);
+            KS_CHECK(L.nav[i].y >= 0.f);
+            KS_CHECK(L.nav[i].y + L.nav[i].h <= L.topBar.h);
+            KS_CHECK(L.nav[i].x + L.nav[i].w <= L.home.x);
+            if (i > 0) KS_CHECK(L.nav[i].x >= L.nav[i - 1].x + L.nav[i - 1].w);
+        }
+        // Quick actions: after the driver's plate, in a row of their own.
         for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
             KS_CHECK(L.quick[i].w > 0.f && L.quick[i].h > 0.f);
             KS_CHECK(L.quick[i].y >= 0.f);
             KS_CHECK(L.quick[i].y + L.quick[i].h <= L.topBar.h);
-            KS_CHECK(L.quick[i].x + L.quick[i].w <= L.avatar.x);
+            KS_CHECK(L.avatar.x + L.avatar.w <= L.quick[i].x);
             if (i > 0) KS_CHECK(L.quick[i].x >= L.quick[i - 1].x + L.quick[i - 1].w);
         }
+        // The clock is the last element: nothing sits to the right of it.
+        const auto& clockBox = L.quick[MainMenuLayout::kClockSlot];
+        KS_CHECK(clockBox.x + clockBox.w >= 1600.f - L.margin - 1.f);
     }
 
     // ---------------------------------------------------------------------
@@ -270,11 +280,51 @@ int main() {
         bool fullscreenAsked = false;
         hub.menu().onToggleFullscreenRequested = [&fullscreenAsked]() { fullscreenAsked = true; };
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, true,
-                              L.quick[2].x + 2.f, L.quick[2].y + 2.f);
+                              L.quick[1].x + 2.f, L.quick[1].y + 2.f);
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
-                              L.quick[2].x + 2.f, L.quick[2].y + 2.f);
+                              L.quick[1].x + 2.f, L.quick[1].y + 2.f);
         KS_CHECK(fullscreenAsked);
         KS_CHECK(hub.menu().state() == MenuState::Main); // a switch, not a section
+
+        // The clock is a readout: clicking it must not leave the screen.
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.quick[MainMenuLayout::kClockSlot].x + 2.f,
+                              L.quick[MainMenuLayout::kClockSlot].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Main);
+
+        // The bar's navigation works on the submenus too: back, forward and
+        // refresh walk the trail the player walked.
+        hub.menu().openScreen(MenuState::Main);
+        hub.handleMouseMove(4.f, 4.f); // nothing in the bar under the cursor
+        hub.menu().openScreen(MenuState::Settings);
+        hub.handleMouseMove(L.nav[0].x + 2.f, L.nav[0].y + 2.f);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.nav[0].x + 2.f, L.nav[0].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Main);       // back
+        hub.handleMouseMove(L.nav[1].x + 2.f, L.nav[1].y + 2.f);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.nav[1].x + 2.f, L.nav[1].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Settings);   // forward
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.nav[2].x + 2.f, L.nav[2].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Settings);   // refresh stays put
+
+        // ...and the bar is drawn on a submenu, with that screen's name in it.
+        hub.menu().openScreen(MenuState::Settings);
+        hub.renderFrame(1600, 900);
+        bool barPlate = false;
+        bool nameInBar = false;
+        for (const auto& cmd : hub.renderer().list().commands()) {
+            if (cmd.type == ks::sim::ui::DrawCmdType::RectFilled && cmd.x0 == 0.f &&
+                cmd.y0 == 0.f && cmd.x1 >= 1599.f &&
+                cmd.y1 >= 900.f * 0.05f && cmd.y1 <= 900.f * 0.10f)
+                barPlate = true;
+            if (cmd.type == ks::sim::ui::DrawCmdType::Text && cmd.text == "SETTINGS" &&
+                cmd.y0 < 900.f * 0.10f)
+                nameInBar = true;
+        }
+        KS_CHECK(barPlate);
+        KS_CHECK(nameInBar);
 
         // ESC on the arrival screen offers to leave instead of hiding it.
         hub.menu().openScreen(MenuState::Main);
