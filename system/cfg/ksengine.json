@@ -186,9 +186,9 @@
       },
       {
         "feature": "headPhysics",
-        "status": "missing",
-        "landsAs": null,
-        "note": "The camera is rigid: no head physics."
+        "status": "partial",
+        "landsAs": "cockpit head spring",
+        "note": "Longitudinal and lateral acceleration sway the cockpit head through a spring-damper; vertical suspension travel is not fed in yet."
       },
       {
         "feature": "freeCamera",
@@ -214,7 +214,8 @@
         "landsAs": "cockpit view",
         "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
       }
-    ]
+    ],
+    "headPhysics": true
   },
   "audio": {
     "master": 0.8,

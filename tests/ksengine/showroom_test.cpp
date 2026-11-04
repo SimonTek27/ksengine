@@ -296,5 +296,39 @@ int main() {
         fs::remove_all(dir, ec);
     }
 
+    // --- cockpit head physics ----------------------------------------------
+    {
+        // The head hangs on a spring: a stop throws it forward down the seat and
+        // it comes back once the car holds a steady speed. A camera with the
+        // feature off is the reference the spring has to return to.
+        CameraController sprung;
+        sprung.setMode(CameraController::Mode::Cockpit);
+        sprung.setHeadPhysics(true);
+        KS_CHECK(sprung.headPhysics());
+
+        CameraController welded;
+        welded.setMode(CameraController::Mode::Cockpit);
+        KS_CHECK(!welded.headPhysics());
+
+        const float dt = 1.f / 120.f;
+        sprung.update(dt, ks::sim::mat4(), 100.f);
+        welded.update(dt, ks::sim::mat4(), 100.f);
+        KS_CHECK_NEAR(sprung.position().z, welded.position().z, 1e-4f);
+
+        for (int i = 0; i < 120; ++i) { // 100 -> 60 km/h over a second
+            const float kmh = 100.f - 40.f * static_cast<float>(i + 1) / 120.f;
+            sprung.update(dt, ks::sim::mat4(), kmh);
+            welded.update(dt, ks::sim::mat4(), kmh);
+        }
+        KS_CHECK(sprung.position().z > welded.position().z + 0.003f);
+
+        for (int i = 0; i < 240; ++i) { // two seconds at a steady 60
+            sprung.update(dt, ks::sim::mat4(), 60.f);
+            welded.update(dt, ks::sim::mat4(), 60.f);
+        }
+        KS_CHECK_NEAR(sprung.position().z, welded.position().z, 2e-3f);
+        KS_CHECK_NEAR(sprung.position().y, welded.position().y, 2e-3f);
+    }
+
     return KS_TEST_RESULT("showroom_test");
 }

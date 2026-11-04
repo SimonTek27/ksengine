@@ -9,14 +9,14 @@ CameraController::CameraController() = default;
 void CameraController::update(float dt, const mat4& carBodyMatrix, float speedKmh)
 {
     switch (m_mode) {
-    case Mode::Cockpit: updateCockpit(carBodyMatrix, speedKmh); break;
+    case Mode::Cockpit: updateCockpit(carBodyMatrix, speedKmh, dt); break;
     case Mode::Chase:   updateChase(carBodyMatrix, speedKmh, dt); break;
     case Mode::Free:    updateFree(dt); break;
     }
     updateProjection();
 }
 
-void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh)
+void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh, float dt)
 {
     vec3 localPos = m_cockpitOffset;
 
@@ -24,6 +24,48 @@ void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh)
     m_headBobPhase += bobSpeed * 0.05f;
     float bob = std::sin(m_headBobPhase) * m_headBobAmplitude * bobSpeed;
     localPos = localPos + vec3(0, bob, 0);
+
+    // Head physics: the head hangs on a spring, so the car's acceleration moves
+    // it instead of leaving it welded to the shell. Braking and throttle push it
+    // along the seat, cornering swings it sideways, and the damper settles it.
+    if (m_headPhysics) {
+        const vec3 carPos = carMatrix * vec3(0, 0, 0);
+        vec3 carForward = (carMatrix * vec3(0, 0, 1)) - carPos;
+        const float forwardLen = std::sqrt(carForward.x * carForward.x +
+                                           carForward.y * carForward.y +
+                                           carForward.z * carForward.z);
+        if (forwardLen > 1e-6f) carForward = carForward * (1.0f / forwardLen);
+        if (!m_headInitialized) {
+            m_lastCarForward = carForward;
+            m_lastSpeedKmh = speedKmh;
+            m_headInitialized = true;
+        }
+        const float step = std::clamp(dt, 0.0f, 0.05f);
+        if (step > 0.0f) {
+            const float longAccel = (speedKmh - m_lastSpeedKmh) / step / 3.6f;
+            // How far the body turned this frame times the speed is the lateral
+            // acceleration the head actually feels.
+            const float cross = m_lastCarForward.x * carForward.z -
+                                m_lastCarForward.z * carForward.x;
+            const float yawRate = std::asin(std::clamp(cross, -1.0f, 1.0f)) / step;
+            const float latAccel = (speedKmh / 3.6f) * yawRate;
+            const vec3 target{
+                std::clamp(latAccel * 0.0012f, -0.035f, 0.035f),
+                0.0f,
+                std::clamp(-longAccel * 0.0010f, -0.025f, 0.025f)};
+            constexpr float kStiffness = 90.0f;
+            constexpr float kDamping = 15.0f;
+            const vec3 accel =
+                (target - m_headOffset) * kStiffness - m_headVelocity * kDamping;
+            m_headVelocity = m_headVelocity + accel * step;
+            m_headOffset = m_headOffset + m_headVelocity * step;
+        }
+        m_lastSpeedKmh = speedKmh;
+        m_lastCarForward = carForward;
+        localPos = localPos + m_headOffset;
+    } else {
+        m_headInitialized = false;
+    }
 
     m_position = carMatrix * localPos;
 

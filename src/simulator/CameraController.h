@@ -45,9 +45,14 @@ public:
 
     void setCockpitOffset(const vec3& offset) { m_cockpitOffset = offset; }
     void setCockpitLookTarget(const vec3& target) { m_cockpitLookTarget = target; }
+    /** Head physics: the cockpit head hangs on a spring, so longitudinal and
+     *  lateral acceleration sway it instead of leaving it welded to the body.
+     *  Off by default; the config's video.headPhysics turns it on. */
+    void setHeadPhysics(bool enabled) { m_headPhysics = enabled; }
+    bool headPhysics() const { return m_headPhysics; }
 
 private:
-    void updateCockpit(const mat4& carMatrix, float speedKmh);
+    void updateCockpit(const mat4& carMatrix, float speedKmh, float dt);
     void updateChase(const mat4& carMatrix, float speedKmh, float dt);
     void updateFree(float dt);
     void updateProjection();
@@ -81,6 +86,13 @@ private:
 
     float m_headBobPhase = 0;
     float m_headBobAmplitude = 0.003f;
+
+    bool m_headPhysics = false;
+    vec3 m_headOffset;
+    vec3 m_headVelocity;
+    vec3 m_lastCarForward{0, 0, 1};
+    float m_lastSpeedKmh = 0.0f;
+    bool m_headInitialized = false;
 };
 
 } // namespace ks::sim
