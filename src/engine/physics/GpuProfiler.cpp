@@ -10,6 +10,12 @@ const char* GpuProfiler::passName(Pass p) {
     switch (p) {
     case Pass::FrameBegin: return "FrameBegin";
     case Pass::Shadow: return "Shadow";
+    case Pass::GBuffer: return "GBuffer";
+    case Pass::SSGI: return "SSGI";
+    case Pass::Lighting: return "Lighting";
+    case Pass::Resolve: return "Resolve";
+    case Pass::Bloom: return "Bloom";
+    case Pass::Display: return "Display";
     case Pass::MainPass: return "MainPass";
     case Pass::UI: return "UI";
     case Pass::FrameEnd: return "FrameEnd";
@@ -127,18 +133,18 @@ void GpuProfiler::resolveFrame(int slot) {
             : (m_avgFrameTimeMs * (1.0 - a) + m_frameTimeMs * a);
     }
 
-    auto passDelta = [&](Pass from, Pass to) {
-        return ticksToMs(data[static_cast<size_t>(from)], data[static_cast<size_t>(to)]);
-    };
-    m_passMs[static_cast<size_t>(Pass::FrameBegin)] = 0.0;
-    m_passMs[static_cast<size_t>(Pass::Shadow)] =
-        passDelta(Pass::FrameBegin, Pass::Shadow);
-    m_passMs[static_cast<size_t>(Pass::MainPass)] =
-        passDelta(Pass::Shadow, Pass::MainPass);
-    m_passMs[static_cast<size_t>(Pass::UI)] =
-        passDelta(Pass::MainPass, Pass::UI);
-    m_passMs[static_cast<size_t>(Pass::FrameEnd)] =
-        passDelta(Pass::UI, Pass::FrameEnd);
+    // Ladder over consecutive written markers: a slot with no timestamp (0)
+    // is skipped, so a path that never wrote it reports nothing for it.
+    m_passMs.fill(0.0);
+    int prev = -1;
+    for (int i = 0; i < kPassCount; ++i) {
+        const uint64_t stamp = data[static_cast<size_t>(i)];
+        if (stamp == 0) continue;
+        if (prev >= 0)
+            m_passMs[static_cast<size_t>(i)] =
+                ticksToMs(data[static_cast<size_t>(prev)], stamp);
+        prev = i;
+    }
 
     m_resolveIndex = slot;
 #endif

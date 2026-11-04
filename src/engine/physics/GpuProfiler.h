@@ -54,6 +54,12 @@ public:
     enum class Pass : int {
         FrameBegin = 0,
         Shadow,
+        GBuffer,
+        SSGI,
+        Lighting,
+        Resolve,
+        Bloom,
+        Display,
         MainPass,
         UI,
         FrameEnd,

@@ -2388,6 +2388,7 @@ void NativeRenderer::endFrame() {
         recordParticles(projRender * m_view, deferred);
         vkCmdEndRenderPass(m_commandBuffer);
 
+        m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::GBuffer);
         // ---- Pass 2: fullscreen lighting + volumetric fog into an
         // offscreen HDR target, sampling the GBuffer written above. ----
         // ---- Pass 1.5: SSGI - gather at half resolution, then denoise it with
@@ -2433,6 +2434,7 @@ void NativeRenderer::endFrame() {
         }
 
 
+        m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::SSGI);
         VkClearValue lClear{};
         lClear.color = {{m_fogColor.x, m_fogColor.y, m_fogColor.z, 1.0f}};
 
@@ -2454,6 +2456,7 @@ void NativeRenderer::endFrame() {
         vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
         vkCmdEndRenderPass(m_commandBuffer);
 
+        m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Lighting);
         // ---- Pass 3: temporal resolve into the history slot the *next*
         // frame reads — and, from there, the bloom extract and the display
         // pass. Stays scene-linear HDR: with TAA off this degenerates to an
@@ -2491,6 +2494,7 @@ void NativeRenderer::endFrame() {
         // what the display pass samples. ----
         writeDisplayDescriptorSets(m_historyViews[historyWrite]);
         {
+        m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Resolve);
             VkViewport bvp{0, 0, float(m_bloomExtent.width), float(m_bloomExtent.height), 0.0f, 1.0f};
             VkRect2D bscissor{{0, 0}, m_bloomExtent};
 
@@ -2527,6 +2531,7 @@ void NativeRenderer::endFrame() {
             bloomPass(m_bloomFramebuffers[0], m_bloomBlurPipeline, m_bloomBlurSets[1], &blurV, sizeof(blurV));
         }
 
+        m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Bloom);
         // ---- Pass 5: display — the only writer of the swapchain now.
         // Tone-maps the resolved frame, folds in the bloom, and encodes for
         // whichever surface the swapchain was created with: sRGB OETF on the
@@ -2578,6 +2583,7 @@ void NativeRenderer::endFrame() {
             recordUiOverlay(m_displayRenderPass, m_commandBuffer);
             vkCmdEndRenderPass(m_commandBuffer);
         }
+    m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Display);
     } else {
         // An HDR10 swapchain with no display pass would encode nothing, so
         // say so once instead of shipping a silently wrong image.

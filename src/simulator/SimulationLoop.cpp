@@ -2225,6 +2225,22 @@ void SimulationLoop::render(float dt) {
                 std::fprintf(stderr, "[render] gpu frame=%.3f ms avg=%.3f ms (~%d fps)\n",
                              gpuMs, m_vulkanRenderer->gpuAvgFrameTimeMs(),
                              m_vulkanRenderer->gpuProfiler().fps());
+            if (gpuMs > 0.0) {
+                // Same slots as GpuProfiler::Pass: the span each marker closes,
+                // skipping markers the running path never wrote (forward writes four).
+                auto& gp = m_vulkanRenderer->gpuProfiler();
+                char passLine[256];
+                passLine[0] = 0;
+                int used = 0;
+                for (int pi = 1; pi < ks::sim::GpuProfiler::kPassCount; ++pi) {
+                    const auto pass = static_cast<ks::sim::GpuProfiler::Pass>(pi);
+                    const double passMs = gp.passTimeMs(pass);
+                    if (passMs <= 0.0 || used > 200) continue;
+                    used += std::snprintf(passLine + used, sizeof(passLine) - used, " %s=%.3f",
+                                          gp.passName(pass), passMs);
+                }
+                std::fprintf(stderr, "[render] gpu passes%s ms\n", passLine);
+            }
             s_frame = 0;
             s_lastReport = nowReport;
         }
