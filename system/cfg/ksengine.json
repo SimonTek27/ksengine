@@ -696,10 +696,10 @@
         "landsAs": "TRACKS page"
       },
       {
-        "feature": "trackCatalog",
+        "feature": "layoutCatalog",
         "status": "partial",
         "landsAs": "track.ini",
-        "note": "Partially implemented: see landsAs for the part that exists."
+        "note": "Layouts come from the track folder: trackSelect picks one, and the session loads its data with the meshes."
       }
     ]
   },
