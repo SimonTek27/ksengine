@@ -15,7 +15,11 @@ enum class GameSessionMode : uint8_t {
     Race,
     TimeAttack,
     Hotlap,
-    Replay
+    Replay,
+    Weekend,
+    Championship,
+    Drift,
+    DragRace
 };
 
 struct SessionStartParams {
@@ -41,6 +45,10 @@ inline const char* sessionModeName(GameSessionMode m) {
     case GameSessionMode::TimeAttack: return "TIME_ATTACK";
     case GameSessionMode::Hotlap: return "HOTLAP";
     case GameSessionMode::Replay: return "REPLAY";
+    case GameSessionMode::Weekend: return "WEEKEND";
+    case GameSessionMode::Championship: return "CHAMPIONSHIP";
+    case GameSessionMode::Drift: return "DRIFT";
+    case GameSessionMode::DragRace: return "DRAG_RACE";
     }
     return "RACE";
 }
@@ -52,6 +60,10 @@ inline GameSessionMode modeFromMenuEntry(std::string entry) {
     if (entry.find("TIME") != std::string::npos) return GameSessionMode::TimeAttack;
     if (entry.find("HOT") != std::string::npos) return GameSessionMode::Hotlap;
     if (entry.find("REPLAY") != std::string::npos) return GameSessionMode::Replay;
+    if (entry.find("WEEK") != std::string::npos) return GameSessionMode::Weekend;
+    if (entry.find("CHAMP") != std::string::npos) return GameSessionMode::Championship;
+    if (entry.find("DRIFT") != std::string::npos) return GameSessionMode::Drift;
+    if (entry.find("DRAG") != std::string::npos) return GameSessionMode::DragRace;
     return GameSessionMode::Race;
 }
 
@@ -67,6 +79,14 @@ inline SessionStartParams defaultsForMode(GameSessionMode m) {
         p.totalLaps = 0; break;
     case GameSessionMode::Race:
         p.totalLaps = 10; break;
+    case GameSessionMode::Weekend:
+        p.totalLaps = 12; p.qualifyMinutes = 15; p.practiceMinutes = 20; break;
+    case GameSessionMode::Championship:
+        p.totalLaps = 15; break;
+    case GameSessionMode::Drift:
+        p.totalLaps = 0; p.sessionTimeSeconds = 180; p.aiCars = 0; break;
+    case GameSessionMode::DragRace:
+        p.totalLaps = 1; p.aiCars = 1; p.standingStart = true; break;
     default: break;
     }
     return p;
