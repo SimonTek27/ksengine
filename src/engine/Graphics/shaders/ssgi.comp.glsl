@@ -3,9 +3,9 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 // Input: G-buffer data from render graph
-layout(set = 0, binding = 0, rgba16f) uniform readonly image2D gbufferDepth;      // Scene depth (linearized)
-layout(set = 0, binding = 1, rgba16f) uniform readonly image2D gbufferNormal;    // World-space normals
-layout(set = 0, binding = 2, rgba16f) uniform readonly image2D gbufferAlbedo;    // Albedo/base color
+layout(set = 0, binding = 0) uniform sampler2D gbufferDepth;      // Scene depth (linearized)
+layout(set = 0, binding = 1) uniform sampler2D gbufferNormal;    // World-space normals
+layout(set = 0, binding = 2) uniform sampler2D gbufferAlbedo;    // Albedo/base color
 
 // Output: Indirect lighting result
 layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D ssgiOutput;      // GI result half-resolution
@@ -30,7 +30,7 @@ vec3 reconstructViewPos(vec2 uv, float depth) {
 // Reconstruct world-space position from depth
 vec3 reconstructWorldPos(vec2 uv, float depth) {
     vec3 viewPos = reconstructViewPos(uv, depth);
-    return (params.viewMatrix * vec4(viewPos, 1.0)).vec3;
+    return (params.viewMatrix * vec4(viewPos, 1.0)).xyz;
 }
 
 // Pseudo-random noise using screen position + frame index
@@ -87,9 +87,9 @@ vec4 rayMarchSS(vec3 origin, vec3 direction, float maxDistance, int maxSteps) {
 
         // Check if we hit geometry
         vec3 rayPoint = origin + direction * (float(i) * stepSize);
-        vec3 rayPointView = (params.viewMatrix * vec4(rayPoint, 1.0)).vec3;
+        vec3 rayPointView = (params.viewMatrix * vec4(rayPoint, 1.0)).xyz;
 
-        float depthDiff = rayPointView.z - sampledWorldPos.z;
+        float depthDiff = rayPoint.z - sampledWorldPos.z;
 
         if (depthDiff > 0.001 && depthDiff < params.params.z) { // bias check
             // Hit! Sample albedo as indirect light color
@@ -105,16 +105,16 @@ vec4 rayMarchSS(vec3 origin, vec3 direction, float maxDistance, int maxSteps) {
 
 void main() {
     ivec2 launchID = ivec2(gl_GlobalInvocationID.xy);
-    ivec2 imageSize = imageSize(ssgiOutput);
+    ivec2 outSize = imageSize(ssgiOutput);
 
-    if (launchID.x >= imageSize.x || launchID.y >= imageSize.y) return;
+    if (launchID.x >= outSize.x || launchID.y >= outSize.y) return;
 
-    vec2 uv = (vec2(launchID) + 0.5) / vec2(imageSize);
+    vec2 uv = (vec2(launchID) + 0.5) / vec2(outSize);
 
     // Sample G-buffer at current pixel
-    float depth = imageLoad(gbufferDepth, launchID).r;
-    vec3 normal = imageLoad(gbufferNormal, launchID).rgb;
-    vec3 albedo = imageLoad(gbufferAlbedo, launchID).rgb;
+    float depth = texture(gbufferDepth, uv).r;
+    vec3 normal = texture(gbufferNormal, uv).rgb;
+    vec3 albedo = texture(gbufferAlbedo, uv).rgb;
 
     // Skip sky pixels (depth == 1.0 means far plane)
     if (depth >= 0.99) {

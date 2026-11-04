@@ -39,6 +39,8 @@ function(ks_add_shader_target _target _src_root)
 		# nobody noticed when they rotted. Building them keeps them honest.
 		${_src_root}/engine/Graphics/shaders/ssao.comp
 		${_src_root}/engine/Graphics/shaders/ssr.comp
+		${_src_root}/engine/Graphics/shaders/ssgi.comp.glsl
+		${_src_root}/engine/Graphics/shaders/ssgi_blur.comp.glsl
 		${_src_root}/engine/Graphics/shaders/motionblur.frag
 		${_src_root}/engine/Graphics/shaders/fxaa.frag
 		${_src_root}/engine/Graphics/shaders/particle.vert

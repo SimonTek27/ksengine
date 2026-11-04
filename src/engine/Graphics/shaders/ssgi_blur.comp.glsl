@@ -6,7 +6,7 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(set = 0, binding = 0, rgba16f) uniform readonly image2D ssgiInput;
 
 // Output: SSGI filtered result
-layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D ssgiOutput;
+layout(set = 0, binding = 1, rgba16f) uniform image2D ssgiOutput; // read for the temporal blend
 
 // Scene depth for bilateral filtering
 layout(set = 0, binding = 2) uniform sampler2D depthTexture;

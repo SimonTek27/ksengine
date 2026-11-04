@@ -82,7 +82,7 @@
         "feature": "ssgi",
         "status": "missing",
         "landsAs": null,
-        "note": "SSGIRenderer is a stub facade: initialize() only sets a flag and render() is empty. The ssgi compute shaders exist but nothing dispatches them, and their storage-image bindings do not match the deferred G-buffer this renderer builds, so this is a pass to write, not a class to plug in."
+        "note": "SSGIRenderer is a stub facade: initialize() only sets a flag and render() is empty. Its two compute shaders now build with the rest (they are in the glslc target and pass spirv-val) but nothing dispatches them, and their bindings do not match the deferred G-buffer this renderer builds, so closing the row means writing the pass."
       },
       {
         "feature": "screenSpaceReflections",
