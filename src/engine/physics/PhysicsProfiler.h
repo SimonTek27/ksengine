@@ -82,9 +82,9 @@ public:
      *  __gpu_frame__ (0 = no data, never an estimate). False when the file
      *  cannot be opened. The C API ks_engine_profiler_export_csv() and the
      *  ksim exit dump (KS_PROFILE_CSV) both write through here, so every
-     *  consumer describes the same frame. */
      *  Per-pass rows (__gpu_pass_<name>__) are written only for the passes
      *  the renderer published for that frame.
+     *  consumer describes the same frame. */
     bool exportCsv(const std::string& path) const;
 
     /** Roadmap 2.14 - per-pass GPU times for the CSV dump. The renderer
