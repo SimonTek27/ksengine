@@ -83,8 +83,14 @@ public:
      *  cannot be opened. The C API ks_engine_profiler_export_csv() and the
      *  ksim exit dump (KS_PROFILE_CSV) both write through here, so every
      *  consumer describes the same frame. */
+     *  Per-pass rows (__gpu_pass_<name>__) are written only for the passes
+     *  the renderer published for that frame.
     bool exportCsv(const std::string& path) const;
 
+    /** Roadmap 2.14 - per-pass GPU times for the CSV dump. The renderer
+     *  publishes only the markers its path actually wrote, in ladder order,
+     *  so a row never claims a pass that did not run. */
+    void setGpuPassTimes(const char* const* names, const double* ms, int count);
     void setGpuFrameTimeMs(double ms) { m_gpuFrameMs = ms; }
     void setGpuAvgFrameTimeMs(double ms) { m_gpuAvgFrameMs = ms; }
     double gpuFrameTimeMs() const { return m_gpuFrameMs; }
@@ -109,6 +115,8 @@ private:
     int m_frameCount = 0;
     double m_gpuFrameMs = 0.0;
     double m_gpuAvgFrameMs = 0.0;
+    std::vector<std::string> m_gpuPassNames;
+    std::vector<double> m_gpuPassMs;
 
     mutable std::mutex m_mutex;
     std::unordered_map<std::string, clock::time_point> m_sectionStart;

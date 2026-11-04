@@ -2135,6 +2135,21 @@ void NativeRenderer::endFrame() {
         auto& prof = ks::physics::PhysicsProfiler::instance();
         prof.setGpuFrameTimeMs(m_gpuProfiler.frameTimeMs());
         prof.setGpuAvgFrameTimeMs(m_gpuProfiler.avgFrameTimeMs());
+        // Same ladder the console report prints, published for the CSV dump:
+        // only the markers this path wrote, so a pass the deferred branch
+        // never ran does not turn into a row.
+        const char* passNames[GpuProfiler::kPassCount]{};
+        double passMs[GpuProfiler::kPassCount]{};
+        int published = 0;
+        for (int pi = 1; pi < GpuProfiler::kPassCount; ++pi) {
+            const auto pass = static_cast<GpuProfiler::Pass>(pi);
+            const double ms = m_gpuProfiler.passTimeMs(pass);
+            if (ms <= 0.0) continue;
+            passNames[published] = GpuProfiler::passName(pass);
+            passMs[published] = ms;
+            ++published;
+        }
+        prof.setGpuPassTimes(passNames, passMs, published);
     }
 
     // ---- Shadow cascades: same draw list, light-space matrices instead of

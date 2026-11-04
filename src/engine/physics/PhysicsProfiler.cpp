@@ -207,6 +207,18 @@ void PhysicsProfiler::report(FILE* out) const
     std::fprintf(out, "==============================\n");
 }
 
+void PhysicsProfiler::setGpuPassTimes(const char* const* names, const double* ms, int count) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_gpuPassNames.clear();
+    m_gpuPassMs.clear();
+    if (!names || !ms || count <= 0) return;
+    for (int i = 0; i < count; ++i) {
+        if (!names[i] || ms[i] <= 0.0) continue;
+        m_gpuPassNames.emplace_back(names[i]);
+        m_gpuPassMs.push_back(ms[i]);
+    }
+}
+
 bool PhysicsProfiler::exportCsv(const std::string& path) const
 {
     FILE* f = std::fopen(path.c_str(), "w");
@@ -219,6 +231,11 @@ bool PhysicsProfiler::exportCsv(const std::string& path) const
     std::fprintf(f, "\"__frame__\",%.6f,0,1\n", frameTimeMs());
     if (gpuFrameTimeMs() > 0.0)
         std::fprintf(f, "\"__gpu_frame__\",%.6f,0,1\n", gpuFrameTimeMs());
+    for (size_t i = 0; i < m_gpuPassNames.size() && i < m_gpuPassMs.size(); ++i) {
+        if (m_gpuPassMs[i] <= 0.0) continue;
+        std::fprintf(f, "\"__gpu_pass_%s__\",%.6f,0,1\n",
+                     m_gpuPassNames[i].c_str(), m_gpuPassMs[i]);
+    }
     std::fclose(f);
     return true;
 }
