@@ -278,6 +278,11 @@ public:
     TcpTelemetryBridge* tcpBridge() { return m_tcp.get(); }
     DashboardOverlay* dashboard() { return &m_ui.dashboard(); }
     TelemetryOverlay* telemetry() { return &m_ui.telemetry(); }
+    // Frame pacing for the config's video.frameLimit: 0 leaves the frame free
+    // (vsync still caps it), any other value sleeps the rest of the budget.
+    void setFrameLimit(int fps) { m_frameLimit = fps > 0 ? fps : 0; }
+    int frameLimit() const { return m_frameLimit; }
+
     void setCameraMode(CameraController::Mode m) {
         if (m_camera) m_camera->setMode(m);
     }
@@ -479,6 +484,9 @@ private:
     double m_simTime = 0.0;
 
     std::chrono::steady_clock::time_point m_lastTime{};
+    void paceFrame();
+    int m_frameLimit = 0;
+    std::chrono::steady_clock::time_point m_frameStart{};
     double m_simAccumulator = 0;
     static constexpr double m_physicsDt = 0.001;
 

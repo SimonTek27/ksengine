@@ -1977,6 +1977,11 @@ void NativeRenderer::destroyScreenshotResources() {
     m_screenshotPixels.clear();
 }
 
+void NativeRenderer::setAnisotropicFiltering(int samples) {
+    m_anisotropicFiltering = samples > 1 ? samples : 1;
+    if (m_textureRuntime) m_textureRuntime->setAnisotropy(m_anisotropicFiltering);
+}
+
 bool NativeRenderer::beginFrame() {
     vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
 

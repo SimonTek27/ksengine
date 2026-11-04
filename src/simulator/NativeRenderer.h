@@ -380,6 +380,12 @@ public:
     bool hdrOutput() const { return m_hdrOutput; }
     bool hdrRequested() const { return m_hdrRequested; }
 
+    // Anisotropic filtering from the config (video.anisotropicFiltering),
+    // capped by the device limit, applied to every sampler built after this
+    // call. 1 means isotropic.
+    void setAnisotropicFiltering(int samples);
+    int anisotropicFiltering() const { return m_anisotropicFiltering; }
+
     // Real frame lifecycle. beginFrame() acquires a swapchain image and
     // resets the per-frame draw list; drawMesh() *queues* a (mesh, model
     // matrix) pair rather than drawing immediately, because the shadow
@@ -619,6 +625,7 @@ private:
     // Display transform / HDR output (see setExposure/setHdrOutput).
     bool m_hdrRequested = false;        // caller asked for HDR10 ...
     bool m_hdrOutput = false;           // ... and the swapchain really is one
+    int m_anisotropicFiltering = 1;     // samples the material samplers ask for
     bool m_swapchainColorSpaceExt = false; // VK_EXT_swapchain_colorspace (instance ext) present
     VkColorSpaceKHR m_swapChainColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     float m_exposure = 1.0f;

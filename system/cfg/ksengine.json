@@ -62,8 +62,8 @@
       {
         "feature": "windowOutput",
         "status": "live",
-        "landsAs": "resolution, fullscreen, vsync, anisotropic, shadow map, AA samples",
-        "note": "Resolution, fullscreen and vsync switch the window and the swapchain; anisotropic, shadow map size and AA samples size the caches. The startup values come from this file."
+        "landsAs": "resolution, fullscreen, vsync, frame limit, anisotropic, shadow map, AA samples",
+        "note": "Resolution, fullscreen and vsync switch the window and the swapchain; the frame limit paces the loop (0 = vsync only) and the anisotropy number caps the material samplers at the device limit. All of it comes from this file."
       },
       {
         "feature": "displayTuning",

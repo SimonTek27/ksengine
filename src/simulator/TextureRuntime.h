@@ -58,6 +58,11 @@ public:
     }
     std::size_t cachedTextureCount() const noexcept { return m_textures.size(); }
 
+    // Anisotropic samples the config asks for, capped by the device limit.
+    // Samplers created after this call use it; 1 means isotropic.
+    void setAnisotropy(int samples);
+    int anisotropy() const noexcept { return m_anisotropySamples; }
+
 private:
     struct Texture {
         VkImage image = VK_NULL_HANDLE;
@@ -94,6 +99,7 @@ private:
     // the device limit (never lower it, never exceed it).
     bool m_anisotropyEnabled = false;
     float m_maxAnisotropy = 1.0f;
+    int m_anisotropySamples = 1; // what the samplers actually ask for
 
     Texture m_fallback;      // white: albedo / generic missing texture
     Texture m_flatFallback;  // (0,0,255): missing normal map = no perturbation

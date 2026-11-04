@@ -94,6 +94,8 @@ TextureRuntime::TextureRuntime(VkDevice device, VkPhysicalDevice physicalDevice,
         vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
         m_maxAnisotropy = std::max(1.0f, properties.limits.maxSamplerAnisotropy);
     }
+    // Until the config speaks, keep the old behaviour: all the device offers.
+    m_anisotropySamples = m_anisotropyEnabled ? static_cast<int>(m_maxAnisotropy) : 1;
     if (!createFallback(m_fallback, 255, 255, 255, 255)) {
         std::fprintf(stderr, "[TextureRuntime] white fallback creation failed\n");
     }
@@ -424,6 +426,15 @@ bool TextureRuntime::uploadRgba(const std::uint8_t* rgba, std::uint32_t width,
     return true;
 }
 
+void TextureRuntime::setAnisotropy(int samples) {
+    const int limit = static_cast<int>(m_maxAnisotropy);
+    if (samples <= 1) {
+        m_anisotropySamples = 1;
+        return;
+    }
+    m_anisotropySamples = samples < limit ? samples : limit;
+}
+
 bool TextureRuntime::createSampler(VkSampler& outSampler, std::uint32_t mipLevels) const {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -437,8 +448,9 @@ bool TextureRuntime::createSampler(VkSampler& outSampler, std::uint32_t mipLevel
     // P0 anisotropy: only when the owning device enabled samplerAnisotropy
     // (mirrored in the ctor arg) — otherwise VUID forbids anisotropyEnable.
     // maxAnisotropy is the device limit queried at construction (>= 1).
-    samplerInfo.anisotropyEnable = m_anisotropyEnabled ? VK_TRUE : VK_FALSE;
-    samplerInfo.maxAnisotropy = m_anisotropyEnabled ? m_maxAnisotropy : 1.0f;
+    const bool anisotropic = m_anisotropyEnabled && m_anisotropySamples > 1;
+    samplerInfo.anisotropyEnable = anisotropic ? VK_TRUE : VK_FALSE;
+    samplerInfo.maxAnisotropy = anisotropic ? static_cast<float>(m_anisotropySamples) : 1.0f;
     samplerInfo.compareEnable = VK_FALSE;
     samplerInfo.minLod = 0.0f;
     // Reach the last generated level; clamps to what the view actually has,

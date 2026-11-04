@@ -1,4 +1,11 @@
 #include <set>
+#if defined(_WIN32)
+// mmsystem.h drags in the whole of windows.h to declare one function; the
+// timer call is declared here so this translation unit stays Win32-free.
+extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned int);
+#pragma comment(lib, "winmm.lib")
+#endif
+#include <thread>
 #include "engine/Graphics/MaterialPresets.h"
 #include "engine/Graphics/MaterialOverrides.h"
 #include "engine/Graphics/TextureNames.h"
@@ -2896,7 +2903,31 @@ void SimulationLoop::applyRemoteInput(int clientIndex, const net::InputData& inp
 #endif
 }
 
+void SimulationLoop::paceFrame() {
+    if (m_frameLimit <= 0) return;
+#if defined(_WIN32)
+    // Windows sleeps on the system timer tick (15.6 ms by default), which is
+    // wider than a 30 fps budget and would land the frame a tick late: ask for
+    // a 1 ms timer once, so sleeping out the budget stays accurate.
+    static const bool timerRaised = [] { timeBeginPeriod(1); return true; }();
+    (void)timerRaised;
+#endif
+    const double budget = 1.0 / static_cast<double>(m_frameLimit);
+    const auto since = [this] {
+        return std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - m_frameStart).count();
+    };
+    const double left = budget - since();
+    if (left <= 0.0) return;
+    // Sleep the bulk, then spin the last millisecond: the timer cannot place a
+    // wake-up that precisely, and a frame limiter has to land on the limit.
+    if (left > 0.0015)
+        std::this_thread::sleep_for(std::chrono::duration<double>(left - 0.0012));
+    while (since() < budget) std::this_thread::yield();
+}
+
 void SimulationLoop::tick() {
+    m_frameStart = std::chrono::steady_clock::now();
     static bool profileInit = false;
     if (!profileInit) {
         profileInit = true;
@@ -2921,6 +2952,7 @@ void SimulationLoop::tick() {
         pumpFeatureHub(1.0f / 60.0f, false);
         render();
         PROFILE_END_FRAME();
+        paceFrame();
         return;
     }
     auto now = std::chrono::steady_clock::now();
@@ -3172,6 +3204,7 @@ void SimulationLoop::tick() {
         render(static_cast<float>(elapsed));
     }
     PROFILE_END_FRAME();
+    paceFrame();
 }
 
 namespace {

@@ -1020,6 +1020,80 @@ static void initSimulation() {
                exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
                headPhysics ? 1 : 0, vsync, width, height);
     }
+    // --- the config drives the image ---------------------------------------
+    // Read after the ppfilter preset so the file wins: system/cfg/ksengine.json
+    // first, the player's settings.json second, its key wins - the same merge
+    // EngineSettings already does for physics.fixedDt and audio.master.
+    {
+        ks::engine::json::Value videoConfig = ks::engine::json::Value::object();
+        const auto mergeVideo = [](const std::string& path,
+                                   ks::engine::json::Value& out) {
+            std::string text;
+            if (!ks::engine::assets::UserData::readFile(path, text)) return;
+            ks::engine::json::Value root;
+            std::string error;
+            if (!ks::engine::json::parse(text, root, &error)) {
+                printf("[INIT] %s: %s\n", path.c_str(), error.c_str());
+                return;
+            }
+            const ks::engine::json::Value* video = root.find("video");
+            if (!video || !video->isObject()) return;
+            for (const std::string& key : video->keys()) {
+                if (const ks::engine::json::Value* value = video->find(key))
+                    out.set(key, *value);
+            }
+        };
+        mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
+        mergeVideo(g_userLayout.settings, videoConfig);
+        const double exposure = videoConfig.numberAt("exposure", -1.0);
+        const std::string tonemap = videoConfig.stringAt("tonemap");
+        const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
+        const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
+        const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
+        const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
+        const bool headPhysics = videoConfig.boolAt("headPhysics", true);
+        const int frameLimit = static_cast<int>(videoConfig.numberAt("frameLimit", 0.0));
+        const int anisotropy =
+            static_cast<int>(videoConfig.numberAt("anisotropicFiltering", 8.0));
+        const std::string resolution = videoConfig.stringAt("resolution");
+        int width = 0, height = 0;
+        if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
+            width = 0;
+            height = 0;
+        }
+        if (auto* renderer = g_simulation->renderer()) {
+            if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));
+            for (int i = 0; i < ks::sim::GameMenuOverlay::kTonemapCount; ++i) {
+                if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
+                    renderer->setTonemapMode(i);
+            }
+            renderer->setSsao(ssao != 0);
+            renderer->setSsr(ssr != 0);
+            renderer->setMotionBlur(motionBlur != 0);
+            if (motionBlur) renderer->setDeferred(true);
+            renderer->setVsync(vsync != 0);
+            if (auto* camera = g_simulation->camera())
+                camera->setHeadPhysics(headPhysics);
+            renderer->setAnisotropicFiltering(anisotropy);
+            g_simulation->setFrameLimit(frameLimit);
+            if (width > 0 && height > 0 && g_hWnd) {
+                const uint32_t currentW = renderer->extent().width;
+                const uint32_t currentH = renderer->extent().height;
+                if (currentW != static_cast<uint32_t>(width) ||
+                    currentH != static_cast<uint32_t>(height)) {
+                    RECT rc{0, 0, width, height};
+                    const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
+                    AdjustWindowRect(&rc, style, FALSE);
+                    SetWindowPos(g_hWnd, nullptr, 0, 0, rc.right - rc.left,
+                                 rc.bottom - rc.top,
+                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+                }
+            }
+        }
+        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, motion blur %d, head %d, vsync %d, %dx%d, aniso %dx, limit %d fps\n",
+               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
+               headPhysics ? 1 : 0, vsync, width, height, anisotropy, frameLimit);
+    }
     // --- VIDEO: the page reads the renderer back and writes to it ----------
     // Resolution and fullscreen are window state, not renderer state: the app
     // owns the HWND, so they go through the two callbacks below.
