@@ -90,8 +90,10 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     // leave that part of the screen empty.
     const float stripBottom = top + static_cast<float>(rowCount > 0 ? rowCount : 1) * tileH +
         rowGap * static_cast<float>(rowCount > 1 ? rowCount - 1 : 0);
-    L.title = {W * 0.55f, stripBottom + H * 0.03f, W * 0.42f, H * 0.09f};
-    L.body = {W * 0.55f, L.title.y + H * 0.105f, W * 0.40f, H * 0.15f};
+    // The caption reads as a lower third under the tiles, left aligned with
+    // them: on the right it landed on the scene and on the second row.
+    L.title = {margin, stripBottom + H * 0.032f, usable * 0.52f, H * 0.085f};
+    L.body = {margin, L.title.y + H * 0.072f, usable * 0.46f, H * 0.10f};
     L.bottomBar = {0.f, H * 0.955f, W, H * 0.045f};
     return L;
 }
