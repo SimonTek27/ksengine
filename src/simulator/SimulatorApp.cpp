@@ -62,7 +62,6 @@ static ks::engine::config::EngineSettings g_engineSettings;
 
 static bool g_throttle = false, g_brake = false;
 static bool g_steerLeft = false, g_steerRight = false;
-static bool g_consoleToggle = false; // CTRL+INS toggle state
 static bool g_handbrake = false;
 static bool g_running = true;
 
@@ -82,10 +81,11 @@ static int g_shotDelay = 60;
 static bool g_shotRequested = false;
 static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
-static bool g_photoMode = false;
-static char g_photoModeKey = 0;
 
-// Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
+// Roadmap 2.14 — windowed profile run: KS_PROFILE_SECONDS=N auto-exits a
+// rendered session after N seconds through the same deterministic teardown
+// (the KS_HEADLESS_SECONDS twin for when the GPU must be in the numbers).
+// The profile itself is requested with KS_PROFILE=1 (same switch the tick
 // scopes and the GPU markers read) and dumped on the way out; KS_PROFILE_CSV
 // additionally writes it as CSV.
 static double g_profileSeconds = 0.0;
@@ -197,36 +197,6 @@ static void handleKeyDown(int vk) {
     if (vk == kb.brake || vk == ks::sim::KeyboardMapping::AltBrake) {
         g_brake = true;
         if (im) im->setKeyDown(vk);
-        return;
-    }
-    // Roadmap 4.x — photo mode toggle (F12 by default, or KS_PHOTOMODE=<key>).
-    if (g_photoMode && vk == g_photoModeKey) {
-        g_simulation->setCameraMode(ks::sim::CameraController::Mode::Free);
-        g_simulation->ui().dashboard().setVisible(false);
-        g_simulation->ui().menu().setVisible(false);
-        g_photoMode = !g_photoMode; // toggle: first press enters, second exits
-        printf("[photo] %sphoto mode %s (key %c)\n", g_photoMode ? "entered" : "exited", g_photoModeKey ? "press again to exit" : "", g_photoModeKey);
-        if (!g_photoMode) {
-            g_simulation->ui().dashboard().setVisible(true);
-            g_simulation->ui().menu().setVisible(true);
-            g_simulation->start(); // resume simulation
-        }
-        return;
-    }
-    // Roadmap 4.x — developer console toggle (CTRL+INSERT).
-    // VK_CONTROL = 0x12, VK_INSERT = 0x2D
-    if (vk == 0x2D) { // INSERT key
-        bool ctrlDown = (GetAsyncKeyState(0x12) & 0x8000) != 0;
-        if (ctrlDown && !g_consoleToggle) {
-            g_consoleToggle = true;
-            g_simulation->ui().console().setVisible(true);
-            g_simulation->ui().console().startTyping();
-            printf("[console] opened (CTRL+INSERT)\n");
-        } else if (!ctrlDown) {
-            g_consoleToggle = false;
-            g_simulation->ui().console().setVisible(false);
-            printf("[console] closed (CTRL released)\n");
-        }
         return;
     }
     if (vk == kb.steerLeft || vk == ks::sim::KeyboardMapping::AltSteerLeft) {
@@ -1273,11 +1243,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         const int d = std::atoi(sd);
         if (d >= 0) g_shotDelay = d;
     }
-    // Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
-    if (const char* pm = std::getenv("KS_PHOTOMODE")) {
-        g_photoMode = true;
-        g_photoModeKey = pm[0];
-    }
     // Roadmap 2.14 — timed profile run (see globals).
     // --track <dir>: the KS_TRACK setting, from the command line. WinMain gets
     // the raw ANSI tail, so this is a minimal quoted-word split; anything it
@@ -1373,42 +1338,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
                 PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
             }
         }
-        // Roadmap 4.x — photo mode screenshot: capture the current frame
-        // with the active ppfilter LUT applied, at the window's resolution.
-        if (g_photoMode && g_nativeRenderer && g_nativeRenderer->screenshotReady() && !g_shotRequested) {
-            g_shotRequested = true;
-            // Use a photo-mode specific path if KS_SCREENSHOT is also set,
-            // otherwise just log and leave the file next to the exe.
-            std::string photoPath = g_shotPath.empty() ?
-                "screenshot_photo.png" : g_shotPath;
-            // The readback is already in sRGB; we apply the preset's LUT
-            // strength/exposure in the shader, but here we just save the
-            // display-referred pixels as-is (the LUT was already applied
-            // during the frame).  Save at window extents.
-            ks::image::RawImage img;
-            img.resize(g_nativeRenderer->extent().width,
-                       g_nativeRenderer->extent().height);
-            const auto& px = g_nativeRenderer->screenshotPixels();
-            for (size_t i = 0; i + 3 < px.size(); i += 4) {
-                img.rgba[i] = px[i + 2];   // R
-                img.rgba[i + 1] = px[i + 1]; // G
-                img.rgba[i + 2] = px[i];   // B
-                img.rgba[i + 3] = 255;     // A
-            }
-            std::string err;
-            if (ks::image::saveImageFile(photoPath, img, &err)) {
-                printf("[photo] saved %s (%ux%u)\n", photoPath.c_str(),
-                       img.width, img.height);
-            } else {
-                printf("[photo] save failed: %s\n", err.c_str());
-            }
-            // Exit photo mode after the shot
-            g_photoMode = false;
-            g_simulation->ui().dashboard().setVisible(true);
-            g_simulation->ui().menu().setVisible(true);
-            g_simulation->start(); // resume simulation
-        }
-
         if (g_headless && g_headlessSeconds > 0.0) {
             g_headlessElapsed += elapsed;
             if (g_headlessElapsed >= g_headlessSeconds) {
