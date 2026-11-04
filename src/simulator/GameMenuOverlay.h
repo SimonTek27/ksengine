@@ -35,6 +35,7 @@ enum class MenuState {
     Replay,
     ContentManager,
     Settings,
+    Options,
     Controls,
     CarSelect,
     TrackSelect,
@@ -120,6 +121,48 @@ public:
     DriverProfile& profile() { return m_profile; }
     const DriverProfile& profile() const { return m_profile; }
 
+    // --- settings: the values the OPTIONS screen shows ------------------
+    // The page is a readout as much as a switch: every row prints what the
+    // renderer or the mixer actually holds, so a knob moved on the command
+    // line (KS_EXPOSURE, the ppfilter preset, KS_SSAO) still shows the truth
+    // here. Nothing in this struct is a placeholder.
+    static constexpr int kExposureCount = 4;
+    static constexpr int kTonemapCount = 5;
+    static constexpr float kExposureValues[kExposureCount] = {0.45f, 0.55f, 0.62f, 0.72f};
+    static constexpr const char* kTonemapNames[kTonemapCount] = {
+        "NONE", "REINHARD", "ACES", "UNCHARTED2", "FILMIC"};
+
+    struct MenuOptions {
+        int exposureIndex = kExposureCount - 1;
+        int tonemap = 2; // ACES, the renderer's own default
+        bool ssao = false;
+        bool ssr = false;
+        float masterVolume = 1.f;
+    };
+
+    static float exposureValue(int index) {
+        const int i = index < 0 ? 0 : (index >= kExposureCount ? kExposureCount - 1 : index);
+        return kExposureValues[i];
+    }
+    static const char* tonemapName(int index) {
+        const int i = index < 0 ? 0 : (index >= kTonemapCount ? kTonemapCount - 1 : index);
+        return kTonemapNames[i];
+    }
+    /** Closest exposure step to a value the engine reports. */
+    static int exposureIndexFor(float exposure);
+
+    MenuOptions& options() { return m_options; }
+    const MenuOptions& options() const { return m_options; }
+    void setOptions(const MenuOptions& options) { m_options = options; }
+
+    /** Open the settings values; the audio entry of SETTINGS lands on the
+     *  first volume row instead of the first exposure row. */
+    void openOptions() {
+        refreshOptions();
+        switchMenu(MenuState::Options);
+    }
+    void openOptionsAudio();
+
     // --- for NativeUi cinematic draw ---
     const std::vector<MenuItem>& items() const { return m_items; }
     int selectedIndex() const { return m_selectedIndex; }
@@ -199,6 +242,12 @@ public:
     std::function<void(int)> onUpgradeRowCycled;
     std::function<void()> onShowResultsRequested;
     std::function<void(const std::string&)> onOpenSettingsPanelRequested;
+    /** Fires with the whole set after a row is cycled: the app applies it to
+     *  the renderer and the mixer in one place. */
+    std::function<void(const MenuOptions&)> onOptionsChanged;
+    /** Read the current values back before the page is built: the app
+     *  hooks this, so a knob moved by a session or a preset shows up. */
+    std::function<void(MenuOptions&)> onOptionsRefresh;
     // Roadmap 3.1 - network actions from the MULTI PLAYER section.
     std::function<void()> onHostServerRequested;
     std::function<void()> onOpenServerBrowserRequested;
@@ -218,9 +267,13 @@ private:
     // Rebuilds the pit strategy rows in place (fuel step / toggles edit the
     // stored values) keeping the cursor — the row layout is stable.
     void refreshPitStrategy();
+    /** Rebuilds the OPTIONS rows after a value moved, keeping the cursor. */
+    void applyOptions();
+    void refreshOptions() { if (onOptionsRefresh) onOptionsRefresh(m_options); }
     void buildReplayMenu();
     void buildContentManagerMenu();
     void buildSettingsMenu();
+    void buildOptionsMenu();
     void buildControlsMenu();
     void buildCarSelectMenu();
     void buildTrackSelectMenu();
@@ -256,6 +309,7 @@ private:
     std::string m_teamName; // roadmap 2.8
 
     DriverProfile m_profile;
+    MenuOptions m_options;
     std::vector<MenuItem> m_items;
     std::vector<ContentEntry> m_selectEntries;
     std::vector<ResultsRow> m_resultRows;

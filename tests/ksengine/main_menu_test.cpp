@@ -230,6 +230,89 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
+    // OPTIONS: the settings page opens values that read and write the engine,
+    // and every label carries the value it is showing.
+    // ---------------------------------------------------------------------
+    {
+        GameMenuOverlay menu;
+        menu.openScreen(MenuState::Settings);
+        const int graphicsRow = rowOf(menu, "GRAPHICS");
+        KS_CHECK(graphicsRow >= 0);
+        menu.setSelectedIndex(graphicsRow);
+        menu.activateSelection();
+        KS_CHECK(menu.state() == MenuState::Options);
+        KS_CHECK(menu.sectionTitle() == "OPTIONS");
+
+        int changes = 0;
+        ks::sim::GameMenuOverlay::MenuOptions last;
+        menu.onOptionsChanged = [&changes, &last](
+                                    const ks::sim::GameMenuOverlay::MenuOptions& o) {
+            ++changes;
+            last = o;
+        };
+
+        // Every row names its value: EXPOSURE prints the step, the volumes
+        // print a percentage, the two effects print ON/OFF.
+        bool exposureValue = false;
+        bool volumeValue = false;
+        bool effectValue = false;
+        for (const auto& item : menu.items()) {
+            if (item.text.rfind("EXPOSURE", 0) == 0 &&
+                item.text.find('.') != std::string::npos)
+                exposureValue = true;
+            if (item.text.rfind("MASTER VOLUME", 0) == 0 &&
+                item.text.find('%') != std::string::npos)
+                volumeValue = true;
+            if (item.text.rfind("SSAO", 0) == 0 &&
+                (item.text.find("[ON]") != std::string::npos ||
+                 item.text.find("[OFF]") != std::string::npos))
+                effectValue = true;
+        }
+        KS_CHECK(exposureValue);
+        KS_CHECK(volumeValue);
+        KS_CHECK(effectValue);
+
+        // Cycling a row reports the whole set, and the label follows.
+        int ssaoRow = -1;
+        for (int i = 0; i < static_cast<int>(menu.items().size()); ++i)
+            if (menu.items()[i].text.rfind("SSAO", 0) == 0) ssaoRow = i;
+        KS_CHECK(ssaoRow >= 0);
+        const bool ssaoBefore = menu.options().ssao;
+        menu.setSelectedIndex(ssaoRow);
+        menu.activateSelection();
+        KS_CHECK(changes == 1);
+        KS_CHECK(last.ssao != ssaoBefore);
+        KS_CHECK(menu.options().ssao == last.ssao);
+        KS_CHECK(menu.items()[ssaoRow].text.find(last.ssao ? "[ON]" : "[OFF]") !=
+                 std::string::npos);
+
+        // A volume row walks down in 10% steps and wraps to silence.
+        int masterRow = -1;
+        for (int i = 0; i < static_cast<int>(menu.items().size()); ++i)
+            if (menu.items()[i].text.rfind("MASTER VOLUME", 0) == 0) masterRow = i;
+        KS_CHECK(masterRow >= 0);
+        menu.setSelectedIndex(masterRow);
+        menu.activateSelection();
+        KS_CHECK_NEAR(last.masterVolume, 0.f, 1e-4f); // 1.00 wrapped to 0
+        menu.activateSelection();
+        KS_CHECK_NEAR(last.masterVolume, 0.1f, 1e-4f);
+        KS_CHECK(menu.items()[masterRow].text.find("10%") != std::string::npos);
+
+        // The audio entry of SETTINGS lands on the first volume row.
+        menu.openOptionsAudio();
+        KS_CHECK(menu.state() == MenuState::Options);
+        KS_CHECK(menu.items()[menu.selectedIndex()].text.rfind("MASTER", 0) == 0);
+
+        // ESC returns to SETTINGS, not to the tiles.
+        KS_CHECK(menu.handleKeyPress(KEY_ESC));
+        KS_CHECK(menu.state() == MenuState::Settings);
+
+        // The engine value maps back to the nearest step it offers.
+        KS_CHECK(ks::sim::GameMenuOverlay::exposureIndexFor(0.55f) == 1);
+        KS_CHECK(ks::sim::GameMenuOverlay::exposureIndexFor(0.70f) == 3);
+    }
+
+    // ---------------------------------------------------------------------
     // The hub: arrows walk the row, ENTER opens the section, ESC offers to
     // leave, hovering a tile selects it.
     // ---------------------------------------------------------------------

@@ -874,7 +874,59 @@ static void initSimulation() {
             g_simulation->ui().keyRebind().setVisible(true);
             return;
         }
+        if (panel == "audio") {
+            g_simulation->ui().menu().openOptionsAudio();
+            return;
+        }
+        if (panel == "graphics") {
+            g_simulation->ui().menu().openOptions();
+            return;
+        }
         printf("Settings panel: %s\n", panel.c_str());
+    };
+
+    // --- OPTIONS: the page reads the engine back and writes to it ----------
+    // One reader, used both to seed the page and to refresh it whenever it
+    // opens: the exposure shown is the one the ppfilter preset left behind,
+    // never a guess made once at startup.
+    const auto readOptions = [](ks::sim::GameMenuOverlay::MenuOptions& options) {
+        if (auto* renderer = g_simulation->renderer()) {
+            options.exposureIndex =
+                ks::sim::GameMenuOverlay::exposureIndexFor(renderer->exposure());
+            options.tonemap = renderer->tonemapMode();
+            options.ssao = renderer->isSsao();
+            options.ssr = renderer->isSsr();
+        }
+        if (auto* audio = g_simulation->audio())
+            options.masterVolume = audio->masterVolume();
+    };
+    {
+        ks::sim::GameMenuOverlay::MenuOptions options =
+            g_simulation->ui().menu().options();
+        readOptions(options);
+        g_simulation->ui().menu().setOptions(options);
+        printf("[INIT] Options seeded: exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n", static_cast<double>(
+                   ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
+               ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
+               options.ssao ? 1 : 0, options.ssr ? 1 : 0,
+               static_cast<double>(options.masterVolume * 100.f));
+    }
+    uiMenu->onOptionsRefresh = readOptions;
+    uiMenu->onOptionsChanged = [](const ks::sim::GameMenuOverlay::MenuOptions& options) {
+        if (auto* renderer = g_simulation->renderer()) {
+            renderer->setExposure(
+                ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex));
+            renderer->setTonemapMode(options.tonemap);
+            renderer->setSsao(options.ssao);
+            renderer->setSsr(options.ssr);
+        }
+        if (auto* audio = g_simulation->audio())
+            audio->setMasterVolume(options.masterVolume);
+        printf("[MENU] options: exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n", static_cast<double>(
+                   ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
+               ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
+               options.ssao ? 1 : 0, options.ssr ? 1 : 0,
+               static_cast<double>(options.masterVolume * 100.f));
     };
     uiMenu->onDevModeRequested = []() {
         printf("Dev mode request\n");

@@ -25,6 +25,7 @@ std::string GameMenuOverlay::sectionTitle() const
     case MenuState::Replay: return "REPLAY";
     case MenuState::ContentManager: return "CONTENT";
     case MenuState::Settings: return "SETTINGS";
+    case MenuState::Options: return "OPTIONS";
     case MenuState::Controls: return "CONTROLS";
     case MenuState::CarSelect: return "SELECT CAR";
     case MenuState::TrackSelect: return "SELECT TRACK";
@@ -328,12 +329,10 @@ void GameMenuOverlay::buildContentManagerMenu()
 void GameMenuOverlay::buildSettingsMenu()
 {
     m_items.clear();
-    m_items.push_back({ "GRAPHICS", "Resolution and quality", [this]() {
-        if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("graphics");
-    }, false, true, "settings" });
-    m_items.push_back({ "AUDIO", "Volumes and devices",
-        [this]() { if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio"); },
-        false, true, "speaker" });
+    m_items.push_back({ "GRAPHICS", "Exposure, tone curve and post effects",
+        [this]() { openOptions(); }, false, true, "settings" });
+    m_items.push_back({ "AUDIO", "Master, engine and environment volumes",
+        [this]() { openOptionsAudio(); }, false, true, "speaker" });
     m_items.push_back({ "CONTROLS", "Bindings and devices",
         [this]() { switchMenu(MenuState::Controls); }, false, true, "keyboard" });
     // Real window toggle (already wired), listed here because this is where
@@ -341,6 +340,110 @@ void GameMenuOverlay::buildSettingsMenu()
     m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
         [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); },
         false, true, "vr" });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
+}
+
+int GameMenuOverlay::exposureIndexFor(float exposure)
+{
+    int best = 0;
+    for (int i = 1; i < kExposureCount; ++i) {
+        if (std::fabs(kExposureValues[i] - exposure) <
+            std::fabs(kExposureValues[best] - exposure))
+            best = i;
+    }
+    return best;
+}
+
+void GameMenuOverlay::openOptionsAudio()
+{
+    refreshOptions();
+    switchMenu(MenuState::Options);
+    for (int i = 0; i < static_cast<int>(m_items.size()); ++i) {
+        if (m_items[i].text.rfind("MASTER", 0) == 0) {
+            m_selectedIndex = i;
+            break;
+        }
+    }
+}
+
+void GameMenuOverlay::applyOptions()
+{
+    m_menuDirty = true;
+    if (onOptionsChanged) onOptionsChanged(m_options);
+    // Every label carries its value, so the rows are rebuilt in place and the
+    // cursor stays on the row the player just moved.
+    if (m_currentState == MenuState::Options) {
+        const int sel = m_selectedIndex;
+        buildOptionsMenu();
+        m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+        m_menuDirty = false;
+    }
+}
+
+void GameMenuOverlay::buildOptionsMenu()
+{
+    m_items.clear();
+    char label[96];
+    const MenuOptions& o = m_options;
+
+    std::snprintf(label, sizeof(label), "EXPOSURE  %.2f",
+                  static_cast<double>(exposureValue(o.exposureIndex)));
+    m_items.push_back({ label, "Display exposure of the final image",
+        [this]() {
+            m_options.exposureIndex = (m_options.exposureIndex + 1) % kExposureCount;
+            applyOptions();
+        }, false, true, "settings" });
+
+    std::snprintf(label, sizeof(label), "TONEMAP  %s", tonemapName(o.tonemap));
+    m_items.push_back({ label, "Tone curve the display pass uses",
+        [this]() {
+            m_options.tonemap = (m_options.tonemap + 1) % kTonemapCount;
+            applyOptions();
+        }, false, true, "settings" });
+
+    std::snprintf(label, sizeof(label), "SSAO  [%s]", o.ssao ? "ON" : "OFF");
+    m_items.push_back({ label, "Ambient occlusion, deferred pass only",
+        [this]() {
+            m_options.ssao = !m_options.ssao;
+            applyOptions();
+        }, false, true, "settings" });
+
+    std::snprintf(label, sizeof(label), "SSR  [%s]", o.ssr ? "ON" : "OFF");
+    m_items.push_back({ label, "Screen-space reflections, deferred pass only",
+        [this]() {
+            m_options.ssr = !m_options.ssr;
+            applyOptions();
+        }, false, true, "settings" });
+
+    m_items.push_back({ "", "", nullptr, true });
+
+    // One row per mixer channel the player can turn down. The step is 10% and
+    // wraps to silence, so a knob can be walked to any value without a slider.
+    const auto volumeRow = [this](const char* name, float MenuOptions::*field,
+                                  const char* description) {
+        char text[64];
+        std::snprintf(text, sizeof(text), "%s  %.0f%%", name,
+                      static_cast<double>(m_options.*field * 100.f));
+        m_items.push_back({ text, description, [this, field]() {
+            float value = m_options.*field;
+            value = value > 0.899f
+                        ? 0.f
+                        : std::min(1.f, std::round((value + 0.1f) * 10.f) / 10.f);
+            m_options.*field = value;
+            applyOptions();
+        }, false, true, "speaker" });
+    };
+    // Only the master gain belongs here: the engine and environment channels
+    // are the session's (silent in the showroom, live in the car), so showing
+    // them as settings would be a lie.
+    volumeRow("MASTER VOLUME", &MenuOptions::masterVolume,
+              "Everything the simulator plays");
+
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
+        [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); },
+        false, true, "vr" });
+    m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
@@ -541,6 +644,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     case MenuState::Replay: buildReplayMenu(); break;
     case MenuState::ContentManager: buildContentManagerMenu(); break;
     case MenuState::Settings: buildSettingsMenu(); break;
+    case MenuState::Options: buildOptionsMenu(); break;
     case MenuState::Controls: buildControlsMenu(); break;
     case MenuState::CarSelect: buildCarSelectMenu(); break;
     case MenuState::TrackSelect: buildTrackSelectMenu(); break;
@@ -561,7 +665,7 @@ void GameMenuOverlay::goBack()
         setVisible(false); // MAIN: leave the menu; PAUSE: back in the car
         return;
     }
-    if (m_currentState == MenuState::Controls) {
+    if (m_currentState == MenuState::Controls || m_currentState == MenuState::Options) {
         switchMenu(MenuState::Settings);
         return;
     }

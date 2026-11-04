@@ -363,6 +363,8 @@ public:
     void setBrakeGlow(float g) { m_brakeGlow = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g); }
     float brakeGlow() const { return m_brakeGlow; }
     void setTonemapMode(int mode) { m_tonemapMode = mode; }
+    /** The curve in use: the settings page reads it back instead of guessing. */
+    int tonemapMode() const { return m_tonemapMode; }
     void setHdrWhiteNits(float nits) { if (nits > 0.0f) m_hdrWhiteNits = nits; }
     float hdrWhiteNits() const { return m_hdrWhiteNits; }
 
