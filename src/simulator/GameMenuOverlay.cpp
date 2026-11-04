@@ -80,15 +80,6 @@ void GameMenuOverlay::startDriving(GameSessionMode mode)
     setVisible(false);
 }
 
-namespace {
-// CLOCK counts from the first time the menu is built: an up time for this
-// session, which is what the row is there to report.
-std::chrono::steady_clock::time_point menuStartTime() {
-    static const auto start = std::chrono::steady_clock::now();
-    return start;
-}
-} // namespace
-
 void GameMenuOverlay::buildMainMenu()
 {
     m_items.clear();
@@ -104,33 +95,11 @@ void GameMenuOverlay::buildMainMenu()
         [this]() { switchMenu(MenuState::Singleplayer); }, false, true, "user" });
     m_items.push_back({ "MULTIPLAYER", "Online and LAN events, ranked or not",
         [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
-    // --- Quick toggle icons (before profile) ---
-    m_items.push_back({ "TOGGLE VR", "Toggle VR mode", [this]() {
-        if (onToggleFullscreenRequested) onToggleFullscreenRequested();
-    }, false, true, "vr" });
-    m_items.push_back({ "SOUND", "Audio settings", [this]() {
-        if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio");
-    }, false, true, "speaker" });
-    m_items.push_back({ "CONTROLS", "Change bindings", [this]() {
-        switchMenu(MenuState::Controls);
-    }, false, true, "keyboard" });
+    // The quick actions - clock, sound, VR screen, controller - belong to the
+    // header bar, not to this row: ui/MainMenu.h lays them out and the hub
+    // runs them, so they are no longer menu rows.
     m_items.push_back({ "DRIVER", "Profile and career stats",
         [this]() { switchMenu(MenuState::Profile); }, false, true, "helmet" });
-    // CLOCK is a readout rather than a screen: the numbers go in the row's own
-    // description, and using the row refreshes them.
-    {
-        const auto up = std::chrono::steady_clock::now() - menuStartTime();
-        const long long seconds =
-            std::chrono::duration_cast<std::chrono::seconds>(up).count();
-        char clock[128];
-        std::snprintf(clock, sizeof(clock), "Up %lldh%02lldm - build %s",
-                      seconds / 3600, (seconds / 60) % 60, __DATE__);
-        m_items.push_back({ "CLOCK", clock, [this]() {
-            const int keep = m_selectedIndex;
-            buildMainMenu();
-            m_selectedIndex = keep;
-        }, false, true, "clock" });
-    }
     m_items.push_back({ "CONTENT", "Cars, tracks and packages",
         [this]() { switchMenu(MenuState::ContentManager); }, false, true, "download" });
     m_items.push_back({ "SETTINGS", "Display, audio and input",

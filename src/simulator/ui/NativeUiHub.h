@@ -25,6 +25,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cmath>
+#include <ctime>
 
 namespace ks {
 namespace sim {
@@ -174,10 +175,16 @@ public:
 
         if (m_menu->isVisible() || m_menu->fadeAlpha() > 0.5f) {
             updateMenuHover(e.x, e.y, m_viewW, m_viewH);
-            if (e.type == MouseEventType::Up && e.button == MouseButton::Left &&
-                m_menu->hoverIndex() >= 0) {
-                m_menu->setSelectedIndex(m_menu->hoverIndex());
-                m_menu->handleClick({(int)e.x, (int)e.y}, m_viewW, m_viewH);
+            if (e.type == MouseEventType::Up && e.button == MouseButton::Left) {
+                if (m_quickHover >= 0) {
+                    // A header quick action is a switch, not a section.
+                    activateQuick(m_quickHover);
+                    return true;
+                }
+                if (m_menu->hoverIndex() >= 0) {
+                    m_menu->setSelectedIndex(m_menu->hoverIndex());
+                    m_menu->handleClick({(int)e.x, (int)e.y}, m_viewW, m_viewH);
+                }
             }
             return true;
         }
@@ -472,10 +479,6 @@ private:
                    Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
         m_text.draw(dl, L.home.x, L.home.y, "HOME",
                     sty(Color::rgba(0.90f, 0.90f, 0.92f, a), 1.f, true));
-        if (const SvgIcon* mark = icons::get("drive")) {
-            mark->draw(dl, L.logo.x, L.logo.y, L.logo.w,
-                       Color::rgba(0.86f, 0.86f, 0.90f, 0.85f * a), 1.1f);
-        }
 
         // The driver's plate, top right: the name and an avatar carrying the
         // initial, which is all the profile art there is.
@@ -495,6 +498,34 @@ private:
                         initialText, sty(Color::rgba(0.96f, 0.96f, 0.97f, a), 1.35f, true));
         }
 
+        // Header quick actions: the clock reads the local time, the other
+        // three open what they stand for. Same bar, so the row of sections
+        // starts below them.
+        {
+            static const char* kQuickIcons[MainMenuLayout::kQuickCount] = {
+                "clock", "speaker", "vr", "pad"};
+            for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
+                const Rect& r = L.quick[i];
+                const bool hot = (i == m_quickHover);
+                if (hot) dl.addRectFilled(r, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
+                const Color tint = hot ? Color::rgba(1.f, 1.f, 1.f, a)
+                                       : Color::rgba(0.74f, 0.74f, 0.78f, a);
+                if (const SvgIcon* icon = icons::get(kQuickIcons[i])) {
+                    const float inset = r.w * 0.16f;
+                    icon->draw(dl, r.x + inset, r.y + inset, r.w - inset * 2.f, tint, 1.f);
+                }
+            }
+            const std::time_t now = std::time(nullptr);
+            std::tm local{};
+            if (const std::tm* fromClock = std::localtime(&now)) local = *fromClock;
+            char timeText[16];
+            std::snprintf(timeText, sizeof(timeText), "%02d:%02d", local.tm_hour, local.tm_min);
+            const float tw = m_text.measureWidth(timeText, 1.f);
+            const Rect& first = L.quick[0];
+            m_text.draw(dl, first.x - tw - 10.f, first.y + first.h * 0.22f, timeText,
+                        sty(Color::rgba(0.88f, 0.88f, 0.90f, a), 1.f));
+        }
+
         for (int i = 0; i < L.count; ++i) {
             // The strip counts slots, the menu counts rows, and the separators
             // sit between them: a slot points at the next row that is a tile.
@@ -508,14 +539,20 @@ private:
 
             dl.addRectFilled(r, Color::rgba(0.05f, 0.05f, 0.07f,
                                            (selected ? 0.92f : (hover ? 0.80f : 0.68f)) * a));
-            if (const SvgIcon* icon = icons::get(item.icon)) {
-                const float size = r.w * 0.54f;
-                icon->draw(dl, r.x + r.w * 0.40f, r.y + r.h * 0.18f, size,
-                           Color::rgba(1.f, 1.f, 1.f, (selected ? 0.22f : 0.13f) * a), 1.f);
-            }
             // The label sits on its own strip so the watermark behind never
             // washes it out.
             const float stripH = 44.f;
+            // The glyph is a watermark in the tile's upper right, sized to the
+            // space above that strip: bigger than the tile's content box it
+            // bled into the row underneath and read as a stray shape.
+            if (const SvgIcon* icon = icons::get(item.icon)) {
+                const float size = std::min(r.w, r.h) * 0.40f;
+                icon->draw(dl, r.x + r.w - size - 20.f,
+                           r.y + (r.h - stripH - size) * 0.5f, size,
+                           Color::rgba(1.f, 1.f, 1.f,
+                                       (selected ? 0.15f : (hover ? 0.11f : 0.075f)) * a),
+                           1.f);
+            }
             dl.addRectFilled({r.x, r.y + r.h - stripH, r.w, stripH},
                              Color::rgba(0.f, 0.f, 0.f, 0.45f * a));
             m_text.draw(dl, r.x + 14.f, r.y + r.h - stripH + 12.f, item.text,
@@ -569,8 +606,42 @@ private:
                     sty(Color::rgba(0.55f, 0.55f, 0.60f, a), 0.95f));
     }
 
+    /** Header quick action under the cursor, or -1. */
+    int quickIconAt(float mx, float my, int w, int h) const {
+        const MainMenuLayout L = mainLayout(w, h);
+        for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
+            if (L.quick[i].contains(mx, my)) return i;
+        }
+        return -1;
+    }
+
+    /** The header's four icons: the clock reads the time, the other three act. */
+    void activateQuick(int index) {
+        switch (index) {
+        case 1: // sound: the audio page of the settings panel
+            if (m_menu->onOpenSettingsPanelRequested)
+                m_menu->onOpenSettingsPanelRequested("audio");
+            break;
+        case 2: // the VR screen
+            if (m_menu->onToggleFullscreenRequested) m_menu->onToggleFullscreenRequested();
+            break;
+        case 3: // controller: the bindings screen
+            m_menu->openScreen(MenuState::Controls);
+            break;
+        default:
+            break; // the clock is a readout, nothing to open
+        }
+    }
+
     void updateMenuHover(float mx, float my, int w, int h) {
+        m_quickHover = -1;
         if (m_menu->state() == MenuState::Main) {
+            const int quick = quickIconAt(mx, my, w, h);
+            if (quick >= 0) {
+                m_quickHover = quick;
+                m_menu->setHoverIndex(-1); // the bar is not a tile
+                return;
+            }
             const int hover = mainMenuTileAt(mainLayout(w, h), mx, my);
             m_menu->setHoverIndex(hover);
             if (hover >= 0) m_menu->setSelectedIndex(hover);
@@ -767,6 +838,7 @@ private:
     KeyRebindOverlay m_keyRebind;
     int m_viewW = 1280, m_viewH = 720;
     bool m_inCarMenuAllowed = true;   // pre-session: always
+    int m_quickHover = -1;            // header quick action under the cursor
 
     std::unique_ptr<GameMenuOverlay> m_menu;
     std::unique_ptr<DashboardOverlay> m_dash;

@@ -89,6 +89,17 @@ private:
         m_indices.push_back(base + 0); m_indices.push_back(base + 2); m_indices.push_back(base + 3);
     }
 
+    /** A UV that is guaranteed to land inside the atlas' white block. Path
+     *  geometry gives every vertex the same texel, and the block's corner is
+     *  not a safe sample under nearest sampling (it can fall on the edge
+     *  texel), so strokes and fills point at the middle of the block. */
+    void whiteCenterUV(float& u, float& v) const {
+        float u0, v0, u1, v1;
+        m_font->whiteUV(u0, v0, u1, v1);
+        u = (u0 + u1) * 0.5f;
+        v = (v0 + v1) * 0.5f;
+    }
+
     void pushSolid(float x0, float y0, float x1, float y1, const Color& c) {
         float u0, v0, u1, v1;
         m_font->whiteUV(u0, v0, u1, v1);
@@ -102,13 +113,13 @@ private:
         for (size_t i = 2; i + 1 < xy.size(); i += 2)
             vp.lineTo(xy[i], xy[i + 1]);
         if (closed) vp.close();
-        float u0, v0, u1, v1;
-        m_font->whiteUV(u0, v0, u1, v1);
+        float u0 = 0.f, v0 = 0.f;
+        whiteCenterUV(u0, v0);
         StrokeStyle st;
         st.color = c;
         st.width = width;
         st.closed = closed;
-        vp.stroke(st, m_vertices, m_indices, u0, v0, u1, v1);
+        vp.stroke(st, m_vertices, m_indices, u0, v0, u0, v0);
     }
 
     void emitFillFromPoints(const std::vector<float>& xy, const Color& c) {
@@ -118,11 +129,11 @@ private:
         for (size_t i = 2; i + 1 < xy.size(); i += 2)
             vp.lineTo(xy[i], xy[i + 1]);
         vp.close();
-        float u0, v0, u1, v1;
-        m_font->whiteUV(u0, v0, u1, v1);
+        float u0 = 0.f, v0 = 0.f;
+        whiteCenterUV(u0, v0);
         FillStyle fs;
         fs.color = c;
-        vp.fillConvex(fs, m_vertices, m_indices, u0, v0, u1, v1);
+        vp.fillConvex(fs, m_vertices, m_indices, u0, v0, u0, v0);
     }
 
     void rebuildVertices() {
@@ -148,12 +159,12 @@ private:
                 VectorPath vp;
                 vp.moveTo(cmd.x0, cmd.y0);
                 vp.lineTo(cmd.x1, cmd.y1);
-                float u0, v0, u1, v1;
-                m_font->whiteUV(u0, v0, u1, v1);
+                float u0 = 0.f, v0 = 0.f;
+                whiteCenterUV(u0, v0);
                 StrokeStyle st;
                 st.color = cmd.color;
                 st.width = cmd.thickness;
-                vp.stroke(st, m_vertices, m_indices, u0, v0, u1, v1);
+                vp.stroke(st, m_vertices, m_indices, u0, v0, u0, v0);
                 break;
             }
             case DrawCmdType::Text: {

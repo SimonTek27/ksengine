@@ -120,6 +120,15 @@ inline constexpr const char* kKeyboard =
     "<path d=\"M8 13.9h8\"/>"
     "</svg>";
 
+// Gamepad: controller bindings.
+inline constexpr const char* kPad =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<path d=\"M6.6 7.8h10.8a3.6 3.6 0 0 1 3.4 4.8l-1.2 3.4a2 2 0 0 1-3.2.9L14.6 15.2H9.4l-1.8 1.7a2 2 0 0 1-3.2-.9l-1.2-3.4a3.6 3.6 0 0 1 3.4-4.8z\"/>"
+    "<path d=\"M8 10.6v2.6M6.7 11.9h2.6\"/>"
+    "<circle cx=\"15.4\" cy=\"11.6\" r=\"0.9\"/>"
+    "<circle cx=\"17.4\" cy=\"13.4\" r=\"0.9\"/>"
+    "</svg>";
+
 // Clock: system info.
 inline constexpr const char* kClock =
     "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
@@ -145,6 +154,7 @@ inline const char* source(const char* id) {
         {"speaker", kSpeaker},
         {"keyboard", kKeyboard},
         {"clock", kClock},
+        {"pad", kPad},
     };
     for (const auto& entry : kTable) {
         if (std::strcmp(entry.id, id) == 0) return entry.svg;

@@ -50,9 +50,9 @@ constexpr int KEY_DOWN = 0x28;
 constexpr int KEY_ENTER = 0x0D;
 constexpr int KEY_ESC = 0x1B;
 
-// Rows on the MAIN screen: the two modes, the four quick toggles the hub
-// carries beside them, then driver, content, settings and the exit group.
-constexpr int kRows = 12;
+// Rows on the MAIN screen: the two modes, then driver, content, settings and
+// the exit group. The quick actions live in the header bar, not here.
+constexpr int kRows = 8;
 
 int rowOf(const GameMenuOverlay& menu, const std::string& text) {
     const std::vector<ks::sim::MenuItem> items = menu.items();
@@ -104,6 +104,15 @@ int main() {
         KS_CHECK(L.body.y > L.title.y);
         KS_CHECK(L.body.y + L.body.h <= L.bottomBar.y + 1.f);
         KS_CHECK(L.avatar.x + L.avatar.w <= 1600.f);
+        // Header quick actions: four icons inside the top bar, left of the
+        // driver plate, laid out without overlapping.
+        for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
+            KS_CHECK(L.quick[i].w > 0.f && L.quick[i].h > 0.f);
+            KS_CHECK(L.quick[i].y >= 0.f);
+            KS_CHECK(L.quick[i].y + L.quick[i].h <= L.topBar.h);
+            KS_CHECK(L.quick[i].x + L.quick[i].w <= L.avatar.x);
+            if (i > 0) KS_CHECK(L.quick[i].x >= L.quick[i - 1].x + L.quick[i - 1].w);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -166,8 +175,8 @@ int main() {
     {
         GameMenuOverlay menu;
         static const char* kExpected[] = {
-            "SINGLE PLAYER", "MULTIPLAYER", "TOGGLE VR", "SOUND", "CONTROLS",
-            "DRIVER", "CLOCK", "CONTENT", "SETTINGS", "EDITOR", "CREDITS", "EXIT",
+            "SINGLE PLAYER", "MULTIPLAYER", "DRIVER", "CONTENT",
+            "SETTINGS", "EDITOR", "CREDITS", "EXIT",
         };
         int tiles = 0;
         int separators = 0;
@@ -223,7 +232,7 @@ int main() {
         KS_CHECK(hub.handleKey(KEY_RIGHT));
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
         KS_CHECK(hub.handleKey(KEY_DOWN)); // DOWN walks the same row
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "TOGGLE VR"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "DRIVER"));
         KS_CHECK(hub.handleKey(KEY_UP));
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
 
@@ -246,7 +255,7 @@ int main() {
         // A click activates the tile under the cursor (the mouse path), and
         // the section it opens is the one under the pointer.
         hub.menu().openScreen(MenuState::Main);
-        const auto& contentTile = L.tile[7]; // the strip shows the whole row
+        const auto& contentTile = L.tile[3]; // 4 + 4: CONTENT closes the top row
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, true,
                               contentTile.x + 12.f, contentTile.y + 12.f);
         // The press alone must already have selected the tile under the
@@ -255,6 +264,17 @@ int main() {
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
                               contentTile.x + 12.f, contentTile.y + 12.f);
         KS_CHECK(hub.menu().state() == MenuState::ContentManager);
+
+        // The header's quick actions are hit-tested in the bar, not on a tile.
+        hub.menu().openScreen(MenuState::Main);
+        bool fullscreenAsked = false;
+        hub.menu().onToggleFullscreenRequested = [&fullscreenAsked]() { fullscreenAsked = true; };
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, true,
+                              L.quick[2].x + 2.f, L.quick[2].y + 2.f);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.quick[2].x + 2.f, L.quick[2].y + 2.f);
+        KS_CHECK(fullscreenAsked);
+        KS_CHECK(hub.menu().state() == MenuState::Main); // a switch, not a section
 
         // ESC on the arrival screen offers to leave instead of hiding it.
         hub.menu().openScreen(MenuState::Main);
