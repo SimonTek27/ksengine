@@ -368,7 +368,7 @@ public:
     RaceFlag localYellowFlag() const { return m_tracksidePosts.trackFlag(); }
     bool loadTracksidePostsFromTrack(const std::string& trackDir);
     void updateTracksidePosts(float dt);
-    // The marshal is one shared asset (content/objects3D/marshal), loaded once
+    // The marshal is one shared asset (content/characters/marshal), loaded once
     // and instanced at each post's coordinates: a track names positions, not
     // geometry of its own.
     bool loadMarshalAsset(const std::string& trackDir);

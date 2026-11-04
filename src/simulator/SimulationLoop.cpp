@@ -2224,7 +2224,7 @@ void SimulationLoop::despawnSceneEntities() {
     m_sceneEntities.clear();
 }
 
-// The marshal is one asset shared by every track: content/objects3D/marshal
+// The marshal is one asset shared by every track: content/characters/marshal
 // holds the bake (manifest.txt + .nmsh + textures/), and a track carries only
 // the coordinates of its posts. Loaded as an instanced mesh, not as static
 // scene, because it stands at a different place in every track.

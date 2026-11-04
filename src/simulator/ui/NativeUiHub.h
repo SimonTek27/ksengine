@@ -13,6 +13,7 @@
 #include "KeyRebindOverlay.h"
 #include "MultiplayerOverlay.h"
 #include "ChatOverlay.h"
+#include "ConsoleOverlay.h"
 #include "RaceTelemetryHud.h"
 #include "../GameMenuOverlay.h"
 #include "../DashboardOverlay.h"
@@ -40,6 +41,7 @@ public:
         m_devices = std::make_unique<DeviceSettingsOverlay>();
         m_mp = std::make_unique<MultiplayerOverlay>();
         m_chat = std::make_unique<ChatOverlay>();
+        m_console = std::make_unique<ConsoleOverlay>();
         m_raceHud.setMode(RaceHudMode::Race);
         m_renderer.setFont(m_text.atlasPtr());
         applyConfiguredFont();
@@ -52,6 +54,7 @@ public:
     KeyRebindOverlay& keyRebind() { return m_keyRebind; }
     MultiplayerOverlay& multiplayer() { return *m_mp; }
     ChatOverlay& chat() { return *m_chat; }
+    ConsoleOverlay& console() { return *m_console; }
     RaceTelemetryHud& raceHud() { return m_raceHud; }
     UiRenderer& renderer() { return m_renderer; }
     TextRenderer& text() { return m_text; }
@@ -93,6 +96,7 @@ public:
         m_keyRebind.build(dl, width, height, &m_input);
         m_mp->build(dl, width, height, &m_input);
         m_chat->build(dl, width, height, &m_input);
+        m_console->build(dl, width, height, &m_input);
 
         m_renderer.endFrame();
         m_input.endFrame();
@@ -102,6 +106,14 @@ public:
         // Composer open: everything is chat until Enter/Esc closes it, so a
         // half-typed message never reaches the menu or the server browser.
         if (m_chat->isTyping()) return m_chat->handleKey(key);
+        // Roadmap 4.x — developer console: INSERT stays with SimulatorApp
+        // (CTRL+INSERT opens it, INSERT alone closes it); every other key goes
+        // to the console while it is up, so typing never drives the car.
+        if (key == 0x2D) return false;
+        if (m_console->isVisible()) {
+            // Forward keys to the console (it handles its own typing state)
+            return m_console->handleKey(key);
+        }
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
@@ -145,8 +157,11 @@ public:
         return false;
     }
 
-    /** WM_CHAR payload, routed straight to the composer while it is open. */
-    bool handleChar(int character) { return m_chat->handleChar(character); }
+    /** WM_CHAR payload: the console takes it while it is up, the chat otherwise. */
+    bool handleChar(int character) {
+        if (m_console->isVisible()) return m_console->handleChar(character);
+        return m_chat->handleChar(character);
+    }
 
     bool handleMouse(const MouseEvent& e) {
         m_input.inject(e);
@@ -203,7 +218,7 @@ public:
     bool blocksDrivingInput() const {
         return m_menu->isInputBlocked() || m_devices->isVisible() ||
                m_keyRebind.isVisible() || m_mp->isVisible() ||
-               m_chat->isTyping();
+               m_chat->isTyping() || m_console->isVisible();
     }
 
 private:
@@ -745,6 +760,7 @@ private:
     std::unique_ptr<DeviceSettingsOverlay> m_devices;
     std::unique_ptr<MultiplayerOverlay> m_mp;
     std::unique_ptr<ChatOverlay> m_chat;
+    std::unique_ptr<ConsoleOverlay> m_console;
 };
 
 } // namespace ui
