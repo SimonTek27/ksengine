@@ -2224,6 +2224,73 @@ void SimulationLoop::despawnSceneEntities() {
     m_sceneEntities.clear();
 }
 
+// The marshal is one asset shared by every track: content/objects3D/marshal
+// holds the bake (manifest.txt + .nmsh + textures/), and a track carries only
+// the coordinates of its posts. Loaded as an instanced mesh, not as static
+// scene, because it stands at a different place in every track.
+bool SimulationLoop::loadMarshalAsset(const std::string& trackDir) {
+    namespace fs = std::filesystem;
+    if (m_marshalAssetLoaded) return true;
+    if (!m_vulkanRenderer) return false;
+
+    std::vector<fs::path> candidates;
+    std::error_code ec;
+    if (!trackDir.empty()) {
+        // <content>/tracks/<track> -> <content>/objects3D/marshal
+        candidates.push_back(fs::path(trackDir).parent_path().parent_path() / kMarshalAssetDir);
+    }
+    candidates.push_back(fs::current_path(ec) / "content" / kMarshalAssetDir);
+
+    for (const fs::path& dir : candidates) {
+        std::ifstream manifest(dir / "manifest.txt");
+        if (!manifest) continue;
+        std::string name;
+        std::getline(manifest, name);
+        while (!name.empty() && (name.back() == '\r' || name.back() == ' ')) name.pop_back();
+        if (name.empty()) continue;
+        const fs::path file = dir / (name + ".nmsh");
+        if (!fs::is_regular_file(file, ec)) continue;
+        MaterialCache materials;
+        const bool hasMaterials = materials.load((dir / "materials.txt").string());
+        const MeshMaterial* material = hasMaterials ? materials.find(name) : nullptr;
+        if (!m_vulkanRenderer->loadMeshFromFile("marshal", file.string(), material,
+                                                (dir / "textures").string()))
+            continue;
+        m_marshalAssetLoaded = true;
+        std::fprintf(stderr, "[posts] marshal asset %s (%s)\n", file.string().c_str(),
+                     hasMaterials ? "materials.txt" : "no materials");
+        return true;
+    }
+    std::fprintf(stderr, "[posts] no marshal asset under content/%s\n", kMarshalAssetDir);
+    return false;
+}
+
+void SimulationLoop::despawnMarshalPosts() {
+    for (const ks::ecs::Entity e : m_marshalEntities)
+        if (scene().valid(e)) scene().destroy(e);
+    m_marshalEntities.clear();
+}
+
+void SimulationLoop::spawnMarshalPosts() {
+    despawnMarshalPosts();
+    if (!m_marshalAssetLoaded || !m_vulkanRenderer) return;
+    int posted = 0;
+    for (const MarshalPost& post : m_tracksidePosts.posts()) {
+        const ks::ecs::Entity e = scene().create();
+        if (e == ks::ecs::kNullEntity) break;
+        scene().emplace<ks::ecs::Name>(e,
+                                      ks::ecs::Name{"marshal_post_" + std::to_string(posted)});
+        ks::ecs::Transform transform;
+        transform.position = ks::math::vec3{post.pose.x, post.pose.y, post.pose.z};
+        transform.rotation = ks::math::vec3{0.f, post.pose.heading, 0.f};
+        scene().emplace<ks::ecs::Transform>(e, transform);
+        scene().emplace<ks::ecs::MeshInstance>(e, ks::ecs::MeshInstance{"marshal"});
+        m_marshalEntities.push_back(e);
+        ++posted;
+    }
+    std::fprintf(stderr, "[posts] %d marshal instance(s) from the shared asset\n", posted);
+}
+
 void SimulationLoop::despawnCarVisuals() {
     for (const ks::ecs::Entity e : m_carVisualEntities) {
         if (!scene().valid(e)) continue;

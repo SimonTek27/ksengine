@@ -155,6 +155,9 @@ void SimulationLoop::updateGarageExit(float dt) {
 bool SimulationLoop::loadTracksidePostsFromTrack(const std::string& trackDir) {
     namespace fs = std::filesystem;
     if (trackDir.empty()) return false;
+    // Previous track's marshals go before this track's posts are read, so the
+    // shared asset is never left standing at another circuit's coordinates.
+    despawnMarshalPosts();
     const fs::path root(trackDir);
     // A multi-layout pack keeps one manifest per layout folder (Vallelunga:
     // extended_circuit/data/data.json), so the layout folder is the track dir
@@ -168,6 +171,9 @@ bool SimulationLoop::loadTracksidePostsFromTrack(const std::string& trackDir) {
                          m_tracksidePosts.postCount(),
                          m_tracksidePosts.hasSafetyCarPad() ? "present" : "absent",
                          candidate.string().c_str());
+            // The posts are positions; the body they all share comes from the
+            // content's prop folder, so this track needs no marshal geometry.
+            if (loadMarshalAsset(trackDir)) spawnMarshalPosts();
             return true;
         }
     }

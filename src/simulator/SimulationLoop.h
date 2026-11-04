@@ -368,6 +368,12 @@ public:
     RaceFlag localYellowFlag() const { return m_tracksidePosts.trackFlag(); }
     bool loadTracksidePostsFromTrack(const std::string& trackDir);
     void updateTracksidePosts(float dt);
+    // The marshal is one shared asset (content/objects3D/marshal), loaded once
+    // and instanced at each post's coordinates: a track names positions, not
+    // geometry of its own.
+    bool loadMarshalAsset(const std::string& trackDir);
+    void spawnMarshalPosts();
+    void despawnMarshalPosts();
 
     void applyDamageEffects();
     void beginSession(GameSessionMode mode);
@@ -578,6 +584,10 @@ private:
     TrackLayoutCatalog m_layouts;
     // Marshal posts + safety-car bay, from <track>/data/data.json.
     TracksidePosts m_tracksidePosts;
+    // Instances of the shared marshal asset, one per post; the mesh itself is
+    // kept in the renderer across tracks (m_marshalAssetLoaded).
+    std::vector<ks::ecs::Entity> m_marshalEntities;
+    bool m_marshalAssetLoaded = false;
 
     // Roadmap 2.7 — garage row (GarageSpawn.h) + pit-lane collision. The
     // default garage session lays the row out with makeLinearRow() and binds

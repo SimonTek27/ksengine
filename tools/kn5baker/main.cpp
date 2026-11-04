@@ -10,6 +10,21 @@
 //       Parses only (no output) and prints per-file stats — used to smoke the
 //       reader against the whole AC content corpus.
 //
+//   kn5baker --only <name_substring> [--recentre] [--skip <name_substring>] \
+//            <input.kn5> <output_directory>
+//       Bakes a subset: ONE prop pulled out of a whole track into the shared
+//       asset folder every track then instances, or a track bake with that prop
+//       left out so the geometry is not duplicated.
+//
+//       --only       keep the meshes whose name contains the needle, and only
+//                    the textures they map (the rest of the track's texture set
+//                    stays behind).
+//       --skip       drop the meshes whose name contains the needle; used when
+//                    baking a track whose props live in the shared folder.
+//       --recentre   move the bake's origin to the middle of its footprint with
+//                    the feet on y = 0, so the asset can be placed at any
+//                    coordinate instead of only where the source track had it.
+//
 // Built on the real "sc6969" format reader (Kn5Reader), so it works on
 // actual AC content and applies the KN5 node-tree transforms.
 
@@ -17,9 +32,14 @@
 #include "FileFormat/Kn5Baker.h"
 #include "FileFormat/Kn5Reader.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <string>
 #include <string_view>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -31,8 +51,113 @@ using ks::engine::fileformat::Kn5ParseResult;
 int usage() {
     std::fprintf(stderr,
                  "usage: kn5baker <input.kn5> <output_directory>\n"
-                 "       kn5baker --validate <input.kn5>\n");
+                 "       kn5baker --validate <input.kn5>\n"
+                 "       kn5baker [--only <name_substring>] [--skip <name_substring>]\n"
+                 "                [--recentre] <input.kn5> <output_directory>\n");
     return 2;
+}
+
+std::string lower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+// Collects every mesh node whose name contains `needle` (case-insensitive).
+// Transforms are already accumulated into Kn5Mesh::world by the reader, so the
+// flat copy stays where the asset put it.
+void collectMatching(const std::vector<Kn5Node>& nodes, const std::string& needle,
+                     std::vector<Kn5Node>& out) {
+    for (const Kn5Node& node : nodes) {
+        if (node.has_mesh && lower(node.name).find(needle) != std::string::npos)
+            out.push_back(node);
+        collectMatching(node.children, needle, out);
+    }
+}
+
+// Drops every mesh node whose name contains `needle`. Children stay: a prop
+// node may carry sub-parts under it, and dropping the branch wholesale would
+// take anything the track still needs.
+void removeMatching(std::vector<Kn5Node>& nodes, const std::string& needle) {
+    nodes.erase(std::remove_if(nodes.begin(), nodes.end(),
+                               [&needle](const Kn5Node& node) {
+                                   return node.has_mesh &&
+                                          lower(node.name).find(needle) != std::string::npos;
+                               }),
+                nodes.end());
+    for (Kn5Node& node : nodes) removeMatching(node.children, needle);
+}
+
+// Vertex bounds of everything baked, in the mesh space the bake writes.
+void boundsOf(const std::vector<Kn5Node>& nodes, float lo[3], float hi[3], bool& any) {
+    for (const Kn5Node& node : nodes) {
+        const auto& positions = node.mesh.positions;
+        if (node.has_mesh && !positions.empty()) {
+            for (std::size_t i = 0; i + 2 < positions.size(); i += 3) {
+                for (int axis = 0; axis < 3; ++axis) {
+                    const float value = positions[i + static_cast<std::size_t>(axis)];
+                    if (!any) {
+                        lo[axis] = hi[axis] = value;
+                    } else {
+                        lo[axis] = std::min(lo[axis], value);
+                        hi[axis] = std::max(hi[axis], value);
+                    }
+                }
+                any = true;
+            }
+        }
+        boundsOf(node.children, lo, hi, any);
+    }
+}
+
+void offsetNodes(std::vector<Kn5Node>& nodes, const float delta[3]) {
+    for (Kn5Node& node : nodes) {
+        if (node.has_mesh) {
+            auto& positions = node.mesh.positions;
+            for (std::size_t i = 0; i + 2 < positions.size(); i += 3) {
+                positions[i] -= delta[0];
+                positions[i + 1] -= delta[1];
+                positions[i + 2] -= delta[2];
+            }
+        }
+        offsetNodes(node.children, delta);
+    }
+}
+
+// Origin in the middle of the footprint, feet on the ground: what a prop needs
+// to be placeable at a coordinate instead of only where its source track had it.
+void recentreOnFootprint(std::vector<Kn5Node>& nodes) {
+    float lo[3] = {0.f, 0.f, 0.f};
+    float hi[3] = {0.f, 0.f, 0.f};
+    bool any = false;
+    boundsOf(nodes, lo, hi, any);
+    if (!any) return;
+    const float delta[3] = {(lo[0] + hi[0]) * 0.5f, lo[1], (lo[2] + hi[2]) * 0.5f};
+    offsetNodes(nodes, delta);
+}
+
+// Keeps only the texture payloads the remaining meshes actually map, so a prop
+// pulled out of a track does not carry the track's whole texture set.
+void keepUsedTextures(ks::engine::fileformat::Kn5File& file) {
+    std::unordered_set<std::string> used;
+    auto collect = [&](auto&& self, const std::vector<Kn5Node>& nodes) -> void {
+        for (const Kn5Node& node : nodes) {
+            if (node.has_mesh) {
+                const int id = node.mesh.material_id;
+                if (id >= 0 && static_cast<std::size_t>(id) < file.materials.size()) {
+                    for (const auto& mapping : file.materials[static_cast<std::size_t>(id)].mappings)
+                        used.insert(mapping.texture);
+                }
+            }
+            self(self, node.children);
+        }
+    };
+    collect(collect, file.nodes);
+
+    std::vector<ks::engine::fileformat::Kn5Texture> textures;
+    for (auto& texture : file.textures)
+        if (used.count(texture.name)) textures.push_back(std::move(texture));
+    file.textures = std::move(textures);
 }
 
 void countNodes(const std::vector<Kn5Node>& nodes, int& static_meshes,
@@ -84,9 +209,8 @@ int validate(const std::string& input) {
     return 0;
 }
 
-int bake(const std::string& input, const std::string& output_dir) {
-    const Kn5BakeResult result =
-        ks::engine::fileformat::bakeKn5ToNativeMeshes(input, output_dir);
+int report(const std::string& input, const std::string& output_dir,
+           const Kn5BakeResult& result) {
     if (!result.ok()) {
         std::fprintf(stderr, "kn5baker: %s: %s\n", input.c_str(),
                      result.error.c_str());
@@ -100,14 +224,82 @@ int bake(const std::string& input, const std::string& output_dir) {
     return 0;
 }
 
+int bake(const std::string& input, const std::string& output_dir,
+         const std::string& only, const std::string& skip, bool recentre) {
+    if (only.empty() && skip.empty() && !recentre)
+        return report(input, output_dir,
+                      ks::engine::fileformat::bakeKn5ToNativeMeshes(input, output_dir));
+
+    Kn5ParseResult parsed = ks::engine::fileformat::parseKn5File(
+        input, ks::engine::fileformat::Kn5ParseOptions{/*keep_texture_data=*/true});
+    if (!parsed.ok()) {
+        std::fprintf(stderr, "kn5baker: %s: %s\n", input.c_str(),
+                     parsed.error.c_str());
+        return 1;
+    }
+
+    if (!only.empty()) {
+        std::vector<Kn5Node> kept;
+        collectMatching(parsed.file.nodes, lower(only), kept);
+        if (kept.empty()) {
+            std::fprintf(stderr, "kn5baker: %s: no mesh name contains '%s'\n",
+                         input.c_str(), only.c_str());
+            return 1;
+        }
+        parsed.file.nodes = std::move(kept);
+        std::printf("kn5baker: %zu mesh(es) matched '%s'\n", parsed.file.nodes.size(),
+                    only.c_str());
+    }
+    if (!skip.empty()) {
+        int before = 0, skinned = 0;
+        std::size_t vertices = 0;
+        countNodes(parsed.file.nodes, before, skinned, vertices);
+        removeMatching(parsed.file.nodes, lower(skip));
+        int after = 0;
+        vertices = 0;
+        countNodes(parsed.file.nodes, after, skinned, vertices);
+        std::printf("kn5baker: dropped %d mesh(es) matching '%s'\n", before - after,
+                    skip.c_str());
+        if (after == 0) {
+            std::fprintf(stderr, "kn5baker: %s: '%s' left nothing to bake\n", input.c_str(),
+                         skip.c_str());
+            return 1;
+        }
+    }
+    if (recentre) {
+        recentreOnFootprint(parsed.file.nodes);
+        std::printf("kn5baker: origin moved to the footprint centre, feet on y = 0\n");
+    }
+    if (!only.empty() || !skip.empty()) keepUsedTextures(parsed.file);
+
+    return report(input, output_dir, ks::engine::fileformat::bakeKn5(parsed.file, output_dir));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     int next = 1;
     bool validate_only = false;
-    if (next < argc && std::string_view(argv[next]) == "--validate") {
-        validate_only = true;
-        ++next;
+    bool recentre = false;
+    std::string only;
+    std::string skip;
+    while (next < argc) {
+        const std::string_view arg = argv[next];
+        if (arg == "--validate") {
+            validate_only = true;
+            ++next;
+        } else if (arg == "--only" && next + 1 < argc) {
+            only = argv[next + 1];
+            next += 2;
+        } else if (arg == "--skip" && next + 1 < argc) {
+            skip = argv[next + 1];
+            next += 2;
+        } else if (arg == "--recentre") {
+            recentre = true;
+            ++next;
+        } else {
+            break;
+        }
     }
 
     if (validate_only) {
@@ -115,5 +307,5 @@ int main(int argc, char** argv) {
         return validate(argv[next]);
     }
     if (argc - next != 2) return usage();
-    return bake(argv[next], argv[next + 1]);
+    return bake(argv[next], argv[next + 1], only, skip, recentre);
 }
