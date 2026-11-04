@@ -933,8 +933,11 @@ static void initSimulation() {
             g_simulation->startFeatureServices(true);
             g_simulation->ui().menu().setVisible(false);
             printf("Hosting on port 40000\n");
+            g_simulation->ui().notify("Hosting a session on port 40000");
         } else {
             g_simulation->ui().chat().addLine("[local] server start failed on 40000");
+            g_simulation->ui().notify("Server start failed on port 40000",
+                                      ks::sim::ui::NoticeKind::Warning);
         }
     };
     uiMenu->onOpenServerBrowserRequested = []() {
@@ -951,6 +954,7 @@ static void initSimulation() {
         net->disconnectFromServer();
         net->stopServer();
         printf("Network session closed.\n");
+        g_simulation->ui().notify("Network session closed");
     };
 
     // --- Roadmap 3.1: F2 browser + chat ----------------------------------
