@@ -126,9 +126,9 @@ public:
     // renderer or the mixer actually holds, so a knob moved on the command
     // line (KS_EXPOSURE, the ppfilter preset, KS_SSAO) still shows the truth
     // here. Nothing in this struct is a placeholder.
-    static constexpr int kExposureCount = 4;
+    static constexpr int kExposureCount = 5;
     static constexpr int kTonemapCount = 5;
-    static constexpr float kExposureValues[kExposureCount] = {0.45f, 0.55f, 0.62f, 0.72f};
+    static constexpr float kExposureValues[kExposureCount] = {0.45f, 0.55f, 0.62f, 0.72f, 1.00f};
     static constexpr const char* kTonemapNames[kTonemapCount] = {
         "NONE", "REINHARD", "ACES", "UNCHARTED2", "FILMIC"};
 

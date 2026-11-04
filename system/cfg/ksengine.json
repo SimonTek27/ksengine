@@ -43,7 +43,7 @@
     "ssao": false,
     "ssr": false,
     "motionBlur": false,
-    "exposure": 0.72,
+    "exposure": 1.0,
     "tonemap": "ACES",
     "tonemaps": [
       "NONE",
@@ -63,13 +63,13 @@
         "feature": "windowOutput",
         "status": "live",
         "landsAs": "resolution, fullscreen, vsync, anisotropic, shadow map, AA samples",
-        "note": "Resolution, fullscreen and vsync switch the window and the swapchain at runtime; anisotropic filtering and the shadow map size are fixed when assets load."
+        "note": "Resolution, fullscreen and vsync switch the window and the swapchain; anisotropic, shadow map size and AA samples size the caches. The startup values come from this file."
       },
       {
         "feature": "displayTuning",
-        "status": "partial",
+        "status": "live",
         "landsAs": "exposure, tonemap",
-        "note": "Only the parts the display pass honours: exposure and tone curve."
+        "note": "Exposure and the tone curve are read from this file at startup, applied after the post preset, and the page reads them back from the renderer."
       },
       {
         "feature": "bloomAndFlare",
