@@ -533,6 +533,16 @@ private:
                 const float slide = (1.f - m_menu->transitionProgress()) * 26.f;
                 const float titleScale = 2.5f;
                 const float titleW = m_text.measureWidth(item.text, titleScale);
+                // The name and its line sit over the scene, and the showroom
+                // behind them is bright: without a plate the text washed out
+                // into the marble. Same plate for both, so the block reads as
+                // one caption and travels with the fade.
+                const float plateY = L.title.y - 26.f;
+                const float plateH = 150.f;
+                dl.addRectFilled({L.title.x - 18.f, plateY, L.title.w + 36.f, plateH},
+                                 Color::rgba(0.03f, 0.03f, 0.05f, 0.55f * a));
+                dl.addRectFilled({L.title.x - 18.f, plateY, 3.f, plateH},
+                                 Color::rgba(0.86f, 0.13f, 0.13f, 0.85f * a));
                 dl.addRectFilled({L.title.x, L.title.y - 18.f, 56.f, 3.f},
                                  Color::rgba(0.86f, 0.13f, 0.13f, a));
                 m_text.draw(dl, L.title.x + L.title.w - titleW + slide, L.title.y, item.text,

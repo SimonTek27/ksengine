@@ -495,6 +495,11 @@ void SimulationLoop::loadShowroomAudio() {
         m_audio = std::move(audio);
     }
     m_showroomAudioLoaded = m_audio->loadShowroomAudio(cfg.ambience, cfg.music);
+    // The hall plays its own ambience: no car is being driven there, and when
+    // the car ships no WAV samples the synth engine drones through the whole
+    // menu. The driving channels come back in closeShowroom().
+    m_audio->setEngineVolume(0.f);
+    m_audio->setEnvironmentVolume(0.f);
 }
 
 void SimulationLoop::loadShowroomHall() {
@@ -1151,7 +1156,13 @@ void SimulationLoop::closeShowroom() {
     m_showroom.close();
     if (m_vulkanRenderer) m_vulkanRenderer->setExposure(1.0f); // the track's own
     m_showroomAudioLoaded = false;
-    if (m_audio) m_audio->stopShowroomAudio();
+    if (m_audio) {
+        m_audio->stopShowroomAudio();
+        // A session starts here: the engine, tyres and wind are the car's
+        // again once the showroom has let go of the camera.
+        m_audio->setEngineVolume(1.f);
+        m_audio->setEnvironmentVolume(1.f);
+    }
 }
 
 bool SimulationLoop::loadCarAudio(const std::string& carDirectory) {
