@@ -35,6 +35,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 motionBlurParams;  // declared to reach iblParams below (std140 offsets must be walked member by member)
     vec4 iblParams;         // x = 1 when the split-sum IBL branch is active, y = prefilter max LOD
     vec4 brakeGlow;         // brief P6: x = normalized hottest-disc temperature [0..1]
+    vec4 ssgiParams;        // x = screen radius (uv), y = intensity, w = 1 when enabled
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DArray shadowCascades;
@@ -237,6 +238,40 @@ vec3 ssr(vec3 worldPos, vec3 N, vec3 V, vec3 L, float roughness) {
     return hitColor * frame.ssrParams.y;
 }
 
+// Screen-space indirect bounce (SSGI). The compute shaders on disk want G-buffer
+// storage images this GBuffer does not expose, so the gather lives here like
+// SSAO and SSR above: a golden-angle spiral around the pixel reads neighbouring
+// world positions and albedos, and the ones in front of the surface become a
+// coloured bounce. Gated by ssgiParams.w, so a disabled frame costs one branch.
+const int SSGI_TAPS = 12;
+
+vec3 ssgi(vec3 worldPos, vec3 N) {
+    if (frame.ssgiParams.w < 0.5) return vec3(0.0);
+    vec4 clip = frame.viewProj * vec4(worldPos, 1.0);
+    if (clip.w <= 0.0) return vec3(0.0);
+    vec2 uv0 = clip.xy / clip.w * 0.5 + 0.5;
+
+    vec3 bounce = vec3(0.0);
+    float total = 0.0;
+    for (int i = 0; i < SSGI_TAPS; ++i) {
+        float t = (float(i) + 0.5) / float(SSGI_TAPS);
+        float ang = float(i) * 2.39996323;              // golden angle: no clumping
+        vec2 uv = uv0 + vec2(cos(ang), sin(ang)) * (frame.ssgiParams.x * sqrt(t));
+        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) continue;
+        vec4 s = texture(gbufWorldPos, uv);
+        if (abs(s.w) < 0.5) continue;                   // sky is not a bounce source
+        vec3 d = s.xyz - worldPos;
+        float dist = length(d);
+        if (dist < 1e-3) continue;
+        float facing = max(dot(N, d / dist), 0.0);      // only light arriving from the front
+        if (facing <= 0.0) continue;
+        float falloff = 1.0 / (1.0 + dist * dist);
+        bounce += texture(gbufAlbedo, uv).rgb * facing * falloff;
+        total += facing * falloff;
+    }
+    if (total <= 0.0) return vec3(0.0);
+    return (bounce / total) * frame.ssgiParams.y;
+}
 void main() {
     vec4 coverage = texture(gbufWorldPos, vUV);
     // Brief P6: coverage is +1 for ordinary geometry, -1 for brake-disc
@@ -293,6 +328,9 @@ void main() {
     // Metals have no diffuse lobe (energy goes into the specular term
     // below, coloured by F0) — this is what makes paint, matte floor and
     // bare exhaust read as different materials under the same light.
+    // Indirect light actually visible around this pixel (SSGI), kept
+    // subtle: half of the gathered bounce, tinted by the surface albedo.
+    ambient += albedo * ssgi(worldPos, N) * sunRad * shadow * 0.5;
     vec3 diffuse = albedo * (1.0 - metalness) * sunRad * NdotL * shadow;
 
     float a = roughness * roughness;

@@ -59,6 +59,7 @@
     "shadowMapSize": 2048,
     "mirrorResolution": "128x512",
     "particles": true,
+    "ssgi": false,
     "sources": [
       {
         "feature": "windowOutput",
@@ -80,9 +81,9 @@
       },
       {
         "feature": "ssgi",
-        "status": "missing",
-        "landsAs": null,
-        "note": "SSGIRenderer is a stub facade: initialize() only sets a flag and render() is empty. Its two compute shaders now build with the rest (they are in the glslc target and pass spirv-val) but nothing dispatches them, and their bindings do not match the deferred G-buffer this renderer builds, so closing the row means writing the pass."
+        "status": "partial",
+        "landsAs": "inline screen-space indirect bounce",
+        "note": "The bounce is gathered inline by the deferred lighting pass from neighbouring GBuffer world positions and albedos, gated by video.ssgi (off by default). The two ssgi compute shaders build but nothing dispatches them: they still want G-buffer storage images this renderer does not expose."
       },
       {
         "feature": "screenSpaceReflections",

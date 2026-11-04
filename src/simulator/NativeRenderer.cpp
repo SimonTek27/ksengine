@@ -761,8 +761,9 @@ struct FrameDataUBO {
     // (setBrakeGlow), driving the emissive on brake-disc-flagged meshes in
     // both lighting shaders. Appended at the END (add-only rule), yzw unused.
     float brakeGlow[4];
+    float ssgiParams[4];      // x = screen radius (uv), y = intensity, w = 1 when enabled (video.ssgi)
 };
-static_assert(sizeof(FrameDataUBO) == 512, "FrameDataUBO is read as a std140 uniform block");
+static_assert(sizeof(FrameDataUBO) == 528, "FrameDataUBO is read as a std140 uniform block");
 
 // Per-mesh material block of descriptor set 1 (set 1 binding 2), read as
 // `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs five
@@ -2233,6 +2234,12 @@ void NativeRenderer::endFrame() {
     frameData.ssrParams[1] = m_ssrIntensity;
     frameData.ssrParams[2] = m_ssrRoughnessThreshold;
     frameData.ssrParams[3] = (m_ssr && m_deferred) ? 1.0f : 0.0f;
+    // SSGI is the third inline screen-space term: it typechecks against the
+    // same GBuffer the lighting pass already reads, so no image or pass.
+    frameData.ssgiParams[0] = m_ssgiRadius;
+    frameData.ssgiParams[1] = m_ssgiIntensity;
+    frameData.ssgiParams[2] = 0.0f;
+    frameData.ssgiParams[3] = (m_ssgi && m_deferred) ? 1.0f : 0.0f;
     frameData.motionBlurParams[0] = m_mbStrength;
     frameData.motionBlurParams[1] = static_cast<float>(m_mbSamples);
     frameData.motionBlurParams[2] = m_mbMaxLength;

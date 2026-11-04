@@ -320,6 +320,15 @@ public:
         m_ssrRoughnessThreshold = roughnessThreshold;
     }
     bool isSsr() const { return m_ssr; }
+    // Screen-space indirect bounce (SSGI). Gathered inline by the deferred
+    // lighting pass from the neighbouring GBuffer pixels, exactly like SSAO and
+    // SSR, so it costs no target and no extra pass; radius is in screen UV.
+    void setSsgi(bool enabled, float radius = 0.05f, float intensity = 1.0f) {
+        m_ssgi = enabled;
+        m_ssgiRadius = radius;
+        m_ssgiIntensity = intensity;
+    }
+    bool isSsgi() const { return m_ssgi; }
 
     // Motion blur (roadmap ksengine-vs-cryengine P0), gathered inside the
     // deferred resolve pass from a motion vector reconstructed out of the
@@ -840,6 +849,9 @@ private:
     float m_ssaoBias = 0.02f;
 
     bool m_ssr = false;
+    bool m_ssgi = false;
+    float m_ssgiRadius = 0.05f;
+    float m_ssgiIntensity = 1.0f;
     float m_ssrMaxDistance = 8.0f;
     float m_ssrIntensity = 1.0f;
     float m_ssrRoughnessThreshold = 0.6f;

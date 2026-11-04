@@ -62,6 +62,7 @@ static ks::engine::config::EngineSettings g_engineSettings;
 
 static bool g_throttle = false, g_brake = false;
 static bool g_steerLeft = false, g_steerRight = false;
+static bool g_consoleToggle = false; // CTRL+INS toggle state
 static bool g_handbrake = false;
 static bool g_running = true;
 
@@ -81,11 +82,10 @@ static int g_shotDelay = 60;
 static bool g_shotRequested = false;
 static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
+static bool g_photoMode = false;
+static char g_photoModeKey = 0;
 
-// Roadmap 2.14 — windowed profile run: KS_PROFILE_SECONDS=N auto-exits a
-// rendered session after N seconds through the same deterministic teardown
-// (the KS_HEADLESS_SECONDS twin for when the GPU must be in the numbers).
-// The profile itself is requested with KS_PROFILE=1 (same switch the tick
+// Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
 // scopes and the GPU markers read) and dumped on the way out; KS_PROFILE_CSV
 // additionally writes it as CSV.
 static double g_profileSeconds = 0.0;
@@ -197,6 +197,36 @@ static void handleKeyDown(int vk) {
     if (vk == kb.brake || vk == ks::sim::KeyboardMapping::AltBrake) {
         g_brake = true;
         if (im) im->setKeyDown(vk);
+        return;
+    }
+    // Roadmap 4.x — photo mode toggle (F12 by default, or KS_PHOTOMODE=<key>).
+    if (g_photoMode && vk == g_photoModeKey) {
+        g_simulation->setCameraMode(ks::sim::CameraController::Mode::Free);
+        g_simulation->ui().dashboard().setVisible(false);
+        g_simulation->ui().menu().setVisible(false);
+        g_photoMode = !g_photoMode; // toggle: first press enters, second exits
+        printf("[photo] %sphoto mode %s (key %c)\n", g_photoMode ? "entered" : "exited", g_photoModeKey ? "press again to exit" : "", g_photoModeKey);
+        if (!g_photoMode) {
+            g_simulation->ui().dashboard().setVisible(true);
+            g_simulation->ui().menu().setVisible(true);
+            g_simulation->start(); // resume simulation
+        }
+        return;
+    }
+    // Roadmap 4.x — developer console toggle (CTRL+INSERT).
+    // VK_CONTROL = 0x12, VK_INSERT = 0x2D
+    if (vk == 0x2D) { // INSERT key
+        bool ctrlDown = (GetAsyncKeyState(0x12) & 0x8000) != 0;
+        if (ctrlDown && !g_consoleToggle) {
+            g_consoleToggle = true;
+            g_simulation->ui().console().setVisible(true);
+            g_simulation->ui().console().startTyping();
+            printf("[console] opened (CTRL+INSERT)\n");
+        } else if (!ctrlDown) {
+            g_consoleToggle = false;
+            g_simulation->ui().console().setVisible(false);
+            printf("[console] closed (CTRL released)\n");
+        }
         return;
     }
     if (vk == kb.steerLeft || vk == ks::sim::KeyboardMapping::AltSteerLeft) {
@@ -914,215 +944,7 @@ static void initSimulation() {
         const std::string tonemap = videoConfig.stringAt("tonemap");
         const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
         const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
-        const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
-        const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
-        const std::string resolution = videoConfig.stringAt("resolution");
-        int width = 0, height = 0;
-        if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
-            width = 0;
-            height = 0;
-        }
-        if (auto* renderer = g_simulation->renderer()) {
-            if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));
-            for (int i = 0; i < ks::sim::GameMenuOverlay::kTonemapCount; ++i) {
-                if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
-                    renderer->setTonemapMode(i);
-            }
-            renderer->setSsao(ssao != 0);
-            renderer->setSsr(ssr != 0);
-            renderer->setMotionBlur(motionBlur != 0);
-            if (motionBlur) renderer->setDeferred(true);
-            renderer->setVsync(vsync != 0);
-            if (width > 0 && height > 0 && g_hWnd) {
-                const uint32_t currentW = renderer->extent().width;
-                const uint32_t currentH = renderer->extent().height;
-                if (currentW != static_cast<uint32_t>(width) ||
-                    currentH != static_cast<uint32_t>(height)) {
-                    RECT rc{0, 0, width, height};
-                    const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
-                    AdjustWindowRect(&rc, style, FALSE);
-                    SetWindowPos(g_hWnd, nullptr, 0, 0, rc.right - rc.left,
-                                 rc.bottom - rc.top,
-                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-            }
-        }
-        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, motion blur %d, vsync %d, %dx%d\n",
-               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
-               vsync, width, height);
-    }
-    // --- the config drives the image ---------------------------------------
-    // Read after the ppfilter preset so the file wins: system/cfg/ksengine.json
-    // first, the player's settings.json second, its key wins - the same merge
-    // EngineSettings already does for physics.fixedDt and audio.master.
-    {
-        ks::engine::json::Value videoConfig = ks::engine::json::Value::object();
-        const auto mergeVideo = [](const std::string& path,
-                                   ks::engine::json::Value& out) {
-            std::string text;
-            if (!ks::engine::assets::UserData::readFile(path, text)) return;
-            ks::engine::json::Value root;
-            std::string error;
-            if (!ks::engine::json::parse(text, root, &error)) {
-                printf("[INIT] %s: %s\n", path.c_str(), error.c_str());
-                return;
-            }
-            const ks::engine::json::Value* video = root.find("video");
-            if (!video || !video->isObject()) return;
-            for (const std::string& key : video->keys()) {
-                if (const ks::engine::json::Value* value = video->find(key))
-                    out.set(key, *value);
-            }
-        };
-        mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
-        mergeVideo(g_userLayout.settings, videoConfig);
-        const double exposure = videoConfig.numberAt("exposure", -1.0);
-        const std::string tonemap = videoConfig.stringAt("tonemap");
-        const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
-        const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
-        const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
-        const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
-        const bool headPhysics = videoConfig.boolAt("headPhysics", true);
-        const std::string resolution = videoConfig.stringAt("resolution");
-        int width = 0, height = 0;
-        if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
-            width = 0;
-            height = 0;
-        }
-        if (auto* renderer = g_simulation->renderer()) {
-            if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));
-            for (int i = 0; i < ks::sim::GameMenuOverlay::kTonemapCount; ++i) {
-                if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
-                    renderer->setTonemapMode(i);
-            }
-            renderer->setSsao(ssao != 0);
-            renderer->setSsr(ssr != 0);
-            renderer->setMotionBlur(motionBlur != 0);
-            if (motionBlur) renderer->setDeferred(true);
-            renderer->setVsync(vsync != 0);
-            if (auto* camera = g_simulation->camera())
-                camera->setHeadPhysics(headPhysics);
-            if (width > 0 && height > 0 && g_hWnd) {
-                const uint32_t currentW = renderer->extent().width;
-                const uint32_t currentH = renderer->extent().height;
-                if (currentW != static_cast<uint32_t>(width) ||
-                    currentH != static_cast<uint32_t>(height)) {
-                    RECT rc{0, 0, width, height};
-                    const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
-                    AdjustWindowRect(&rc, style, FALSE);
-                    SetWindowPos(g_hWnd, nullptr, 0, 0, rc.right - rc.left,
-                                 rc.bottom - rc.top,
-                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-            }
-        }
-        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, motion blur %d, head %d, vsync %d, %dx%d\n",
-               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
-               headPhysics ? 1 : 0, vsync, width, height);
-    }
-    // --- the config drives the image ---------------------------------------
-    // Read after the ppfilter preset so the file wins: system/cfg/ksengine.json
-    // first, the player's settings.json second, its key wins - the same merge
-    // EngineSettings already does for physics.fixedDt and audio.master.
-    {
-        ks::engine::json::Value videoConfig = ks::engine::json::Value::object();
-        const auto mergeVideo = [](const std::string& path,
-                                   ks::engine::json::Value& out) {
-            std::string text;
-            if (!ks::engine::assets::UserData::readFile(path, text)) return;
-            ks::engine::json::Value root;
-            std::string error;
-            if (!ks::engine::json::parse(text, root, &error)) {
-                printf("[INIT] %s: %s\n", path.c_str(), error.c_str());
-                return;
-            }
-            const ks::engine::json::Value* video = root.find("video");
-            if (!video || !video->isObject()) return;
-            for (const std::string& key : video->keys()) {
-                if (const ks::engine::json::Value* value = video->find(key))
-                    out.set(key, *value);
-            }
-        };
-        mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
-        mergeVideo(g_userLayout.settings, videoConfig);
-        const double exposure = videoConfig.numberAt("exposure", -1.0);
-        const std::string tonemap = videoConfig.stringAt("tonemap");
-        const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
-        const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
-        const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
-        const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
-        const bool headPhysics = videoConfig.boolAt("headPhysics", true);
-        const int frameLimit = static_cast<int>(videoConfig.numberAt("frameLimit", 0.0));
-        const int anisotropy =
-            static_cast<int>(videoConfig.numberAt("anisotropicFiltering", 8.0));
-        const std::string resolution = videoConfig.stringAt("resolution");
-        int width = 0, height = 0;
-        if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
-            width = 0;
-            height = 0;
-        }
-        if (auto* renderer = g_simulation->renderer()) {
-            if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));
-            for (int i = 0; i < ks::sim::GameMenuOverlay::kTonemapCount; ++i) {
-                if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
-                    renderer->setTonemapMode(i);
-            }
-            renderer->setSsao(ssao != 0);
-            renderer->setSsr(ssr != 0);
-            renderer->setMotionBlur(motionBlur != 0);
-            if (motionBlur) renderer->setDeferred(true);
-            renderer->setVsync(vsync != 0);
-            if (auto* camera = g_simulation->camera())
-                camera->setHeadPhysics(headPhysics);
-            renderer->setAnisotropicFiltering(anisotropy);
-            g_simulation->setFrameLimit(frameLimit);
-            if (width > 0 && height > 0 && g_hWnd) {
-                const uint32_t currentW = renderer->extent().width;
-                const uint32_t currentH = renderer->extent().height;
-                if (currentW != static_cast<uint32_t>(width) ||
-                    currentH != static_cast<uint32_t>(height)) {
-                    RECT rc{0, 0, width, height};
-                    const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
-                    AdjustWindowRect(&rc, style, FALSE);
-                    SetWindowPos(g_hWnd, nullptr, 0, 0, rc.right - rc.left,
-                                 rc.bottom - rc.top,
-                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
-                }
-            }
-        }
-        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, motion blur %d, head %d, vsync %d, %dx%d, aniso %dx, limit %d fps\n",
-               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
-               headPhysics ? 1 : 0, vsync, width, height, anisotropy, frameLimit);
-    }
-    // --- the config drives the image ---------------------------------------
-    // Read after the ppfilter preset so the file wins: system/cfg/ksengine.json
-    // first, the player's settings.json second, its key wins - the same merge
-    // EngineSettings already does for physics.fixedDt and audio.master.
-    {
-        ks::engine::json::Value videoConfig = ks::engine::json::Value::object();
-        const auto mergeVideo = [](const std::string& path,
-                                   ks::engine::json::Value& out) {
-            std::string text;
-            if (!ks::engine::assets::UserData::readFile(path, text)) return;
-            ks::engine::json::Value root;
-            std::string error;
-            if (!ks::engine::json::parse(text, root, &error)) {
-                printf("[INIT] %s: %s\n", path.c_str(), error.c_str());
-                return;
-            }
-            const ks::engine::json::Value* video = root.find("video");
-            if (!video || !video->isObject()) return;
-            for (const std::string& key : video->keys()) {
-                if (const ks::engine::json::Value* value = video->find(key))
-                    out.set(key, *value);
-            }
-        };
-        mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
-        mergeVideo(g_userLayout.settings, videoConfig);
-        const double exposure = videoConfig.numberAt("exposure", -1.0);
-        const std::string tonemap = videoConfig.stringAt("tonemap");
-        const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
-        const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
+        const int ssgi = videoConfig.boolAt("ssgi", false) ? 1 : 0;
         const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
         const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
         const bool headPhysics = videoConfig.boolAt("headPhysics", true);
@@ -1144,6 +966,15 @@ static void initSimulation() {
             }
             renderer->setSsao(ssao != 0);
             renderer->setSsr(ssr != 0);
+            renderer->setSsgi(ssgi != 0);
+            if (ssgi != 0) {
+                // SSGI is gathered by the deferred lighting shader, which the
+                // forward path never runs: asking for it means asking for that
+                // path, exactly like the KS_SSAO / KS_SSR env switches above.
+                renderer->setDeferred(true);
+                printf("[INIT] Render path: deferred (video.ssgi)\n");
+            }
+
             renderer->setMotionBlur(motionBlur != 0);
             if (motionBlur) renderer->setDeferred(true);
             renderer->setVsync(vsync != 0);
@@ -1166,8 +997,8 @@ static void initSimulation() {
                 }
             }
         }
-        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, motion blur %d, head %d, vsync %d, %dx%d, aniso %dx, limit %d fps, particles %d\n",
-               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, motionBlur,
+        printf("[INIT] Config video: exposure %.2f, tonemap %s, ssao %d, ssr %d, ssgi %d, motion blur %d, head %d, vsync %d, %dx%d, aniso %dx, limit %d fps, particles %d\n",
+               exposure > 0.0 ? exposure : 0.0, tonemap.c_str(), ssao, ssr, ssgi, motionBlur,
                headPhysics ? 1 : 0, vsync, width, height, anisotropy, frameLimit, particles ? 1 : 0);
     }
     // --- VIDEO: the page reads the renderer back and writes to it ----------
@@ -1442,6 +1273,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         const int d = std::atoi(sd);
         if (d >= 0) g_shotDelay = d;
     }
+    // Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
+    if (const char* pm = std::getenv("KS_PHOTOMODE")) {
+        g_photoMode = true;
+        g_photoModeKey = pm[0];
+    }
     // Roadmap 2.14 — timed profile run (see globals).
     // --track <dir>: the KS_TRACK setting, from the command line. WinMain gets
     // the raw ANSI tail, so this is a minimal quoted-word split; anything it
@@ -1536,6 +1372,41 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
                 g_running = false;
                 PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
             }
+        }
+        // Roadmap 4.x — photo mode screenshot: capture the current frame
+        // with the active ppfilter LUT applied, at the window's resolution.
+        if (g_photoMode && g_nativeRenderer && g_nativeRenderer->screenshotReady() && !g_shotRequested) {
+            g_shotRequested = true;
+            // Use a photo-mode specific path if KS_SCREENSHOT is also set,
+            // otherwise just log and leave the file next to the exe.
+            std::string photoPath = g_shotPath.empty() ?
+                "screenshot_photo.png" : g_shotPath;
+            // The readback is already in sRGB; we apply the preset's LUT
+            // strength/exposure in the shader, but here we just save the
+            // display-referred pixels as-is (the LUT was already applied
+            // during the frame).  Save at window extents.
+            ks::image::RawImage img;
+            img.resize(g_nativeRenderer->extent().width,
+                       g_nativeRenderer->extent().height);
+            const auto& px = g_nativeRenderer->screenshotPixels();
+            for (size_t i = 0; i + 3 < px.size(); i += 4) {
+                img.rgba[i] = px[i + 2];   // R
+                img.rgba[i + 1] = px[i + 1]; // G
+                img.rgba[i + 2] = px[i];   // B
+                img.rgba[i + 3] = 255;     // A
+            }
+            std::string err;
+            if (ks::image::saveImageFile(photoPath, img, &err)) {
+                printf("[photo] saved %s (%ux%u)\n", photoPath.c_str(),
+                       img.width, img.height);
+            } else {
+                printf("[photo] save failed: %s\n", err.c_str());
+            }
+            // Exit photo mode after the shot
+            g_photoMode = false;
+            g_simulation->ui().dashboard().setVisible(true);
+            g_simulation->ui().menu().setVisible(true);
+            g_simulation->start(); // resume simulation
         }
 
         if (g_headless && g_headlessSeconds > 0.0) {
