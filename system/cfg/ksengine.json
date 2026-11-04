@@ -164,11 +164,6 @@
         "note": "The native display pass applies exposure, the tone curve and the ppfilter LUT; no external post-processing middleware is involved."
       },
       {
-        "feature": "presentHooks",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
         "feature": "vrSupport",
         "status": "missing",
         "landsAs": null
@@ -736,11 +731,6 @@
         "landsAs": null
       },
       {
-        "feature": "hudSymbols",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
         "feature": "appPausePolicy",
         "status": "missing",
         "landsAs": null
@@ -819,7 +809,8 @@
       {
         "feature": "contentUnpacking",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "Packaging::unpack is a stub that returns false: content is read in place from its folder (and from .zip reads done at load time), never extracted to disk."
       },
       {
         "feature": "trackTweaks",
