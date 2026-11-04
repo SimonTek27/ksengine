@@ -134,7 +134,6 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
-    // --- showroom (content/showrooms/<id>/showroom.json) -------------------
     bool openShowroom(const std::string& directory, std::string* error = nullptr);
     void loadShowroomHall();
     void loadShowroomAudio();
@@ -162,10 +161,6 @@ public:
     void stop();
     void reset();
     void teleportToPit(int carIndex);
-    // Fase 1 exit: start a session of the mode chosen in the menu (practice
-    // = open laps solo, race = grid vs AI + countdown, time attack = solo).
-    // Configures laps/AI/session byte BEFORE start(), which then builds the
-    // grid and countdown from those values.
     void startSession(GameSessionMode mode);
     void startSession(GameSessionMode mode, const SessionStartParams& params);
     bool isRunning() const { return m_running; }
@@ -300,7 +295,6 @@ public:
     std::function<void()> onSimulationStopped;
     std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateChanged;
 
-    /** Phase 3.3: rebind layout-specific data without full track unload. */
     bool switchLayout(const std::string& layoutId);
     const TrackLayoutCatalog& layoutCatalog() const { return m_layouts; }
 
@@ -345,7 +339,6 @@ private:
                                             const std::string& prefix,
                                             bool faceInside);
 
-    // --- members (complete set from local branch) ------------------------
     bool m_running = false;
     bool m_vulkanMode = false;
     bool m_particlesConfig = false;
