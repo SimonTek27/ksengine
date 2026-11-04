@@ -19,11 +19,13 @@ namespace sim {
 namespace ui {
 
 struct MainMenuLayout {
-    /** Tiles that fit side by side; the strip scrolls for the rest. */
-    static constexpr int kVisible = 5;
+    /** Slots the strip can hold. A row with fewer rows than this gets wider
+     *  tiles rather than empty space, so the sections the menu carries are on
+     *  screen instead of waiting behind a scroll nothing announces. */
+    static constexpr int kMaxSlots = 8;
 
-    Rect tile[kVisible]{};
-    int item[kVisible] = {-1, -1, -1, -1, -1}; // row index behind each slot
+    Rect tile[kMaxSlots]{};
+    int item[kMaxSlots] = {-1, -1, -1, -1, -1, -1, -1, -1}; // row behind each slot
     int count = 0;                             // slots actually used
     int first = 0;                             // first row on screen
     Rect strip{};
@@ -46,7 +48,7 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     const float H = static_cast<float>(h);
     const float margin = W * 0.035f;
     const float gap = W * 0.008f;
-    const float tileW = W * 0.18f; // five of these plus the gaps fit inside W
+    const float usable = W - margin * 2.f;
     const float tileH = H * 0.246f;
     const float top = H * 0.173f;
 
@@ -54,19 +56,22 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     L.home = {margin, H * 0.024f, W * 0.24f, H * 0.034f};
     L.logo = {margin, H * 0.052f, H * 0.03f, H * 0.03f};
     L.avatar = {W - margin - H * 0.052f, H * 0.014f, H * 0.052f, H * 0.052f};
-    L.strip = {margin, top,
-               tileW * static_cast<float>(MainMenuLayout::kVisible) +
-                   gap * static_cast<float>(MainMenuLayout::kVisible - 1),
-               tileH};
-
     const int rows = std::max(0, tileCount);
-    L.count = std::min(MainMenuLayout::kVisible, rows);
+    L.count = std::min(MainMenuLayout::kMaxSlots, rows);
+    // The row shares the strip between the slots it actually uses: twelve
+    // sections do not fit at five across, and clipping the tail meant the
+    // rows added to the menu were simply not on screen.
+    const float tileW = L.count > 0
+        ? (usable - gap * static_cast<float>(L.count - 1)) / static_cast<float>(L.count)
+        : usable;
+    L.strip = {margin, top, usable, tileH};
     // Keep the selection inside the window by moving the window as little as
-     // possible: only when it would fall off the right edge. Centring it
-     // instead scrolls the strip under the cursor, so a hovered tile slides
-     // away between press and release and the click opens its neighbour.
-    L.first = std::clamp(selected - (MainMenuLayout::kVisible - 1), 0,
-                         std::max(0, rows - MainMenuLayout::kVisible));
+    // possible: only when it would fall off the right edge. Centring it
+    // instead scrolls the strip under the cursor, so a hovered tile slides
+    // away between press and release and the click opens its neighbour.
+    L.first = L.count > 0
+        ? std::clamp(selected - (L.count - 1), 0, std::max(0, rows - L.count))
+        : 0;
     for (int i = 0; i < L.count; ++i) {
         const int row = L.first + i;
         L.tile[i] = {margin + static_cast<float>(i) * (tileW + gap), top, tileW, tileH};

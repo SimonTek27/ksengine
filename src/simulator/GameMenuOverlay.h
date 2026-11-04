@@ -235,6 +235,15 @@ private:
 
     bool m_visible = true;
     bool m_menuDirty = true;
+    bool m_videoSubmode = false;
+    bool m_hdrEnabled = false;
+    int m_resIdx = 0;
+    std::vector<std::string> m_resolutions;
+    bool m_vsyncEnabled = true;
+    int m_qualityIdx = 0;
+    int kNumQualities = 3;
+    int m_aaIdx = 0;
+    int kNumAAModes = 3;
     MenuState m_currentState = MenuState::Main;
     MenuState m_previousState = MenuState::Main;
     int m_selectedIndex = 0;

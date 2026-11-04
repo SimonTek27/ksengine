@@ -72,6 +72,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main_menu_test.cpp" AND
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/DashboardOverlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/TelemetryOverlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/ConsoleOverlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/FontTtfLoader.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/TextRenderer.cpp")
     target_include_directories(main_menu_test PRIVATE

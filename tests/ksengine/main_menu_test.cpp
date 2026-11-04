@@ -50,6 +50,10 @@ constexpr int KEY_DOWN = 0x28;
 constexpr int KEY_ENTER = 0x0D;
 constexpr int KEY_ESC = 0x1B;
 
+// Rows on the MAIN screen: the two modes, the four quick toggles the hub
+// carries beside them, then driver, content, settings and the exit group.
+constexpr int kRows = 12;
+
 int rowOf(const GameMenuOverlay& menu, const std::string& text) {
     const std::vector<ks::sim::MenuItem> items = menu.items();
     for (int i = 0; i < static_cast<int>(items.size()); ++i) {
@@ -62,11 +66,14 @@ int rowOf(const GameMenuOverlay& menu, const std::string& text) {
 
 int main() {
     // ---------------------------------------------------------------------
-    // Geometry: five tiles, in order, between the two bars, none overlapping.
+    // Geometry: the tiles of an eight-row screen, in order, between the two
+    // bars, none overlapping and none clipped.
     // ---------------------------------------------------------------------
     {
+        // The strip is sized by the rows it carries, so an eight-row screen
+        // shows all eight: nothing waits behind a scroll nothing announces.
         const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
-        KS_CHECK(L.count == MainMenuLayout::kVisible);
+        KS_CHECK(L.count == MainMenuLayout::kMaxSlots);
         KS_CHECK(L.first == 0);
         for (int i = 0; i < L.count; ++i) {
             KS_CHECK(L.item[i] == i); // the row behind each slot
@@ -90,20 +97,21 @@ int main() {
     // Scrolling: the window follows the selection; short rows do not scroll.
     // ---------------------------------------------------------------------
     {
-        const MainMenuLayout last = layoutMainMenu(1600, 900, 8, 7);
-        KS_CHECK(last.first == 3); // 8 rows, 5 slots: last window starts at 3
-        KS_CHECK(last.item[0] == 3);
-        KS_CHECK(last.item[last.count - 1] == 7);
-        // The window moves only when the selection leaves it: 6 is still
-        // inside the window that starts at 2, and 0 at 0.
-        KS_CHECK(layoutMainMenu(1600, 900, 8, 6).first == 2);
-        // A hovered tile must not scroll away from under the cursor.
-        for (int slot = 0; slot < MainMenuLayout::kVisible; ++slot) {
+        // A row longer than the strip scrolls, and only then.
+        const int many = MainMenuLayout::kMaxSlots + 4;
+        const MainMenuLayout last = layoutMainMenu(1600, 900, many, many - 1);
+        KS_CHECK(last.count == MainMenuLayout::kMaxSlots);
+        KS_CHECK(last.first == 4); // rows - slots
+        KS_CHECK(last.item[0] == 4);
+        KS_CHECK(last.item[last.count - 1] == many - 1);
+        KS_CHECK(layoutMainMenu(1600, 900, many, 3).first == 0);
+        // An eight-row screen never scrolls, so a hovered tile cannot slide
+        // away from under the cursor.
+        for (int slot = 0; slot < 8; ++slot) {
             const MainMenuLayout hovered = layoutMainMenu(1600, 900, 8, slot);
             KS_CHECK(hovered.first == 0);
             KS_CHECK(hovered.item[slot] == slot);
         }
-        KS_CHECK(layoutMainMenu(1600, 900, 8, 0).first == 0);
 
         const MainMenuLayout shortRow = layoutMainMenu(1280, 720, 3, 2);
         KS_CHECK(shortRow.count == 3);
@@ -145,8 +153,8 @@ int main() {
     {
         GameMenuOverlay menu;
         static const char* kExpected[] = {
-            "SINGLE PLAYER", "MULTIPLAYER", "DRIVER", "CONTENT",
-            "SETTINGS", "EDITOR", "CREDITS", "EXIT",
+            "SINGLE PLAYER", "MULTIPLAYER", "TOGGLE VR", "SOUND", "CONTROLS",
+            "DRIVER", "CLOCK", "CONTENT", "SETTINGS", "EDITOR", "CREDITS", "EXIT",
         };
         int tiles = 0;
         int separators = 0;
@@ -160,9 +168,9 @@ int main() {
             KS_CHECK(ks::sim::ui::icons::get(item.icon) != nullptr);
             KS_CHECK(!item.description.empty());
         }
-        KS_CHECK(tiles == 8);
+        KS_CHECK(tiles == kRows);
         KS_CHECK(separators == 1); // the gap before EDITOR
-        for (int i = 0; i < 8; ++i) KS_CHECK(rowOf(menu, kExpected[i]) >= 0);
+        for (int i = 0; i < kRows; ++i) KS_CHECK(rowOf(menu, kExpected[i]) >= 0);
         KS_CHECK(rowOf(menu, "SINGLE PLAYER") == 0); // the game opens on it
         KS_CHECK(rowOf(menu, "EXIT") == static_cast<int>(menu.items().size()) - 1);
         // The garage and the replay screen are reached elsewhere now.
@@ -202,7 +210,7 @@ int main() {
         KS_CHECK(hub.handleKey(KEY_RIGHT));
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
         KS_CHECK(hub.handleKey(KEY_DOWN)); // DOWN walks the same row
-        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "DRIVER"));
+        KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "TOGGLE VR"));
         KS_CHECK(hub.handleKey(KEY_UP));
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
 
@@ -217,7 +225,7 @@ int main() {
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "EXIT"));
 
         // Hovering selects the tile under the cursor.
-        const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
+        const MainMenuLayout L = layoutMainMenu(1600, 900, kRows, 0);
         hub.menu().setSelectedIndex(rowOf(hub.menu(), "SINGLE PLAYER"));
         hub.handleMouseMove(L.tile[1].x + 12.f, L.tile[1].y + 12.f);
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "MULTIPLAYER"));
@@ -225,13 +233,14 @@ int main() {
         // A click activates the tile under the cursor (the mouse path), and
         // the section it opens is the one under the pointer.
         hub.menu().openScreen(MenuState::Main);
+        const auto& contentTile = L.tile[7]; // the strip shows the whole row
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, true,
-                              L.tile[3].x + 12.f, L.tile[3].y + 12.f);
+                              contentTile.x + 12.f, contentTile.y + 12.f);
         // The press alone must already have selected the tile under the
         // cursor: that is the hover path the click builds on.
         KS_CHECK(hub.menu().selectedIndex() == rowOf(hub.menu(), "CONTENT"));
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
-                              L.tile[3].x + 12.f, L.tile[3].y + 12.f);
+                              contentTile.x + 12.f, contentTile.y + 12.f);
         KS_CHECK(hub.menu().state() == MenuState::ContentManager);
 
         // ESC on the arrival screen offers to leave instead of hiding it.

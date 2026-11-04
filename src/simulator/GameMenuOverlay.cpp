@@ -92,8 +92,21 @@ void GameMenuOverlay::buildMainMenu()
         [this]() { switchMenu(MenuState::Singleplayer); }, false, true, "user" });
     m_items.push_back({ "MULTIPLAYER", "Online and LAN events, ranked or not",
         [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
+    // --- Quick toggle icons (before profile) ---
+    m_items.push_back({ "TOGGLE VR", "Toggle VR mode", [this]() {
+        if (onToggleFullscreenRequested) onToggleFullscreenRequested();
+    }, false, true, "vr" });
+    m_items.push_back({ "SOUND", "Audio settings", [this]() {
+        if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio");
+    }, false, true, "speaker" });
+    m_items.push_back({ "CONTROLS", "Change bindings", [this]() {
+        switchMenu(MenuState::Controls);
+    }, false, true, "keyboard" });
     m_items.push_back({ "DRIVER", "Profile and career stats",
         [this]() { switchMenu(MenuState::Profile); }, false, true, "helmet" });
+    m_items.push_back({ "CLOCK", "System info", [this]() {
+        // TODO: show system info
+    }, false, true, "clock" });
     m_items.push_back({ "CONTENT", "Cars, tracks and packages",
         [this]() { switchMenu(MenuState::ContentManager); }, false, true, "download" });
     m_items.push_back({ "SETTINGS", "Display, audio and input",

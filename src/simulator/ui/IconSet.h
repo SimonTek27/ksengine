@@ -96,6 +96,37 @@ inline constexpr const char* kExit =
     "<path d=\"M3.6 12h10.2M10.4 8.6L13.8 12l-3.4 3.4\"/>"
     "</svg>";
 
+// Headset: the VR toggle.
+inline constexpr const char* kVr =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<path d=\"M2.8 9.4h18.4v4.2a2.2 2.2 0 0 1-2.2 2.2h-3.4l-1.6-1.7h-2l-1.6 1.7H5a2.2 2.2 0 0 1-2.2-2.2z\"/>"
+    "<circle cx=\"8\" cy=\"12.2\" r=\"1.7\"/>"
+    "<circle cx=\"16\" cy=\"12.2\" r=\"1.7\"/>"
+    "</svg>";
+
+// Speaker with two waves: audio settings.
+inline constexpr const char* kSpeaker =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<path d=\"M4 9.6h3.4L12 6.2v11.6L7.4 14.4H4z\"/>"
+    "<path d=\"M15.2 9.4a3.8 3.8 0 0 1 0 5.2\"/>"
+    "<path d=\"M17.6 6.9a7 7 0 0 1 0 10.2\"/>"
+    "</svg>";
+
+// Keyboard: change bindings.
+inline constexpr const char* kKeyboard =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<rect x=\"2.6\" y=\"6.8\" width=\"18.8\" height=\"10.4\" rx=\"2\"/>"
+    "<path d=\"M6.4 10.4h1.4M10.1 10.4h1.4M13.8 10.4h1.4M17.5 10.4h1.4\"/>"
+    "<path d=\"M8 13.9h8\"/>"
+    "</svg>";
+
+// Clock: system info.
+inline constexpr const char* kClock =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.8\">"
+    "<circle cx=\"12\" cy=\"12\" r=\"8.4\"/>"
+    "<path d=\"M12 7.6V12l3.2 2\"/>"
+    "</svg>";
+
 /** SVG source for an id, or nullptr when the id is not in the set. */
 inline const char* source(const char* id) {
     if (id == nullptr || *id == '\0') return nullptr;
@@ -110,6 +141,10 @@ inline const char* source(const char* id) {
         {"helmet", kHelmet},
         {"info", kInfo},
         {"exit", kExit},
+        {"vr", kVr},
+        {"speaker", kSpeaker},
+        {"keyboard", kKeyboard},
+        {"clock", kClock},
     };
     for (const auto& entry : kTable) {
         if (std::strcmp(entry.id, id) == 0) return entry.svg;
