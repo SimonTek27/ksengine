@@ -2683,6 +2683,16 @@ void NativeRenderer::shutdown() {
     if (m_inFlightFence) vkDestroyFence(m_device, m_inFlightFence, nullptr);
     if (m_commandPool) vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
+    // The overlay owns device objects of its own (pipeline, atlas image,
+    // dynamic buffers) and is created lazily, the first time something draws
+    // it. As plain members they would be destroyed in the destructor, after
+    // this function has already dropped the device, so a run that drew the
+    // menu crashed on exit while one that drew nothing shut down cleanly.
+    m_uiDisplay.reset();
+    m_uiForward.reset();
+    m_uiPass.reset();
+    m_uiAtlasPass = nullptr;
+
     vkDestroyDevice(m_device, nullptr);
     m_device = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
