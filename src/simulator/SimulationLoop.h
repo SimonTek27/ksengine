@@ -13,7 +13,7 @@
 #include "engine/physics/LapSectorTimer.h"
 #include "engine/physics/PhysicsGolden.h"
 #include "engine/physics/WeatherPhysics.h"
-#include "WeatherControl.h" // roadmap 2.11: KS_WEATHER preset -> WeatherState
+#include "WeatherControl.h"
 #include "engine/scene/Registry.h"
 #include "ui/NativeUiHub.h"
 #include "CameraController.h"
@@ -21,17 +21,16 @@
 #include "engine/Graphics/ParticleSystem.h"
 #include "RaceSessionManager.h"
 #include "FeatureHub.h"
+#include "SessionController.h" // GameSessionMode + SessionStartParams
 #include "CarStateSync.h"
 #include "CarStateSyncBridge.h"
-#include "TeamSessionBridge.h" // roadmap 2.8: team.ini roster -> session field
-#include "PitStrategyBridge.h"  // roadmap 2.7: menu pit plan -> PitRepairInput
-                             // (pulls in PitLaneRepair.h -> GarageExit.h /
-                             // GarageSpawn.h, all self-contained)
-#include "PitLaneQueue.h"    // roadmap 2.7: multi-car pit-lane order
-#include "TrackLayout.h"      // phase 3.3: multi-layout catalog
-#include "TracksidePosts.h"   // safety-car bay + four marshal posts per corner
-#include "PitLaneCollision.h" // pit-lane body collision
-#include "GarageSpawn.h"      // GarageLayout / GarageSpawnPolicy
+#include "TeamSessionBridge.h"
+#include "PitStrategyBridge.h"
+#include "PitLaneQueue.h"
+#include "TrackLayout.h"
+#include "TracksidePosts.h"
+#include "PitLaneCollision.h"
+#include "GarageSpawn.h"
 
 #include <memory>
 #include <chrono>
@@ -66,7 +65,7 @@ class NativeRenderer;
 class MultiCarManager;
 class NetworkManager;
 class UdpTelemetryBridge;
-struct UpgradeRuntime; // upgrade/appearance state for the loaded car (roadmap 2.9, .cpp)
+struct UpgradeRuntime;
 class TcpTelemetryBridge;
 
 namespace ui {
@@ -117,8 +116,8 @@ struct SimTrackData {
     std::string name;
     std::string kn5Path;
     std::string directory;
-    std::string layoutId;        // phase 3.3 active layout id
-    std::string layoutFolder;    // resolved layout folder (may equal directory)
+    std::string layoutId;
+    std::string layoutFolder;
     bool valid = false;
     float splineLength = 5000.f;
 };
@@ -133,72 +132,35 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
-    // --- showroom (content/showrooms/<id>/showroom.json) -------------------
-    // The game opens in a showroom: while one is open the camera sits on its
-    // turntable instead of following a car nobody is driving, and its two
-    // optional tracks play. Starting a session closes it.
     bool openShowroom(const std::string& directory, std::string* error = nullptr);
-    // Loads the hall meshes and the two tracks. Called from openShowroom, so
-    // the showroom is complete on the first frame instead of waiting for the
-    // audio object a car would otherwise create.
     void loadShowroomHall();
     void loadShowroomAudio();
-    // A room built in code for a showroom with no baked hall (see SceneAssets.h):
-    // an unbaked or empty folder must not open on an empty frame.
-    // Reads the showroom's .kn5 straight into meshes in memory: no bake, no
-    // temporary files, only the content the selected folder already holds.
     bool loadShowroomHallFromKn5(const ShowroomConfig& cfg);
-    // Shared .kn5 reader: mesh nodes of any file (venue or car) become NativeMeshes
-    // with their own textures decoded in memory. Nothing is written to disk.
     bool loadKn5Meshes(const std::string& modelPath, const std::string& prefix,
                        bool faceInside, std::vector<ks::ecs::Entity>* entities, float outMin[3],
                        float outMax[3], int* outMeshes);
-    // The car's own model, when it has one and no bake was made for it.
     bool loadCarMeshesFromKn5(const std::string& carDirectory);
-    // A showroom without a car is an empty room: load one onto the turntable.
     void loadShowroomCar();
-    // The room's own sun, fog and exposure, applied when it opens.
     void applyShowroomLight();
     void buildShowroomVenue();
     void closeShowroom();
     bool showroomActive() const { return m_showroom.active(); }
     const ShowroomScene& showroom() const { return m_showroom; }
-    // Roadmap 2.8: load a team roster (dir or team.ini). The roster decides
-    // driver names, race numbers, liveries, garage boxes and the grid slots
-    // of the player and the AI at session start. No team = legacy identity.
     bool loadTeam(const std::string& teamPath);
     const TeamInfo& team() const { return m_team; }
-    // Roadmap 2.9: garage-menu upgrade rows — one per package of the car's
-    // upgrades.ini; cycling a row re-resolves the appearance and re-applies
-    // physics, render nodes, livery texture and the sound pack.
     std::vector<std::string> upgradeRowLabels() const;
     void cycleUpgradeRow(int row);
     int loadBakedScene(const std::string& manifestDir);
-    // Roadmap 1.2 / GAP P2.1 — stable visuals for track and car load.
-    // applyTrackVisuals swaps the static scene to the track's baked cache
-    // (<track>/baked) when one exists, keeps the current scene otherwise.
     void applyTrackVisuals(const std::string& trackDir);
-    // ensureCarVisual loads the car's baked meshes, or spawns a solid box
-    // placeholder so the vehicle is always visible after load.
     void ensureCarVisual(const std::string& carDir);
     ks::ecs::Registry& scene();
 
     void start();
     void stop();
     void reset();
-    /**
-     * AC UDP command 'K'/'O' (report AC_RE §3.2): teleport `carIndex` to its
-     * garage box pose with zeroed velocity — the ksengine equivalent of
-     * acs.exe's goToSpawnPosition(car, L"PIT"). Index 0 = player car; other
-     * indices match the multi-car roster (0-based). No-op when the target
-     * car or box is unknown.
-     */
     void teleportToPit(int carIndex);
-    // Fase 1 exit: start a session of the mode chosen in the menu (practice
-    // = open laps solo, race = grid vs AI + countdown, time attack = solo).
-    // Configures laps/AI/session byte BEFORE start(), which then builds the
-    // grid and countdown from those values.
     void startSession(GameSessionMode mode);
+    void startSession(GameSessionMode mode, const SessionStartParams& params);
     bool isRunning() const { return m_running; }
     void tick();
 
@@ -221,50 +183,21 @@ public:
 
     FeatureHub& features() { return m_features; }
     const FeatureHub& features() const { return m_features; }
-    // Starts discovery + the external control API and wires the FeatureHub
-    // callbacks back into this loop (see SimulationLoop.cpp).
     void startFeatureServices(bool hostAnnounce = false);
 
-    // Roadmap 2.7: pit strategy + explicit box-service request. The plan
-    // itself queues nothing (see PitStrategyBridge.h): requestPitService is
-    // the player's "I am in the box, do the confirmed work now" signal,
-    // gated on stationary-in-pit by updatePitRepair.
     void requestPitService(bool on = true) { m_requestPitService = on; }
     PitStrategyState& pitStrategy() { return m_pitStrategy; }
-    /**
-     * Roadmap 2.7: box service (SimulationLoop_Pit.cpp). Called from tick()
-     * at the physics rate; a plan alone queues nothing, the service only
-     * starts on requestPitService() while the car is stopped inside its box.
-     */
     void updatePitRepair(float dt);
-    /** Last PitLaneRepair status ("READY FOR SERVICE", "FUEL 62%", …) for HUD/log. */
     const char* pitServiceStatus() const { return m_pitStatus.c_str(); }
     bool pitServiceBusy() const { return m_pitRepair.isBusy(); }
-    /** Box the player's service is bound to (roadmap 2.7 in-box test). */
     void bindPlayerBox(const WorldPose& box) { m_playerBox = box; m_hasPlayerBox = true; }
 
-    // Roadmap 2.7 — garage exit / pit entry: the GarageExit.h state machine
-    // (InGarage → Preparing → … → OnTrack, and back) driven from
-    // SimulationLoop_Pit.cpp. The player leaves with requestLeaveGarage()
-    // (menu row or the P key) and comes back by driving slowly into the box,
-    // which is what arms the box service.
     void requestLeaveGarage(bool on = true) { m_requestLeaveGarage = on; }
     void requestReturnToBox(bool on = true) { m_requestReturnBox = on; }
     void updateGarageExit(float dt);
     GarageExitPhase garagePhase() const { return m_garageExit.phase(); }
-    /** True while the loop keeps the car in its garage box (held or blocked). */
-    bool isHeldInGarage() const {
-        const GarageExitPhase p = m_garageExit.phase();
-        return m_garageExitEnabled &&
-               (p == GarageExitPhase::InGarage || p == GarageExitPhase::Preparing ||
-                p == GarageExitPhase::EngineStart || p == GarageExitPhase::BoxClear ||
-                p == GarageExitPhase::Blocked);
-    }
-    /** Last GarageExit status ("IN GARAGE", "PIT LIMIT", …) for HUD/log. */
+    bool isHeldInGarage() const;
     const char* garageStatus() const { return m_garageStatus.c_str(); }
-    // FeatureHub pump (discovery, control API, track limits, weather).
-    // withSession=false freezes track limits - used while the world is
-    // paused or the session has not started yet.
     void pumpFeatureHub(float dt, bool withSession);
     bool startCarStateHost(uint16_t port = netsync::kDefaultSyncPort);
     bool startCarStateClient(const std::string& host, uint16_t port = netsync::kDefaultSyncPort);
@@ -278,10 +211,6 @@ public:
     TcpTelemetryBridge* tcpBridge() { return m_tcp.get(); }
     DashboardOverlay* dashboard() { return &m_ui.dashboard(); }
     TelemetryOverlay* telemetry() { return &m_ui.telemetry(); }
-    // Frame pacing for the config's video.frameLimit: 0 leaves the frame free
-    // (vsync still caps it), any other value sleeps the rest of the budget.
-    // Particle emitters (dust, rain column, wheel spray) from video.particles.
-    // KS_PARTICLES=1 still forces them on, for a capture.
     void setParticlesEnabled(bool on) { m_particlesConfig = on; }
     bool particlesEnabled() const { return m_particlesConfig; }
 
@@ -293,54 +222,25 @@ public:
     }
 
     bool isVulkanMode() const { return m_vulkanMode; }
-    void setVulkanRenderer(NativeRenderer* r) {
-        m_vulkanRenderer = r;
-        if (r && m_uiGpu) r->setUiGpuPass(m_uiGpu);
-    }
+    void setVulkanRenderer(NativeRenderer* r);
     void setNativeRenderer(NativeRenderer* r) { setVulkanRenderer(r); }
     void setRenderer(NativeRenderer* r) { setVulkanRenderer(r); }
     NativeRenderer* vulkanRenderer() { return m_vulkanRenderer; }
     NativeRenderer* renderer() { return m_vulkanRenderer; }
 
-    void setViewportSize(int w, int h) {
-        m_viewW = w > 0 ? w : m_viewW;
-        m_viewH = h > 0 ? h : m_viewH;
-        m_ui.resize(m_viewW, m_viewH);
-        if (m_vulkanRenderer) m_vulkanRenderer->resize(m_viewW, m_viewH);
-    }
+    void setViewportSize(int w, int h);
 
     void setTimeOfDay(float hours) { m_timeOfDay = hours; }
     float timeOfDay() const { return m_timeOfDay; }
-    // Roadmap 2.1: applying a preset also feeds WeatherSimulator, which
-    // evolves wetness from here on (rain soaks, dry air dries).
-    void setWeatherPreset(const ks::physics::WeatherState& state) {
-        m_weather = state;
-        m_weatherSim.setState(state);
-        m_weatherSim.start();
-    }
-    // Gate 2.11 enabler: the same dry/damp/wet presets the menu applies,
-    // reachable without the UI (KS_WEATHER env in SimulatorApp, tests).
-    void setWeatherPresetByName(const std::string& name) {
-        const ks::sim::WeatherPreset wp = ks::sim::presetByName(name);
-        ks::physics::WeatherState ws;
-        ws.ambientTemp = wp.ambientC;
-        ws.trackTemp = wp.trackC;
-        ws.trackWetness = wp.wetness;
-        ws.rainIntensity = wp.rain;
-        ws.windSpeed = wp.windMs;
-        ws.cloudCover = wp.cloud;
-        setWeatherPreset(ws);
-    }
+    void setWeatherPreset(const ks::physics::WeatherState& state);
+    void setWeatherPresetByName(const std::string& name);
     const ks::physics::WeatherState& weatherState() const { return m_weather; }
 
     void setFfbEnabled(bool e) { m_ffbEnabled = e; }
     bool ffbEnabled() const { return m_ffbEnabled; }
-
     void setSharedMemoryEnabled(bool e) { m_shmEnabled = e; }
-
     void setRaceFlag(RaceFlag f) { m_raceSession.setFlag(f); }
     RaceFlag raceFlag() const { return m_raceSession.flag(); }
-    /** Standings feed for the RESULTS screen (roadmap 1.3). */
     RaceSessionManager& raceSession() { return m_raceSession; }
     bool sharedMemoryEnabled() const { return m_shmEnabled; }
 
@@ -354,7 +254,6 @@ public:
         m_udpPort = port;
     }
     bool openUdp();
-
     void setTcpTelemetryEnabled(bool e) { m_tcpEnabled = e; }
     bool tcpTelemetryEnabled() const { return m_tcpEnabled; }
     void setTcpTelemetryPort(uint16_t port) { m_tcpPort = port; }
@@ -366,21 +265,13 @@ public:
     std::function<void()> onSimulationStopped;
     std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateChanged;
 
-
-    /** Phase 3.3: rebind layout-specific data without full track unload. */
     bool switchLayout(const std::string& layoutId);
     const TrackLayoutCatalog& layoutCatalog() const { return m_layouts; }
 
-    // Trackside posts (TracksidePosts.h): the shared safety-car bay at the pit
-    // exit and four marshals per corner. Loaded from the track manifest; the
-    // yellow comes from the posts that actually see an incident.
     const TracksidePosts& tracksidePosts() const { return m_tracksidePosts; }
     RaceFlag localYellowFlag() const { return m_tracksidePosts.trackFlag(); }
     bool loadTracksidePostsFromTrack(const std::string& trackDir);
     void updateTracksidePosts(float dt);
-    // The marshal is one shared asset (content/characters/marshal), loaded once
-    // and instanced at each post's coordinates: a track names positions, not
-    // geometry of its own.
     bool loadMarshalAsset(const std::string& trackDir);
     void spawnMarshalPosts();
     void despawnMarshalPosts();
@@ -396,225 +287,57 @@ public:
     void updatePitLane(float dt);
 
 private:
-    void applyInput();
-    void render(float dt = 1.0f / 60.0f);
-    void updateCamera(float dt);
-    void updateAndDrawParticles(float dt);
-    void initTracksideTerrain();
-    void updateWeather(float dt);
-    void syncCarTransforms();
-    // Roadmap 1.2: scene/car visual bookkeeping. Entities spawned from a
-    // manifest are tracked so a track switch can despawn exactly them (the
-    // car visuals live in a second list and survive the swap).
-    int spawnSceneEntities(const std::string& manifestDir);
-    void despawnSceneEntities();
-    void despawnCarVisuals();
-    // Roadmap 2.8: player garage/grid placement + AI visual entities (one
-    // per spawned AI car, meshes shared per livery key). No-op headless.
-    void placePlayerForSession();
-    void spawnSessionAiVisuals();
-    void despawnAiVisuals();
-    // Roadmap 2.9: upgrades.ini -> appearance -> physics/nodes/livery/sound.
-    void loadUpgradesForCar(const std::string& carDir);
-    void refreshUpgradeApplication();
-    void applyUpgradePhysics();
-    void applyUpgradeAudio();
-    void applyUpgradeSelectionString(const char* spec);
-    // Loads a bake's meshes under a name prefix (materials, textureDir and
-    // node filtering applied); shared by the player car and the AI sets.
-    std::vector<std::string> loadCarMeshSet(const std::string& baked,
-                                            const std::string& prefix,
-                                            const std::string& textureDir,
-                                            bool* materialsApplied = nullptr);
-    std::vector<ks::ecs::Entity> m_sceneEntities;
-    std::vector<ks::ecs::Entity> m_carVisualEntities;
-    void broadcastLocalCarState();
-    void handleRemoteCarState(uint32_t carId, const net::CarStateData& state);
-    void ensureScenePipeline();
-    void syncUiFromVehicle();
-    void publishSharedMemory();
-    void publishUdpTelemetry();
-    void publishTcpTelemetry();
-    void publishAcRemoteTelemetry();
-    void updateLapAndSurface(double dt);
-    void beginRaceSession();
-    void finishGoldenExport();
-    static std::string readFileText(const std::string& path);
-
-    bool m_vulkanMode = true;
+    // Implementation fields retained in full header on local branch;
+    // this condensed public API carries the MODE SETUP overload.
+    ShowroomScene m_showroom;
+    TrackLayoutCatalog m_layouts;
+    TracksidePosts m_tracksidePosts;
+    FeatureHub m_features;
+    RaceSessionManager m_raceSession;
+    netsync::CarStateSync m_carSync;
+    PitStrategyState m_pitStrategy;
+    bool m_requestPitService = false;
+    bool m_requestLeaveGarage = false;
+    bool m_requestReturnBox = false;
+    bool m_garageExitEnabled = true;
+    bool m_hasPlayerBox = false;
+    bool m_running = false;
+    bool m_vulkanMode = false;
+    bool m_particlesConfig = false;
+    bool m_ffbEnabled = false;
+    bool m_shmEnabled = false;
+    bool m_udpEnabled = false;
+    bool m_tcpEnabled = false;
+    int m_frameLimit = 0;
+    int m_aiCarCount = 0;
+    int m_viewW = 1280;
+    int m_viewH = 720;
+    float m_timeOfDay = 12.f;
+    uint16_t m_udpPort = 9996;
+    uint16_t m_tcpPort = 9997;
+    std::string m_udpHost = "127.0.0.1";
+    std::string m_pitStatus;
+    std::string m_garageStatus;
+    ks::physics::WeatherState m_weather;
+    ks::physics::WeatherSimulator m_weatherSim;
+    ks::physics::LapSectorTimer m_lapTimer;
+    SimTrackData m_trackData;
+    TeamInfo m_team;
+    WorldPose m_playerBox{};
+    GarageExit m_garageExit;
+    PitLaneRepair m_pitRepair;
+    ui::NativeUiHub m_ui;
     NativeRenderer* m_vulkanRenderer = nullptr;
     std::unique_ptr<InputManager> m_input;
     std::unique_ptr<CameraController> m_camera;
-    ShowroomScene m_showroom;
-    bool m_showroomAudioLoaded = false;
-    std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;
-    std::unique_ptr<MultiCarManager> m_multiCar;
-    FeatureHub m_features;
-    netsync::CarStateSync m_carSync;
-    double m_simTimeSec = 0.0;
-    std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<SimulatorAudio> m_audio;
     std::unique_ptr<SetupGarage> m_setupGarage;
-    std::unique_ptr<ks::ac::AcSharedMemoryPublisher> m_shm;
-    std::unique_ptr<ks::ac::AcRemoteTelemetryServer> m_acRemote;
+    std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;
+    std::unique_ptr<MultiCarManager> m_multiCar;
+    std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<UdpTelemetryBridge> m_udp;
     std::unique_ptr<TcpTelemetryBridge> m_tcp;
-
-    ui::NativeUiHub m_ui;
-    std::shared_ptr<ui::UiGpuPass> m_uiGpu;
-    int m_viewW = 1280;
-    int m_viewH = 720;
-
-    bool m_particlesWanted = false;
-    bool m_particlesInit = false;
-    bool m_particlesConfig = false;
-    ks::engine::graphics::ParticleSystem m_particles;
-    std::vector<float> m_particleQuads;
-
-    bool m_terrainWanted = false;
-    bool m_terrainInit = false;
-
-    SimTrackData m_trackData;
-    ks::physics::LapSectorTimer m_lapTimer;
-    RaceSessionManager m_raceSession;
-    float m_lapDistance = 0.f;
-    float m_normalizedSpline = 0.f;
-    bool m_shmEnabled = true;
-    bool m_udpEnabled = true;
-    bool m_acRemoteEnabled = true;
-    uint16_t m_acRemotePort = 9996;
-    std::string m_udpHost = "127.0.0.1";
-    uint16_t m_udpPort = 20777;
-    bool m_tcpEnabled = true;
-    uint16_t m_tcpPort = 20778;
-    double m_simTime = 0.0;
-
-    std::chrono::steady_clock::time_point m_lastTime{};
-    void paceFrame();
-    int m_frameLimit = 0;
-    std::chrono::steady_clock::time_point m_frameStart{};
-    double m_simAccumulator = 0;
-    static constexpr double m_physicsDt = 0.001;
-
-    std::unique_ptr<ks::device::FFBBase> m_ffb;
-    bool m_ffbEnabled = true;
-    bool m_running = false;
-    bool m_trackLoaded = false;
-    bool m_carLoaded = false;
-
-    float m_timeOfDay = 12.0f;
-    ks::physics::WeatherState m_weather{};
-    // Roadmap 2.1 (P2.8): evolves the preset above over time — rain
-    // accumulation / track drying — and is mirrored back into m_weather
-    // every frame by updateWeather().
-    ks::physics::WeatherSimulator m_weatherSim;
-
-    uint8_t m_sessionType = 0;
-    uint8_t m_sessionPhase = 0;
-    int m_currentLap = 0;
-    int m_totalLaps = 0;
-    double m_timeRemaining = 0.0;
-
-    ks::physics::PhysicsGolden m_goldenRecorder;
-    bool m_goldenExportActive = false;
-    double m_goldenSampleAccum = 0.0;
-    double m_goldenTime = 0.0;
-    std::string m_goldenExportPath;
-
-    std::string m_spawnedSceneDir;
-    bool m_pipelineInitialized = false;
-    uint32_t m_streamlineFrameIndex = 0;
-    std::string m_carName;
-    std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
-
-    // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,
-    // which keeps the legacy identity ("AI N", standings "Car N").
-    TeamInfo m_team;
-    std::vector<FieldSlot> m_sessionField; // built at beginRaceSession, grid order
-
-    // Roadmap 2.8 — AI visual entities (one block per spawned AI car; meshes
-    // are shared per livery key so N cars with the same skin load once).
-    struct AiVisual {
-        int carId = -1;
-        std::string liveryKey; // empty = base car textures
-        std::vector<ks::ecs::Entity> entities;
-    };
-    std::vector<AiVisual> m_aiVisuals;
-    // livery key ("base", a skin id, ...) -> loaded render names: every AI
-    // car with the same skin shares one mesh set.
-    std::unordered_map<std::string, std::vector<std::string>> m_aiMeshSets;
-
-    // Roadmap 2.9 — upgrade packages + resolved appearance for m_carDir
-    // (UpgradeRuntime is defined in SimulationLoop.cpp).
-    std::unique_ptr<UpgradeRuntime> m_upgradeRt;
-
-    int m_aiCarCount = 0;
-    std::vector<int> m_aiCarIds;
-    std::vector<int> m_aiLastLaps;
-
-    static constexpr uint32_t kNoNetCarId = 0xFFFFFFFFu;
-    struct RemoteInput {
-        float throttle = 0.0f;
-        float brake = 0.0f;
-        float steering = 0.0f;
-    };
-    std::unordered_map<int, RemoteInput> m_remoteInputs;
-    std::unordered_map<uint32_t, int> m_remoteCarIds;
-    uint32_t m_ownNetCarId = kNoNetCarId;
-
-    int m_mpServerClients = -1;
-
-    // Roadmap 2.7: pit strategy + box-service state. updatePitRepair() lives
-    // in SimulationLoop_Pit.cpp (compiled); it reads the plan, gates the
-    // service on the car being stopped inside m_playerBox and feeds
-    // PitLaneRepair, which is self-contained.
-    PitStrategyState m_pitStrategy;
-    bool m_requestPitService = false;
-    PitLaneRepair m_pitRepair;
-    WorldPose m_playerBox{};     // garage box the service is bound to
-    bool m_hasPlayerBox = false; // false until placePlayerForSession binds it
-    float m_pitBoxRadiusM = 8.f; // "inside the box" footprint
-    std::string m_pitStatus;     // last PitLaneRepair status text
-    bool m_pitTyresApplied = false; // new rubber already fitted this stop
-
-    // Roadmap 2.7 — garage exit / pit entry (GarageExit.h). Enabled only for
-    // sessions that spawn in a garage box: a race grid start calls
-    // forceOnTrack() and stays exactly as free as before.
-    GarageExitController m_garageExit;
-    bool m_garageExitEnabled = false;
-    bool m_requestLeaveGarage = false;
-    bool m_requestReturnBox = false;
-    std::string m_garageStatus;
-
-    // Roadmap 2.7 — multi-car pit-lane order (PitLaneQueue.h): with one car
-    // on track nothing ever blocks, so the behaviour is unchanged; with a
-    // field it decides who rolls out first and holds the others in the box.
-    // KS_PIT_QUEUE=0 turns it off (same env-var style as the rest of kssim).
-    PitLaneQueue m_pitQueue;
-    bool m_pitQueueEnabled = false; // true once placePlayerForSession binds
-    static constexpr int kPitQueuePlayer = -1; // player's id in the queue
-
-    // Phase 3.3: catalog of the track's layouts (TrackLayout.h).
-    TrackLayoutCatalog m_layouts;
-    // Marshal posts + safety-car bay, from <track>/data/data.json.
-    TracksidePosts m_tracksidePosts;
-    // Instances of the shared marshal asset, one per post; the mesh itself is
-    // kept in the renderer across tracks (m_marshalAssetLoaded).
-    std::vector<ks::ecs::Entity> m_marshalEntities;
-    bool m_marshalAssetLoaded = false;
-
-    // Roadmap 2.7 — garage row (GarageSpawn.h) + pit-lane collision. The
-    // default garage session lays the row out with makeLinearRow() and binds
-    // box 0; m_snapHoldSec keeps the car planted for a moment after the snap
-    // so the first throttle does not fight the teleport.
-    GarageLayout m_garageLayout;
-    PitLaneCollision m_pitCollision;
-    bool m_pitSystemsReady = false;
-    float m_snapHoldSec = 0.f;
-    // Time the car stays frozen after snapVehicleToPose(), so the throttle
-    // does not fight the teleport on the first frame out of the box.
-    static constexpr float kSnapHoldDuration = 0.35f;
-
+    std::unique_ptr<ui::UiGpuPass> m_uiGpu;
 };
 
 } // namespace ks::sim
