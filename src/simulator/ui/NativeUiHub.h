@@ -496,12 +496,15 @@ private:
         }
 
         for (int i = 0; i < L.count; ++i) {
-            const int row = L.item[i];
-            if (row < 0) continue;
+            // The strip counts slots, the menu counts rows, and the separators
+            // sit between them: a slot points at the next row that is a tile.
+            const int slot = L.first + i;
+            if (slot < 0 || slot >= static_cast<int>(rows.size())) continue;
+            const int row = rows[slot];
             const MenuItem& item = items[row];
             const Rect r = L.tile[i];
             const bool selected = (i == selSlot);
-            const bool hover = (row == m_menu->hoverIndex());
+            const bool hover = (slot == m_menu->hoverIndex());
 
             dl.addRectFilled(r, Color::rgba(0.05f, 0.05f, 0.07f,
                                            (selected ? 0.92f : (hover ? 0.80f : 0.68f)) * a));
@@ -527,7 +530,9 @@ private:
         }
 
         if (selSlot >= 0 && selSlot < L.count) {
-            const int row = L.item[selSlot];
+            const int slot = L.first + selSlot;
+            const int row =
+                (slot >= 0 && slot < static_cast<int>(rows.size())) ? rows[slot] : -1;
             if (row >= 0) {
                 const MenuItem& item = items[row];
                 const float slide = (1.f - m_menu->transitionProgress()) * 26.f;
