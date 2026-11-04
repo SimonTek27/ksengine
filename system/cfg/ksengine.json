@@ -5,7 +5,7 @@
     "config": "system/cfg/ksengine.json",
     "playerOverrides": "user/<player>/settings.json",
     "precedence": "system/cfg first, user file second, later wins per key",
-    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and where every Content Manager page and Custom Shaders Patch module lands. Only physics.fixedDt, audio.master, assist.tc and assist.abs are consumed by the runtime today; every other key is documentation and is ignored by the loader, so it can never break a session."
+    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and the features it owns, with the status each one has today. Only physics.fixedDt, audio.master, assist.tc and assist.abs are consumed by the runtime; every other key is documentation and is ignored by the loader, so it can never break a session."
   },
   "effectiveKeys": [
     "physics.fixedDt",
@@ -30,10 +30,9 @@
     ],
     "from": [
       "cm:settings/content-manager",
-      "cm:settings/assetto-corsa",
-      "cm:settings/custom-shaders-patch"
+      "cm:settings/assetto-corsa"
     ],
-    "note": "Content Manager splits its settings across three panels; in KinetiKa they are three entries of the same SETTINGS screen, with the Custom Shaders Patch pages folded into the two below (image) and one (input)."
+    "note": "Content Manager splits its settings across three panels; in KinetiKa they are three entries of the same SETTINGS screen, and the image options all live in the video page."
   },
   "video": {
     "resolution": "1920x1080",
@@ -71,149 +70,146 @@
         "note": "Resolution, fullscreen and vsync switch the window and the swapchain at runtime; anisotropic filtering and the shadow map size are fixed when assets load."
       },
       {
-        "from": "csp:graphics_adjustments",
+        "feature": "displayTuning",
         "status": "partial",
         "landsAs": "exposure, tonemap",
-        "note": "Only the parts the display pass honours: exposure and tone curve. The rest of the page has no equivalent pass."
+        "note": "Only the parts the display pass honours: exposure and tone curve."
       },
       {
-        "from": "csp:lighting_fx",
+        "feature": "bloomAndFlare",
         "status": "missing",
-        "landsAs": null,
-        "note": "No emissive/light bloom chain in the deferred path."
+        "landsAs": null
       },
       {
-        "from": "csp:extra_fx",
+        "feature": "ssgi",
         "status": "missing",
-        "landsAs": null,
-        "note": "No SSGI, no screen-space shadows accumulation."
+        "landsAs": null
       },
       {
-        "from": "csp:reflections_fx",
+        "feature": "screenSpaceReflections",
         "status": "partial",
         "landsAs": "ssr",
-        "note": "Screen-space reflections exist; planar/mirror reflections do not."
+        "note": "Screen-space reflections exist; planar and mirror reflections do not."
       },
       {
-        "from": "csp:smart_mirror",
+        "feature": "mirrors",
         "status": "missing",
-        "landsAs": null,
-        "note": "No mirror pass; the Value is kept for reference only."
+        "landsAs": null
       },
       {
-        "from": "csp:smart_shadows",
+        "feature": "shadowMap",
         "status": "partial",
         "landsAs": "shadowMapSize",
-        "note": "One cascade shadow map at a fixed size, no per-frame retargeting."
+        "note": "One cascade shadow map at a fixed size, without per-frame retargeting."
       },
       {
-        "from": "csp:shadowed_wheels",
+        "feature": "wheelShadowing",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:colorful_shadowing",
+        "feature": "coloredShadows",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:custom_rendering_modes",
+        "feature": "renderModes",
         "status": "partial",
         "landsAs": "deferred pass",
         "note": "Forward and deferred paths exist; the list of named modes does not."
       },
       {
-        "from": "csp:data_gbuffer",
+        "feature": "gbufferLayout",
         "status": "partial",
         "landsAs": "deferred gbuffer",
         "note": "The deferred path has its own gbuffer layout; per-material overrides are not loaded."
       },
       {
-        "from": "csp:grass_fx",
+        "feature": "grass",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:particles_fx",
+        "feature": "particles",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:rain_fx",
+        "feature": "rain",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:windscreen_fx",
+        "feature": "windscreenEffects",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:skidmarks_fx",
+        "feature": "skidmarks",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:fake_shadows_fx",
+        "feature": "fakeShadows",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:tyres_fx",
+        "feature": "tyreVisuals",
         "status": "missing",
         "landsAs": null,
-        "note": "Tyres render as plain meshes; no deformation or flat-spot visuals."
+        "note": "Tyres render as plain meshes: no deformation or flat-spot visuals."
       },
       {
-        "from": "csp:weather_fx",
+        "feature": "weatherShaders",
         "status": "partial",
         "landsAs": "weather preset",
-        "note": "A weather state drives sun and sky values; the shader-level weather system is absent."
+        "note": "A weather state drives sun and sky values; shader-level weather is absent."
       },
       {
-        "from": "csp:yebisest",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "csp:dxgi_tweaks",
+        "feature": "postChain",
         "status": "missing",
         "landsAs": null,
-        "note": "Vulkan swapchain: no DXGI present hooks."
+        "note": "The native display pass applies exposure, the tone curve and the ppfilter LUT; no external post-processing middleware is involved."
       },
       {
-        "from": "csp:vr_tweaks",
+        "feature": "presentHooks",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:triple_custom",
+        "feature": "vrSupport",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:neck",
+        "feature": "tripleScreen",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "headPhysics",
         "status": "missing",
         "landsAs": null,
-        "note": "Camera is rigid; no head physics."
+        "note": "The camera is rigid: no head physics."
       },
       {
-        "from": "csp:freer_camera",
+        "feature": "freeCamera",
         "status": "partial",
         "landsAs": "orbit camera",
         "note": "A free orbit camera exists for the showroom and the menu backdrop."
       },
       {
-        "from": "csp:chaser_camera",
+        "feature": "chaseCamera",
         "status": "partial",
         "landsAs": "chase camera",
-        "note": "Chase and cockpit views exist, without the spring/offset tuning of the page."
+        "note": "Chase and cockpit views exist, without spring or offset tuning."
       },
       {
         "from": "ac:cfg/camera_manager",
         "status": "partial",
         "landsAs": "chase / cockpit cameras",
-        "note": "Two views exist and switch; the page's per-camera bookmarks are not read."
+        "note": "Two views exist and switch; its per-camera bookmarks are not read."
       },
       {
         "from": "ac:cfg/camera_onboard",
@@ -255,10 +251,10 @@
         "note": "Master is a real setting. Engine, wind, tyre and opponent levels are driven per frame by the session, so they are not exposed as preferences."
       },
       {
-        "from": "csp:music",
+        "feature": "musicPlayer",
         "status": "live",
         "landsAs": "showroom music channel",
-        "note": "The showroom plays ambience and music with declick and headroom; there is no playlists page."
+        "note": "The showroom plays ambience and music with declick and headroom; there is no playlists screen."
       },
       {
         "from": "cm:settings/content-manager/audio",
@@ -291,33 +287,31 @@
         "landsAs": null
       },
       {
-        "from": "csp:gamepad_fx",
+        "feature": "gamepadInput",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:ffb_tweaks",
+        "feature": "forceFeedback",
         "status": "missing",
-        "landsAs": null,
-        "note": "No force feedback device path yet."
+        "landsAs": null
       },
       {
-        "from": "csp:g27_lights",
+        "feature": "wheelLeds",
         "status": "missing",
-        "landsAs": null,
-        "note": "No wheel LED or rev-light output: the input path is keyboard only, and a device that reports LEDs is ignored."
+        "landsAs": null
       },
       {
-        "from": "csp:data_controls_props",
+        "feature": "actionProps",
         "status": "partial",
         "landsAs": "action labels",
-        "note": "The action names live in code, not in a data file."
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "csp:data_hotkeys_supported",
+        "feature": "hotkeyList",
         "status": "partial",
         "landsAs": "global hotkeys",
-        "note": "F5/F11/T/P exist as fixed bindings."
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
         "from": "ac:cfg/trackir",
@@ -372,13 +366,13 @@
         "note": "Car collisions are always on; the collision radius is fixed."
       },
       {
-        "from": "csp:new_behaviour",
+        "feature": "vehicleSystems",
         "status": "partial",
         "landsAs": "vehicle model",
-        "note": "Gearbox, clutch and tyre model are the engine's own; the page's extra systems are not ported."
+        "note": "Gearbox, clutch and tyre model are the engine's own; the extra systems are not ported."
       },
       {
-        "from": "csp:small_tweaks",
+        "feature": "gameplayTweaks",
         "status": "missing",
         "landsAs": null
       }
@@ -409,28 +403,28 @@
         "note": "No password, slot list or booking."
       },
       {
-        "from": "csp:spectating",
+        "feature": "spectatorMode",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:chat_shortcuts",
+        "feature": "chatBindings",
         "status": "partial",
         "landsAs": "chat",
-        "note": "Free text chat exists; binds and emoji do not."
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "csp:data_emoji",
+        "feature": "chatEmoji",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:mumble_plugin",
+        "feature": "voiceChat",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_spectator_brightness_fix",
+        "feature": "spectatorView",
         "status": "missing",
         "landsAs": null
       },
@@ -467,10 +461,10 @@
         "note": "Career totals are kept and written to stats.json; there is no championship progression."
       },
       {
-        "from": "csp:data_countries",
+        "feature": "nationalityList",
         "status": "live",
         "landsAs": "nationality picker",
-        "note": "The picker list is compiled in rather than read from the CSP data file."
+        "note": "Implemented and driven by this section."
       }
     ]
   },
@@ -492,32 +486,32 @@
         "note": "The showroom is a real scene (content/showrooms/industrial)."
       },
       {
-        "from": "csp:car_instruments",
+        "feature": "carInstruments",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:brakedisc_fx",
+        "feature": "brakeGlow",
         "status": "partial",
         "landsAs": "brake glow",
         "note": "Discs glow with temperature; there is no glow texture or spark set."
       },
       {
-        "from": "csp:walking_out",
+        "feature": "walkMode",
         "status": "partial",
         "landsAs": "leave garage / return to box",
         "note": "Pit lane phases exist; the driver does not walk."
       },
       {
-        "from": "csp:data_setup_names",
+        "feature": "setupCatalog",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:surfaces_fx",
+        "feature": "surfaceEffects",
         "status": "partial",
         "landsAs": "track surface grip",
-        "note": "Surface names map to friction; the per-surface effects are not rendered."
+        "note": "Surface names map to friction; per-surface effects are not rendered."
       }
     ]
   },
@@ -603,7 +597,7 @@
         "from": "cm:content/showrooms",
         "status": "partial",
         "landsAs": "garage scene",
-        "note": "One showroom is installed; the page's preview grid does not exist."
+        "note": "One showroom is installed; its preview grid does not exist."
       },
       {
         "from": "cm:content/misc/skins",
@@ -616,29 +610,29 @@
         "landsAs": null
       },
       {
-        "from": "csp:tracks",
+        "feature": "trackCatalog",
         "status": "partial",
         "landsAs": "track.ini",
-        "note": "Track data is read per track; the CSP track catalogue is not loaded."
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "csp:track_adjustments",
+        "feature": "trackTweaks",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_manifest",
+        "feature": "contentManifest",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_standard_content",
+        "feature": "standardContent",
         "status": "partial",
         "landsAs": "content scan",
-        "note": "Folders are scanned directly; there is no standard-content allow list."
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "csp:data_alt_mapping",
+        "feature": "materialMapping",
         "status": "missing",
         "landsAs": null
       }
@@ -661,36 +655,35 @@
         "note": "Scrolling list with the car folder name; class and year filters are declared but not applied."
       },
       {
-        "from": "csp:data_car_classes",
+        "feature": "carClasses",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_car_years",
+        "feature": "carYears",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_paintable",
+        "feature": "paintableBody",
         "status": "partial",
         "landsAs": "body material",
-        "note": "Car bodywork maps to the CARBODY material; paintable regions are not declared per car."
+        "note": "Bodywork maps to the CARBODY material; paintable regions are not declared per car."
       },
       {
-        "from": "csp:data_oem_colors_modern",
+        "feature": "oemColorsModern",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_oem_colors_vintage",
+        "feature": "oemColorsVintage",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:cars",
+        "feature": "carCatalog",
         "status": "missing",
-        "landsAs": null,
-        "note": "Per-car CSP data files are not parsed."
+        "landsAs": null
       }
     ]
   },
@@ -703,10 +696,10 @@
         "landsAs": "TRACKS page"
       },
       {
-        "from": "csp:tracks",
+        "feature": "trackCatalog",
         "status": "partial",
         "landsAs": "track.ini",
-        "note": "Layouts come from the track folder; CSP layout metadata is ignored."
+        "note": "Partially implemented: see landsAs for the part that exists."
       }
     ]
   },
@@ -724,12 +717,12 @@
         "landsAs": null
       },
       {
-        "from": "csp:data_helmets",
+        "feature": "helmets",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_human_materials",
+        "feature": "driverMaterials",
         "status": "missing",
         "landsAs": null
       }
@@ -776,10 +769,10 @@
         "note": "Rounded cards, resume/restart/garage/settings/quit."
       },
       {
-        "from": "csp:nice_screenshots",
+        "feature": "photoMode",
         "status": "partial",
         "landsAs": "photo mode",
-        "note": "A photo mode with free camera exists; the page's filters and DOF do not."
+        "note": "A photo mode with a free camera exists; its filters and depth of field do not."
       }
     ]
   },
@@ -812,18 +805,19 @@
         "note": "No launcher page: the simulator opens on the tiles."
       },
       {
-        "from": "csp:gui",
+        "feature": "hudWidgets",
         "status": "partial",
         "landsAs": "header bar",
-        "note": "The header (clock, notifications, quick actions) is the part of CSP's GUI page that has a counterpart; its widget list does not."
+        "note": "The header bar (clock, notifications, quick actions) is the part with a counterpart; no widget list."
       },
       {
-        "from": "csp:taskbar",
+        "feature": "headerBar",
         "status": "partial",
-        "landsAs": "header bar"
+        "landsAs": "header bar",
+        "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "csp:splashscreen",
+        "feature": "splash",
         "status": "missing",
         "landsAs": null
       }
@@ -837,7 +831,7 @@
         "landsAs": "CREDITS screen"
       },
       {
-        "from": "csp:data_credits",
+        "feature": "creditsList",
         "status": "missing",
         "landsAs": null
       }
@@ -847,33 +841,33 @@
     "enabled": false,
     "sources": [
       {
-        "from": "csp:general",
+        "feature": "coreSwitches",
         "status": "missing",
         "landsAs": null,
-        "note": "The patch's core switches have no counterpart; the runtime is its own engine."
+        "note": "The runtime is its own engine: there are no core switches to inherit."
       },
       {
-        "from": "csp:lua_tools",
+        "feature": "scripting",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:module_lw",
+        "feature": "moduleLoader",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_imgui_symbols",
+        "feature": "hudSymbols",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_apps_allowed_to_pause",
+        "feature": "appPausePolicy",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "csp:data_apps_virtual_tyres_fix",
+        "feature": "virtualTyres",
         "status": "missing",
         "landsAs": null
       },
