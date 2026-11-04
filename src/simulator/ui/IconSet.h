@@ -155,6 +155,22 @@ inline constexpr const char* kRefresh =
     "<path d=\"M19.9 4.4v5h-5\"/>"
     "</svg>";
 
+// Home: a roof over a door. The bar's first button: it always goes back to
+// the screen the game opens on, whatever the trail behind the player is.
+inline constexpr const char* kHome =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.6\">"
+    "<path d=\"M3.4 10.8L12 3.8l8.6 7\"/>"
+    "<path d=\"M5.8 12.4v7.2a1 1 0 0 0 1 1h10.4a1 1 0 0 0 1-1v-7.2\"/>"
+    "<path d=\"M9.9 20.6v-5h4.2v5\"/>"
+    "</svg>";
+
+// Bell: the notification readout that closes the bar, after the clock.
+inline constexpr const char* kBell =
+    "<svg viewBox=\"0 0 24 24\" stroke-width=\"1.7\">"
+    "<path d=\"M6.3 16.7V11a5.7 5.7 0 0 1 11.4 0v5.7l1.5 2H4.8z\"/>"
+    "<path d=\"M10 20.4a2.2 2.2 0 0 0 4 0\"/>"
+    "</svg>";
+
 /** SVG source for an id, or nullptr when the id is not in the set. */
 inline const char* source(const char* id) {
     if (id == nullptr || *id == '\0') return nullptr;
@@ -177,6 +193,8 @@ inline const char* source(const char* id) {
         {"back", kBack},
         {"forward", kForward},
         {"refresh", kRefresh},
+        {"home", kHome},
+        {"bell", kBell},
     };
     for (const auto& entry : kTable) {
         if (std::strcmp(entry.id, id) == 0) return entry.svg;

@@ -142,9 +142,50 @@ public:
         m_cmds.push_back(std::move(d));
     }
 
+    /** Filled rectangle with live corners. A card is a convex shape, so it is
+     *  emitted as one vector fill: no new pipeline state, no extra pass, and
+     *  the same command the SVG icons already go through. */
+    void addRoundedRectFilled(const Rect& r, const Color& c, float radius,
+                              int segmentsPerCorner = 4) {
+        addPolygonFill(roundedRectPoints(r, radius, segmentsPerCorner), c);
+    }
+
+    /** Outline of the same shape, so a card's border follows its corners. */
+    void addRoundedRect(const Rect& r, const Color& c, float radius,
+                        float thickness = 1.f) {
+        addPolyline(roundedRectPoints(r, radius, 4), c, thickness, true);
+    }
+
     const std::vector<DrawCmd>& commands() const { return m_cmds; }
 
 private:
+    /** Clockwise (screen space) outline of a rounded rectangle, one quarter
+     *  arc per corner. The radius is clamped to half the shorter side, so a
+     *  small card cannot fold its corners through each other. */
+    static std::vector<float> roundedRectPoints(const Rect& r, float radius, int segments) {
+        std::vector<float> pts;
+        const float rad = std::clamp(radius, 0.f, std::min(r.w, r.h) * 0.5f);
+        if (rad <= 0.01f) {
+            pts = {r.x, r.y, r.x + r.w, r.y, r.x + r.w, r.y + r.h, r.x, r.y + r.h};
+            return pts;
+        }
+        const int segs = std::clamp(segments, 2, 16);
+        const float kPi = 3.14159265358979f;
+        const float cx[4] = {r.x + rad, r.x + r.w - rad, r.x + r.w - rad, r.x + rad};
+        const float cy[4] = {r.y + rad, r.y + rad, r.y + r.h - rad, r.y + r.h - rad};
+        const float start[4] = {kPi, 1.5f * kPi, 0.f, 0.5f * kPi};
+        pts.reserve(static_cast<size_t>(4 * (segs + 1) * 2));
+        for (int corner = 0; corner < 4; ++corner) {
+            for (int s = 0; s <= segs; ++s) {
+                const float t = start[corner] +
+                    (0.5f * kPi) * static_cast<float>(s) / static_cast<float>(segs);
+                pts.push_back(cx[corner] + rad * std::cos(t));
+                pts.push_back(cy[corner] + rad * std::sin(t));
+            }
+        }
+        return pts;
+    }
+
     std::vector<DrawCmd> m_cmds;
 };
 

@@ -59,7 +59,10 @@ float lastStrokePoints(const DrawList& dl) {
 int main() {
     // --- every icon in the set is a document that parses and stays in frame --
     {
-        static const char* ids[] = {"drive", "restart", "setup", "settings", "exit"};
+        // Icons that are more than one stroke: the chevrons and the refresh
+        // ring are deliberately single paths, so they are not in this list.
+        static const char* ids[] = {"drive", "restart", "setup", "settings",
+                                    "exit",  "home",    "bell"};
         for (const char* id : ids) {
             const SvgIcon* icon = ks::sim::ui::icons::get(id);
             KS_CHECK(icon != nullptr);

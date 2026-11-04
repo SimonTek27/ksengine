@@ -496,32 +496,33 @@ private:
             const bool selected = (i == selSlot);
             const bool hover = (slot == m_menu->hoverIndex());
 
-            dl.addRectFilled(r, Color::rgba(0.05f, 0.05f, 0.07f,
-                                           (selected ? 0.92f : (hover ? 0.80f : 0.68f)) * a));
-            // The label sits on its own strip so the watermark behind never
-            // washes it out.
-            const float stripH = 44.f;
-            // The glyph is a watermark in the tile's upper right, sized to the
-            // space above that strip: bigger than the tile's content box it
-            // bled into the row underneath and read as a stray shape.
+            // A card, not a plate: live corners, the glyph as its artwork and
+            // the label on the card itself. The dark strip that used to sit
+            // under the label cut the card into two rectangles and hid the
+            // bottom of the glyph, which is what made the strip read square.
+            const float radius = std::clamp(r.h * 0.11f, 8.f, 18.f);
+            dl.addRoundedRectFilled(r, Color::rgba(0.05f, 0.05f, 0.07f,
+                                                   (selected ? 0.92f
+                                                             : (hover ? 0.80f : 0.68f)) * a),
+                                    radius);
             if (const SvgIcon* icon = icons::get(item.icon)) {
-                const float size = std::min(r.w, r.h) * 0.40f;
-                icon->draw(dl, r.x + r.w - size - 20.f,
-                           r.y + (r.h - stripH - size) * 0.5f, size,
+                const float size = std::min(r.w, r.h) * 0.46f;
+                icon->draw(dl, r.x + r.w - size - 22.f,
+                           r.y + (r.h - size) * 0.5f - 8.f, size,
                            Color::rgba(1.f, 1.f, 1.f,
                                        (selected ? 0.15f : (hover ? 0.11f : 0.075f)) * a),
                            1.f);
             }
-            dl.addRectFilled({r.x, r.y + r.h - stripH, r.w, stripH},
-                             Color::rgba(0.f, 0.f, 0.f, 0.45f * a));
-            m_text.draw(dl, r.x + 14.f, r.y + r.h - stripH + 12.f, item.text,
+            m_text.draw(dl, r.x + 20.f, r.y + r.h - 38.f, item.text,
                         sty(selected ? Color::rgba(1.f, 1.f, 1.f, a)
                                      : Color::rgba(0.82f, 0.82f, 0.86f, a),
                             1.15f, selected));
             if (selected) {
-                dl.addRectFilled({r.x, r.y + r.h - 3.f, r.w, 3.f},
-                                 Color::rgba(0.86f, 0.13f, 0.13f, a));
-                dl.addRect(r, Color::rgba(1.f, 1.f, 1.f, 0.18f * a), 1.f);
+                dl.addRoundedRectFilled({r.x + 20.f, r.y + r.h - 16.f, 44.f, 3.f},
+                                        Color::rgba(0.86f, 0.13f, 0.13f, a), 1.5f);
+                dl.addRoundedRect(r, Color::rgba(1.f, 1.f, 1.f, 0.20f * a), radius, 1.f);
+            } else if (hover) {
+                dl.addRoundedRect(r, Color::rgba(1.f, 1.f, 1.f, 0.12f * a), radius, 1.f);
             }
         }
 
@@ -576,10 +577,11 @@ private:
         dl.addLine(0.f, L.topBar.h, static_cast<float>(w), L.topBar.h,
                    Color::rgba(1.f, 1.f, 1.f, 0.10f * a), 1.f);
 
-        // Back / forward / refresh, flat and unlabelled, with the screen's name
-        // after them: the bar reads left to right like a window's.
+        // Home / back / forward / refresh, flat and unlabelled, with the
+        // screen's name after them: the bar reads left to right like a
+        // window's, and the first button always has somewhere to go.
         static const char* kNavIcons[MainMenuLayout::kNavCount] = {
-            "back", "forward", "refresh"};
+            "home", "back", "forward", "refresh"};
         for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
             const Rect& r = L.nav[i];
             const bool live = navEnabled(i);
@@ -616,9 +618,11 @@ private:
                         initialText, sty(Color::rgba(0.96f, 0.96f, 0.97f, a), 1.35f, true));
         }
 
-        // The quick actions, and then the clock, which is the last element.
+        // The quick actions, then the time, then the notification glyph that
+        // closes the bar. The slot used to be a second clock face of its own,
+        // which read as an unlabelled button next to the time it duplicated.
         static const char* kQuickIcons[MainMenuLayout::kQuickCount] = {
-            "speaker", "vr", "pad", "clock"};
+            "speaker", "vr", "pad", "bell"};
         for (int i = 0; i < MainMenuLayout::kQuickCount; ++i) {
             const Rect& r = L.quick[i];
             const bool hot = (i == m_quickHover);
@@ -650,10 +654,13 @@ private:
         return -1;
     }
 
-    /** The bar's three moves, in layout order. */
-    enum class NavAction { Back = 0, Forward = 1, Refresh = 2 };
+    /** The bar's moves, in layout order. */
+    enum class NavAction { Home = 0, Back = 1, Forward = 2, Refresh = 3 };
 
     bool navEnabled(int index) const {
+        if (index == static_cast<int>(NavAction::Home))
+            return m_menu->state() != MenuState::Main &&
+                   m_menu->state() != MenuState::Pause;
         if (index == static_cast<int>(NavAction::Back)) return m_navPos > 0;
         if (index == static_cast<int>(NavAction::Forward))
             return m_navPos + 1 < m_navHistory.size();
@@ -670,6 +677,11 @@ private:
 
     void activateNav(int index) {
         switch (static_cast<NavAction>(index)) {
+        case NavAction::Home:
+            // The first screen is one step of the trail like any other move:
+            // the back chevron then returns to the page the player left.
+            if (m_menu->state() != MenuState::Main) m_menu->openScreen(MenuState::Main);
+            break;
         case NavAction::Back:
             if (m_navPos == 0) return;
             --m_navPos;
@@ -710,7 +722,7 @@ private:
     }
 
     /** The bar's four icons: sound, the VR screen, the controller, then the
-     *  clock, which is a readout and opens nothing. */
+     *  notification readout, which opens nothing and reports nothing yet. */
     void activateQuick(int index) {
         switch (index) {
         case 0: // sound: the audio page of the settings panel

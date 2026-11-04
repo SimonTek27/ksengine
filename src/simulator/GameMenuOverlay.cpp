@@ -148,33 +148,45 @@ void GameMenuOverlay::buildSingleplayerMenu()
         [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
     m_items.push_back({ "", "", nullptr, true });
     m_items.push_back({ "BACK", "Return",
-        [this]() { goBack(); } });
+        [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildMultiplayerMenu()
 {
     m_items.clear();
     m_items.push_back({ "HOST SESSION", "Run a server on this machine (LAN/online)",
-        [this]() { if (onHostServerRequested) onHostServerRequested(); } });
+        [this]() { if (onHostServerRequested) onHostServerRequested(); },
+        false, true, "users" });
     m_items.push_back({ "JOIN SESSION", "Open the server browser, F2 also brings it up",
-        [this]() { if (onOpenServerBrowserRequested) onOpenServerBrowserRequested(); } });
+        [this]() { if (onOpenServerBrowserRequested) onOpenServerBrowserRequested(); },
+        false, true, "download" });
     m_items.push_back({ "DISCONNECT", "Leave the current session or stop the server",
-        [this]() { if (onDisconnectRequested) onDisconnectRequested(); } });
+        [this]() { if (onDisconnectRequested) onDisconnectRequested(); },
+        false, true, "exit" });
     m_items.push_back({ "", "", nullptr, true });
-    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildProfileMenu()
 {
     m_items.clear();
+    // Every row edits one field of the profile the header plate and the
+    // results read from. The bio and the race number are fields the overlay
+    // already carries, so the page lists them instead of losing them.
     m_items.push_back({ "NAME", m_profile.name,
-        [this]() { if (onTextInputRequested) onTextInputRequested("NAME", m_profile.name); } });
+        [this]() { if (onTextInputRequested) onTextInputRequested("NAME", m_profile.name); },
+        false, true, "user" });
     m_items.push_back({ "NATIONALITY", m_profile.nationality,
-        [this]() { if (onNationalityInputRequested) onNationalityInputRequested(); } });
+        [this]() { if (onNationalityInputRequested) onNationalityInputRequested(); },
+        false, true, "helmet" });
     m_items.push_back({ "NUMBER", std::to_string(m_profile.raceNumber),
-        [this]() { m_profile.raceNumber = (m_profile.raceNumber % 99) + 1; m_menuDirty = true; } });
+        [this]() { m_profile.raceNumber = (m_profile.raceNumber % 99) + 1; m_menuDirty = true; },
+        false, true, "drive" });
+    m_items.push_back({ "BIO", m_profile.bio.empty() ? "Add a short biography" : m_profile.bio,
+        [this]() { if (onTextInputRequested) onTextInputRequested("BIO", m_profile.bio); },
+        false, true, "info" });
     m_items.push_back({ "", "", nullptr, true });
-    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildGarageMenu()
@@ -293,18 +305,24 @@ void GameMenuOverlay::buildReplayMenu()
 {
     m_items.clear();
     m_items.push_back({ "LOAD", "Open a saved session",
-        [this]() { if (onLoadReplayRequested) onLoadReplayRequested(); } });
-    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+        [this]() { if (onLoadReplayRequested) onLoadReplayRequested(); },
+        false, true, "download" });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildContentManagerMenu()
 {
     m_items.clear();
-    m_items.push_back({ "TRACKS", "Browse circuits",
-        [this]() { openTrackSelect(); } });
-    m_items.push_back({ "CARS", "Browse vehicles",
-        [this]() { openCarSelect(); } });
-    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+    // The three libraries the loader scans. CARS and TRACKS are reachable
+    // from a session too; TEAMS was the one with no way in from here.
+    m_items.push_back({ "CARS", "Browse vehicles in content/cars",
+        [this]() { openCarSelect(); }, false, true, "drive" });
+    m_items.push_back({ "TRACKS", "Browse circuits in content/tracks",
+        [this]() { openTrackSelect(); }, false, true, "restart" });
+    m_items.push_back({ "TEAMS", "Driver rosters in content/teams (optional)",
+        [this]() { openTeamSelect(); }, false, true, "users" });
+    m_items.push_back({ "", "", nullptr, true });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildSettingsMenu()
@@ -312,16 +330,18 @@ void GameMenuOverlay::buildSettingsMenu()
     m_items.clear();
     m_items.push_back({ "GRAPHICS", "Resolution and quality", [this]() {
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("graphics");
-    } });
+    }, false, true, "settings" });
     m_items.push_back({ "AUDIO", "Volumes and devices",
-        [this]() { if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio"); } });
+        [this]() { if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("audio"); },
+        false, true, "speaker" });
     m_items.push_back({ "CONTROLS", "Bindings and devices",
-        [this]() { switchMenu(MenuState::Controls); } });
-        // Real window toggle (already wired), listed here because this is
-        // where players look for it.
-        m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
-            [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); } });
-    m_items.push_back({ "BACK", "Return", [this]() { goBack(); } });
+        [this]() { switchMenu(MenuState::Controls); }, false, true, "keyboard" });
+    // Real window toggle (already wired), listed here because this is where
+    // players look for it.
+    m_items.push_back({ "FULLSCREEN", "Switch between window and full screen",
+        [this]() { if (onToggleFullscreenRequested) onToggleFullscreenRequested(); },
+        false, true, "vr" });
+    m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 
 void GameMenuOverlay::buildControlsMenu()
@@ -329,11 +349,12 @@ void GameMenuOverlay::buildControlsMenu()
     m_items.clear();
     m_items.push_back({ "KEYBOARD", "Driving bindings", [this]() {
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("keyboard");
-    } });
+    }, false, true, "keyboard" });
     m_items.push_back({ "WHEEL", "Device and FFB", [this]() {
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("devices");
-    } });
-    m_items.push_back({ "BACK", "Return", [this]() { switchMenu(MenuState::Settings); } });
+    }, false, true, "pad" });
+    m_items.push_back({ "BACK", "Return", [this]() { switchMenu(MenuState::Settings); },
+        false, true, "back" });
 }
 
 void GameMenuOverlay::openCarSelect()

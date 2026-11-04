@@ -104,7 +104,8 @@ int main() {
         KS_CHECK(L.body.y > L.title.y);
         KS_CHECK(L.body.y + L.body.h <= L.bottomBar.y + 1.f);
         KS_CHECK(L.avatar.x + L.avatar.w <= 1600.f);
-        // Bar navigation: three buttons in the left corner, before the name.
+        // Bar navigation: home, back, forward and refresh in the corner,
+        // before the section's name.
         for (int i = 0; i < MainMenuLayout::kNavCount; ++i) {
             KS_CHECK(L.nav[i].w > 0.f && L.nav[i].h > 0.f);
             KS_CHECK(L.nav[i].y >= 0.f);
@@ -274,6 +275,10 @@ int main() {
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
                               contentTile.x + 12.f, contentTile.y + 12.f);
         KS_CHECK(hub.menu().state() == MenuState::ContentManager);
+        // The page lists the three libraries the loader scans.
+        KS_CHECK(rowOf(hub.menu(), "CARS") >= 0);
+        KS_CHECK(rowOf(hub.menu(), "TRACKS") >= 0);
+        KS_CHECK(rowOf(hub.menu(), "TEAMS") >= 0);
 
         // The header's quick actions are hit-tested in the bar, not on a tile.
         hub.menu().openScreen(MenuState::Main);
@@ -297,17 +302,25 @@ int main() {
         hub.menu().openScreen(MenuState::Main);
         hub.handleMouseMove(4.f, 4.f); // nothing in the bar under the cursor
         hub.menu().openScreen(MenuState::Settings);
-        hub.handleMouseMove(L.nav[0].x + 2.f, L.nav[0].y + 2.f);
-        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
-                              L.nav[0].x + 2.f, L.nav[0].y + 2.f);
-        KS_CHECK(hub.menu().state() == MenuState::Main);       // back
         hub.handleMouseMove(L.nav[1].x + 2.f, L.nav[1].y + 2.f);
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
                               L.nav[1].x + 2.f, L.nav[1].y + 2.f);
-        KS_CHECK(hub.menu().state() == MenuState::Settings);   // forward
+        KS_CHECK(hub.menu().state() == MenuState::Main);       // back
+        hub.handleMouseMove(L.nav[2].x + 2.f, L.nav[2].y + 2.f);
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
                               L.nav[2].x + 2.f, L.nav[2].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Settings);   // forward
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.nav[3].x + 2.f, L.nav[3].y + 2.f);
         KS_CHECK(hub.menu().state() == MenuState::Settings);   // refresh stays put
+
+        // The first button is HOME: from a submenu it opens the arrival
+        // screen, and from there it has nowhere to go.
+        hub.menu().openScreen(MenuState::ContentManager);
+        hub.handleMouseMove(L.nav[0].x + 2.f, L.nav[0].y + 2.f);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
+                              L.nav[0].x + 2.f, L.nav[0].y + 2.f);
+        KS_CHECK(hub.menu().state() == MenuState::Main);
 
         // ...and the bar is drawn on a submenu, with that screen's name in it.
         hub.menu().openScreen(MenuState::Settings);

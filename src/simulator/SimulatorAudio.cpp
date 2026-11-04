@@ -605,7 +605,8 @@ namespace {
  *  linear interpolation: room tone and music are not transient, so this is
  *  cheaper than a resampler and inaudible in use. */
 void mixShowroomLoop(float* out, int frames, int channels, int sampleRate,
-                     SimulatorAudio::SfxSample& sample, float& position, bool& on)
+                     SimulatorAudio::SfxSample& sample, float& position, bool& on,
+                     float gain)
 {
     if (!on || sample.samples.empty()) return;
     const int srcChannels = sample.channels > 0 ? sample.channels : 2;
@@ -614,7 +615,16 @@ void mixShowroomLoop(float* out, int frames, int channels, int sampleRate,
         on = false;
         return;
     }
-    const float step = static_cast<float>(sample.sampleRate) / static_cast<float>(sampleRate);
+    // A header that did not name a rate used to divide by zero here: the step
+    // became infinite and the track played as a frozen frame, a steady tone.
+    const int srcRate = sample.sampleRate > 0 ? sample.sampleRate : sampleRate;
+    const float step = static_cast<float>(srcRate) / static_cast<float>(sampleRate);
+    // Ten milliseconds at each side of the loop. A track that was not authored
+    // to loop does not meet itself at the seam, and the step between its last
+    // and first sample is a click: that is the noise the showroom opened on
+    // and repeated at every wrap.
+    const float rampFrames = std::min(static_cast<float>(totalFrames) * 0.25f,
+                                      static_cast<float>(srcRate) * 0.01f);
     for (int i = 0; i < frames; ++i) {
         if (position >= static_cast<float>(totalFrames)) {
             if (!sample.loop) {
@@ -626,11 +636,18 @@ void mixShowroomLoop(float* out, int frames, int channels, int sampleRate,
         const int frame = static_cast<int>(position);
         const int next = (frame + 1 < totalFrames) ? frame + 1 : 0;
         const float frac = position - static_cast<float>(frame);
+        float fade = 1.f;
+        if (rampFrames > 0.f) {
+            fade = std::min(1.f, position / rampFrames);
+            fade = std::min(fade, std::max(0.f, static_cast<float>(totalFrames) - position) /
+                                      rampFrames);
+        }
+        const float amplitude = sample.volume * gain * fade;
         for (int c = 0; c < channels; ++c) {
             const int sc = c < srcChannels ? c : 0;
             const float a = sample.samples[static_cast<size_t>(frame) * srcChannels + sc];
             const float b = sample.samples[static_cast<size_t>(next) * srcChannels + sc];
-            out[i * channels + c] += (a + (b - a) * frac) * sample.volume;
+            out[i * channels + c] += (a + (b - a) * frac) * amplitude;
         }
         position += step;
     }
@@ -690,7 +707,7 @@ void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sa
         std::fill(chBuf, chBuf + bufFrames * 2, 0.0f);
         renderGearShift(chBuf, bufFrames, 2, sampleRate);
     }
-    m_mixer->setVolume(ChGearShift, masterVol);
+    m_mixer->setVolume(ChGearShift, engineVol * masterVol);
 
     chBuf = m_mixer->channelBuffer(ChBrakes);
     if (chBuf) {
@@ -718,14 +735,14 @@ void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sa
         std::fill(chBuf, chBuf + bufFrames * 2, 0.0f);
         renderBackfire(chBuf, bufFrames, 2, sampleRate);
     }
-    m_mixer->setVolume(ChBackfire, masterVol);
+    m_mixer->setVolume(ChBackfire, engineVol * masterVol);
 
     chBuf = m_mixer->channelBuffer(ChLimiter);
     if (chBuf) {
         std::fill(chBuf, chBuf + bufFrames * 2, 0.0f);
         renderLimiter(chBuf, bufFrames, 2, sampleRate);
     }
-    m_mixer->setVolume(ChLimiter, masterVol);
+    m_mixer->setVolume(ChLimiter, engineVol * masterVol);
 
     chBuf = m_mixer->channelBuffer(ChRainAmbient);
     if (chBuf) {
@@ -773,15 +790,23 @@ void SimulatorAudio::renderAudio(float* output, int frames, int channels, int sa
 
     // Showroom tracks: the two channels exist for the whole run, so this is
     // silent (and free) once a session has taken over.
+    // Room tone and menu music can both be present, with volumes set one by
+    // one in showroom.json: 0.6 + 0.5 summed past full scale and the output
+    // clipped, which is what made them sound wrong rather than loud. The gain
+    // keeps the pair at or under 1.
+    const float showroomSum =
+        (m_showroomAmbienceOn ? m_showroomAmbience.volume : 0.f) +
+        (m_showroomMusicOn ? m_showroomMusic.volume : 0.f);
+    const float showroomGain = showroomSum > 1.f ? (1.f / showroomSum) : 1.f;
     if (float* ambience = m_mixer->channelBuffer(ChShowroomAmbience)) {
         std::fill(ambience, ambience + bufFrames * 2, 0.0f);
         mixShowroomLoop(ambience, bufFrames, 2, sampleRate, m_showroomAmbience,
-                        m_showroomAmbiencePos, m_showroomAmbienceOn);
+                        m_showroomAmbiencePos, m_showroomAmbienceOn, showroomGain);
     }
     if (float* music = m_mixer->channelBuffer(ChShowroomMusic)) {
         std::fill(music, music + bufFrames * 2, 0.0f);
         mixShowroomLoop(music, bufFrames, 2, sampleRate, m_showroomMusic,
-                        m_showroomMusicPos, m_showroomMusicOn);
+                        m_showroomMusicPos, m_showroomMusicOn, showroomGain);
     }
     m_mixer->setVolume(ChShowroomAmbience, masterVol);
     m_mixer->setVolume(ChShowroomMusic, masterVol);

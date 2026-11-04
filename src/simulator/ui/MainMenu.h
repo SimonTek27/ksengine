@@ -24,11 +24,12 @@ struct MainMenuLayout {
      *  screen instead of waiting behind a scroll nothing announces. */
     static constexpr int kMaxSlots = 12;
     /** Header quick actions: sound, the VR screen, the controller, then the
-     *  clock — which is always the last element in the bar. */
+     *  notification readout — the clock's time always reads just before it,
+     *  so the bar still closes on a glyph. */
     static constexpr int kQuickCount = 4;
     static constexpr int kClockSlot = kQuickCount - 1;
-    /** Navigation in the bar's left corner: back, forward, refresh. */
-    static constexpr int kNavCount = 3;
+    /** Navigation in the bar's left corner: home, back, forward, refresh. */
+    static constexpr int kNavCount = 4;
 
     Rect tile[kMaxSlots]{};
     int item[kMaxSlots] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}; // row per slot
@@ -68,7 +69,7 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     const float mid = L.topBar.h * 0.5f;
 
     // Navigation sits in the bar's left corner with the section's name after
-    // it: three flat buttons, the moves a window puts there.
+    // it: four flat buttons, the moves a window puts there, home first.
     {
         const float buttonSize = H * 0.030f;
         const float buttonGap = W * 0.007f;
