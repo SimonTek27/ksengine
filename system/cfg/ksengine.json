@@ -73,13 +73,15 @@
       },
       {
         "feature": "bloomAndFlare",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "bloom (bright pass + separable blur)",
+        "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Occlusion-driven lens flare is not implemented."
       },
       {
         "feature": "ssgi",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "SSGIRenderer and its compute shader exist in engine/graphics, but no renderer pass instantiates them: the frame never runs the trace."
       },
       {
         "feature": "screenSpaceReflections",
@@ -127,13 +129,15 @@
       },
       {
         "feature": "particles",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "billboard sprite quads",
+        "note": "ParticleSystem feeds the billboard pass with dust, a rain column and wheel spray; the emitters only start with KS_PARTICLES=1, the config does not drive them yet."
       },
       {
         "feature": "rain",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "weather rain shading + spray",
+        "note": "The lighting pass takes rain intensity and track wetness from the weather state; falling drops and wheel spray are particle emitters gated by KS_PARTICLES=1."
       },
       {
         "feature": "windscreenEffects",
