@@ -70,11 +70,13 @@ int main() {
     // bars, none overlapping and none clipped.
     // ---------------------------------------------------------------------
     {
-        // The strip is sized by the rows it carries, so an eight-row screen
-        // shows all eight: nothing waits behind a scroll nothing announces.
+        // Two rows of tiles: an eight-row screen shows all eight, so nothing
+        // waits behind a scroll nothing announces.
         const MainMenuLayout L = layoutMainMenu(1600, 900, 8, 0);
-        KS_CHECK(L.count == MainMenuLayout::kMaxSlots);
+        KS_CHECK(L.count == 8);
+        KS_CHECK(L.perRow == 4); // 4 + 4
         KS_CHECK(L.first == 0);
+        float lowest = 0.f;
         for (int i = 0; i < L.count; ++i) {
             KS_CHECK(L.item[i] == i); // the row behind each slot
             KS_CHECK(L.tile[i].w > 0.f && L.tile[i].h > 0.f);
@@ -82,12 +84,23 @@ int main() {
             KS_CHECK(L.tile[i].x + L.tile[i].w <= 1600.f);
             KS_CHECK(L.tile[i].y > L.topBar.h);                 // under the bar
             KS_CHECK(L.tile[i].y + L.tile[i].h < L.bottomBar.y); // over the hints
-            if (i > 0) {
-                KS_CHECK(L.tile[i].x >= L.tile[i - 1].x + L.tile[i - 1].w);
+            // Left to right inside a row; the next row starts again at the margin.
+            if (i > 0 && i % L.perRow != 0) KS_CHECK(L.tile[i].x > L.tile[i - 1].x);
+            if (i >= L.perRow) KS_CHECK(L.tile[i].y > L.tile[i - L.perRow].y);
+            lowest = std::max(lowest, L.tile[i].y + L.tile[i].h);
+        }
+        // No two tiles overlap, on either row.
+        for (int i = 0; i < L.count; ++i) {
+            for (int j = i + 1; j < L.count; ++j) {
+                const auto& a = L.tile[i];
+                const auto& b = L.tile[j];
+                const bool apart = a.x + a.w <= b.x || b.x + b.w <= a.x ||
+                                   a.y + a.h <= b.y || b.y + b.h <= a.y;
+                KS_CHECK(apart);
             }
         }
-        // The section's name and text sit under the row, not on it.
-        KS_CHECK(L.title.y >= L.tile[0].y + L.tile[0].h);
+        // The section's name and text sit under both rows, not on them.
+        KS_CHECK(L.title.y >= lowest);
         KS_CHECK(L.body.y > L.title.y);
         KS_CHECK(L.body.y + L.body.h <= L.bottomBar.y + 1.f);
         KS_CHECK(L.avatar.x + L.avatar.w <= 1600.f);

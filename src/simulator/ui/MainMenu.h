@@ -22,11 +22,12 @@ struct MainMenuLayout {
     /** Slots the strip can hold. A row with fewer rows than this gets wider
      *  tiles rather than empty space, so the sections the menu carries are on
      *  screen instead of waiting behind a scroll nothing announces. */
-    static constexpr int kMaxSlots = 8;
+    static constexpr int kMaxSlots = 12;
 
     Rect tile[kMaxSlots]{};
-    int item[kMaxSlots] = {-1, -1, -1, -1, -1, -1, -1, -1}; // row behind each slot
+    int item[kMaxSlots] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}; // row per slot
     int count = 0;                             // slots actually used
+    int perRow = 0;                            // tiles on the top row
     int first = 0;                             // first row on screen
     Rect strip{};
     Rect topBar{};
@@ -49,8 +50,8 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     const float margin = W * 0.035f;
     const float gap = W * 0.008f;
     const float usable = W - margin * 2.f;
-    const float tileH = H * 0.246f;
-    const float top = H * 0.173f;
+    const float top = H * 0.145f;
+    const float rowGap = H * 0.018f;
 
     L.topBar = {0.f, 0.f, W, H * 0.078f};
     L.home = {margin, H * 0.024f, W * 0.24f, H * 0.034f};
@@ -58,30 +59,39 @@ inline MainMenuLayout layoutMainMenu(int w, int h, int tileCount, int selected) 
     L.avatar = {W - margin - H * 0.052f, H * 0.014f, H * 0.052f, H * 0.052f};
     const int rows = std::max(0, tileCount);
     L.count = std::min(MainMenuLayout::kMaxSlots, rows);
-    // The row shares the strip between the slots it actually uses: twelve
-    // sections do not fit at five across, and clipping the tail meant the
-    // rows added to the menu were simply not on screen.
-    const float tileW = L.count > 0
-        ? (usable - gap * static_cast<float>(L.count - 1)) / static_cast<float>(L.count)
+    // Two rows, the top one taking the first half: twelve sections do not fit
+    // across a single strip at a readable label width, and whatever did not
+    // fit was simply not on screen.
+    L.perRow = L.count > 0 ? (L.count + 1) / 2 : 0;
+    const int perRow = L.perRow > 0 ? L.perRow : 1;
+    const int rowCount = L.count > 0 ? (L.count + perRow - 1) / perRow : 0;
+    const float tileH = rowCount > 1 ? H * 0.185f : H * 0.230f;
+    const float tileW = perRow > 0
+        ? (usable - gap * static_cast<float>(perRow - 1)) / static_cast<float>(perRow)
         : usable;
-    L.strip = {margin, top, usable, tileH};
-    // Keep the selection inside the window by moving the window as little as
-    // possible: only when it would fall off the right edge. Centring it
-    // instead scrolls the strip under the cursor, so a hovered tile slides
-    // away between press and release and the click opens its neighbour.
+    const float rowsHeight = static_cast<float>(rowCount) * tileH +
+        rowGap * static_cast<float>(rowCount > 1 ? rowCount - 1 : 0);
+    L.strip = {margin, top, usable, rowsHeight};
+    // Twelve rows, twelve slots: nothing scrolls, and a longer row than that
+    // still keeps the selection inside the window.
     L.first = L.count > 0
         ? std::clamp(selected - (L.count - 1), 0, std::max(0, rows - L.count))
         : 0;
     for (int i = 0; i < L.count; ++i) {
         const int row = L.first + i;
-        L.tile[i] = {margin + static_cast<float>(i) * (tileW + gap), top, tileW, tileH};
+        const int column = i % perRow;
+        const int line = i / perRow;
+        L.tile[i] = {margin + static_cast<float>(column) * (tileW + gap),
+                     top + static_cast<float>(line) * (tileH + rowGap), tileW, tileH};
         L.item[i] = (row < rows) ? row : -1;
     }
 
-    // The name and its text sit in the lower right, over the scene: that is
-    // the part of the screen the tiles leave empty.
-    L.title = {W * 0.55f, H * 0.455f, W * 0.42f, H * 0.10f};
-    L.body = {W * 0.55f, H * 0.575f, W * 0.40f, H * 0.22f};
+    // The name and its text sit under both rows, over the scene: the tiles
+    // leave that part of the screen empty.
+    const float stripBottom = top + static_cast<float>(rowCount > 0 ? rowCount : 1) * tileH +
+        rowGap * static_cast<float>(rowCount > 1 ? rowCount - 1 : 0);
+    L.title = {W * 0.55f, stripBottom + H * 0.03f, W * 0.42f, H * 0.09f};
+    L.body = {W * 0.55f, L.title.y + H * 0.105f, W * 0.40f, H * 0.15f};
     L.bottomBar = {0.f, H * 0.955f, W, H * 0.045f};
     return L;
 }
