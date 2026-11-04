@@ -93,6 +93,30 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
     add_test(NAME test_audio_3d COMMAND test_audio_3d)
 endif()
 
+# Showroom audio, measured: two generated wavs go through the same load and
+# mix path the hall uses, and the render is checked for clipping, a click at
+# the loop seam and a silent start. Headless (initialize(false)), so it needs
+# no output device.
+if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/showroom_audio_test.cpp")
+    add_executable(showroom_audio_test
+        showroom_audio_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SimulatorAudio.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/Mp3Decode.cpp")
+    target_include_directories(showroom_audio_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    # The mp3 path goes through Media Foundation, so the decoder and its
+    # platform libraries travel with the test.
+    target_link_libraries(showroom_audio_test PRIVATE ksengine
+        mfplat mfreadwrite mfuuid ole32)
+    add_test(NAME showroom_audio_test COMMAND showroom_audio_test)
+endif()
+
 # Geotrack fase 1 — genera una cartella pista da una centerline geografica.
 # TrackSceneCore non fa parte di ksengine; Json.cpp viaggia con il target come
 # in ks_cartool (stesso schema del tool di conversione auto).

@@ -153,6 +153,34 @@ bool SimulatorAudio::loadShowroomAudio(const ShowroomAudioTrack& ambience,
 
     m_showroomAmbienceOn = decode(ambience, m_showroomAmbience);
     m_showroomMusicOn = decode(music, m_showroomMusic);
+    // What the mixer is actually holding, in numbers: the rate the file was
+    // decoded at, how long it is, its peak, and the step across the loop seam.
+    // The seam is the one nobody can hear until it clicks, and a rate of 0 is
+    // a track that will play as a frozen frame.
+    const auto report = [](const char* name, const SimulatorAudio::SfxSample& s) {
+        if (s.samples.empty()) return;
+        const int ch = s.channels > 0 ? s.channels : 2;
+        const std::size_t frames = s.samples.size() / static_cast<std::size_t>(ch);
+        float peak = 0.f;
+        for (float v : s.samples) peak = std::max(peak, std::fabs(v));
+        float seam = 0.f;
+        if (frames > 0) {
+            for (int c = 0; c < ch; ++c) {
+                const float first = s.samples[static_cast<std::size_t>(c)];
+                const float last = s.samples[(frames - 1) * static_cast<std::size_t>(ch) +
+                                             static_cast<std::size_t>(c)];
+                seam = std::max(seam, std::fabs(last - first));
+            }
+        }
+        const float rate = static_cast<float>(s.sampleRate > 0 ? s.sampleRate : 44100);
+        std::printf("[audio] %s: %d Hz, %d ch, %.2f s, peak %.1f dBFS, loop seam %.3f\n",
+                    name, s.sampleRate, ch,
+                    static_cast<double>(static_cast<float>(frames) / rate),
+                    static_cast<double>(peak > 0.f ? 20.f * std::log10(peak) : -120.f),
+                    static_cast<double>(seam));
+    };
+    report("ambience", m_showroomAmbience);
+    report("music", m_showroomMusic);
     std::printf("[audio] showroom ambience=%s music=%s\n",
                 m_showroomAmbienceOn ? "on" : "off", m_showroomMusicOn ? "on" : "off");
     return m_showroomAmbienceOn || m_showroomMusicOn;

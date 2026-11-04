@@ -5,6 +5,7 @@
  */
 #include "UiRenderer.h"
 #include "IconSet.h"
+#include "NotificationCenter.h"
 #include "MainMenu.h"
 #include "TextRenderer.h"
 #include "UiInput.h"
@@ -60,6 +61,14 @@ public:
     UiRenderer& renderer() { return m_renderer; }
     TextRenderer& text() { return m_text; }
     UiInput& input() { return m_input; }
+    NotificationCenter& notifications() { return m_notices; }
+
+    /** Report one thing worth telling the player about. Anything the loop or
+     *  the app already logs as a real event goes through here, so the bell
+     *  reports what happened rather than a decorative count. */
+    void notify(std::string text, NoticeKind kind = NoticeKind::Info) {
+        m_notices.push(std::move(text), kind);
+    }
 
     void resize(int w, int h) {
         m_viewW = w;
@@ -102,6 +111,9 @@ public:
         m_mp->build(dl, width, height, &m_input);
         m_chat->build(dl, width, height, &m_input);
         m_console->build(dl, width, height, &m_input);
+        // The notice list is painted after every screen: it is a panel over
+        // whatever the player is looking at, not a part of it.
+        buildNotifications(dl, width, height);
 
         m_renderer.endFrame();
         m_input.endFrame();
@@ -179,6 +191,14 @@ public:
 
         if (m_menu->isVisible() || m_menu->fadeAlpha() > 0.5f) {
             syncNavHistory();
+            // The notice list covers part of the screen: a press inside it
+            // closes it rather than pressing whatever sits underneath.
+            if (m_notices.open() && e.type == MouseEventType::Up &&
+                e.button == MouseButton::Left &&
+                notificationPanel(m_viewW, m_viewH).contains(e.x, e.y)) {
+                m_notices.setOpen(false);
+                return true;
+            }
             updateMenuHover(e.x, e.y, m_viewW, m_viewH);
             if (e.type == MouseEventType::Up && e.button == MouseButton::Left) {
                 if (m_navHover >= 0) {
@@ -362,9 +382,10 @@ private:
 
         dl.addRectFilled({0.f, 0.f, static_cast<float>(w), static_cast<float>(h)},
                          Color::rgba(0.f, 0.f, 0.f, 0.30f * a));
-        dl.addRectFilled(bar.panel, Color::rgba(0.06f, 0.06f, 0.07f, 0.94f * a));
-        dl.addRect({bar.panel.x, bar.panel.y, bar.panel.w, 1.f},
-                   Color::rgba(1.f, 1.f, 1.f, 0.10f * a));
+        // Same card language as the arrival screen: live corners, a border
+        // that follows them, cells that light up as rounded plates.
+        dl.addRoundedRectFilled(bar.panel, Color::rgba(0.06f, 0.06f, 0.07f, 0.94f * a), 16.f);
+        dl.addRoundedRect(bar.panel, Color::rgba(1.f, 1.f, 1.f, 0.12f * a), 16.f, 1.f);
 
         // Session flag: a checkered block. Drawn as squares because the icon
         // set is stroke-only and a checkered flag is solid colour.
@@ -390,12 +411,13 @@ private:
             const bool isHover = bar.menuIndex[i] == m_menu->hoverIndex();
 
             if (isSelected || isHover) {
-                dl.addRectFilled({cell.x + 5.f, cell.y + 9.f, cell.w - 10.f, cell.h - 18.f},
-                                 Color::rgba(1.f, 1.f, 1.f, (isSelected ? 0.10f : 0.05f) * a));
+                dl.addRoundedRectFilled({cell.x + 5.f, cell.y + 9.f, cell.w - 10.f, cell.h - 18.f},
+                                        Color::rgba(1.f, 1.f, 1.f,
+                                                    (isSelected ? 0.10f : 0.05f) * a), 12.f);
             }
             if (isSelected) {
-                dl.addRectFilled({cell.x + 5.f, cell.y + cell.h - 11.f, cell.w - 10.f, 2.f},
-                                 Color::rgba(0.86f, 0.13f, 0.13f, a));
+                dl.addRoundedRectFilled({cell.x + 5.f, cell.y + cell.h - 11.f, cell.w - 10.f, 2.f},
+                                        Color::rgba(0.86f, 0.13f, 0.13f, a), 1.f);
             }
 
             const float centreX = cell.x + cell.w * 0.5f;
@@ -566,6 +588,47 @@ private:
                     sty(Color::rgba(0.55f, 0.55f, 0.60f, a), 0.95f));
     }
 
+    /** The notice list, hanging from the bell that opens it: right-aligned
+     *  with the bar, so it opens under the glyph the player pressed. */
+    Rect notificationPanel(int w, int h) const {
+        const MainMenuLayout L = mainLayout(w, h);
+        const float width = std::min(380.f, static_cast<float>(w) * 0.32f);
+        const float rows = static_cast<float>(
+            std::min<std::size_t>(m_notices.items().size(), 5));
+        const Rect bell = L.quick[MainMenuLayout::kClockSlot];
+        return {bell.x + bell.w - width, L.topBar.y + L.topBar.h + 8.f, width,
+                54.f + rows * 30.f};
+    }
+
+    void buildNotifications(DrawList& dl, int w, int h) {
+        if (!m_notices.open()) return;
+        const float fade = m_menu->fadeAlpha();
+        const float a = fade > 0.01f ? fade : 1.f;
+        const Rect panel = notificationPanel(w, h);
+        dl.addRoundedRectFilled(panel, Color::rgba(0.04f, 0.04f, 0.05f, 0.96f * a), 12.f);
+        dl.addRoundedRect(panel, Color::rgba(1.f, 1.f, 1.f, 0.14f * a), 12.f, 1.f);
+        m_text.draw(dl, panel.x + 16.f, panel.y + 14.f, "NOTIFICATIONS",
+                    sty(Color::rgba(0.86f, 0.25f, 0.25f, a), 0.95f, true));
+        if (m_notices.empty()) {
+            m_text.draw(dl, panel.x + 16.f, panel.y + 40.f, "Nothing to report",
+                        sty(Color::rgba(0.62f, 0.62f, 0.66f, a), 1.f));
+            return;
+        }
+        const auto& items = m_notices.items();
+        const std::size_t first = items.size() > 5 ? items.size() - 5 : 0;
+        float y = panel.y + 40.f;
+        for (std::size_t i = items.size(); i > first; --i) {
+            const Notice& notice = items[i - 1];
+            const Color dot = notice.kind == NoticeKind::Warning
+                ? Color::rgba(0.86f, 0.55f, 0.20f, a)
+                : Color::rgba(0.45f, 0.70f, 0.95f, a);
+            dl.addRoundedRectFilled({panel.x + 16.f, y + 6.f, 6.f, 6.f}, dot, 3.f);
+            m_text.draw(dl, panel.x + 30.f, y, notice.text,
+                        sty(Color::rgba(0.86f, 0.86f, 0.89f, a), 1.f));
+            y += 30.f;
+        }
+    }
+
     /** The bar every screen wears: navigation and the section's name on the
      *  left, the driver's plate and the quick actions on the right, the clock
      *  closing it. Painted from the layout that hit-tests it, so a button the
@@ -627,11 +690,26 @@ private:
             const Rect& r = L.quick[i];
             const bool hot = (i == m_quickHover);
             if (hot) dl.addRectFilled(r, Color::rgba(1.f, 1.f, 1.f, 0.14f * a));
-            const Color tint = hot ? Color::rgba(1.f, 1.f, 1.f, a)
-                                   : Color::rgba(0.74f, 0.74f, 0.78f, a);
+            const bool active = (i == MainMenuLayout::kClockSlot) && m_notices.open();
+            const Color tint = (hot || active) ? Color::rgba(1.f, 1.f, 1.f, a)
+                                               : Color::rgba(0.74f, 0.74f, 0.78f, a);
             if (const SvgIcon* icon = icons::get(kQuickIcons[i])) {
                 const float inset = r.w * 0.16f;
                 icon->draw(dl, r.x + inset, r.y + inset, r.w - inset * 2.f, tint, 1.f);
+            }
+            // The badge counts what arrived while the player was not looking;
+            // opening the list is what clears it.
+            if (i == MainMenuLayout::kClockSlot && m_notices.unread() > 0) {
+                const float dotH = 15.f;
+                const Rect dot{r.x + r.w - 14.f, r.y + 1.f, 20.f, dotH};
+                dl.addRoundedRectFilled(dot, Color::rgba(0.86f, 0.13f, 0.13f, a), dotH * 0.5f);
+                char count[8];
+                const std::size_t unread = m_notices.unread();
+                if (unread > 9) std::snprintf(count, sizeof(count), "9+");
+                else std::snprintf(count, sizeof(count), "%d", static_cast<int>(unread));
+                const float cw = m_text.measureWidth(count, 0.62f);
+                m_text.draw(dl, dot.x + (dot.w - cw) * 0.5f, dot.y + 2.f, count,
+                            sty(Color::rgba(1.f, 1.f, 1.f, a), 0.62f, true));
             }
         }
         const std::time_t now = std::time(nullptr);
@@ -722,7 +800,7 @@ private:
     }
 
     /** The bar's four icons: sound, the VR screen, the controller, then the
-     *  notification readout, which opens nothing and reports nothing yet. */
+     *  bell, which opens the list of what just happened. */
     void activateQuick(int index) {
         switch (index) {
         case 0: // sound: the audio page of the settings panel
@@ -735,8 +813,9 @@ private:
         case 2: // controller: the bindings screen
             m_menu->openScreen(MenuState::Controls);
             break;
-        default:
-            break; // the clock
+        default: // the bell: open or close the notice list
+            m_notices.toggle();
+            break;
         }
     }
 
@@ -755,13 +834,17 @@ private:
                 return;
             }
         }
-        if (m_menu->state() == MenuState::Main) {
+        // The quick actions belong to the bar, so they are live on every
+        // screen that wears it — the bell used to answer only on the tiles.
+        if (m_menu->state() != MenuState::Pause) {
             const int quick = quickIconAt(mx, my, w, h);
             if (quick >= 0) {
                 m_quickHover = quick;
                 m_menu->setHoverIndex(-1); // the bar is not a tile
                 return;
             }
+        }
+        if (m_menu->state() == MenuState::Main) {
             const int hover = mainMenuTileAt(mainLayout(w, h), mx, my);
             m_menu->setHoverIndex(hover);
             if (hover >= 0) m_menu->setSelectedIndex(hover);
@@ -852,10 +935,13 @@ private:
             const bool hover = (i == m_menu->hoverIndex());
 
             if (selected || hover) {
-                dl.addRectFilled({L.left - 12.f, iy - 2.f, L.listW + 24.f, L.rowH - 2.f},
-                                 Color::rgba(1.f, 1.f, 1.f, 0.06f * a));
-                dl.addRectFilled({L.left - 12.f, iy - 2.f, L.accentW, L.rowH - 2.f},
-                                 Color::rgba(0.9f, 0.15f, 0.15f, a));
+                // A row is a card too: the same rounded plate the tiles wear,
+                // sized to the row, with the accent inside its corner.
+                dl.addRoundedRectFilled({L.left - 12.f, iy - 2.f, L.listW + 24.f, L.rowH - 2.f},
+                                        Color::rgba(1.f, 1.f, 1.f,
+                                                    (selected ? 0.09f : 0.06f) * a), 8.f);
+                dl.addRoundedRectFilled({L.left - 12.f, iy + 4.f, L.accentW, L.rowH - 14.f},
+                                        Color::rgba(0.9f, 0.15f, 0.15f, a), 1.f);
             }
 
             Color titleCol = selected
@@ -888,8 +974,10 @@ private:
             const float py = L.top;
             const float pw = static_cast<float>(w) - px - 64.f;
             if (pw > 120.f) {
-                dl.addRectFilled({px, py, pw, 160.f}, Color::rgba(0.05f, 0.05f, 0.07f, 0.85f * a));
-                dl.addRectFilled({px, py, 3.f, 160.f}, Color::rgba(0.9f, 0.15f, 0.15f, 0.7f * a));
+                dl.addRoundedRectFilled({px, py, pw, 160.f},
+                                        Color::rgba(0.05f, 0.05f, 0.07f, 0.85f * a), 12.f);
+                dl.addRoundedRectFilled({px, py + 10.f, 3.f, 140.f},
+                                        Color::rgba(0.9f, 0.15f, 0.15f, 0.7f * a), 1.5f);
                 m_text.draw(dl, px + 20.f, py + 24.f, "INFO",
                             sty(Color::rgba(0.9f, 0.25f, 0.25f, a), 1.f, true));
                 // Wrapped inside the panel: a long description used to run
@@ -957,6 +1045,7 @@ private:
     KeyRebindOverlay m_keyRebind;
     int m_viewW = 1280, m_viewH = 720;
     bool m_inCarMenuAllowed = true;   // pre-session: always
+    NotificationCenter m_notices;     // what the bell reports
     int m_quickHover = -1;            // header quick action under the cursor
     int m_navHover = -1;              // bar navigation button under the cursor
     // The trail the bar's arrows walk: the states the player went through, in

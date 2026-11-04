@@ -291,10 +291,38 @@ int main() {
         KS_CHECK(fullscreenAsked);
         KS_CHECK(hub.menu().state() == MenuState::Main); // a switch, not a section
 
-        // The clock is a readout: clicking it must not leave the screen.
+        // The bell is a readout too, but an openable one: a notice raises a
+        // badge, the bell opens the list and clears it, and a press on the
+        // panel closes the panel instead of the tile underneath.
+        hub.menu().openScreen(MenuState::Main);
+        const auto& bell = L.quick[MainMenuLayout::kClockSlot];
+        hub.notifications().clear();
+        hub.renderFrame(1600, 900);
+        KS_CHECK(!hub.notifications().open());
+        hub.notifications().push("Hosting a session on port 40000");
+        KS_CHECK(hub.notifications().unread() == 1);
+
+        hub.handleMouseMove(bell.x + 2.f, bell.y + 2.f);
+        hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false, bell.x + 2.f, bell.y + 2.f);
+        KS_CHECK(hub.notifications().open());
+        KS_CHECK(hub.notifications().unread() == 0); // opening is reading
+
+        hub.renderFrame(1600, 900);
+        bool noticeListed = false;
+        for (const auto& cmd : hub.renderer().list().commands()) {
+            if (cmd.type == ks::sim::ui::DrawCmdType::Text &&
+                cmd.text == "Hosting a session on port 40000")
+                noticeListed = true;
+        }
+        KS_CHECK(noticeListed);
+
+        // A press inside the panel consumes the click and closes it.
+        const float panelW = 380.f;
+        const float panelX = bell.x + bell.w - panelW;
+        const float panelY = L.topBar.h + 8.f;
         hub.handleMouseButton(ks::sim::ui::MouseButton::Left, false,
-                              L.quick[MainMenuLayout::kClockSlot].x + 2.f,
-                              L.quick[MainMenuLayout::kClockSlot].y + 2.f);
+                              panelX + 20.f, panelY + 20.f);
+        KS_CHECK(!hub.notifications().open());
         KS_CHECK(hub.menu().state() == MenuState::Main);
 
         // The bar's navigation works on the submenus too: back, forward and

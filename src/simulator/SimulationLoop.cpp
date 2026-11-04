@@ -472,6 +472,8 @@ void SimulationLoop::loadShowroomCar() {
         std::fprintf(stderr, "[showroom] no car to show: no model in %s\n",
                      (fs::path(m_showroom.config().directory).parent_path().parent_path() /
                       "cars").string().c_str());
+        m_ui.notify("Showroom: no car model found in content/cars",
+                    ks::sim::ui::NoticeKind::Warning);
         return;
     }
     ensureCarVisual(carDirectory);
@@ -490,6 +492,8 @@ void SimulationLoop::loadShowroomAudio() {
         auto audio = std::make_unique<SimulatorAudio>();
         if (!audio->initialize()) {
             std::fprintf(stderr, "[showroom] no audio device, tracks stay silent\n");
+            m_ui.notify("No audio device: the showroom stays silent",
+                        ks::sim::ui::NoticeKind::Warning);
             return;
         }
         m_audio = std::move(audio);
