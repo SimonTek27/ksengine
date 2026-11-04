@@ -134,6 +134,7 @@ public:
     bool loadTrackFolder(const std::string& trackDirectory);
     bool loadCar(const std::string& carDir);
     bool loadCarAudio(const std::string& carDirectory);
+    // --- showroom (content/showrooms/<id>/showroom.json) -------------------
     bool openShowroom(const std::string& directory, std::string* error = nullptr);
     void loadShowroomHall();
     void loadShowroomAudio();
@@ -161,7 +162,10 @@ public:
     void stop();
     void reset();
     void teleportToPit(int carIndex);
-    // Fase 1 exit: start a session of the mode chosen in the menu.
+    // Fase 1 exit: start a session of the mode chosen in the menu (practice
+    // = open laps solo, race = grid vs AI + countdown, time attack = solo).
+    // Configures laps/AI/session byte BEFORE start(), which then builds the
+    // grid and countdown from those values.
     void startSession(GameSessionMode mode);
     void startSession(GameSessionMode mode, const SessionStartParams& params);
     bool isRunning() const { return m_running; }
@@ -199,7 +203,13 @@ public:
     void requestReturnToBox(bool on = true) { m_requestReturnBox = on; }
     void updateGarageExit(float dt);
     GarageExitPhase garagePhase() const { return m_garageExit.phase(); }
-    bool isHeldInGarage() const;
+    bool isHeldInGarage() const {
+        const GarageExitPhase p = m_garageExit.phase();
+        return m_garageExitEnabled &&
+               (p == GarageExitPhase::InGarage || p == GarageExitPhase::Preparing ||
+                p == GarageExitPhase::EngineStart || p == GarageExitPhase::BoxClear ||
+                p == GarageExitPhase::Blocked);
+    }
     const char* garageStatus() const { return m_garageStatus.c_str(); }
     void pumpFeatureHub(float dt, bool withSession);
     bool startCarStateHost(uint16_t port = netsync::kDefaultSyncPort);
@@ -225,18 +235,40 @@ public:
     }
 
     bool isVulkanMode() const { return m_vulkanMode; }
-    void setVulkanRenderer(NativeRenderer* r);
+    void setVulkanRenderer(NativeRenderer* r) {
+        m_vulkanRenderer = r;
+        if (r && m_uiGpu) r->setUiGpuPass(m_uiGpu);
+    }
     void setNativeRenderer(NativeRenderer* r) { setVulkanRenderer(r); }
     void setRenderer(NativeRenderer* r) { setVulkanRenderer(r); }
     NativeRenderer* vulkanRenderer() { return m_vulkanRenderer; }
     NativeRenderer* renderer() { return m_vulkanRenderer; }
 
-    void setViewportSize(int w, int h);
+    void setViewportSize(int w, int h) {
+        m_viewW = w > 0 ? w : m_viewW;
+        m_viewH = h > 0 ? h : m_viewH;
+        m_ui.resize(m_viewW, m_viewH);
+        if (m_vulkanRenderer) m_vulkanRenderer->resize(m_viewW, m_viewH);
+    }
 
     void setTimeOfDay(float hours) { m_timeOfDay = hours; }
     float timeOfDay() const { return m_timeOfDay; }
-    void setWeatherPreset(const ks::physics::WeatherState& state);
-    void setWeatherPresetByName(const std::string& name);
+    void setWeatherPreset(const ks::physics::WeatherState& state) {
+        m_weather = state;
+        m_weatherSim.setState(state);
+        m_weatherSim.start();
+    }
+    void setWeatherPresetByName(const std::string& name) {
+        const ks::sim::WeatherPreset wp = ks::sim::presetByName(name);
+        ks::physics::WeatherState ws;
+        ws.ambientTemp = wp.ambientC;
+        ws.trackTemp = wp.trackC;
+        ws.trackWetness = wp.wetness;
+        ws.rainIntensity = wp.rain;
+        ws.windSpeed = wp.windMs;
+        ws.cloudCover = wp.cloud;
+        setWeatherPreset(ws);
+    }
     const ks::physics::WeatherState& weatherState() const { return m_weather; }
 
     void setFfbEnabled(bool e) { m_ffbEnabled = e; }
@@ -252,7 +284,10 @@ public:
 
     void setUdpTelemetryEnabled(bool e) { m_udpEnabled = e; }
     bool udpTelemetryEnabled() const { return m_udpEnabled; }
-    void setUdpTelemetryEndpoint(const std::string& host, uint16_t port);
+    void setUdpTelemetryEndpoint(const std::string& host, uint16_t port) {
+        m_udpHost = host;
+        m_udpPort = port;
+    }
     bool openUdp();
     void setTcpTelemetryEnabled(bool e) { m_tcpEnabled = e; }
     bool tcpTelemetryEnabled() const { return m_tcpEnabled; }
@@ -265,6 +300,7 @@ public:
     std::function<void()> onSimulationStopped;
     std::function<void(uint8_t, uint8_t, int, int, double)> onSessionStateChanged;
 
+    /** Phase 3.3: rebind layout-specific data without full track unload. */
     bool switchLayout(const std::string& layoutId);
     const TrackLayoutCatalog& layoutCatalog() const { return m_layouts; }
 
@@ -309,18 +345,7 @@ private:
                                             const std::string& prefix,
                                             bool faceInside);
 
-    ShowroomScene m_showroom;
-    TrackLayoutCatalog m_layouts;
-    TracksidePosts m_tracksidePosts;
-    FeatureHub m_features;
-    RaceSessionManager m_raceSession;
-    netsync::CarStateSync m_carSync;
-    PitStrategyState m_pitStrategy;
-    bool m_requestPitService = false;
-    bool m_requestLeaveGarage = false;
-    bool m_requestReturnBox = false;
-    bool m_garageExitEnabled = true;
-    bool m_hasPlayerBox = false;
+    // --- members (complete set from local branch) ------------------------
     bool m_running = false;
     bool m_vulkanMode = false;
     bool m_particlesConfig = false;
@@ -328,6 +353,11 @@ private:
     bool m_shmEnabled = false;
     bool m_udpEnabled = false;
     bool m_tcpEnabled = false;
+    bool m_requestPitService = false;
+    bool m_requestLeaveGarage = false;
+    bool m_requestReturnBox = false;
+    bool m_garageExitEnabled = true;
+    bool m_hasPlayerBox = false;
     int m_frameLimit = 0;
     int m_aiCarCount = 0;
     int m_viewW = 1280;
@@ -338,6 +368,14 @@ private:
     std::string m_udpHost = "127.0.0.1";
     std::string m_pitStatus;
     std::string m_garageStatus;
+
+    ShowroomScene m_showroom;
+    TrackLayoutCatalog m_layouts;
+    TracksidePosts m_tracksidePosts;
+    FeatureHub m_features;
+    RaceSessionManager m_raceSession;
+    netsync::CarStateSync m_carSync;
+    PitStrategyState m_pitStrategy;
     ks::physics::WeatherState m_weather;
     ks::physics::WeatherSimulator m_weatherSim;
     ks::physics::LapSectorTimer m_lapTimer;
@@ -348,6 +386,7 @@ private:
     PitLaneRepair m_pitRepair;
     ui::NativeUiHub m_ui;
     NativeRenderer* m_vulkanRenderer = nullptr;
+
     std::unique_ptr<InputManager> m_input;
     std::unique_ptr<CameraController> m_camera;
     std::unique_ptr<SimulatorAudio> m_audio;
@@ -358,6 +397,11 @@ private:
     std::unique_ptr<UdpTelemetryBridge> m_udp;
     std::unique_ptr<TcpTelemetryBridge> m_tcp;
     std::unique_ptr<ui::UiGpuPass> m_uiGpu;
+
+    std::vector<ks::ecs::Entity> m_sceneEntities;
+    std::vector<ks::ecs::Entity> m_aiVisuals;
+    std::vector<ks::ecs::Entity> m_marshalEntities;
+    std::unique_ptr<UpgradeRuntime> m_upgrade;
 
     static constexpr float kSnapHoldDuration = 0.35f;
 };
