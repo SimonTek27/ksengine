@@ -56,16 +56,17 @@ struct MaterialPreset {
  *  file's own exponent is the best information there is. */
 inline const MaterialPreset* materialPresetTable(std::size_t& count) {
     static const MaterialPreset kPresets[] = {
-        {MaterialPresetId::BrakeDisc, "brake_disc", 0.32f, 1.00f, 0.00f, 0.40f},
-        {MaterialPresetId::Glass, "glass", 0.02f, 0.00f, 0.00f, 0.00f},
-        {MaterialPresetId::Rubber, "rubber", 0.62f, 0.00f, 0.00f, 0.15f},
-        {MaterialPresetId::Carbon, "carbon", 0.18f, 0.20f, 1.00f, 0.25f},
-        {MaterialPresetId::Chrome, "chrome", 0.05f, 1.00f, 0.00f, 0.10f},
-        {MaterialPresetId::BrushedMetal, "brushed_metal", 0.22f, 1.00f, 0.00f, 0.40f},
-        {MaterialPresetId::Leather, "leather", 0.60f, 0.00f, 0.00f, 0.50f},
-        {MaterialPresetId::Plastic, "plastic", 0.45f, 0.00f, 0.00f, 0.55f},
-        {MaterialPresetId::Paint, "paint", 0.10f, 0.00f, 1.00f, 0.20f},
-        {MaterialPresetId::Default, "default", 0.35f, 0.00f, 0.00f, 1.00f},
+        {MaterialPresetId::BrakeDisc, "brake_disc", 0.38f, 1.00f, 0.00f, 0.40f},
+        {MaterialPresetId::Glass, "glass", 0.015f, 0.00f, 0.35f, 0.00f},
+        {MaterialPresetId::Rubber, "rubber", 0.78f, 0.00f, 0.00f, 0.10f},
+        {MaterialPresetId::Carbon, "carbon", 0.14f, 0.25f, 0.95f, 0.20f},
+        {MaterialPresetId::Chrome, "chrome", 0.035f, 1.00f, 0.00f, 0.08f},
+        {MaterialPresetId::BrushedMetal, "brushed_metal", 0.20f, 1.00f, 0.00f, 0.35f},
+        {MaterialPresetId::Leather, "leather", 0.58f, 0.00f, 0.00f, 0.50f},
+        {MaterialPresetId::Plastic, "plastic", 0.42f, 0.00f, 0.00f, 0.50f},
+        // Lacquered body: low roughness + full clearcoat for wet showroom look
+        {MaterialPresetId::Paint, "paint", 0.07f, 0.00f, 1.00f, 0.12f},
+        {MaterialPresetId::Default, "default", 0.32f, 0.00f, 0.00f, 1.00f},
     };
     count = sizeof(kPresets) / sizeof(kPresets[0]);
     return kPresets;
@@ -113,48 +114,68 @@ inline const MaterialPreset& resolveMaterialPreset(const std::string& shaderName
     const std::string name = materialLower(materialName);
 
     // Brakes first: "disc" would otherwise land in the metal rule below.
-    if (materialMentions(shader, "brakedisc") || materialMentions(name, "disc") ||
-        materialMentions(name, "brake"))
+    if (materialMentions(shader, "brakedisc") || materialMentions(name, "brakedisc") ||
+        materialMentions(name, "brake_disc") ||
+        (materialMentions(name, "disc") && materialMentions(name, "brake")))
         return materialPreset(MaterialPresetId::BrakeDisc);
+    if (materialMentions(name, "caliper") || materialMentions(name, "calliper"))
+        return materialPreset(MaterialPresetId::Paint); // often body-coloured
 
     // Glass and light covers share the shader family in AC content.
     if (materialMentions(shader, "windscreen") || materialMentions(shader, "glass") ||
         materialMentions(name, "glass") || materialMentions(name, "windscreen") ||
-        materialMentions(name, "lens"))
+        materialMentions(name, "canopy") || materialMentions(name, "lens") ||
+        materialMentions(name, "headlight") || materialMentions(name, "taillight") ||
+        materialMentions(name, "rearlight") || materialMentions(name, "light_glass"))
         return materialPreset(MaterialPresetId::Glass);
 
     if (materialMentions(shader, "tyres") || materialMentions(name, "tyre") ||
-        materialMentions(name, "tire") || materialMentions(name, "rubber"))
+        materialMentions(name, "tire") || materialMentions(name, "rubber") ||
+        materialMentions(name, "sidewall"))
         return materialPreset(MaterialPresetId::Rubber);
 
-    if (materialMentions(shader, "carbon") || materialMentions(name, "carbon"))
+    if (materialMentions(shader, "carbon") || materialMentions(name, "carbon") ||
+        materialMentions(name, "cfrp") || materialMentions(name, "splitter") ||
+        materialMentions(name, "diffuser") || materialMentions(name, "diveplane"))
         return materialPreset(MaterialPresetId::Carbon);
 
     if (materialMentions(shader, "chrome") || materialMentions(name, "chrome") ||
-        materialMentions(name, "mirror"))
+        materialMentions(name, "exhaust") || materialMentions(name, "tip") ||
+        materialMentions(name, "mirror_chrome"))
         return materialPreset(MaterialPresetId::Chrome);
 
+    // Interior soft goods before generic "wheel" metal (steering_wheel).
     if (materialMentions(shader, "leather") || materialMentions(name, "leather") ||
-        materialMentions(name, "alcantara"))
+        materialMentions(name, "alcantara") || materialMentions(name, "suede") ||
+        materialMentions(name, "seat") || materialMentions(name, "steering"))
         return materialPreset(MaterialPresetId::Leather);
 
-    // Not the generic reflection shader: AC uses it for plates, stickers and
-    // light housings too, and calling all of those metal turned a third of
-    // the car chrome. Only an explicit name makes a surface bare metal.
+    // Rims / bare metal — avoid matching "steering_wheel" (handled above).
     if (materialMentions(shader, "metal") || materialMentions(name, "rim") ||
-        materialMentions(name, "wheel") || materialMentions(name, "alu"))
+        materialMentions(name, "rim_") || materialMentions(name, "alloy") ||
+        materialMentions(name, "alu") ||
+        (materialMentions(name, "wheel") && !materialMentions(name, "steering")))
         return materialPreset(MaterialPresetId::BrushedMetal);
 
     // Painted bodywork: the damage/dirt multi-map is the AC body shader, and
     // the 499P names its own panels MAIN_PAINT / EXT.
     if (materialMentions(shader, "damage_dirt") || materialMentions(shader, "carpaint") ||
         materialMentions(name, "paint") || materialMentions(name, "body") ||
-        materialMentions(name, "livery"))
+        materialMentions(name, "carbody") || materialMentions(name, "livery") ||
+        materialMentions(name, "ext_") || materialMentions(name, "main_paint") ||
+        materialMentions(name, "wing") || materialMentions(name, "door") ||
+        materialMentions(name, "bonnet") || materialMentions(name, "hood") ||
+        materialMentions(name, "fender") || materialMentions(name, "bumper"))
         return materialPreset(MaterialPresetId::Paint);
 
+    // Plastics / interior hard trim / decals / plates.
     if (materialMentions(shader, "plastic") || materialMentions(name, "plastic") ||
         materialMentions(name, "trim") || materialMentions(name, "grille") ||
-        materialMentions(name, "interior"))
+        materialMentions(name, "interior") || materialMentions(name, "int_") ||
+        materialMentions(name, "dash") || materialMentions(name, "console") ||
+        materialMentions(name, "plate") || materialMentions(name, "sticker") ||
+        materialMentions(name, "decal") || materialMentions(name, "number") ||
+        materialMentions(name, "badge") || materialMentions(name, "logo"))
         return materialPreset(MaterialPresetId::Plastic);
 
     return materialPreset(MaterialPresetId::Default);
