@@ -37,12 +37,19 @@ void ReplayRecorder::recordFrame(const ks::physics::SimulationState& state,
 {
     if (!m_recording) return;
 
+    // qualityLevel 1..5 -> ~15, 20, 30, 45, 60 Hz
+    static const float kHz[5] = {15.f, 20.f, 30.f, 45.f, 60.f};
+    const float minDt = 1.0f / kHz[std::clamp(m_qualityLevel, 1, 5) - 1];
     if (!m_frames.empty()) {
         float lastTime = m_frames.back().time;
         auto now = std::chrono::steady_clock::now();
         float currentTime = std::chrono::duration<float>(now - m_recordStart).count();
-        if (currentTime - lastTime < 1.0f / 60.0f) return;
+        if (currentTime - lastTime < minDt) return;
     }
+    // Soft size cap: ~sizeof(ReplayFrame) * N; stop accepting when over budget.
+    const std::size_t budget =
+        static_cast<std::size_t>(std::max(1, m_maxSizeMb)) * 1024u * 1024u / sizeof(ReplayFrame);
+    if (m_frames.size() >= budget) return;
 
     ReplayFrame frame;
     auto now = std::chrono::steady_clock::now();
