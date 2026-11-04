@@ -34,6 +34,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -100,19 +101,29 @@ void removeMatching(std::vector<Kn5Node>& nodes, const std::string& needle) {
     for (Kn5Node& node : nodes) removeMatching(node.children, needle);
 }
 
-// Vertex bounds of everything baked, in the mesh space the bake writes.
+// Vertex bounds of everything baked, in world space: Kn5Baker applies each
+// mesh's accumulated matrix when it writes, so the local positions alone are
+// not where the asset ends up.
 void boundsOf(const std::vector<Kn5Node>& nodes, float lo[3], float hi[3], bool& any) {
     for (const Kn5Node& node : nodes) {
         const auto& positions = node.mesh.positions;
         if (node.has_mesh && !positions.empty()) {
+            const auto& w = node.mesh.world;
             for (std::size_t i = 0; i + 2 < positions.size(); i += 3) {
+                const float x = positions[i];
+                const float y = positions[i + 1];
+                const float z = positions[i + 2];
+                const float world[3] = {
+                    x * w[0] + y * w[4] + z * w[8] + w[12],
+                    x * w[1] + y * w[5] + z * w[9] + w[13],
+                    x * w[2] + y * w[6] + z * w[10] + w[14],
+                };
                 for (int axis = 0; axis < 3; ++axis) {
-                    const float value = positions[i + static_cast<std::size_t>(axis)];
                     if (!any) {
-                        lo[axis] = hi[axis] = value;
+                        lo[axis] = hi[axis] = world[axis];
                     } else {
-                        lo[axis] = std::min(lo[axis], value);
-                        hi[axis] = std::max(hi[axis], value);
+                        lo[axis] = std::min(lo[axis], world[axis]);
+                        hi[axis] = std::max(hi[axis], world[axis]);
                     }
                 }
                 any = true;
@@ -122,14 +133,49 @@ void boundsOf(const std::vector<Kn5Node>& nodes, float lo[3], float hi[3], bool&
     }
 }
 
+bool invert3x3(const float m[3][3], float out[3][3]) {
+    const float det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                      m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                      m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    if (std::fabs(det) < 1e-12f) return false;
+    const float inv = 1.f / det;
+    out[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * inv;
+    out[0][1] = -(m[0][1] * m[2][2] - m[0][2] * m[2][1]) * inv;
+    out[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * inv;
+    out[1][0] = -(m[1][0] * m[2][2] - m[1][2] * m[2][0]) * inv;
+    out[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * inv;
+    out[1][2] = -(m[0][0] * m[1][2] - m[0][2] * m[1][0]) * inv;
+    out[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * inv;
+    out[2][1] = -(m[0][0] * m[2][1] - m[0][1] * m[2][0]) * inv;
+    out[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * inv;
+    return true;
+}
+
+// Shifts the bake by `delta` world metres. The positions are local to each
+// mesh and its accumulated matrix is applied when the mesh is written, so the
+// world shift is carried into each mesh's own space first — adding it to the
+// local numbers would move a rotated prop somewhere else entirely.
 void offsetNodes(std::vector<Kn5Node>& nodes, const float delta[3]) {
     for (Kn5Node& node : nodes) {
-        if (node.has_mesh) {
+        if (node.has_mesh && !node.mesh.positions.empty()) {
+            const auto& w = node.mesh.world;
+            const float basis[3][3] = {{w[0], w[1], w[2]},
+                                       {w[4], w[5], w[6]},
+                                       {w[8], w[9], w[10]}};
+            float inverse[3][3];
+            float local[3] = {0.f, 0.f, 0.f};
+            if (invert3x3(basis, inverse)) {
+                // row-vector convention: local = world * basis^-1
+                for (int column = 0; column < 3; ++column)
+                    local[column] = delta[0] * inverse[0][column] +
+                                    delta[1] * inverse[1][column] +
+                                    delta[2] * inverse[2][column];
+            }
             auto& positions = node.mesh.positions;
             for (std::size_t i = 0; i + 2 < positions.size(); i += 3) {
-                positions[i] -= delta[0];
-                positions[i + 1] -= delta[1];
-                positions[i + 2] -= delta[2];
+                positions[i] -= local[0];
+                positions[i + 1] -= local[1];
+                positions[i + 2] -= local[2];
             }
         }
         offsetNodes(node.children, delta);
