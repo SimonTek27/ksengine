@@ -77,14 +77,13 @@ public:
     /** Print human-readable report to FILE (default stderr). */
     void report(FILE* out = stderr) const;
 
-    /** Roadmap 2.14 — same numbers as the report as CSV: one row per
-     *  section plus __frame__ and, only when the queue produced timestamps,
-     *  __gpu_frame__ (0 = no data, never an estimate). False when the file
-     *  cannot be opened. The C API ks_engine_profiler_export_csv() and the
-     *  ksim exit dump (KS_PROFILE_CSV) both write through here, so every
-     *  Per-pass rows (__gpu_pass_<name>__) are written only for the passes
-     *  the renderer published for that frame.
-     *  consumer describes the same frame. */
+    /** Roadmap 2.14 - same numbers as the report as CSV: one row per section
+     *  plus __frame__, and - only when the queue produced timestamps -
+     *  __gpu_frame__ plus one __gpu_pass_<name>__ row per pass the renderer
+     *  published for that frame (0 = no data, never an estimate). False when
+     *  the file cannot be opened. The C API ks_engine_profiler_export_csv()
+     *  and the ksim exit dump (KS_PROFILE_CSV) both write through here, so
+     *  every consumer describes the same frame. */
     bool exportCsv(const std::string& path) const;
 
     /** Roadmap 2.14 - per-pass GPU times for the CSV dump. The renderer
