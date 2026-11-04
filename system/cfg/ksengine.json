@@ -28,11 +28,7 @@
       "audio",
       "controls"
     ],
-    "from": [
-      "cm:settings/content-manager",
-      "cm:settings/assetto-corsa"
-    ],
-    "note": "Content Manager splits its settings across three panels; in KinetiKa they are three entries of the same SETTINGS screen, and the image options all live in the video page."
+    "note": "The three entries of the SETTINGS screen: every image option lives in the video page, the volumes in audio, the bindings in controls."
   },
   "video": {
     "resolution": "1920x1080",
@@ -64,7 +60,7 @@
     "mirrorResolution": "128x512",
     "sources": [
       {
-        "from": "ac:cfg/video.ini",
+        "feature": "windowOutput",
         "status": "live",
         "landsAs": "resolution, fullscreen, vsync, anisotropic, shadow map, AA samples",
         "note": "Resolution, fullscreen and vsync switch the window and the swapchain at runtime; anisotropic filtering and the shadow map size are fixed when assets load."
@@ -168,8 +164,8 @@
       },
       {
         "feature": "postChain",
-        "status": "missing",
-        "landsAs": null,
+        "status": "partial",
+        "landsAs": "postProcessFilter",
         "note": "The native display pass applies exposure, the tone curve and the ppfilter LUT; no external post-processing middleware is involved."
       },
       {
@@ -185,7 +181,8 @@
       {
         "feature": "tripleScreen",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "One window, one swapchain: no triple-head splitting or side-angle correction."
       },
       {
         "feature": "headPhysics",
@@ -206,34 +203,16 @@
         "note": "Chase and cockpit views exist, without spring or offset tuning."
       },
       {
-        "from": "ac:cfg/camera_manager",
+        "feature": "cameraViews",
         "status": "partial",
         "landsAs": "chase / cockpit cameras",
         "note": "Two views exist and switch; its per-camera bookmarks are not read."
       },
       {
-        "from": "ac:cfg/camera_onboard",
+        "feature": "cockpitCamera",
         "status": "partial",
         "landsAs": "cockpit view",
         "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
-      },
-      {
-        "from": "ac:cfg/triple_screen",
-        "status": "missing",
-        "landsAs": null,
-        "note": "One window, one swapchain: no triple-head splitting or side-angle correction."
-      },
-      {
-        "from": "cm:settings/assetto-corsa/video",
-        "status": "partial",
-        "landsAs": "video page",
-        "note": "The page lists only the knobs the renderer reads back; MSAA, mip LOD bias and frame latency have no implementation."
-      },
-      {
-        "from": "cm:tools/pp-filter-editor",
-        "status": "partial",
-        "landsAs": "postProcessFilter",
-        "note": "Presets are loaded from system/ppfilters at start-up; there is no editor."
       }
     ]
   },
@@ -245,7 +224,7 @@
     "showroomMusic": true,
     "sources": [
       {
-        "from": "ac:cfg/audio.ini",
+        "feature": "channelLevels",
         "status": "partial",
         "landsAs": "master",
         "note": "Master is a real setting. Engine, wind, tyre and opponent levels are driven per frame by the session, so they are not exposed as preferences."
@@ -257,7 +236,7 @@
         "note": "The showroom plays ambience and music with declick and headroom; there is no playlists screen."
       },
       {
-        "from": "cm:settings/content-manager/audio",
+        "feature": "masterVolume",
         "status": "live",
         "landsAs": "master volume row"
       }
@@ -276,23 +255,18 @@
     "file": "user/<player>/controls.json",
     "sources": [
       {
-        "from": "ac:cfg/controls.ini",
+        "feature": "keyboardBindings",
         "status": "partial",
         "landsAs": "keyboard rebind page",
         "note": "Keyboard only: seven actions, each captured and swapped so two actions never share a key. Arrow keys stay reserved."
       },
       {
-        "from": "ac:cfg/ff_post_process",
+        "feature": "forceFeedback",
         "status": "missing",
         "landsAs": null
       },
       {
         "feature": "gamepadInput",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "forceFeedback",
         "status": "missing",
         "landsAs": null
       },
@@ -314,17 +288,12 @@
         "note": "Partially implemented: see landsAs for the part that exists."
       },
       {
-        "from": "ac:cfg/trackir",
+        "feature": "headTracking",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "ac:cfg/oculus",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "ac:cfg/openvr",
+        "feature": "vrInput",
         "status": "missing",
         "landsAs": null
       }
@@ -342,25 +311,25 @@
     "weather": "clear",
     "sources": [
       {
-        "from": "cm:drive/quick-drive",
+        "feature": "sessionModes",
         "status": "live",
         "landsAs": "PRACTICE / TIME ATTACK / RACE rows",
         "note": "Each row starts a session with its own lap countdown and grid."
       },
       {
-        "from": "ac:cfg/race.ini",
+        "feature": "sessionSetup",
         "status": "partial",
         "landsAs": "session setup",
         "note": "Car, track and AI count come from the chosen content; AI level and fixed setup are not exposed."
       },
       {
-        "from": "ac:cfg/assists.ini",
+        "feature": "driverAids",
         "status": "partial",
         "landsAs": "assist.tc, assist.abs",
         "note": "Applied from the setup at start-up only."
       },
       {
-        "from": "ac:cfg/gameplay.ini",
+        "feature": "collisionRules",
         "status": "partial",
         "landsAs": "physics flags",
         "note": "Car collisions are always on; the collision radius is fixed."
@@ -386,18 +355,18 @@
     "spectating": false,
     "sources": [
       {
-        "from": "cm:online/server-list",
+        "feature": "serverBrowser",
         "status": "live",
         "landsAs": "SERVER BROWSER row"
       },
       {
-        "from": "cm:online/host",
+        "feature": "hosting",
         "status": "live",
         "landsAs": "HOST ON 40000 row",
         "note": "A notice is raised whether the host starts or refuses to."
       },
       {
-        "from": "ac:cfg/race.ini",
+        "feature": "sessionRules",
         "status": "partial",
         "landsAs": "session rules",
         "note": "No password, slot list or booking."
@@ -429,7 +398,7 @@
         "landsAs": null
       },
       {
-        "from": "cm:tools/server-manager",
+        "feature": "dedicatedServer",
         "status": "partial",
         "landsAs": "host row",
         "note": "kssimserver.exe ships next to the simulator; there is no in-menu manager."
@@ -455,7 +424,7 @@
     ],
     "sources": [
       {
-        "from": "cm:career",
+        "feature": "careerStats",
         "status": "partial",
         "landsAs": "PROFILE stats block",
         "note": "Career totals are kept and written to stats.json; there is no championship progression."
@@ -474,13 +443,13 @@
     "setupEditor": false,
     "sources": [
       {
-        "from": "cm:content/cars/setup",
+        "feature": "upgrades",
         "status": "partial",
         "landsAs": "upgrade rows",
         "note": "Upgrade packages cycle and apply; there is no per-parameter setup screen."
       },
       {
-        "from": "ac:cfg/showroom_start",
+        "feature": "garageScene",
         "status": "partial",
         "landsAs": "garage view",
         "note": "The showroom is a real scene (content/showrooms/industrial)."
@@ -528,13 +497,13 @@
     "compoundChoice": false,
     "sources": [
       {
-        "from": "ac:cfg/race.ini",
+        "feature": "pitPlan",
         "status": "live",
         "landsAs": "CONFIRM PLAN",
         "note": "Fuel target and repair jobs are handed to the pit service."
       },
       {
-        "from": "cm:content/cars/pit",
+        "feature": "pitService",
         "status": "partial",
         "landsAs": "REQUEST SERVICE",
         "note": "The service runs when the car is stopped in the box; tyre compound choice is not implemented."
@@ -550,91 +519,15 @@
     "folder": "user/<player>/replay",
     "sources": [
       {
-        "from": "cm:replay",
+        "feature": "replayRecording",
         "status": "live",
         "landsAs": "RECORD / LOAD rows"
       },
       {
-        "from": "ac:cfg/replay.ini",
+        "feature": "replayLimits",
         "status": "partial",
         "landsAs": "maxSizeMb, qualityLevel, autosave",
         "note": "Size and sampling rate are read as documented defaults; autosave counts are not enforced per session type."
-      }
-    ]
-  },
-  "contentManager": {
-    "cars": true,
-    "tracks": true,
-    "teams": true,
-    "showrooms": [
-      "industrial"
-    ],
-    "skins": false,
-    "archives": false,
-    "sources": [
-      {
-        "from": "cm:content/cars",
-        "status": "live",
-        "landsAs": "CARS page",
-        "note": "content/cars folders; kn5 meshes and power curves are read at load."
-      },
-      {
-        "from": "cm:content/tracks",
-        "status": "live",
-        "landsAs": "TRACKS page"
-      },
-      {
-        "from": "cm:content/driver-suits",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "cm:content/helmets",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "cm:content/showrooms",
-        "status": "partial",
-        "landsAs": "garage scene",
-        "note": "One showroom is installed; its preview grid does not exist."
-      },
-      {
-        "from": "cm:content/misc/skins",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "cm:tools/unpacker",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "trackCatalog",
-        "status": "partial",
-        "landsAs": "track.ini",
-        "note": "Partially implemented: see landsAs for the part that exists."
-      },
-      {
-        "feature": "trackTweaks",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "contentManifest",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "standardContent",
-        "status": "partial",
-        "landsAs": "content scan",
-        "note": "Partially implemented: see landsAs for the part that exists."
-      },
-      {
-        "feature": "materialMapping",
-        "status": "missing",
-        "landsAs": null
       }
     ]
   },
@@ -649,7 +542,7 @@
     ],
     "sources": [
       {
-        "from": "cm:content/cars/filters",
+        "feature": "carFilters",
         "status": "partial",
         "landsAs": "CARS page",
         "note": "Scrolling list with the car folder name; class and year filters are declared but not applied."
@@ -681,7 +574,7 @@
         "landsAs": null
       },
       {
-        "feature": "carCatalog",
+        "feature": "carData",
         "status": "missing",
         "landsAs": null
       }
@@ -691,14 +584,9 @@
     "layouts": true,
     "sources": [
       {
-        "from": "cm:content/tracks",
-        "status": "live",
-        "landsAs": "TRACKS page"
-      },
-      {
         "feature": "layoutCatalog",
-        "status": "partial",
-        "landsAs": "track.ini",
+        "status": "live",
+        "landsAs": "TRACKS page",
         "note": "Layouts come from the track folder: trackSelect picks one, and the session loads its data with the meshes."
       }
     ]
@@ -707,17 +595,12 @@
     "roster": "content/teams",
     "sources": [
       {
-        "from": "cm:content/driver-suits",
+        "feature": "teamSuits",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "cm:content/helmets",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "helmets",
+        "feature": "teamHelmets",
         "status": "missing",
         "landsAs": null
       },
@@ -738,13 +621,13 @@
     ],
     "sources": [
       {
-        "from": "cm:drive/results",
+        "feature": "resultTable",
         "status": "live",
         "landsAs": "RESULTS screen",
         "note": "Positions, best lap, disqualification and finish state are shown per driver."
       },
       {
-        "from": "ac:cfg/race.ini",
+        "feature": "standings",
         "status": "partial",
         "landsAs": "results rows",
         "note": "No export, no championship points."
@@ -763,7 +646,7 @@
     "photoMode": "partial",
     "sources": [
       {
-        "from": "cm:drive/pause",
+        "feature": "pauseActions",
         "status": "live",
         "landsAs": "pause bar",
         "note": "Rounded cards, resume/restart/garage/settings/quit."
@@ -793,13 +676,13 @@
     "notifications": true,
     "sources": [
       {
-        "from": "cm:launcher",
+        "feature": "startupTiles",
         "status": "live",
         "landsAs": "tile row",
         "note": "Startup tiles open the sections directly."
       },
       {
-        "from": "ac:cfg/launcher.ini",
+        "feature": "windowStartup",
         "status": "partial",
         "landsAs": "window title and startup section",
         "note": "No launcher page: the simulator opens on the tiles."
@@ -826,7 +709,7 @@
   "credits": {
     "sources": [
       {
-        "from": "cm:about",
+        "feature": "creditsScreen",
         "status": "live",
         "landsAs": "CREDITS screen"
       },
@@ -872,17 +755,12 @@
         "landsAs": null
       },
       {
-        "from": "ac:cfg/python",
+        "feature": "timeLimitedSession",
         "status": "missing",
         "landsAs": null
       },
       {
-        "from": "ac:cfg/time_limited_test",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "from": "cm:settings/assetto-corsa/dev",
+        "feature": "devModeRow",
         "status": "partial",
         "landsAs": "DEV MODE row",
         "note": "The row opens a confirmation screen; the mode itself only logs."
@@ -892,10 +770,81 @@
   "quit": {
     "sources": [
       {
-        "from": "cm:quit",
+        "feature": "exitSave",
         "status": "live",
         "landsAs": "QUIT confirmation",
         "note": "Settings are written back before the window closes."
+      }
+    ]
+  },
+  "content": {
+    "cars": true,
+    "tracks": true,
+    "teams": true,
+    "showrooms": [
+      "industrial"
+    ],
+    "skins": false,
+    "archives": false,
+    "sources": [
+      {
+        "feature": "carCatalog",
+        "status": "live",
+        "landsAs": "CARS page",
+        "note": "content/cars folders; kn5 meshes and power curves are read at load."
+      },
+      {
+        "feature": "trackCatalog",
+        "status": "live",
+        "landsAs": "TRACKS page",
+        "note": "Partially implemented: see landsAs for the part that exists."
+      },
+      {
+        "feature": "driverSuits",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "helmets",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "showrooms",
+        "status": "partial",
+        "landsAs": "garage scene",
+        "note": "One showroom is installed; its preview grid does not exist."
+      },
+      {
+        "feature": "skins",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "contentUnpacking",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "trackTweaks",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "contentManifest",
+        "status": "missing",
+        "landsAs": null
+      },
+      {
+        "feature": "standardContent",
+        "status": "partial",
+        "landsAs": "content scan",
+        "note": "Partially implemented: see landsAs for the part that exists."
+      },
+      {
+        "feature": "materialMapping",
+        "status": "missing",
+        "landsAs": null
       }
     ]
   }
