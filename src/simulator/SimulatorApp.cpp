@@ -96,7 +96,7 @@ static const wchar_t* WINDOW_CLASS = L"KsEditorSimWindow";
 static bool createVulkanInstance() {
     VkApplicationInfo appInfo = {};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.pApplicationName = "ksEditor Simulator";
+    appInfo.pApplicationName = "KinetiKa Simulator";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "ksEngine";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -373,7 +373,7 @@ static void initWindow() {
     wc.lpszClassName = WINDOW_CLASS;
     RegisterClassExW(&wc);
 
-    g_hWnd = CreateWindowExW(0, WINDOW_CLASS, L"ksEditor Simulator",
+    g_hWnd = CreateWindowExW(0, WINDOW_CLASS, L"KinetiKa Simulator",
                              WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT, 1920, 1080,
                              nullptr, nullptr, g_hInstance, nullptr);
@@ -1112,13 +1112,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         if (s > 0.0) g_profileSeconds = s;
     }
 
-    printf("[MAIN] Starting ksEditor Simulator (Qt-free%s)...\n",
+    printf("[MAIN] Starting KinetiKa Simulator (Qt-free%s)...\n",
            g_headless ? ", headless" : "");
 
     if (!g_headless) initWindow();
     initVulkanAndSimulation();
 
-    printf("ksEditor Simulator started (%s)\n",
+    printf("KinetiKa Simulator started (%s)\n",
            g_headless ? "headless, no window/Vulkan" : "Win32 + Vulkan, no Qt");
 
     LARGE_INTEGER freq, lastTime;
