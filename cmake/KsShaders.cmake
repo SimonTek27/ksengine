@@ -26,6 +26,7 @@ function(ks_add_shader_target _target _src_root)
 		${_src_root}/simulator/shaders/gbuffer.frag
 		${_src_root}/simulator/shaders/deferred_lighting.vert
 		${_src_root}/simulator/shaders/deferred_lighting.frag
+		${_src_root}/simulator/shaders/ssgiGather.frag.glsl
 		${_src_root}/simulator/shaders/taa.frag
 		${_src_root}/simulator/shaders/hiz_downsample.frag
 		# Display pass + bloom chain of the deferred path (ksengine shaders).

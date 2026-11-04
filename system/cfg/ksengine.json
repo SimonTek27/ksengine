@@ -84,8 +84,8 @@
       {
         "feature": "ssgi",
         "status": "partial",
-        "landsAs": "inline screen-space indirect bounce",
-        "note": "The bounce is gathered inline by the deferred lighting pass from neighbouring GBuffer world positions and albedos. video.ssgi turns it on, video.ssgiRadius (screen UV) and video.ssgiIntensity tune it, and enabling it also switches the render path to deferred, because the forward path never runs that shader (off by default). The two ssgi compute shaders build but nothing dispatches them: they still want G-buffer storage images this renderer does not expose."
+        "landsAs": "half-res gather + gaussian denoise",
+        "note": "The bounce is gathered at half resolution by ssgiGather.frag into its own target and denoised with two gaussian axes before the deferred lighting pass samples it as binding 8 - that filter is what keeps a wide video.ssgiRadius smooth. video.ssgi turns it on (and switches the render path to deferred, because the forward path never runs that shader, off by default); video.ssgiRadius and video.ssgiIntensity tune footprint and strength. The two engine-side ssgi compute shaders build but nothing dispatches them."
       },
       {
         "feature": "screenSpaceReflections",

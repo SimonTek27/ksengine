@@ -721,6 +721,25 @@ private:
     VkShaderModule m_glareFragModule = VK_NULL_HANDLE;
     VkShaderModule m_blurFragModule = VK_NULL_HANDLE;
 
+    // SSGI (video.ssgi): a half-res gather plus one scratch target, filtered by
+    // two gaussian passes and sampled by the lighting pass as binding 8. The
+    // gather pipeline is its own; the blur reuses bloomBlur.frag.
+    VkImage m_ssgiImages[2]{};
+    VkDeviceMemory m_ssgiMemory[2]{};
+    VkImageView m_ssgiViews[2]{};
+    VkFramebuffer m_ssgiFramebuffers[2]{};
+    VkSampler m_ssgiSampler = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_ssgiGatherSetLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_ssgiBlurSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_ssgiPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_ssgiGatherSet = VK_NULL_HANDLE;
+    VkDescriptorSet m_ssgiBlurSets[2]{};
+    VkPipelineLayout m_ssgiGatherLayout = VK_NULL_HANDLE;
+    VkPipelineLayout m_ssgiBlurLayout = VK_NULL_HANDLE;
+    VkPipeline m_ssgiGatherPipeline = VK_NULL_HANDLE;
+    VkPipeline m_ssgiBlurPipeline = VK_NULL_HANDLE;
+    VkShaderModule m_ssgiGatherFragModule = VK_NULL_HANDLE;
+
     // --- Display pass: the only writer of the backbuffer on the deferred
     // path — tonemap.frag turns the resolved linear-HDR frame into sRGB
     // (SDR) or PQ/Rec.2020 (HDR10) pixels. ---

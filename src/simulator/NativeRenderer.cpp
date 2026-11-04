@@ -2390,6 +2390,49 @@ void NativeRenderer::endFrame() {
 
         // ---- Pass 2: fullscreen lighting + volumetric fog into an
         // offscreen HDR target, sampling the GBuffer written above. ----
+        // ---- Pass 1.5: SSGI - gather at half resolution, then denoise it with
+        // two gaussian axes so a wide ssgiRadius stays smooth instead of blotchy.
+        // The lighting pass below samples m_ssgiViews[0]. ----
+        if (m_ssgi && m_ssgiGatherPipeline && m_ssgiBlurPipeline) {
+            VkViewport svp{0, 0, float(m_bloomExtent.width), float(m_bloomExtent.height), 0.0f, 1.0f};
+            VkRect2D sscissor{{0, 0}, m_bloomExtent};
+            auto ssgiPass = [&](VkFramebuffer fb, VkPipeline pipeline, VkPipelineLayout layout,
+                                VkDescriptorSet set, const void* push, uint32_t pushSize) {
+                VkClearValue clear{};
+                clear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+                VkRenderPassBeginInfo b{};
+                b.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                b.renderPass = m_bloomRenderPass;
+                b.framebuffer = fb;
+                b.renderArea.extent = m_bloomExtent;
+                b.clearValueCount = 1;
+                b.pClearValues = &clear;
+                vkCmdBeginRenderPass(m_commandBuffer, &b, VK_SUBPASS_CONTENTS_INLINE);
+                vkCmdSetViewport(m_commandBuffer, 0, 1, &svp);
+                vkCmdSetScissor(m_commandBuffer, 0, 1, &sscissor);
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+                vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout,
+                                        0, 1, &set, 0, nullptr);
+                vkCmdPushConstants(m_commandBuffer, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   pushSize, push);
+                vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
+                vkCmdEndRenderPass(m_commandBuffer);
+            };
+
+            BlurPC gather{m_ssgiRadius, 0.0f, 0.0f, 0.0f};
+            ssgiPass(m_ssgiFramebuffers[0], m_ssgiGatherPipeline, m_ssgiGatherLayout,
+                     m_ssgiGatherSet, &gather, sizeof(gather));
+
+            BlurPC giH{1.0f / float(m_bloomExtent.width), 0.0f, 0.0f, 0.0f};
+            ssgiPass(m_ssgiFramebuffers[1], m_ssgiBlurPipeline, m_ssgiBlurLayout,
+                     m_ssgiBlurSets[0], &giH, sizeof(giH));
+
+            BlurPC giV{0.0f, 1.0f / float(m_bloomExtent.height), 0.0f, 0.0f};
+            ssgiPass(m_ssgiFramebuffers[0], m_ssgiBlurPipeline, m_ssgiBlurLayout,
+                     m_ssgiBlurSets[1], &giV, sizeof(giV));
+        }
+
+
         VkClearValue lClear{};
         lClear.color = {{m_fogColor.x, m_fogColor.y, m_fogColor.z, 1.0f}};
 
@@ -4114,24 +4157,241 @@ bool NativeRenderer::ensureDeferredResources() {
         }
     }
 
+    // ---- SSGI targets (video.ssgi): one half-res gather plus one scratch
+    // target, both living in the bloom render pass. The blur that follows is
+    // what lets a large ssgiRadius stay smooth: the inline version could only
+    // spread its own taps, never borrow a neighbour's bounce. ----
+    {
+        for (int i = 0; i < 2; ++i) {
+            if (!createSampledTarget(m_physicalDevice, m_device, m_bloomExtent.width,
+                                     m_bloomExtent.height, VK_FORMAT_R16G16B16A16_SFLOAT,
+                                     m_ssgiImages[i], m_ssgiMemory[i], m_ssgiViews[i])) {
+                destroyDeferredResources();
+                return false;
+            }
+            VkFramebufferCreateInfo fb{};
+            fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fb.renderPass = m_bloomRenderPass;
+            fb.attachmentCount = 1;
+            fb.pAttachments = &m_ssgiViews[i];
+            fb.width = m_bloomExtent.width;
+            fb.height = m_bloomExtent.height;
+            fb.layers = 1;
+            if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_ssgiFramebuffers[i]) != VK_SUCCESS) {
+                destroyDeferredResources();
+                return false;
+            }
+        }
+
+        // Linear: the gather is half resolution, so both the blur taps and the
+        // lighting pass fetch are free to interpolate between texels.
+        VkSamplerCreateInfo sCi{};
+        sCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sCi.magFilter = VK_FILTER_LINEAR;
+        sCi.minFilter = VK_FILTER_LINEAR;
+        sCi.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sCi.maxLod = 1.0f;
+        if (vkCreateSampler(m_device, &sCi, nullptr, &m_ssgiSampler) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+
+        VkDescriptorSetLayoutBinding gBindings[3]{};
+        for (int i = 0; i < 3; ++i)
+            gBindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                            VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        VkDescriptorSetLayoutCreateInfo dslCi{};
+        dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        dslCi.bindingCount = 3;
+        dslCi.pBindings = gBindings;
+        if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_ssgiGatherSetLayout) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+        dslCi.bindingCount = 1;
+        if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_ssgiBlurSetLayout) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+
+        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5};
+        VkDescriptorPoolCreateInfo poolCi{};
+        poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolCi.maxSets = 3;
+        poolCi.poolSizeCount = 1;
+        poolCi.pPoolSizes = &poolSize;
+        if (vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_ssgiPool) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+
+        VkDescriptorSetAllocateInfo gAi{};
+        gAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        gAi.descriptorPool = m_ssgiPool;
+        gAi.descriptorSetCount = 1;
+        gAi.pSetLayouts = &m_ssgiGatherSetLayout;
+        if (vkAllocateDescriptorSets(m_device, &gAi, &m_ssgiGatherSet) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+        VkDescriptorSetLayout blurLayouts[2] = {m_ssgiBlurSetLayout, m_ssgiBlurSetLayout};
+        VkDescriptorSetAllocateInfo bAi{};
+        bAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        bAi.descriptorPool = m_ssgiPool;
+        bAi.descriptorSetCount = 2;
+        bAi.pSetLayouts = blurLayouts;
+        if (vkAllocateDescriptorSets(m_device, &bAi, m_ssgiBlurSets) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+
+        VkDescriptorImageInfo gInfo[3]{};
+        VkWriteDescriptorSet gWrites[3]{};
+        for (int i = 0; i < 3; ++i) {
+            gInfo[i].sampler = m_ssgiSampler;
+            gInfo[i].imageView = m_gbufferViews[i];
+            gInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            gWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            gWrites[i].dstSet = m_ssgiGatherSet;
+            gWrites[i].dstBinding = uint32_t(i);
+            gWrites[i].descriptorCount = 1;
+            gWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            gWrites[i].pImageInfo = &gInfo[i];
+        }
+        vkUpdateDescriptorSets(m_device, 3, gWrites, 0, nullptr);
+
+        VkDescriptorImageInfo bInfo[2]{};
+        VkWriteDescriptorSet bWrites[2]{};
+        for (int i = 0; i < 2; ++i) {
+            bInfo[i].sampler = m_ssgiSampler;
+            bInfo[i].imageView = m_ssgiViews[i];
+            bInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            bWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            bWrites[i].dstSet = m_ssgiBlurSets[i];
+            bWrites[i].dstBinding = 0;
+            bWrites[i].descriptorCount = 1;
+            bWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            bWrites[i].pImageInfo = &bInfo[i];
+        }
+        vkUpdateDescriptorSets(m_device, 2, bWrites, 0, nullptr);
+
+        m_ssgiGatherFragModule = createShaderModule(m_device, readFile(m_shaderDir + "/ssgiGather.frag.spv"));
+        if (!m_ssgiGatherFragModule) {
+            fprintf(stderr, "[NativeRenderer] ssgiGather.frag.spv missing - video.ssgi stays inert\n");
+            destroyDeferredResources();
+            return false;
+        }
+
+        // Both pipelines are fullscreen triangles in the bloom render pass: the
+        // gather pulls the G-buffer, the blur is bloomBlur.frag run twice.
+        VkPushConstantRange pcRange{};
+        pcRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        pcRange.offset = 0;
+        pcRange.size = sizeof(BlurPC);
+        auto makeLayout = [&](VkDescriptorSetLayout setLayout, VkPipelineLayout* out) {
+            VkDescriptorSetLayout setLayouts[1] = {setLayout};
+            VkPipelineLayoutCreateInfo layoutCi{};
+            layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+            layoutCi.setLayoutCount = 1;
+            layoutCi.pSetLayouts = setLayouts;
+            layoutCi.pushConstantRangeCount = 1;
+            layoutCi.pPushConstantRanges = &pcRange;
+            return vkCreatePipelineLayout(m_device, &layoutCi, nullptr, out) == VK_SUCCESS;
+        };
+        if (!makeLayout(m_ssgiGatherSetLayout, &m_ssgiGatherLayout) ||
+            !makeLayout(m_ssgiBlurSetLayout, &m_ssgiBlurLayout)) {
+            destroyDeferredResources();
+            return false;
+        }
+
+        VkPipelineVertexInputStateCreateInfo vertexInput{};
+        vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+        inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo viewportState{};
+        viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewportState.viewportCount = 1;
+        viewportState.scissorCount = 1;
+        VkPipelineRasterizationStateCreateInfo rasterizer{};
+        rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_NONE;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        VkPipelineMultisampleStateCreateInfo multisampling{};
+        multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        VkPipelineColorBlendAttachmentState blendAtt{};
+        blendAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                  VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        VkPipelineColorBlendStateCreateInfo colorBlend{};
+        colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        colorBlend.attachmentCount = 1;
+        colorBlend.pAttachments = &blendAtt;
+        VkDynamicState dynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynState{};
+        dynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dynState.dynamicStateCount = 2;
+        dynState.pDynamicStates = dynStates;
+
+        auto makePipeline = [&](VkPipelineLayout layout, VkShaderModule frag, VkPipeline* out) {
+            VkPipelineShaderStageCreateInfo stages[2]{};
+            stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+            stages[0].module = m_lightingVertModule;
+            stages[0].pName = "main";
+            stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            stages[1].module = frag;
+            stages[1].pName = "main";
+
+            VkGraphicsPipelineCreateInfo pipeCi{};
+            pipeCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+            pipeCi.stageCount = 2;
+            pipeCi.pStages = stages;
+            pipeCi.pVertexInputState = &vertexInput;
+            pipeCi.pInputAssemblyState = &inputAssembly;
+            pipeCi.pViewportState = &viewportState;
+            pipeCi.pRasterizationState = &rasterizer;
+            pipeCi.pMultisampleState = &multisampling;
+            pipeCi.pColorBlendState = &colorBlend;
+            pipeCi.pDepthStencilState = nullptr;
+            pipeCi.pDynamicState = &dynState;
+            pipeCi.layout = layout;
+            pipeCi.renderPass = m_bloomRenderPass;
+            pipeCi.subpass = 0;
+            return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeCi, nullptr, out) == VK_SUCCESS;
+        };
+        if (!makePipeline(m_ssgiGatherLayout, m_ssgiGatherFragModule, &m_ssgiGatherPipeline) ||
+            !makePipeline(m_ssgiBlurLayout, m_blurFragModule, &m_ssgiBlurPipeline)) {
+            destroyDeferredResources();
+            return false;
+        }
+    }
+
+
     // ---- Lighting descriptors: FrameData UBO, shadow cascade array, the
     // three GBuffer targets, and the three IBL samplers (brief P2, bindings
     // 5..7 — appended, never reordered). ----
     {
-        VkDescriptorSetLayoutBinding bindings[8]{};
+        VkDescriptorSetLayoutBinding bindings[9]{};
         bindings[0] = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
-        for (int i = 1; i < 8; ++i)
+        for (int i = 1; i < 9; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 8;
+        dslCi.bindingCount = 9;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_lightingSetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorPoolSize poolSizes[2]{};
         poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
-        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 7};
+        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8};
 
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -4807,6 +5067,25 @@ void NativeRenderer::destroyDeferredResources() {
         if (m_bloomMemory[i]) { vkFreeMemory(m_device, m_bloomMemory[i], nullptr); m_bloomMemory[i] = VK_NULL_HANDLE; }
     }
 
+    if (m_ssgiGatherPipeline) { vkDestroyPipeline(m_device, m_ssgiGatherPipeline, nullptr); m_ssgiGatherPipeline = VK_NULL_HANDLE; }
+    if (m_ssgiBlurPipeline) { vkDestroyPipeline(m_device, m_ssgiBlurPipeline, nullptr); m_ssgiBlurPipeline = VK_NULL_HANDLE; }
+    if (m_ssgiGatherLayout) { vkDestroyPipelineLayout(m_device, m_ssgiGatherLayout, nullptr); m_ssgiGatherLayout = VK_NULL_HANDLE; }
+    if (m_ssgiBlurLayout) { vkDestroyPipelineLayout(m_device, m_ssgiBlurLayout, nullptr); m_ssgiBlurLayout = VK_NULL_HANDLE; }
+    if (m_ssgiGatherFragModule) { vkDestroyShaderModule(m_device, m_ssgiGatherFragModule, nullptr); m_ssgiGatherFragModule = VK_NULL_HANDLE; }
+    if (m_ssgiPool) { vkDestroyDescriptorPool(m_device, m_ssgiPool, nullptr); m_ssgiPool = VK_NULL_HANDLE; }
+    m_ssgiGatherSet = VK_NULL_HANDLE;
+    m_ssgiBlurSets[0] = m_ssgiBlurSets[1] = VK_NULL_HANDLE;
+    if (m_ssgiGatherSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_ssgiGatherSetLayout, nullptr); m_ssgiGatherSetLayout = VK_NULL_HANDLE; }
+    if (m_ssgiBlurSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_ssgiBlurSetLayout, nullptr); m_ssgiBlurSetLayout = VK_NULL_HANDLE; }
+    if (m_ssgiSampler) { vkDestroySampler(m_device, m_ssgiSampler, nullptr); m_ssgiSampler = VK_NULL_HANDLE; }
+    for (int i = 0; i < 2; ++i) {
+        if (m_ssgiFramebuffers[i]) { vkDestroyFramebuffer(m_device, m_ssgiFramebuffers[i], nullptr); m_ssgiFramebuffers[i] = VK_NULL_HANDLE; }
+        if (m_ssgiViews[i]) { vkDestroyImageView(m_device, m_ssgiViews[i], nullptr); m_ssgiViews[i] = VK_NULL_HANDLE; }
+        if (m_ssgiImages[i]) { vkDestroyImage(m_device, m_ssgiImages[i], nullptr); m_ssgiImages[i] = VK_NULL_HANDLE; }
+        if (m_ssgiMemory[i]) { vkFreeMemory(m_device, m_ssgiMemory[i], nullptr); m_ssgiMemory[i] = VK_NULL_HANDLE; }
+    }
+
+
     // Fresh history is undefined content — force the first frame after any
     // rebuild to take the current frame only.
     m_historyValid = false;
@@ -4848,8 +5127,16 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
         iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    VkWriteDescriptorSet writes[8]{};
-    for (int i = 0; i < 8; ++i) {
+    // Binding 8: the denoised SSGI target. Before the SSGI resources exist, or
+    // if they failed, the shadow view stands in - the shader samples it only
+    // when ssgiParams.w is set.
+    VkDescriptorImageInfo ssgiInfo{};
+    ssgiInfo.sampler = m_ssgiSampler ? m_ssgiSampler : shadowSampler;
+    ssgiInfo.imageView = m_ssgiViews[0] ? m_ssgiViews[0] : shadowView;
+    ssgiInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet writes[9]{};
+    for (int i = 0; i < 9; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = m_lightingSet;
         writes[i].dstBinding = uint32_t(i);
@@ -4857,14 +5144,15 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
     }
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].pBufferInfo = &bufInfo;
-    for (int i = 1; i < 8; ++i) {
+    for (int i = 1; i < 9; ++i) {
         writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[i].pImageInfo = (i == 1) ? &shadowInfo
                               : (i < 5) ? &gInfo[i - 2]
-                                        : &iblInfo[i - 5];
+                              : (i < 8) ? &iblInfo[i - 5]
+                                        : &ssgiInfo;
     }
 
-    vkUpdateDescriptorSets(m_device, 8, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 9, writes, 0, nullptr);
 }
 
 void NativeRenderer::writeResolveDescriptorSet() {
