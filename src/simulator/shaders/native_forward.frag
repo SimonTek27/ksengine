@@ -152,6 +152,11 @@ void main() {
     int cascadeIndex = 2;
     if (viewDist < frame.cascadeSplits.x) cascadeIndex = 0;
     else if (viewDist < frame.cascadeSplits.y) cascadeIndex = 1;
+    // cascadeSplits.w = live cascade count (1..3): never sample a layer the
+    // shadow pass did not render.
+    int liveCascades = int(frame.cascadeSplits.w + 0.5);
+    if (liveCascades < 1) liveCascades = 3;
+    cascadeIndex = min(cascadeIndex, liveCascades - 1);
 
     float shadow = sampleShadow(fragWorldPos, cascadeIndex);
 

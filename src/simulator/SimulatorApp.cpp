@@ -924,6 +924,10 @@ static void initSimulation() {
         const int anisotropy =
             static_cast<int>(videoConfig.numberAt("anisotropicFiltering", 8.0));
         const bool particles = videoConfig.boolAt("particles", true);
+        const int shadowMapSize =
+            static_cast<int>(videoConfig.numberAt("shadowMapSize", 2048.0));
+        const int shadowCascades =
+            static_cast<int>(videoConfig.numberAt("shadowCascades", 3.0));
         const std::string resolution = videoConfig.stringAt("resolution");
         int width = 0, height = 0;
         if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
@@ -936,6 +940,19 @@ static void initSimulation() {
                 if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
                     renderer->setTonemapMode(i);
             }
+            // video.shadowMapSize / video.shadowCascades: the cascade stack
+            // rebuilds its attachments once, here, before the first frame.
+            if (g_shadowMap.isInitialized()) {
+                if (!g_shadowMap.setCascadeCount(shadowCascades))
+                    printf("[INIT] Shadow cascades: rebuild FAILED\n");
+                if (!g_shadowMap.setResolution(
+                        static_cast<uint32_t>(shadowMapSize)))
+                    printf("[INIT] Shadow map size: rebuild FAILED\n");
+                printf("[INIT] Shadow: %ux%u, %d cascades\n",
+                       g_shadowMap.resolution(), g_shadowMap.resolution(),
+                       g_shadowMap.cascadeCount());
+            }
+
             renderer->setSsao(ssao != 0);
             renderer->setSsr(ssr != 0);
             renderer->setSsgi(ssgi != 0,

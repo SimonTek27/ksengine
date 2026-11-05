@@ -61,11 +61,12 @@ bool CascadedShadowMap::initialize(VkPhysicalDevice physicalDevice, VkDevice dev
                                    const std::string& shaderDir, uint32_t resolution) {
     m_physicalDevice = physicalDevice;
     m_device = device;
+    m_shaderDir = shaderDir;
     m_resolution = resolution;
 
-    // Practical split scheme default weighting; update() will re-derive the
-    // actual distances from the real camera near/far each frame.
-    m_splitFractions = {0.10f, 0.30f, 1.00f};
+    // Practical split scheme weighting; update() re-derives the actual
+    // distances from the real camera near/far each frame.
+    applySplitFractions();
 
     // ---- Render pass: color attachment (manual depth written by
     // ksShadow.frag, matching what it already outputs) + a real depth
@@ -136,7 +137,7 @@ bool CascadedShadowMap::initialize(VkPhysicalDevice physicalDevice, VkDevice dev
     imgCi.imageType = VK_IMAGE_TYPE_2D;
     imgCi.extent = {resolution, resolution, 1};
     imgCi.mipLevels = 1;
-    imgCi.arrayLayers = kCascadeCount;
+    imgCi.arrayLayers = static_cast<uint32_t>(m_cascadeCount);
     imgCi.format = VK_FORMAT_R32_SFLOAT;
     imgCi.tiling = VK_IMAGE_TILING_OPTIMAL;
     imgCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -169,7 +170,7 @@ bool CascadedShadowMap::initialize(VkPhysicalDevice physicalDevice, VkDevice dev
     arrayViewCi.format = VK_FORMAT_R32_SFLOAT;
     arrayViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     arrayViewCi.subresourceRange.levelCount = 1;
-    arrayViewCi.subresourceRange.layerCount = kCascadeCount;
+    arrayViewCi.subresourceRange.layerCount = static_cast<uint32_t>(m_cascadeCount);
     if (vkCreateImageView(m_device, &arrayViewCi, nullptr, &m_arrayView) != VK_SUCCESS) {
         fprintf(stderr, "[ShadowSystem] failed to create cascade array view\n");
         return false;
@@ -215,7 +216,7 @@ bool CascadedShadowMap::initialize(VkPhysicalDevice physicalDevice, VkDevice dev
     m_transientDepthView = transientDepthView;
 
     // Per-layer views + framebuffers (one per cascade).
-    for (int i = 0; i < kCascadeCount; ++i) {
+    for (int i = 0; i < m_cascadeCount; ++i) {
         VkImageViewCreateInfo layerViewCi{};
         layerViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         layerViewCi.image = m_depthImage;
@@ -447,7 +448,7 @@ void CascadedShadowMap::update(const mat4& camView, const mat4& camProj, float c
     if (std::fabs(sunDir.dot(up)) > 0.99f) up = vec3(0.0f, 0.0f, 1.0f); // avoid a degenerate lookAt when the sun is near-vertical
 
     float prevSplit = camNear;
-    for (int c = 0; c < kCascadeCount; ++c) {
+    for (int c = 0; c < m_cascadeCount; ++c) {
         float splitDist = camNear + (camFar - camNear) * m_splitFractions[static_cast<size_t>(c)];
 
         float tNear = (prevSplit - camNear) / (camFar - camNear);
@@ -492,8 +493,44 @@ void CascadedShadowMap::update(const mat4& camView, const mat4& camProj, float c
     }
 }
 
+void CascadedShadowMap::applySplitFractions() {
+    if (m_cascadeCount == 1) m_splitFractions = {1.0f, 1.0f, 1.0f};
+    else if (m_cascadeCount == 2) m_splitFractions = {0.25f, 1.0f, 1.0f};
+    else m_splitFractions = {0.10f, 0.30f, 1.00f};
+}
+
+bool CascadedShadowMap::reinitialize(int cascades, uint32_t resolution) {
+    const VkPhysicalDevice phys = m_physicalDevice;
+    const VkDevice dev = m_device;
+    const std::string dir = m_shaderDir;
+    shutdown();
+    m_cascadeCount = cascades;
+    m_resolution = resolution;
+    return initialize(phys, dev, VK_NULL_HANDLE, VK_NULL_HANDLE, dir, resolution);
+}
+
+bool CascadedShadowMap::setCascadeCount(int count) {
+    if (count < 1) count = 1;
+    if (count > kCascadeCount) count = kCascadeCount;
+    if (count == m_cascadeCount) return true;
+    if (!isInitialized()) { m_cascadeCount = count; return true; }
+    const bool ok = reinitialize(count, m_resolution);
+    m_cascadeCount = count;
+    return ok;
+}
+
+bool CascadedShadowMap::setResolution(uint32_t resolution) {
+    if (resolution < 256) resolution = 256;
+    if (resolution > 8192) resolution = 8192;
+    if (resolution == m_resolution) return true;
+    if (!isInitialized()) { m_resolution = resolution; return true; }
+    const bool ok = reinitialize(m_cascadeCount, resolution);
+    m_resolution = resolution;
+    return ok;
+}
+
 void CascadedShadowMap::beginCascadePass(VkCommandBuffer cmd, int cascadeIndex) const {
-    if (cascadeIndex < 0 || cascadeIndex >= kCascadeCount) return;
+    if (cascadeIndex < 0 || cascadeIndex >= m_cascadeCount) return;
 
     VkClearValue clears[2];
     clears[0].color = {{1.0f, 1.0f, 1.0f, 1.0f}}; // far depth outside any drawn geometry => unshadowed
@@ -521,7 +558,7 @@ void CascadedShadowMap::endCascadePass(VkCommandBuffer cmd) const {
 }
 
 void CascadedShadowMap::pushLightSpaceMatrix(VkCommandBuffer cmd, int cascadeIndex, const mat4& modelMatrix) const {
-    if (cascadeIndex < 0 || cascadeIndex >= kCascadeCount) return;
+    if (cascadeIndex < 0 || cascadeIndex >= m_cascadeCount) return;
     float data[32];
     std::memcpy(data, m_cascades[static_cast<size_t>(cascadeIndex)].viewProj.data(), sizeof(float) * 16);
     std::memcpy(data + 16, modelMatrix.data(), sizeof(float) * 16);

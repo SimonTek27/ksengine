@@ -59,9 +59,14 @@ const float VOL_STRENGTH = 4.0;
 const int FOG_STEPS = 12;
 
 int cascadeFor(float viewDist) {
-    if (viewDist < frame.cascadeSplits.x) return 0;
-    if (viewDist < frame.cascadeSplits.y) return 1;
-    return 2;
+    // cascadeSplits.w is how many cascades the stack really has (1..3);
+    // sampling a layer nobody rendered would read stale shadow depth.
+    int count = int(frame.cascadeSplits.w + 0.5);
+    if (count < 1) count = 3;
+    int index = 2;
+    if (viewDist < frame.cascadeSplits.x) index = 0;
+    else if (viewDist < frame.cascadeSplits.y) index = 1;
+    return min(index, count - 1);
 }
 
 float sampleShadow(vec3 worldPos, int cascadeIndex) {

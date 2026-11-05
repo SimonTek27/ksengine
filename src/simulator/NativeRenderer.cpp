@@ -2273,10 +2273,14 @@ void NativeRenderer::endFrame() {
     VkImageView shadowView = m_dummyShadowView;
     VkSampler shadowSampler = m_dummyShadowSampler;
     if (m_shadowMap && m_shadowMap->isInitialized()) {
-        for (int c = 0; c < m_shadowMap->cascadeCount() && c < 3; ++c) {
+        const int liveCascades = m_shadowMap->cascadeCount();
+        for (int c = 0; c < liveCascades && c < 3; ++c) {
             std::memcpy(frameData.cascadeViewProj[c], m_shadowMap->cascade(c).viewProj.data(), sizeof(float) * 16);
             frameData.cascadeSplits[c] = m_shadowMap->cascade(c).splitDepth;
         }
+        // w carries the live count: the lighting shaders clamp their layer
+        // index to it, so a short stack never samples a layer nobody drew.
+        frameData.cascadeSplits[3] = static_cast<float>(liveCascades);
         shadowView = m_shadowMap->arrayView();
         shadowSampler = m_shadowMap->sampler();
     }

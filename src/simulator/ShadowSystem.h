@@ -58,7 +58,12 @@ public:
     void endCascadePass(VkCommandBuffer cmd) const;
     void pushLightSpaceMatrix(VkCommandBuffer cmd, int cascadeIndex, const mat4& modelMatrix) const;
 
-    int cascadeCount() const { return kCascadeCount; }
+    // Live stack size (1..kCascadeCount). video.shadowCascades can shrink it:
+    // one cascade is a third of the shadow cost, three is the old default.
+    int cascadeCount() const { return m_cascadeCount; }
+    // Both recreate the attachments once and keep pipeline and render pass.
+    bool setCascadeCount(int count);
+    bool setResolution(uint32_t resolution);
     const ShadowCascade& cascade(int i) const { return m_cascades[static_cast<size_t>(i)]; }
     VkPipeline pipeline() const { return m_pipeline; }
     VkPipelineLayout pipelineLayout() const { return m_pipelineLayout; }
@@ -69,6 +74,11 @@ public:
     uint32_t resolution() const { return m_resolution; }
 
 private:
+    bool reinitialize(int cascades, uint32_t resolution);
+    void applySplitFractions();
+
+    std::string m_shaderDir;
+    int m_cascadeCount = kCascadeCount;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     uint32_t m_resolution = 2048;
