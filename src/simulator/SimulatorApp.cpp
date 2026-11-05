@@ -904,6 +904,9 @@ static void initSimulation() {
         g_simulation->startSession(mode, params);
         printf("Session started: %s\n", ks::sim::sessionModeName(mode));
     };
+    uiMenu->onPaintChosen = [](float r, float g, float b) {
+        if (g_simulation) g_simulation->setCarPaint(r, g, b);
+    };
     uiMenu->onTrackChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
         if (g_simulation->loadTrackFolder(dir))
