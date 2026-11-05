@@ -15,6 +15,7 @@
 
 
 #include "engine/FileFormat/AcdWriter.h"
+#include "engine/FileFormat/Kn5Reader.h"
 namespace ks {
 namespace assetto_corsa {
 
@@ -346,9 +347,10 @@ static void normalizeBrakes(Json& root) {
     if (!brakes.contains("DISCS_COMPONENTS")) brakes.insert("DISCS_COMPONENTS", components);
 }
 
-    static void normalize(Json& root) {
+    static void normalize(Json& root, const fs::path& carDir) {
         normalizeGraphics(root);
         normalizeBrakes(root);
+        addComponentMaps(root, collectModelNodeNames(carDir));
         projectDamperAndBumpstop(root);
         Json& fuel = objectAt(root, "fuel");
         addTypeDefaults(root, fuel);
@@ -541,7 +543,7 @@ for (const char* owner : {"suspensions", "car"}) {
         }
         if (root.contains("escmode")) root.remove("escmode");
         if (root.contains("ac_tyres")) root.remove("ac_tyres");
-        normalize(root);
+        normalize(root, carDir);
         if (!writeDocuments(carDir, root, result)) return result;
         const Result audit = verify(carDir);
         result.claims = audit.claims;
@@ -983,7 +985,7 @@ for (const char* owner : {"suspensions", "car"}) {
             }
         }
         root.insert("fuel", fuel);
-        normalize(root);
+        normalize(root, carDir);
 
         if (!writeDocuments(carDir, root, result)) return result;
         const Result audit = verify(carDir);
@@ -1161,6 +1163,94 @@ private:
 
     static const char* brakeTempCurveText() {
         return "0|0.3409\r\n400|1\r\n900|0.9659\r\n1200|0.5909\r\n2000|0.3409\r\n";
+    }
+
+    // Brake discs and suspension legs are model nodes, and the documents name
+    // them so the runtime can move them with the wheel. AC content only lists
+    // them when brakes.ini [DISCS_GRAPHICS] happens to be there, so the nodes
+    // the model really carries decide the mapping.
+    static void collectNodeNames(const engine::fileformat::Kn5Node& node,
+                                 std::vector<std::string>& out) {
+        if (!node.name.empty()) out.push_back(node.name);
+        for (const engine::fileformat::Kn5Node& child : node.children) collectNodeNames(child, out);
+    }
+
+    // The main model is the biggest .kn5 in the folder: collider.kn5 and the
+    // LOD files are either tiny or a subset of it.
+    static std::vector<std::string> collectModelNodeNames(const fs::path& carDir) {
+        std::vector<std::string> names;
+        std::error_code ec;
+        fs::path model;
+        std::uintmax_t modelSize = 0;
+        for (const auto& entry : fs::directory_iterator(carDir, ec)) {
+            if (!entry.is_regular_file()) continue;
+            if (!iequals(entry.path().extension().string(), ".kn5")) continue;
+            if (iequals(entry.path().stem().string(), "collider")) continue;
+            const std::uintmax_t size = entry.file_size(ec);
+            if (size > modelSize) {
+                modelSize = size;
+                model = entry.path();
+            }
+        }
+        if (model.empty()) return names;
+        const engine::fileformat::Kn5ParseResult parsed =
+            engine::fileformat::parseKn5File(model.string());
+        if (!parsed.ok()) return names;
+        for (const engine::fileformat::Kn5Node& root : parsed.file.nodes)
+            collectNodeNames(root, names);
+        return names;
+    }
+
+    // The corner must be a token of its own (LF, not the L of "LOW"), so a node
+    // of another part never answers for a corner it does not belong to.
+    static std::string findComponentNode(const std::vector<std::string>& nodes,
+                                         const char* marker, const std::string& corner) {
+        for (const std::string& name : nodes) {
+            const std::string upperName = upper(name);
+            if (upperName.find(marker) == std::string::npos) continue;
+            std::size_t at = upperName.find(corner);
+            while (at != std::string::npos) {
+                const bool startOk =
+                    at == 0 || !std::isalnum(static_cast<unsigned char>(upperName[at - 1]));
+                const std::size_t end = at + corner.size();
+                const bool endOk = end >= upperName.size() ||
+                                   !std::isalnum(static_cast<unsigned char>(upperName[end]));
+                if (startOk && endOk) return name;
+                at = upperName.find(corner, at + 1);
+            }
+        }
+        return std::string();
+    }
+
+    // One role per corner, the same shape the reference manifests carry:
+    // DISC_LF -> the disc node, SUSP_LF -> the suspension leg node. A car whose
+    // model has no such node gets no entry, never a guess.
+    static void addComponentMaps(Json& root, const std::vector<std::string>& nodes) {
+        if (nodes.empty()) return;
+        // One scope per component family: inserting a section into brakes
+        // reallocates its members, so a reference taken before that insertion
+        // can dangle afterwards.
+        {
+            Json& discs = objectAt(objectAt(root, "brakes"), "DISCS_COMPONENTS");
+            for (const char* corner : {"LF", "RF", "LR", "RR"}) {
+                const std::string token = corner;
+                const std::string role = "DISC_" + token;
+                if (discs.contains(role)) continue;
+                std::string node = findComponentNode(nodes, "DISC", token);
+                if (node.empty()) node = findComponentNode(nodes, "DISK", token);
+                if (!node.empty()) discs.insert(role, Json(node));
+            }
+        }
+        {
+            Json& suspensions = objectAt(objectAt(root, "brakes"), "SUSPENSIONS_COMPONENTS");
+            for (const char* corner : {"LF", "RF", "LR", "RR"}) {
+                const std::string token = corner;
+                const std::string role = "SUSP_" + token;
+                if (suspensions.contains(role)) continue;
+                const std::string node = findComponentNode(nodes, "SUSP", token);
+                if (!node.empty()) suspensions.insert(role, Json(node));
+            }
+        }
     }
 
     static bool writeBrakeTempLuts(const fs::path& carDir) {
