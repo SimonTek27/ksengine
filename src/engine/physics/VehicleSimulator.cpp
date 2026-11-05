@@ -33,6 +33,7 @@ void VehicleSimulator::reset() {
     m_state.mass = static_cast<float>(m_mass);
     m_state.position = {0, 0.35f, 0};
     m_throttle = m_brake = m_steering = 0;
+    m_handbrake = 0;
     m_currentGear = 1;
     m_rpm = 1000;
     m_yawRate = 0;
@@ -67,6 +68,8 @@ void VehicleSimulator::reset() {
 void VehicleSimulator::setThrottle(double v) { m_throttle = std::clamp(v, 0.0, 1.0); }
 void VehicleSimulator::setBrake(double v) { m_brake = std::clamp(v, 0.0, 1.0); }
 void VehicleSimulator::setSteering(double v) { m_steering = std::clamp(v, -1.0, 1.0); }
+
+void VehicleSimulator::setHandbrake(double v) { m_handbrake = std::clamp(v, 0.0, 1.0); }
 
 void VehicleSimulator::setMass(double kg) {
     m_baseMass = std::max(200.0, kg);
@@ -799,8 +802,11 @@ void VehicleSimulator::integrate(double dt) {
         if (kFront > 0.18f)
             TbrakeTot *= (1.f - std::clamp((kFront - 0.18f) / 0.4f, 0.f, 0.7f));
     }
+    // Handbrake: rear axle only, its own demand, so it locks the back wheels
+    // while the pedal keeps the front ones free.
+    const float Thandbrake = static_cast<float>(m_handbrake) * mass * 6.0f * R;
     float TbrakeF = 0.5f * TbrakeTot * biasF;
-    float TbrakeR = 0.5f * TbrakeTot * (1.f - biasF);
+    float TbrakeR = 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake;
     // G15: brake thermal fade (per-wheel disc/pad)
     {
         const float TbCmd[4] = { TbrakeF, TbrakeF, TbrakeR, TbrakeR };
@@ -824,8 +830,10 @@ void VehicleSimulator::integrate(double dt) {
     // T_net = T_drive − T_brake − Fx·R  → I ω̇
     const float TbFL = m_brakes.effectiveTorque(0, 0.5f * TbrakeTot * biasF);
     const float TbFR = m_brakes.effectiveTorque(1, 0.5f * TbrakeTot * biasF);
-    const float TbRL = m_brakes.effectiveTorque(2, 0.5f * TbrakeTot * (1.f - biasF));
-    const float TbRR = m_brakes.effectiveTorque(3, 0.5f * TbrakeTot * (1.f - biasF));
+    const float TbRL =
+        m_brakes.effectiveTorque(2, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake);
+    const float TbRR =
+        m_brakes.effectiveTorque(3, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake);
     const float Tnet[4] = {
         -TbFL - m_tireFx[0] * R,
         -TbFR - m_tireFx[1] * R,

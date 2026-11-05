@@ -1946,10 +1946,17 @@ void SimulationLoop::applyInput() {
     ks::engine::devices::InputSystem::instance().setState(input);
 #if HAS_VEHICLE_SIM
     if (!m_vehicle) return;
-    if (blocked) { m_vehicle->setThrottle(0); m_vehicle->setBrake(0); m_vehicle->setSteering(0); return; }
+    if (blocked) {
+        m_vehicle->setThrottle(0);
+        m_vehicle->setBrake(0);
+        m_vehicle->setSteering(0);
+        m_vehicle->setHandbrake(0);
+        return;
+    }
     m_vehicle->setThrottle(m_input->throttle());
     m_vehicle->setBrake(m_input->brake());
     m_vehicle->setSteering(m_input->steer());
+    m_vehicle->setHandbrake(m_input->handbrake());
 #endif
 }
 

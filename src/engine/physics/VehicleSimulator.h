@@ -49,6 +49,9 @@ public:
     void setThrottle(double v);
     void setBrake(double v);
     void setSteering(double v);
+    /** Rear-axle handbrake demand, 0..1: locks the back wheels on its own, without
+     *  the foot brake and outside the bias. */
+    void setHandbrake(double v);
 
     SimulationState getState() const { return m_state; }
     SimulationState& state() { return m_state; }
@@ -248,6 +251,7 @@ private:
     bool m_frozen = false;
 
     double m_throttle = 0, m_brake = 0, m_steering = 0;
+    double m_handbrake = 0.0; // rear-axle handbrake demand, 0..1
     double m_mass = 1200, m_enginePowerKw = 260, m_maxRpm = 8500;
     double m_cd = 0.35, m_frontalArea = 2.2, m_wheelBase = 2.6, m_trackWidth = 1.6;
     double m_wheelRadius = 0.33, m_finalDrive = 3.9;

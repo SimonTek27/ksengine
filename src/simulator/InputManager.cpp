@@ -93,6 +93,11 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
         m_clutch = 0;
     }
 
+    // Handbrake follows the button while it is held, like the pedal axes follow
+    // their own: a latched toggle would leave the brake on after the pad is gone.
+    m_handbrake = (m_map.handbrakeButton >= 0 && (buttons & (1u << m_map.handbrakeButton)))
+                      ? 1.0 : 0.0;
+
     bool up = m_map.shiftUpButton >= 0 && (buttons & (1u << m_map.shiftUpButton));
     bool dn = m_map.shiftDownButton >= 0 && (buttons & (1u << m_map.shiftDownButton));
     if (up && !m_prevShiftUpBtn) m_shiftUp = true;
@@ -283,6 +288,8 @@ void InputManager::processKeyboard() {
     m_prevShiftUpKey = curUp;
     m_prevShiftDownKey = curDn;
 
+    m_handbrake = pressed(m_kb.handbrake) ? 1.0 : 0.0;
+
     m_steer = curve(m_steer, m_map.steerGamma, m_map.deadZone, true);
     m_throttle = std::clamp(m_throttle, 0.0, 1.0);
     m_brake = std::clamp(m_brake, 0.0, 1.0);
@@ -294,7 +301,7 @@ void InputManager::processKeyboard() {
 }
 
 void InputManager::reset() {
-    m_throttle = m_brake = m_steer = m_clutch = 0;
+    m_throttle = m_brake = m_steer = m_clutch = m_handbrake = 0;
     m_rawThrottle = m_rawBrake = m_rawSteer = 0;
     m_shiftUp = m_shiftDown = false;
     m_keys.clear();

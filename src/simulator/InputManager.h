@@ -39,6 +39,9 @@ struct JoystickMapping {
     int shiftUpButton = 5;
     int shiftDownButton = 4;
     int clutchButton = 0;
+    // Pad handbrake. A pad has a free face button where a wheel puts a switch,
+    // so the default differs instead of being shared.
+    int handbrakeButton = 1;
 
     double deadZone = 0.12;
     double steerGamma = 1.6;
@@ -57,6 +60,7 @@ struct JoystickMapping {
         m.deadZone = 0.02;
         m.shiftUpButton = 4;
         m.shiftDownButton = 5;
+        m.handbrakeButton = -1; // wheels differ: mapped by the owner, not guessed
         return m;
     }
 
@@ -275,6 +279,7 @@ public:
     double brake() const { return m_brake; }
     double steer() const { return m_steer; }
     double clutch() const { return m_clutch; }
+    double handbrake() const { return m_handbrake; }
 
     double rawThrottle() const { return m_rawThrottle; }
     double rawBrake() const { return m_rawBrake; }
@@ -325,7 +330,7 @@ private:
     void applyMapping(const double axes[AXIS_COUNT], unsigned buttons);
     static double curve(double v, double gamma, double deadZone, bool bipolar);
 
-    double m_throttle = 0, m_brake = 0, m_steer = 0, m_clutch = 0;
+    double m_throttle = 0, m_brake = 0, m_steer = 0, m_clutch = 0, m_handbrake = 0;
     double m_rawThrottle = 0, m_rawBrake = 0, m_rawSteer = 0;
 
     bool m_shiftUp = false, m_shiftDown = false;
