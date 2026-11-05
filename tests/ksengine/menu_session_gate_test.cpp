@@ -220,6 +220,28 @@ int main() {
         KS_CHECK(chosen.totalLaps == 20);
         KS_CHECK(chosen.aiCars == 3);
 
+
+        // The two files in the order the app reads them: the later one
+        // overrides only the fields it carries, the earlier values survive.
+        ks::sim::clearSessionDefaultsOverride();
+        ks::engine::json::Value systemBlock;
+        KS_CHECK(ks::engine::json::parse(
+            "{\"Race\":{\"laps\":8,\"aiCars\":2,\"clockSeconds\":600,\"startInGarage\":true}}",
+            systemBlock, &error));
+        KS_CHECK(ks::sim::applySessionDefaults(systemBlock).empty());
+        ks::engine::json::Value userBlock;
+        KS_CHECK(ks::engine::json::parse(
+            "{\"Race\":{\"laps\":4},\"Practice\":{\"aiCars\":1}}", userBlock, &error));
+        KS_CHECK(ks::sim::applySessionDefaults(userBlock).empty());
+        const ks::sim::SessionStartParams merged = ks::sim::defaultsForMode(GameSessionMode::Race);
+        KS_CHECK(merged.totalLaps == 4);          // from the user file
+        KS_CHECK(merged.aiCars == 2);             // kept from the system file
+        KS_CHECK(merged.sessionTimeSeconds == 600);
+        KS_CHECK(merged.startInGarage);
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Practice).aiCars == 1);
+        // A mode the user file never mentions keeps the system entry whole.
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Hotlap).aiCars == 0);
+
         ks::sim::clearSessionDefaultsOverride();
         KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Practice).totalLaps == 0);
     }
