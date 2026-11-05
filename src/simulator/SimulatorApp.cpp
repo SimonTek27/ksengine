@@ -782,40 +782,61 @@ static void initSimulation() {
     }
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();
-    // singleplayer.modes: the SINGLE PLAYER rows, in the order the install
-    // config lists them. A file that names none keeps the built-in eight; names
-    // go through the same parser as KS_SESSION.
+    // singleplayer.modes: the SINGLE PLAYER rows, in the order the config lists
+    // them. The install file is read first and the player's own settings.json
+    // after it, so a player wins exactly like the other settings. A file that
+    // names none keeps the built-in eight, and a name the parser does not know
+    // is reported instead of quietly becoming a race.
     {
-        const std::string configFile =
-            ks::engine::assets::Paths::systemCfgFile("ksengine.json");
-        std::ifstream in(configFile, std::ios::binary);
-        if (in) {
+        std::vector<ks::sim::GameSessionMode> modes;
+        bool configured = false;
+        for (const std::string& file :
+             {ks::engine::assets::Paths::systemCfgFile("ksengine.json"),
+              g_userLayout.settings}) {
+            std::ifstream in(file, std::ios::binary);
+            if (!in) continue;
             const std::string text((std::istreambuf_iterator<char>(in)),
                                    std::istreambuf_iterator<char>());
             ks::engine::json::Value root;
             std::string error;
-            if (ks::engine::json::parse(text, root, &error)) {
-                const ks::engine::json::Value* rows = nullptr;
-                if (const ks::engine::json::Value* block = root.find("singleplayer"))
-                    rows = block->find("modes");
-                if (rows && rows->isArray()) {
-                    std::vector<ks::sim::GameSessionMode> modes;
-                    std::string listed;
-                    for (size_t i = 0; i < rows->size(); ++i) {
-                        const ks::engine::json::Value* entry = rows->item(i);
-                        if (!entry || !entry->isString()) continue;
-                        const ks::sim::GameSessionMode mode =
-                            ks::sim::modeFromMenuEntry(entry->asString());
-                        modes.push_back(mode);
-                        if (!listed.empty()) listed += ", ";
-                        listed += ks::sim::sessionModeName(mode);
-                    }
-                    if (!modes.empty()) {
-                        uiMenu->setSingleplayerModes(modes);
-                        printf("[INIT] Single player modes: %s\n", listed.c_str());
-                    }
+            if (!ks::engine::json::parse(text, root, &error)) {
+                printf("[INIT] %s: %s\n", file.c_str(), error.c_str());
+                continue;
+            }
+            const ks::engine::json::Value* block = root.find("singleplayer");
+            const ks::engine::json::Value* rows = block ? block->find("modes") : nullptr;
+            if (!rows || !rows->isArray() || rows->size() == 0) continue;
+            std::vector<ks::sim::GameSessionMode> parsed;
+            for (size_t i = 0; i < rows->size(); ++i) {
+                const ks::engine::json::Value* entry = rows->item(i);
+                const std::string name = entry ? entry->asString() : std::string();
+                ks::sim::GameSessionMode mode;
+                if (!entry || !entry->isString()) {
+                    printf("[INIT] %s singleplayer.modes[%zu]: not a name, ignored\n",
+                           file.c_str(), i);
+                } else if (!ks::sim::tryModeFromMenuEntry(name, &mode)) {
+                    printf("[INIT] %s singleplayer.modes: unknown mode '%s', ignored\n",
+                           file.c_str(), name.c_str());
+                } else {
+                    parsed.push_back(mode);
                 }
             }
+            if (parsed.empty()) {
+                printf("[INIT] %s singleplayer.modes: no usable mode, keeping the "
+                       "built-in eight\n", file.c_str());
+                continue;
+            }
+            modes = parsed;
+            configured = true;
+        }
+        if (configured) {
+            std::string listed;
+            for (size_t i = 0; i < modes.size(); ++i) {
+                if (i) listed += ", ";
+                listed += ks::sim::sessionModeName(modes[i]);
+            }
+            uiMenu->setSingleplayerModes(modes);
+            printf("[INIT] Single player modes: %s\n", listed.c_str());
         }
     }
     uiMenu->setVisible(true);

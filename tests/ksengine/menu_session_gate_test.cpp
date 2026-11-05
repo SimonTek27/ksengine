@@ -150,5 +150,20 @@ int main() {
         KS_CHECK(rows[6].enabled); // RESULTS follows the two configured rows
     }
 
+    // The strict parser a config goes through: known names map, an unknown one
+    // is refused and leaves the caller's mode alone (KS_SESSION still races).
+    {
+        ks::sim::GameSessionMode mode = GameSessionMode::Replay;
+        KS_CHECK(ks::sim::tryModeFromMenuEntry("HotLap", &mode) &&
+                 mode == GameSessionMode::Hotlap);
+        KS_CHECK(ks::sim::tryModeFromMenuEntry("DragRace", &mode) &&
+                 mode == GameSessionMode::DragRace);
+        KS_CHECK(ks::sim::tryModeFromMenuEntry("Weekend", &mode) &&
+                 mode == GameSessionMode::Weekend);
+        KS_CHECK(!ks::sim::tryModeFromMenuEntry("Endurance", &mode));
+        KS_CHECK(mode == GameSessionMode::Weekend); // untouched on refusal
+        KS_CHECK(ks::sim::modeFromMenuEntry("Endurance") == GameSessionMode::Race);
+    }
+
     return KS_TEST_RESULT("menu_session_gate_test");
 }

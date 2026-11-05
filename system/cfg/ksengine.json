@@ -319,7 +319,7 @@
         "feature": "sessionModes",
         "status": "live",
         "landsAs": "SINGLE PLAYER rows (same eight modes, same order)",
-        "note": "One row per entry of singleplayer.modes, in that order. Practice, Time Attack and Race carry their own lap countdown and grid; Hotlap, Weekend, Championship, Drift and DragRace start through the same path with defaultsForMode() values."
+        "note": "One row per entry of singleplayer.modes, in that order; the player's own settings.json overrides the list and an unknown name is reported instead of started. Practice, Time Attack and Race carry their own lap countdown and grid; Hotlap, Weekend, Championship, Drift and DragRace start through the same path with defaultsForMode() values."
       },
       {
         "feature": "sessionSetup",

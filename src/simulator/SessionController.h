@@ -53,18 +53,33 @@ inline const char* sessionModeName(GameSessionMode m) {
     return "RACE";
 }
 
-inline GameSessionMode modeFromMenuEntry(std::string entry) {
+/** Name -> mode without a fallback: false means the name matches no mode, so a
+ *  config that misspells one can report it instead of silently racing. */
+inline bool tryModeFromMenuEntry(std::string entry, GameSessionMode* out) {
     for (char& c : entry) c = (char)toupper((unsigned char)c);
-    if (entry.find("QUAL") != std::string::npos) return GameSessionMode::Qualifying;
-    if (entry.find("PRACT") != std::string::npos) return GameSessionMode::Practice;
-    if (entry.find("TIME") != std::string::npos) return GameSessionMode::TimeAttack;
-    if (entry.find("HOT") != std::string::npos) return GameSessionMode::Hotlap;
-    if (entry.find("REPLAY") != std::string::npos) return GameSessionMode::Replay;
-    if (entry.find("WEEK") != std::string::npos) return GameSessionMode::Weekend;
-    if (entry.find("CHAMP") != std::string::npos) return GameSessionMode::Championship;
-    if (entry.find("DRIFT") != std::string::npos) return GameSessionMode::Drift;
-    if (entry.find("DRAG") != std::string::npos) return GameSessionMode::DragRace;
-    return GameSessionMode::Race;
+    GameSessionMode mode;
+    if (entry.find("QUAL") != std::string::npos) mode = GameSessionMode::Qualifying;
+    else if (entry.find("PRACT") != std::string::npos) mode = GameSessionMode::Practice;
+    else if (entry.find("TIME") != std::string::npos) mode = GameSessionMode::TimeAttack;
+    else if (entry.find("HOT") != std::string::npos) mode = GameSessionMode::Hotlap;
+    else if (entry.find("REPLAY") != std::string::npos) mode = GameSessionMode::Replay;
+    else if (entry.find("WEEK") != std::string::npos) mode = GameSessionMode::Weekend;
+    else if (entry.find("CHAMP") != std::string::npos) mode = GameSessionMode::Championship;
+    else if (entry.find("DRIFT") != std::string::npos) mode = GameSessionMode::Drift;
+    else if (entry.find("DRAG") != std::string::npos) mode = GameSessionMode::DragRace;
+    else if (entry.find("RACE") != std::string::npos) mode = GameSessionMode::Race;
+    else if (entry.find("QUICK") != std::string::npos) mode = GameSessionMode::Race;
+    else return false;
+    if (out) *out = mode;
+    return true;
+}
+
+/** The menu/KS_SESSION form: an unmatched name races, which is what the
+ *  environment has always done. The config loader uses the strict version. */
+inline GameSessionMode modeFromMenuEntry(std::string entry) {
+    GameSessionMode mode = GameSessionMode::Race;
+    tryModeFromMenuEntry(entry, &mode);
+    return mode;
 }
 
 inline SessionStartParams defaultsForMode(GameSessionMode m) {
