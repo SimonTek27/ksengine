@@ -428,8 +428,8 @@ static void initVulkanAndSimulation() {
 ");
         }
     } else {
-        // No explicit request: the default image is the antialiased one.
-        // The forward path stays one env var away, and it is the jagged one.
+        // No explicit request: the default image is the antialiased one. The
+        // forward path stays one env var away, and it is the jagged one.
         g_nativeRenderer->setDeferred(true);
         g_nativeRenderer->setTaa(true);
         deferredRequested = true;
