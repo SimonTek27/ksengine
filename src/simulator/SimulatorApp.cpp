@@ -424,8 +424,7 @@ static void initVulkanAndSimulation() {
             deferredRequested = true;
             printf("[INIT] Render path: deferred + TAA\n");
         } else if (std::strcmp(mode, "forward") == 0) {
-            printf("[INIT] Render path: forward (no antialiasing)
-");
+            printf("[INIT] Render path: forward (no antialiasing)\n");
         }
     } else {
         // No explicit request: the default image is the antialiased one. The
@@ -433,8 +432,7 @@ static void initVulkanAndSimulation() {
         g_nativeRenderer->setDeferred(true);
         g_nativeRenderer->setTaa(true);
         deferredRequested = true;
-        printf("[INIT] Render path: deferred + TAA (default)
-");
+        printf("[INIT] Render path: deferred + TAA (default)\n");
     }
     // HDR10 output: 10-bit A2B10G10R10 swapchain in
     // VK_COLOR_SPACE_HDR10_ST2084_EXT, PQ/Rec.2020-encoded by the tonemap
