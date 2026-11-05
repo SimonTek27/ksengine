@@ -626,10 +626,31 @@ void GameMenuOverlay::buildControlsMenu()
         false, true, "back" });
 }
 
-void GameMenuOverlay::openCarSelect()
+void GameMenuOverlay::openCarSelect(const std::string& root)
 {
-    m_selectEntries = scanCarLibrary();
+    m_carLibrary = scanCarLibrary(root);
+    m_carClassFilter.clear();
+    m_carYearFilter = 0;
+    m_carClasses.clear();
+    m_carYears.clear();
+    for (const auto& e : m_carLibrary) {
+        if (!e.carClass.empty() &&
+            std::find(m_carClasses.begin(), m_carClasses.end(), e.carClass) == m_carClasses.end())
+            m_carClasses.push_back(e.carClass);
+        if (e.year > 0 &&
+            std::find(m_carYears.begin(), m_carYears.end(), e.year) == m_carYears.end())
+            m_carYears.push_back(e.year);
+    }
+    std::sort(m_carClasses.begin(), m_carClasses.end());
+    std::sort(m_carYears.begin(), m_carYears.end());
+    applyCarFilter();
     switchMenu(MenuState::CarSelect);
+}
+
+void GameMenuOverlay::applyCarFilter()
+{
+    m_selectEntries = filterCars(m_carLibrary, std::string(), m_carClassFilter,
+                                 m_carYearFilter, m_carYearFilter);
 }
 
 void GameMenuOverlay::openTrackSelect()
@@ -654,13 +675,56 @@ void GameMenuOverlay::showResults(std::vector<ResultsRow> rows)
 void GameMenuOverlay::buildCarSelectMenu()
 {
     m_items.clear();
+    char label[96];
+
+    // Only the metadata the library carries gets a row: a content folder with
+    // no class never sees a CLASS row it could not fill.
+    if (!m_carClasses.empty()) {
+        std::snprintf(label, sizeof(label), "CLASS  %s",
+                      m_carClassFilter.empty() ? "any" : m_carClassFilter.c_str());
+        m_items.push_back({ label, "Show one class only", [this]() {
+            size_t next = 0;
+            if (!m_carClassFilter.empty()) {
+                const auto it = std::find(m_carClasses.begin(), m_carClasses.end(),
+                                          m_carClassFilter);
+                if (it != m_carClasses.end())
+                    next = static_cast<size_t>(it - m_carClasses.begin()) + 1;
+            }
+            m_carClassFilter = next >= m_carClasses.size() ? std::string() : m_carClasses[next];
+            applyCarFilter();
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    }
+    if (!m_carYears.empty()) {
+        std::snprintf(label, sizeof(label), "YEAR  %s",
+                      m_carYearFilter > 0 ? std::to_string(m_carYearFilter).c_str() : "any");
+        m_items.push_back({ label, "Show one model year only", [this]() {
+            size_t next = 0;
+            if (m_carYearFilter > 0) {
+                const auto it = std::find(m_carYears.begin(), m_carYears.end(), m_carYearFilter);
+                if (it != m_carYears.end())
+                    next = static_cast<size_t>(it - m_carYears.begin()) + 1;
+            }
+            m_carYearFilter = next >= m_carYears.size() ? 0 : m_carYears[next];
+            applyCarFilter();
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    }
+    if (!m_items.empty())
+        m_items.push_back({ "", "", nullptr, true });
+
     if (m_selectEntries.empty()) {
-        m_items.push_back({ "(no cars found)",
-            "Put car folders in content/cars", nullptr });
+        m_items.push_back({ m_carLibrary.empty() ? "(no cars found)" : "(no car matches)",
+            m_carLibrary.empty() ? "Put car folders in content/cars"
+                                 : "Set the filters back to any", nullptr });
     } else {
         for (const auto& e : m_selectEntries) {
             const std::string path = e.path;
-            m_items.push_back({ e.label, e.path, [this, path]() {
+            std::string detail = e.brand;
+            if (!e.carClass.empty()) detail += (detail.empty() ? "" : " - ") + e.carClass;
+            if (e.year > 0) detail += (detail.empty() ? "" : " - ") + std::to_string(e.year);
+            if (detail.empty()) detail = e.path;
+            m_items.push_back({ e.label, detail, [this, path]() {
                 if (onCarChosen) onCarChosen(path);
                 goBack();
             } });
@@ -892,6 +956,13 @@ void GameMenuOverlay::activateSelected()
         }
         // MODE SETUP rows carry their value in the label or the "now ..."
         // description, so they rebuild after each step with the cursor kept.
+        // CARS filter rows carry their value in the label, same rebuild rule.
+        else if (m_menuDirty && m_currentState == MenuState::CarSelect) {
+            const int sel = m_selectedIndex;
+            buildCarSelectMenu();
+            m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+            m_menuDirty = false;
+        }
         else if (m_menuDirty && m_currentState == MenuState::ModeConfig) {
             const int sel = m_selectedIndex;
             buildModeConfigMenu();

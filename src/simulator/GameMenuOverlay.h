@@ -188,7 +188,9 @@ public:
     const std::string& carName() const { return m_carName; }
     std::string sectionTitle() const;
 
-    void openCarSelect();
+    /** CARS page. The root is a parameter so a test can point it at a
+     *  scratch library; the menu always uses content/cars. */
+    void openCarSelect(const std::string& root = "content/cars");
     void openTrackSelect();
     void openTeamSelect();
     void showResults(std::vector<ResultsRow> rows);
@@ -255,6 +257,7 @@ private:
     void buildOptionsMenu();
     void buildControlsMenu();
     void buildCarSelectMenu();
+    void applyCarFilter();
     void buildTrackSelectMenu();
     void buildTeamSelectMenu();
     void buildResultsMenu();
@@ -291,6 +294,13 @@ private:
     MenuOptions m_options;
     std::vector<MenuItem> m_items;
     std::vector<ContentEntry> m_selectEntries;
+    // CARS page: the whole library, the filter values it actually carries and
+    // the current selection. Filters exist only for metadata a car declares.
+    std::vector<ContentEntry> m_carLibrary;
+    std::vector<std::string> m_carClasses;
+    std::vector<int> m_carYears;
+    std::string m_carClassFilter;
+    int m_carYearFilter = 0;
     std::vector<ResultsRow> m_resultRows;
 
     float m_pitFuelTargetL = 60.f;

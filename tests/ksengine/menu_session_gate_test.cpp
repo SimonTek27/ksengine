@@ -9,6 +9,8 @@
 #include "KsTest.h"
 #include "simulator/GameMenuOverlay.h"
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -276,6 +278,67 @@ int main() {
 
         ks::sim::clearSessionDefaultsOverride();
         KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Practice).totalLaps == 0);
+    }
+
+
+    // CARS page filters come from the metadata the car folders really carry:
+    // with ui_car.json the CLASS/YEAR rows appear and filter the list, with
+    // none the page stays exactly as it was.
+    {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path root = fs::temp_directory_path() / "ksim_cars_meta";
+        const fs::path bare = fs::temp_directory_path() / "ksim_cars_bare";
+        fs::remove_all(root, ec);
+        fs::remove_all(bare, ec);
+        fs::create_directories(root / "alpha", ec);
+        fs::create_directories(root / "beta", ec);
+        fs::create_directories(bare / "plain", ec);
+        {
+            std::ofstream meta(root / "alpha" / "ui_car.json");
+            meta << "{ \"name\": \"Alpha GT\", \"brand\": \"Ks\", \"class\": \"GT3\", "
+                    "\"year\": 2024 }";
+        }
+
+        GameMenuOverlay cars;
+        cars.openCarSelect(root.string());
+        std::vector<MenuItem> rows = cars.items();
+        KS_CHECK(rows.size() > 3);
+        KS_CHECK(rows[0].text == "CLASS  any");
+        KS_CHECK(rows[1].text == "YEAR  any");
+        KS_CHECK(rows[2].isSeparator);
+        KS_CHECK(rows[3].text == "Alpha GT");
+        KS_CHECK(rows[3].description == "Ks - GT3 - 2024");
+        KS_CHECK(rows[4].text == "beta"); // no metadata: folder name, no detail
+
+        // GT3 keeps alpha only: beta declares no class and is filtered out.
+        cars.setSelectedIndex(0);
+        KS_CHECK(cars.handleKeyPress(0x0D));
+        rows = cars.items();
+        KS_CHECK(rows[0].text == "CLASS  GT3");
+        int listed = 0;
+        for (const auto& r : rows)
+            if (r.text == "Alpha GT" || r.text == "beta") ++listed;
+        KS_CHECK(listed == 1);
+
+        // Back to any brings both back.
+        KS_CHECK(cars.handleKeyPress(0x0D)); // GT3 -> any (one class)
+        rows = cars.items();
+        KS_CHECK(rows[0].text == "CLASS  any");
+        listed = 0;
+        for (const auto& r : rows)
+            if (r.text == "Alpha GT" || r.text == "beta") ++listed;
+        KS_CHECK(listed == 2);
+
+        // A library with no metadata never shows a filter it cannot fill.
+        GameMenuOverlay plain;
+        plain.openCarSelect(bare.string());
+        const std::vector<MenuItem> plainRows = plain.items();
+        KS_CHECK(plainRows[0].text == "plain");
+        KS_CHECK(plainRows[1].isSeparator || plainRows[1].text == "BACK");
+
+        fs::remove_all(root, ec);
+        fs::remove_all(bare, ec);
     }
 
     // The strict parser a config goes through: known names map, an unknown one

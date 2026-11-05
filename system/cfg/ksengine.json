@@ -631,24 +631,28 @@
       "brand"
     ],
     "filtersLive": [
-      "brand"
+      "brand",
+      "class",
+      "year"
     ],
     "sources": [
       {
         "feature": "carFilters",
         "status": "partial",
         "landsAs": "CARS page",
-        "note": "Scrolling list with the car folder name; class and year filters are declared but not applied."
+        "note": "Scrolling list with the car name; brand, class and year come from <car>/ui_car.json and each filter row exists only when at least one car declares that field. A folder with no metadata is listed by its folder name."
       },
       {
         "feature": "carClasses",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "CLASS row on the CARS page",
+        "note": "Read from the class field of ui_car.json; absent cars are never filtered out."
       },
       {
         "feature": "carYears",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "YEAR row on the CARS page",
+        "note": "Read from the year field of ui_car.json; a car without a year stays visible."
       },
       {
         "feature": "paintableBody",
@@ -659,12 +663,14 @@
       {
         "feature": "oemColorsModern",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "No colour list in the car folders yet: the page offers no paint choice."
       },
       {
         "feature": "oemColorsVintage",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "No colour list in the car folders yet: the page offers no paint choice."
       },
       {
         "feature": "carData",
