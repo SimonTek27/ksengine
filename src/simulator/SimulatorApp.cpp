@@ -850,13 +850,12 @@ static void initSimulation() {
              "showroomAmbience", "showroomMusic", "sources"}},
             {"assist", {"tc", "abs", "note"}},
             {"video",
-             {"resolution", "resolutions", "fullscreen", "vsync", "frameLimit", "ssao",
+             {"note", "resolution", "resolutions", "fullscreen", "vsync", "frameLimit", "ssao",
               "ssr", "ssgi", "ssgiRadius", "ssgiIntensity", "motionBlur", "exposure",
               "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
               "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
-            {"singleplayer", {"modes", "note", "sources", "assistTc", "assistAbs",
-                             "fixedDt", "weather"}},
+            {"singleplayer", {"modes", "note", "sources"}},
         };
         for (const std::string& file :
              {ks::engine::assets::Paths::systemCfgFile("ksengine.json"),

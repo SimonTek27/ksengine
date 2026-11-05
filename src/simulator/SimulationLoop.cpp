@@ -1629,8 +1629,11 @@ void SimulationLoop::stop() {
 }
 
 void SimulationLoop::startSession(GameSessionMode mode) {
-    // Rows that skip MODE SETUP start with the mode's own defaults.
-    startSession(mode, defaultsForMode(mode));
+    // Rows that skip MODE SETUP start with the mode's own defaults; a race
+    // still promises a grid, as the menu did before MODE SETUP existed.
+    SessionStartParams p = defaultsForMode(mode);
+    if (mode == GameSessionMode::Race && p.aiCars == 0) p.aiCars = 5;
+    startSession(mode, p);
 }
 
 void SimulationLoop::startSession(GameSessionMode mode, const SessionStartParams& params) {
@@ -1646,13 +1649,12 @@ void SimulationLoop::startSession(GameSessionMode mode, const SessionStartParams
     // The grid the player asked for wins over the count left by the last
     // session. A race with no AI in either place still fills five places;
     // practice, hotlap and time attack are solo by definition.
-    if (params.aiCars > 0) {
-        setAiCarCount(params.aiCars);
-    } else if (mode == GameSessionMode::Race) {
-        if (m_aiCarCount == 0) setAiCarCount(5);
-    } else {
-        setAiCarCount(0);
-    }
+    // MODE SETUP decides the grid; a race with no AI is a solo race, which
+    // the screen now lets the player ask for.
+    if (mode == GameSessionMode::Race)
+        setAiCarCount(std::max(0, params.aiCars));
+    else
+        setAiCarCount(0); // practice, hotlap and time attack are solo by definition
     std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI, clock %ds)\n",
                  sessionModeName(mode), m_totalLaps, m_aiCarCount, params.sessionTimeSeconds);
     start();

@@ -5,7 +5,7 @@
     "config": "system/cfg/ksengine.json",
     "playerOverrides": "user/<player>/settings.json",
     "precedence": "system/cfg first, user file second, later wins per key",
-    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and the features it owns, with the status each one has today. The keys listed in effectiveKeys are consumed by the runtime; every other key is documentation. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden."
+    "note": "Sections below mirror the menu sections that exist in the simulator. effectiveKeys is exactly what the runtime reads today; every other key documents a feature and the status it has. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden. MODE SETUP takes its starting values from defaultsForMode() in the code, not from this file."
   },
   "effectiveKeys": [
     "physics.fixedDt",
@@ -13,25 +13,21 @@
     "assist.tc",
     "assist.abs",
     "video.resolution",
-    "video.fullscreen",
-    "video.vsync",
-    "video.frameLimit",
+    "video.exposure",
+    "video.tonemap",
     "video.ssao",
     "video.ssr",
     "video.ssgi",
     "video.ssgiRadius",
     "video.ssgiIntensity",
     "video.motionBlur",
-    "video.exposure",
-    "video.tonemap",
-    "video.postProcessFilter",
-    "video.hdrOutput",
-    "video.msaa",
+    "video.vsync",
+    "video.frameLimit",
     "video.anisotropicFiltering",
-    "video.shadowMapSize",
-    "video.shadowCascades",
     "video.particles",
     "video.headPhysics",
+    "video.shadowMapSize",
+    "video.shadowCascades",
     "singleplayer.modes"
   ],
   "physics": {
@@ -52,6 +48,7 @@
     "note": "The three entries of the SETTINGS screen: every image option lives in the video page, the volumes in audio, the bindings in controls."
   },
   "video": {
+    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, particles, headPhysics, shadowMapSize and shadowCascades. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
     "resolution": "1920x1080",
     "resolutions": [
       "1920x1080",
@@ -238,6 +235,7 @@
     "headPhysics": true
   },
   "audio": {
+    "note": "master is the only audio key the runtime reads; the engine, wind and environment levels are driven per frame by the session and the showroom channel starts with the simulator, so engineVolume, environmentVolume, showroomAmbience and showroomMusic document that behaviour rather than act as preferences.",
     "master": 0.8,
     "engineVolume": 1.0,
     "environmentVolume": 1.0,
@@ -331,22 +329,24 @@
       "Drift",
       "DragRace"
     ],
-    "assistTc": 0,
-    "assistAbs": 0,
-    "fixedDt": 0.008333333333333333,
-    "weather": "clear",
     "sources": [
       {
         "feature": "sessionModes",
         "status": "live",
         "landsAs": "SINGLE PLAYER rows (same eight modes, same order)",
-        "note": "One row per entry of singleplayer.modes, in that order; the player's own settings.json overrides the list and an unknown name is reported instead of started. Practice, Time Attack and Race carry their own lap countdown and grid; Hotlap, Weekend, Championship, Drift and DragRace start through the same path with defaultsForMode() values."
+        "note": "One row per entry of singleplayer.modes, in that order; the player's own settings.json overrides the list and an unknown name is reported instead of started. Each row opens MODE SETUP and START SESSION hands the chosen values to the loop."
+      },
+      {
+        "feature": "modeSetup",
+        "status": "live",
+        "landsAs": "MODE SETUP screen (laps, AI cars, clock, garage start)",
+        "note": "One screen per mode with steps of one lap, one AI car and five minutes, a garage-start toggle and a summary of what is about to start. The values begin at defaultsForMode() for that mode - 10 laps for Race, 12 for Weekend, 15 for Championship, 180 s for Drift, 1 lap and 1 AI for DragRace - and the screen, not this file, is where they are set."
       },
       {
         "feature": "sessionSetup",
         "status": "partial",
         "landsAs": "session setup",
-        "note": "Car, track and AI count come from the chosen content; AI level and fixed setup are not exposed."
+        "note": "Car and track come from the chosen content; the MODE SETUP screen sets the laps, the AI cars, the session clock and whether the player starts in the garage. AI level and a fixed setup are not exposed."
       },
       {
         "feature": "driverAids",
