@@ -50,6 +50,9 @@ vec2 equirectUv(vec3 d) {
 // its sun specular with brief P3 (same two-lobe math as deferred).
 layout(set = 1, binding = 0) uniform sampler2D albedoMap;
 layout(set = 1, binding = 1) uniform sampler2D normalMap;
+// AC txDetail: a weave or grain multiplied over the albedo, tiled. A missing
+// map binds white 1x1, which leaves the albedo exactly as authored.
+layout(set = 1, binding = 5) uniform sampler2D detailMap;
 layout(set = 1, binding = 2) uniform MaterialData {
     float roughness;
     float metalness;
@@ -65,7 +68,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintG;
     float tintB;
     float paintSolid;  // 1 = tint replaces the albedo instead of multiplying it
-    float padTint;     // keeps the block on its 16-byte std140 stride
+    float detailScale; // >0 = tile the detail map over the albedo
 } material;
 
 const float PI = 3.14159265;
@@ -134,6 +137,12 @@ void main() {
     // keeps untextured meshes byte-identical to the pre-2.3 path).
     // One sample feeds both the cut-out test and the shading.
     vec4 albedoSample = fragColor * texture(albedoMap, fragUV);
+    if (material.detailScale > 0.0) {
+        // Carbon and leather carry their weave here, not in the base map.
+        // A detail map is neutral at 0.5 grey, so doubling it makes a
+        // flat detail the identity and only the weave shows through.
+        albedoSample.rgb *= texture(detailMap, fragUV * material.detailScale).rgb * 2.0;
+    }
     // KN5 alpha test: decals, grilles and light covers are cut out instead of
     // drawn as opaque cards.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;

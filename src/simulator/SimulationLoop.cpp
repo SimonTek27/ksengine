@@ -915,6 +915,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 std::string albedo;
                 std::string fallbackAlbedo;
                 std::string normal;
+                std::string detail;
                 for (const auto& mapping : material.mappings) {
                     if (mapping.texture.empty()) continue;
                     const std::string mappingName = lower(mapping.name);
@@ -927,6 +928,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     }
                     if (mappingName.find("diffuse") != std::string::npos) {
                         albedo = mapping.texture;
+                        continue;
+                    }
+                    // txDetail: the weave carbon and leather carry on top of the
+                    // base colour. "NormalDetail" is caught above as a normal
+                    // map, so this only ever sees the colour detail.
+                    if (mappingName.find("detail") != std::string::npos) {
+                        detail = mapping.texture;
                         continue;
                     }
                     if (fallbackAlbedo.empty()) fallbackAlbedo = mapping.texture;
@@ -946,6 +954,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     if (probe) albedo.clear();
                 }
                 nm.albedoTexture = textureKey(albedo, faceInside);
+                nm.detailTexture = textureKey(detail, faceInside);
+                if (!nm.detailTexture.empty()) {
+                    const float tiles = propertyFloat(material, "ksDetailU");
+                    nm.detailScale = tiles > 0.0f ? tiles : 1.0f;
+                }
                 // No diffuse authored: the surface keeps the colour the file
                 // gives it (ksDiffuse) instead of rendering as flat white.
                 if (!faceInside && albedo.empty()) {
@@ -998,6 +1011,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 }
                 if (presetId == graphics::MaterialPresetId::Paint) {
                     ++painted;
+                    // The paint material's detail map is a grime pattern, not
+                    // a weave: multiplying it into a livery only greys the body
+                    // down. The colour on this surface is the car's own.
+                    nm.detailTexture.clear();
+                    nm.detailScale = 0.0f;
                     // A livery texture already carries the body colour: the
                     // factory colour must never multiply it, or a bright livery
                     // red turns into a dark maroon. The factory paint only lands

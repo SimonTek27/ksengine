@@ -46,7 +46,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintG;
     float tintB;
     float paintSolid;  // 1 = tint replaces the albedo (explicit paint)
-    float padTint;     // 16-byte std140 stride, same as native_forward.frag
+    float detailScale; // >0 = tile the detail map over the albedo
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -55,6 +55,9 @@ layout(set = 1, binding = 2) uniform MaterialData {
 // 1.0 scalar for map rows).
 layout(set = 1, binding = 3) uniform sampler2D roughnessMap;
 layout(set = 1, binding = 4) uniform sampler2D metalnessMap;
+// AC txDetail: a weave or grain multiplied over the albedo, tiled. A missing
+// map binds white 1x1, which leaves the albedo exactly as authored.
+layout(set = 1, binding = 5) uniform sampler2D detailMap;
 
 // Derivative-based TBN (KN5 bakes no tangents). Derivatives are taken at
 // top level and only the blend is behind normalScale, so implicit LODs and
@@ -81,6 +84,12 @@ void main() {
     float roughness = material.roughness * texture(roughnessMap, fragUV).r;
     float metalness = material.metalness * texture(metalnessMap, fragUV).r;
     vec4 albedoSample = fragColor * texture(albedoMap, fragUV);
+    if (material.detailScale > 0.0) {
+        // Same rule as native_forward.frag: the detail map multiplies.
+        // A detail map is neutral at 0.5 grey, so doubling it makes a
+        // flat detail the identity and only the weave shows through.
+        albedoSample.rgb *= texture(detailMap, fragUV * material.detailScale).rgb * 2.0;
+    }
     // KN5 alpha test, same rule as native_forward.frag: without it a decal
     // plane writes opaque albedo and the deferred path fills its quad.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;

@@ -84,6 +84,10 @@ struct MeshMaterial {
     // texture already carries its colour, so a paint the player picked must
     // overwrite it rather than darken it.
     float paintSolid = 0.0f;
+    // Detail map (the KN5's txDetail): a weave or grain the base map does not
+    // carry, multiplied over the albedo once per tile. Empty = no detail.
+    std::string detail;
+    float detailScale = 0.0f; // tile count; 0 = disabled
 };
 
 class MaterialCache final {

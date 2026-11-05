@@ -132,6 +132,10 @@ struct NativeMesh {
     // 1 = tint replaces the albedo (an explicit paint over a livery), 0 = the
     // tint multiplies it (painting a body that shows its own texture).
     float paintSolid = 0.0f;
+    // Detail map (KN5 txDetail): multiplies the albedo, tiled. Empty or
+    // detailScale 0 leaves the base map untouched.
+    std::string detailTexture;
+    float detailScale = 0.0f;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is
@@ -585,7 +589,8 @@ private:
                                     const std::string& albedoPath,
                                     const std::string& normalPath,
                                     const std::string& roughnessPath,
-                                    const std::string& metalnessPath);
+                                    const std::string& metalnessPath,
+                                    const std::string& detailPath);
     // After clearTextureCache() drops images that live descriptor sets still
     // reference: re-resolve every set (lazy DDS reload on next use).
     void rewriteMaterialDescriptors();
