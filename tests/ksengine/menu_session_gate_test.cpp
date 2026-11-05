@@ -9,6 +9,7 @@
 #include "KsTest.h"
 #include "simulator/GameMenuOverlay.h"
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -297,7 +298,9 @@ int main() {
         {
             std::ofstream meta(root / "alpha" / "ui_car.json");
             meta << "{ \"name\": \"Alpha GT\", \"brand\": \"Ks\", \"class\": \"GT3\", "
-                    "\"year\": 2024 }";
+                    "\"year\": 2024, \"colors\": [ { \"name\": \"Rosso\", "
+                    "\"rgb\": [0.8, 0.0, 0.1] }, { \"name\": \"Blu\", "
+                    "\"rgb\": [0, 0, 255] } ] }";
         }
 
         GameMenuOverlay cars;
@@ -329,6 +332,58 @@ int main() {
         for (const auto& r : rows)
             if (r.text == "Alpha GT" || r.text == "beta") ++listed;
         KS_CHECK(listed == 2);
+
+        // Paints: the list is read from the car folder (0..255 scaled down) and
+        // the first colour is what the body gets when the car is loaded.
+        {
+            const auto library = ks::sim::scanCarLibrary(root.string());
+            KS_CHECK(!library.empty());
+            KS_CHECK(library[0].paints.size() == 2);
+            KS_CHECK(ks::sim::carPaintsFor((root / "alpha").string()).size() == 2);
+            KS_CHECK(library[0].paints[0].name == "Rosso");
+            KS_CHECK(library[0].paints[1].b > 0.99f && library[0].paints[1].r < 0.01f);
+        }
+        std::string paintedCar;
+        float painted[3] = {-1.0f, -1.0f, -1.0f};
+        cars.onCarChosen = [&](const std::string& p) { paintedCar = p; };
+        cars.onPaintChosen = [&](float r, float g, float b) {
+            painted[0] = r; painted[1] = g; painted[2] = b;
+        };
+        {
+            // Row 3 is Alpha GT with the filters on "any".
+            int row = -1;
+            const std::vector<MenuItem> list = cars.items();
+            for (std::size_t i = 0; i < list.size(); ++i)
+                if (list[i].text == "Alpha GT") { row = static_cast<int>(i); break; }
+            KS_CHECK(row >= 0);
+            cars.setSelectedIndex(row);
+            KS_CHECK(cars.handleKeyPress(0x0D));
+            KS_CHECK(!paintedCar.empty());
+            KS_CHECK(std::fabs(painted[0] - 0.8f) < 0.01f && painted[1] < 0.01f);
+        }
+        // Reopening CARS offers the car's colours on the loaded body and the
+        // row cycles them.
+        cars.openCarSelect(root.string());
+        {
+            const std::vector<MenuItem> list = cars.items();
+            std::string paintRow;
+            for (const auto& r : list)
+                if (r.text.rfind("PAINT", 0) == 0) paintRow = r.text;
+            KS_CHECK(paintRow == "PAINT  Rosso");
+            int row = -1;
+            for (std::size_t i = 0; i < list.size(); ++i)
+                if (list[i].text.rfind("PAINT", 0) == 0) row = static_cast<int>(i);
+            KS_CHECK(row >= 0);
+            cars.setSelectedIndex(row);
+            KS_CHECK(cars.handleKeyPress(0x0D));
+            KS_CHECK(painted[2] > 0.99f); // second colour, 0..255 -> 1.0
+            const std::vector<MenuItem> after = cars.items();
+            bool cycled = false;
+            for (const auto& r : after)
+                if (r.text == "PAINT  Blu") cycled = true;
+            KS_CHECK(cycled);
+        }
+        cars.onPaintChosen = nullptr;
 
         // A library with no metadata never shows a filter it cannot fill.
         GameMenuOverlay plain;

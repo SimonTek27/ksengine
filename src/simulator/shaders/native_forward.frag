@@ -61,6 +61,10 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float emissive;    // unlit term added after shading
     float opacity;     // multiplies the albedo alpha on a blended surface
     float glassiness;  // 0 = decal, 1 = glass pane
+    float tintR;       // bodywork paint: multiplies the albedo (1,1,1 = baked)
+    float tintG;
+    float tintB;
+    float padTint;     // keeps the block on its 16-byte std140 stride
 } material;
 
 const float PI = 3.14159265;
@@ -132,7 +136,7 @@ void main() {
     // KN5 alpha test: decals, grilles and light covers are cut out instead of
     // drawn as opaque cards.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
-    vec3 albedo = albedoSample.rgb;
+    vec3 albedo = albedoSample.rgb * vec3(material.tintR, material.tintG, material.tintB);
 
     vec3 N = normalize(fragNormal);
     // Normal map sampled unconditionally so the derivatives inside

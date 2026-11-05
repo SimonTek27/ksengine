@@ -18,6 +18,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
  */
 
 #include "SimulationLoop.h"
+#include "ContentLibrary.h"
 #include "InputManager.h"
 #include "MultiCarManager.h"
 #include "NetworkManager.h"
@@ -416,6 +417,18 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     m_carLoaded = true;
     m_ui.menu().setCarName(m_carName);
     if (m_shm) m_shm->invalidateStatic();
+    // Factory paint: the first colour the car folder declares. A car with no
+    // list goes back to white, so one car's paint never follows the player into
+    // the next. The CARS page can repaint from here (setCarPaint).
+    {
+        const std::vector<ks::sim::CarPaint> paints = ks::sim::carPaintsFor(carDir);
+        m_carPaint[0] = m_carPaint[1] = m_carPaint[2] = 1.0f;
+        if (!paints.empty()) {
+            m_carPaint[0] = paints.front().r;
+            m_carPaint[1] = paints.front().g;
+            m_carPaint[2] = paints.front().b;
+        }
+    }
     // Roadmap 1.2: visual for the freshly loaded car (baked meshes or
     // solid box placeholder). Never fails the physics load. Applies the
     // appearance's node filter and livery texture override (roadmap 2.9).
@@ -981,7 +994,16 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                         overrides.findEffective(material.name) != nullptr ? " (override)" : "");
                     std::putchar(10);
                 }
-                if (presetId == graphics::MaterialPresetId::Paint) ++painted;
+                if (presetId == graphics::MaterialPresetId::Paint) {
+                    ++painted;
+                    // Bodywork carries the paint the car folder declares (the
+                    // CARS colour list). The tint multiplies the albedo in both
+                    // shaders, so the panel keeps its texture detail and only
+                    // its colour moves; 1,1,1 is the texture as baked.
+                    nm.tint[0] = m_carPaint[0];
+                    nm.tint[1] = m_carPaint[1];
+                    nm.tint[2] = m_carPaint[2];
+                }
                 if (presetId == graphics::MaterialPresetId::BrushedMetal ||
                     presetId == graphics::MaterialPresetId::Chrome ||
                     presetId == graphics::MaterialPresetId::BrakeDisc)
@@ -2605,16 +2627,45 @@ std::vector<std::string> SimulationLoop::loadCarMeshSet(const std::string& baked
         }
         const ks::sim::MeshMaterial* material =
             hasMaterials ? materials.find(name) : nullptr;
+        // Bodywork only: the mesh whose albedo is the CARBODY texture carries
+        // the paint colour. Glass, wheels and lights keep their own textures,
+        // so picking a paint never tints them.
+        ks::sim::MeshMaterial painted;
+        const ks::sim::MeshMaterial* useMaterial = material;
+        if (material &&
+            graphics::canonicalTextureName(material->albedo) == "CARBODY") {
+            painted = *material;
+            painted.tint[0] = m_carPaint[0];
+            painted.tint[1] = m_carPaint[1];
+            painted.tint[2] = m_carPaint[2];
+            useMaterial = &painted;
+            std::printf("[paint] body mesh %s tinted %.3f %.3f %.3f\n", name.c_str(),
+                        m_carPaint[0], m_carPaint[1], m_carPaint[2]);
+        }
         // Prefixed so baked names (original kn5 node names) can neither
         // collide with nor destroy scene meshes of the same name, and
         // so the legacy "car_" prefix sync sees them too.
         const std::string renderName = prefix + name;
         if (!m_vulkanRenderer->loadMeshFromFile(renderName, baked + "/" + name + ".nmsh",
-                                                material, textureDir))
+                                                useMaterial, textureDir))
             continue;
         loaded.push_back(renderName);
     }
     return loaded;
+}
+
+void SimulationLoop::setCarPaint(float r, float g, float b)
+{
+    auto clamp01 = [](float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); };
+    const float want[3] = {clamp01(r), clamp01(g), clamp01(b)};
+    if (want[0] == m_carPaint[0] && want[1] == m_carPaint[1] &&
+        want[2] == m_carPaint[2])
+        return; // same paint: no rebuild
+    for (int i = 0; i < 3; ++i) m_carPaint[i] = want[i];
+    std::printf("[paint] body tint %.3f %.3f %.3f\n", m_carPaint[0], m_carPaint[1],
+                m_carPaint[2]);
+    // The material block is static per mesh, so the body has to be re-uploaded.
+    if (m_carLoaded && !m_carDir.empty()) ensureCarVisual(m_carDir);
 }
 
 void SimulationLoop::ensureCarVisual(const std::string& carDir) {

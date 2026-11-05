@@ -182,6 +182,12 @@ public:
     // ensureCarVisual loads the car's baked meshes, or spawns a solid box
     // placeholder so the vehicle is always visible after load.
     void ensureCarVisual(const std::string& carDir);
+
+    /** Bodywork paint from the CARS colour list: stored and, while a car is
+     *  loaded, applied by rebuilding its visuals (the material block is
+     *  written once per mesh, so a repaint re-uploads the body). */
+    void setCarPaint(float r, float g, float b);
+    const float* carPaint() const { return m_carPaint; }
     ks::ecs::Registry& scene();
 
     void start();
@@ -533,6 +539,8 @@ private:
     bool m_pipelineInitialized = false;
     uint32_t m_streamlineFrameIndex = 0;
     std::string m_carName;
+    // Bodywork tint currently applied (1,1,1 = the texture as baked).
+    float m_carPaint[3] = {1.0f, 1.0f, 1.0f};
     std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
 
     // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,

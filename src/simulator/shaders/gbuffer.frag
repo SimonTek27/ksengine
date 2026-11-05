@@ -38,6 +38,14 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float alphaTest;   // >= 0.5 = discard below alphaRef (KN5 alpha_tested)
     float alphaRef;
     float emissive;    // forward-only for now: the GBuffer has no free channel
+    // Serialisation fields only: the forward shader reads these two, the
+    // GBuffer does not. They stay so the tint lands at the same offset.
+    float opacity;
+    float glassiness;
+    float tintR;       // bodywork paint: multiplies the albedo (1,1,1 = baked)
+    float tintG;
+    float tintB;
+    float padTint;     // 16-byte std140 stride, same as native_forward.frag
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -75,7 +83,8 @@ void main() {
     // KN5 alpha test, same rule as native_forward.frag: without it a decal
     // plane writes opaque albedo and the deferred path fills its quad.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
-    outAlbedoAO = vec4(albedoSample.rgb, metalness);
+    outAlbedoAO = vec4(albedoSample.rgb * vec3(material.tintR, material.tintG, material.tintB),
+                      metalness);
 
     // Normal comes from the material instead of the old hardcoded 0.75:
     // material.roughness feeds deferred_lighting.frag's GGX directly, so an

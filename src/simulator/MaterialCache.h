@@ -76,6 +76,10 @@ struct MeshMaterial {
     // True when a materials.txt row supplied these values; false = defaults
     // (the renderer treats that as "no authored material" for logging).
     bool authored = false;
+    // Bodywork paint from the content, not from the bake: multiplies the
+    // albedo in both shaders. 1,1,1 leaves the baked texture untouched, which
+    // is what every mesh gets unless the car declares colours.
+    float tint[3] = {1.0f, 1.0f, 1.0f};
 };
 
 class MaterialCache final {

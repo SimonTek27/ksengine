@@ -793,9 +793,15 @@ struct MaterialUBO {
     // field above keeps its offset.
     float opacity = 1.0f;
     float glassiness = 0.0f;
-    float pad3[2] = {0.0f, 0.0f};
+    // Bodywork paint tint (CARS colour) at 40/44/48: multiplies the albedo.
+    // 1,1,1 is the baked texture untouched, so a mesh that announces no paint
+    // renders exactly as it did before this field existed.
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    // 16-byte stride pad of the std140 block (the three floats above are read
+    // by the shaders, these are not).
+    float pad3[3] = {0.0f, 0.0f, 0.0f};
 };
-static_assert(sizeof(MaterialUBO) == 48, "MaterialUBO is read as a std140 uniform block");
+static_assert(sizeof(MaterialUBO) == 64, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -1578,6 +1584,9 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.emissive = mesh.emissive;
     ubo.opacity = mesh.opacity;
     ubo.glassiness = mesh.glassiness;
+    ubo.tint[0] = mesh.tint[0];
+    ubo.tint[1] = mesh.tint[1];
+    ubo.tint[2] = mesh.tint[2];
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1720,6 +1729,9 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
         mesh.roughness = material->roughness; // 1.0 when the map below is set
         mesh.metalness = material->metalness;
         mesh.clearcoat = material->clearcoat;
+        mesh.tint[0] = material->tint[0];
+        mesh.tint[1] = material->tint[1];
+        mesh.tint[2] = material->tint[2];
         mesh.albedoTexture =
             MaterialCache::resolveTexturePath(textureDir, material->albedo);
         mesh.normalTexture =

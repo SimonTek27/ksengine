@@ -224,6 +224,8 @@ public:
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;
     std::function<void(const std::string&)> onCarChosen;
+    // Bodywork paint picked on the CARS page (rgb 0..1).
+    std::function<void(float, float, float)> onPaintChosen;
     std::function<void(const std::string&)> onTrackChosen;
     std::function<void(const std::string&)> onTeamChosen;
     std::function<std::vector<std::string>()> upgradeRowLabels;
@@ -297,6 +299,10 @@ private:
     // CARS page: the whole library, the filter values it actually carries and
     // the current selection. Filters exist only for metadata a car declares.
     std::vector<ContentEntry> m_carLibrary;
+    // Paints of the car chosen last: the page keeps them so reopening CARS
+    // can cycle them on the body behind the menu.
+    std::vector<CarPaint> m_carPaints;
+    std::size_t m_carPaintIndex = 0;
     std::vector<std::string> m_carClasses;
     std::vector<int> m_carYears;
     std::string m_carClassFilter;

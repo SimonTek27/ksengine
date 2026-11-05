@@ -7,7 +7,10 @@
  * open the menu and the select screens explain where content goes.
  *
  * Optional metadata files (first hit wins):
- *   <car>/ui_car.json  { "name", "brand", "class", "year" }
+ *   <car>/ui_car.json  { "name", "brand", "class", "year",
+ *                        "colors": [ { "name", "rgb": [r,g,b] } ] }
+ *  Colours are the car's own paint list: a channel above 1 is taken as a
+ *  0..255 value and scaled down, so both list styles land in 0..1.
  *   <car>/data/car.json
  *   <track>/ui_track.json { "name", "country", "year" }
  */
@@ -22,6 +25,14 @@
 
 namespace ks::sim {
 
+/** One paint from the car's own colour list. rgb is 0..1. */
+struct CarPaint {
+    std::string name;
+    float r = 1.0f;
+    float g = 1.0f;
+    float b = 1.0f;
+};
+
 struct ContentEntry {
     std::string id;     // directory name, stable key
     std::string path;   // passed to SimulationLoop::loadCar / loadTrackFolder
@@ -29,6 +40,8 @@ struct ContentEntry {
     std::string brand;  // optional filter key
     std::string carClass;
     int year = 0;
+    // Paints the car folder declares. Empty = no colour choice to offer.
+    std::vector<CarPaint> paints;
 };
 
 namespace content_detail {
@@ -57,6 +70,36 @@ inline void applyCarMeta(ContentEntry& entry) {
             entry.carClass = v->asString();
         if (const auto* v = root.find("year"); v && v->isNumber())
             entry.year = static_cast<int>(v->asNumber());
+        if (const auto* list = root.find("colors"); list && list->isArray()) {
+            for (std::size_t i = 0; i < list->size(); ++i) {
+                const auto* item = list->item(i);
+                if (!item || !item->isObject()) continue;
+                const auto* rgb = item->find("rgb");
+                if (!rgb || !rgb->isArray() || rgb->size() < 3) continue;
+                float channels[3] = {1.0f, 1.0f, 1.0f};
+                bool usable = true;
+                for (int k = 0; k < 3; ++k) {
+                    const auto* c = rgb->item(k);
+                    if (!c || !c->isNumber()) { usable = false; break; }
+                    channels[k] = static_cast<float>(c->asNumber());
+                }
+                if (!usable) continue;
+                // 0..255 lists are common in content tools: scale, do not clamp
+                // everything to white.
+                if (channels[0] > 1.0f || channels[1] > 1.0f || channels[2] > 1.0f)
+                    for (float& c : channels) c /= 255.0f;
+                for (float& c : channels)
+                    c = c < 0.0f ? 0.0f : (c > 1.0f ? 1.0f : c);
+                CarPaint paint;
+                paint.r = channels[0];
+                paint.g = channels[1];
+                paint.b = channels[2];
+                if (const auto* n = item->find("name"); n && n->isString())
+                    paint.name = n->asString();
+                if (paint.name.empty()) paint.name = "colour " + std::to_string(i + 1);
+                entry.paints.push_back(std::move(paint));
+            }
+        }
         break;
     }
 }
@@ -83,6 +126,17 @@ inline std::vector<ContentEntry> scanRoot(const std::string& root, bool cars) {
 }
 
 } // namespace content_detail
+
+/** Paint list of one car folder, in the order the file declares it. Empty
+ *  when the folder has no metadata or no colours, which is the case every car
+ *  without a paint choice falls into. */
+inline std::vector<CarPaint> carPaintsFor(const std::string& carDir) {
+    ContentEntry entry;
+    entry.path = carDir;
+    entry.id = carDir;
+    content_detail::applyCarMeta(entry);
+    return entry.paints;
+}
 
 inline std::vector<ContentEntry> scanCarLibrary(const std::string& root = "content/cars") {
     return content_detail::scanRoot(root, true);

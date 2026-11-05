@@ -126,6 +126,9 @@ struct NativeMesh {
     // material.blend != 0 (glass, windscreen, decals): drawn after the
     // opaque pass, blended over what is already there, no depth write.
     bool blended = false;
+    // Bodywork paint tint (CARS colour): multiplies the albedo in both the
+    // forward and the GBuffer shader. 1,1,1 = as baked.
+    float tint[3] = {1.0f, 1.0f, 1.0f};
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is

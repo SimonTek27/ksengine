@@ -710,6 +710,19 @@ void GameMenuOverlay::buildCarSelectMenu()
             m_menuDirty = true;
         }, false, true, "flag" });
     }
+    if (!m_carPaints.empty()) {
+        const std::size_t index = std::min(m_carPaintIndex, m_carPaints.size() - 1);
+        std::snprintf(label, sizeof(label), "PAINT  %s", m_carPaints[index].name.c_str());
+        m_items.push_back({ label, "Repaint the bodywork", [this]() {
+            if (m_carPaints.empty()) return;
+            m_carPaintIndex = (m_carPaintIndex + 1) % m_carPaints.size();
+            if (onPaintChosen) {
+                const CarPaint& p = m_carPaints[m_carPaintIndex];
+                onPaintChosen(p.r, p.g, p.b);
+            }
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    }
     if (!m_items.empty())
         m_items.push_back({ "", "", nullptr, true });
 
@@ -724,8 +737,17 @@ void GameMenuOverlay::buildCarSelectMenu()
             if (!e.carClass.empty()) detail += (detail.empty() ? "" : " - ") + e.carClass;
             if (e.year > 0) detail += (detail.empty() ? "" : " - ") + std::to_string(e.year);
             if (detail.empty()) detail = e.path;
-            m_items.push_back({ e.label, detail, [this, path]() {
+            const std::vector<CarPaint> paints = e.paints;
+            m_items.push_back({ e.label, detail, [this, path, paints]() {
+                m_carPaints = paints;
+                m_carPaintIndex = 0;
                 if (onCarChosen) onCarChosen(path);
+                // The car's own first colour is its paint, applied as soon as
+                // the body exists; without a list the texture shows as baked.
+                if (!m_carPaints.empty() && onPaintChosen) {
+                    const CarPaint& p = m_carPaints[0];
+                    onPaintChosen(p.r, p.g, p.b);
+                }
                 goBack();
             } });
         }

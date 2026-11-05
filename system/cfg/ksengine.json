@@ -662,15 +662,15 @@
       },
       {
         "feature": "oemColorsModern",
-        "status": "missing",
-        "landsAs": null,
-        "note": "No colour list in the car folders yet: the page offers no paint choice."
+        "status": "live",
+        "landsAs": "colours list of ui_car.json paints the bodywork",
+        "note": "colors[] in ui_car.json: the first is applied when the car loads, the CARS page cycles the rest. The tint multiplies the albedo of the meshes the presets classify as paint, so the texture detail stays. Channels above 1 are read as 0..255 and scaled."
       },
       {
         "feature": "oemColorsVintage",
         "status": "missing",
         "landsAs": null,
-        "note": "No colour list in the car folders yet: the page offers no paint choice."
+        "note": "No separate vintage palette: the single colors[] list above is all the choice a car folder offers today."
       },
       {
         "feature": "carData",
