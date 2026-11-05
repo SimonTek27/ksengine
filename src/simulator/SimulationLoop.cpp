@@ -588,6 +588,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     int meshes = 0;
     int mappedNormal = 0;
     int painted = 0;
+    int tinted = 0;
     int metalSurfaces = 0;
     int cutouts = 0;
     int seeThrough = 0;
@@ -996,6 +997,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 }
                 if (presetId == graphics::MaterialPresetId::Paint) {
                     ++painted;
+                    ++tinted;
                     // Bodywork carries the paint the car folder declares (the
                     // CARS colour list). The tint multiplies the albedo in both
                     // shaders, so the panel keeps its texture detail and only
@@ -1095,6 +1097,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     for (const auto& node : parsed.file.nodes) walk(node);
 
     if (meshes == 0) return false;
+    if (tinted > 0) {
+        // Runtime proof that the paint reached the bodywork, not just the file.
+        std::printf("[paint] body %d mesh(es) tinted %.3f %.3f %.3f\n", tinted,
+                    m_carPaint[0], m_carPaint[1], m_carPaint[2]);
+        std::putchar(10);
+    }
         std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, "
                     "%d cut-out, %d see-through, %d self-lit",
             std::filesystem::path(modelPath).filename().string().c_str(), meshes,
