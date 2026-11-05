@@ -520,6 +520,8 @@ private:
     double m_timeRemaining = 0.0;
     // false = rolling start: beginRaceSession() skips the countdown.
     bool m_sessionStandingStart = true;
+    // 0 = no clock; otherwise the limit handed to RaceSessionManager.
+    int m_sessionTimeLimitSeconds = 0;
 
     ks::physics::PhysicsGolden m_goldenRecorder;
     bool m_goldenExportActive = false;

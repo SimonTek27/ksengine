@@ -1352,6 +1352,8 @@ void SimulationLoop::beginRaceSession() {
         rc.sessionType = RaceConfig::SessionType::Practice;
     rc.trackLength = std::max(100.0f, m_trackData.splineLength);
     rc.totalLaps = m_totalLaps;
+    // The clock the session ends on (0 = open session).
+    rc.sessionTimeSeconds = m_sessionTimeLimitSeconds;
     rc.numCars = 1 + static_cast<int>(m_aiCarIds.size());
     m_raceSession.configure(rc);
     m_raceSession.setPlayerCarIndex(0);
@@ -1658,15 +1660,12 @@ void SimulationLoop::startSession(GameSessionMode mode, const SessionStartParams
         setAiCarCount(0); // practice, hotlap and time attack are solo by definition
     std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI, clock %ds)\n",
                  sessionModeName(mode), m_totalLaps, m_aiCarCount, params.sessionTimeSeconds);
-    // beginRaceSession() reads this to decide countdown or green flag.
+    // beginRaceSession() reads these: countdown or green flag, and the clock.
     m_sessionStandingStart = params.standingStart;
+    m_sessionTimeLimitSeconds = std::max(0, params.sessionTimeSeconds);
     start();
-    // A countdown owns the clock during a race, so the session clock is armed
-    // afterwards for the modes that run green from the first metre.
-    if (params.sessionTimeSeconds > 0 &&
-        m_sessionType != SESSION_RACE) {
-        m_timeRemaining = static_cast<double>(params.sessionTimeSeconds);
-    }
+    // The manager owns the clock now; the HUD reads it back every frame.
+    m_timeRemaining = static_cast<double>(m_sessionTimeLimitSeconds);
     // MODE SETUP's garage start: the pose policy already parks practice and
     // qualifying in the box, so this only holds a car that started on the grid.
     if (params.startInGarage && m_hasPlayerBox)
@@ -3091,6 +3090,8 @@ void SimulationLoop::tick() {
     }
     if (m_raceSession.isCountingDown())
         m_timeRemaining = m_raceSession.countdownValue();
+    else if (m_raceSession.isActive())
+        m_timeRemaining = m_raceSession.remainingTime();
     if (m_sessionPhase != PHASE_CHECKERED_FLAG && onSessionStateChanged)
         onSessionStateChanged(m_sessionType, m_sessionPhase, m_currentLap, m_totalLaps, m_timeRemaining);
 #if HAS_VEHICLE_SIM
