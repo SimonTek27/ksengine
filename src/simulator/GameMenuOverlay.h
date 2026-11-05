@@ -106,6 +106,15 @@ public:
         m_menuDirty = true;
         if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
     }
+    /** SINGLE PLAYER rows: the modes the config lists, in its order. An empty
+     *  list keeps the built-in eight, which is what a config without
+     *  singleplayer.modes gets. */
+    void setSingleplayerModes(const std::vector<GameSessionMode>& modes) {
+        m_singleplayerModes = modes;
+        m_menuDirty = true;
+        if (m_currentState == MenuState::Singleplayer) buildSingleplayerMenu();
+    }
+    std::vector<GameSessionMode> effectiveSingleplayerModes() const;
     void setProfileField(const std::string& fieldName, const std::string& value);
     void setNationalityFromList(int index);
 
@@ -230,6 +239,7 @@ private:
     void startDriving(GameSessionMode mode);
     void buildMainMenu();
     void buildSingleplayerMenu();
+    std::vector<GameSessionMode> m_singleplayerModes; // empty = built-in eight
     void buildModeConfigMenu();
     void buildMultiplayerMenu();
     void buildProfileMenu();

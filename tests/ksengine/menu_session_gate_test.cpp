@@ -133,5 +133,22 @@ int main() {
         KS_CHECK(!menu.isVisible());
     }
 
+    // A config that lists its own modes decides the rows: two entries mean two
+    // session rows, in that order, with RESULTS right after them.
+    {
+        GameMenuOverlay configured;
+        configured.setSingleplayerModes({GameSessionMode::Drift, GameSessionMode::Practice});
+        configured.setCarName("gt3");
+        configured.setTrackName("monza");
+        configured.setVisible(true);
+        KS_CHECK(configured.handleKeyPress(0x0D)); // MAIN -> SINGLE PLAYER
+        const std::vector<MenuItem> rows = configured.items();
+        // car, track, team, separator, two modes, results, separator, back
+        KS_CHECK(rows.size() == 9);
+        KS_CHECK(rows[4].description == "Score runs on the drift pad");
+        KS_CHECK(rows[5].description == "Open session on the selected circuit");
+        KS_CHECK(rows[6].enabled); // RESULTS follows the two configured rows
+    }
+
     return KS_TEST_RESULT("menu_session_gate_test");
 }

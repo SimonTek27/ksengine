@@ -31,6 +31,9 @@
 #include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
 #include <cstdio>
+#include "engine/Config/Json.h"
+#include <iterator>
+#include <fstream>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -779,6 +782,42 @@ static void initSimulation() {
     }
 
     ks::sim::GameMenuOverlay* uiMenu = &g_simulation->ui().menu();
+    // singleplayer.modes: the SINGLE PLAYER rows, in the order the install
+    // config lists them. A file that names none keeps the built-in eight; names
+    // go through the same parser as KS_SESSION.
+    {
+        const std::string configFile =
+            ks::engine::assets::Paths::systemCfgFile("ksengine.json");
+        std::ifstream in(configFile, std::ios::binary);
+        if (in) {
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            ks::engine::json::Value root;
+            std::string error;
+            if (ks::engine::json::parse(text, root, &error)) {
+                const ks::engine::json::Value* rows = nullptr;
+                if (const ks::engine::json::Value* block = root.find("singleplayer"))
+                    rows = block->find("modes");
+                if (rows && rows->isArray()) {
+                    std::vector<ks::sim::GameSessionMode> modes;
+                    std::string listed;
+                    for (size_t i = 0; i < rows->size(); ++i) {
+                        const ks::engine::json::Value* entry = rows->item(i);
+                        if (!entry || !entry->isString()) continue;
+                        const ks::sim::GameSessionMode mode =
+                            ks::sim::modeFromMenuEntry(entry->asString());
+                        modes.push_back(mode);
+                        if (!listed.empty()) listed += ", ";
+                        listed += ks::sim::sessionModeName(mode);
+                    }
+                    if (!modes.empty()) {
+                        uiMenu->setSingleplayerModes(modes);
+                        printf("[INIT] Single player modes: %s\n", listed.c_str());
+                    }
+                }
+            }
+        }
+    }
     uiMenu->setVisible(true);
     uiMenu->onExitRequested = []() {
         g_running = false;

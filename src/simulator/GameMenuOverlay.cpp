@@ -8,6 +8,46 @@
 
 namespace ks::sim {
 
+namespace {
+// The eight modes the config ships, used when a file lists none. The labels and
+// hints stay here: they are copy, not configuration, and a mode the parser
+// cannot name never reaches the menu.
+struct SingleplayerModeRow {
+    GameSessionMode mode;
+    const char* label;
+    const char* hint;
+};
+constexpr SingleplayerModeRow kSingleplayerModes[] = {
+    { GameSessionMode::Practice, "PRACTICE", "Open session on the selected circuit" },
+    { GameSessionMode::Hotlap, "HOTLAP", "Flying laps on your own" },
+    { GameSessionMode::TimeAttack, "TIME ATTACK", "Clean laps against the clock" },
+    { GameSessionMode::Weekend, "WEEKEND", "Practice, qualifying and race" },
+    { GameSessionMode::Championship, "CHAMPIONSHIP", "A season across circuits" },
+    { GameSessionMode::Race, "QUICK RACE", "Grid start against AI" },
+    { GameSessionMode::Drift, "DRIFT", "Score runs on the drift pad" },
+    { GameSessionMode::DragRace, "DRAG RACE", "Standing start, quarter mile" },
+};
+
+const char* singleplayerLabel(GameSessionMode mode) {
+    for (const SingleplayerModeRow& row : kSingleplayerModes)
+        if (row.mode == mode) return row.label;
+    return "SESSION";
+}
+
+const char* singleplayerHint(GameSessionMode mode) {
+    for (const SingleplayerModeRow& row : kSingleplayerModes)
+        if (row.mode == mode) return row.hint;
+    return "Start this session";
+}
+} // namespace
+
+std::vector<GameSessionMode> GameMenuOverlay::effectiveSingleplayerModes() const {
+    if (!m_singleplayerModes.empty()) return m_singleplayerModes;
+    std::vector<GameSessionMode> modes;
+    for (const SingleplayerModeRow& row : kSingleplayerModes) modes.push_back(row.mode);
+    return modes;
+}
+
 GameMenuOverlay::GameMenuOverlay()
 {
     buildMainMenu();
@@ -136,27 +176,12 @@ void GameMenuOverlay::buildSingleplayerMenu()
     if (!carOk && !trackOk) hint = "Select a car and a track first";
     else if (!carOk) hint = "Select a car first";
     else hint = "Select a track first";
-    // One row per entry of system/cfg/ksengine.json singleplayer.modes, in
-    // that order. Each starts the session with that mode's own defaults
-    // (laps, grid, clock), which live in defaultsForMode().
-    struct ModeRow {
-        GameSessionMode mode;
-        const char* label;
-        const char* hint;
-    };
-    static const ModeRow kModes[] = {
-        { GameSessionMode::Practice, "PRACTICE", "Open session on the selected circuit" },
-        { GameSessionMode::Hotlap, "HOTLAP", "Flying laps on your own" },
-        { GameSessionMode::TimeAttack, "TIME ATTACK", "Clean laps against the clock" },
-        { GameSessionMode::Weekend, "WEEKEND", "Practice, qualifying and race" },
-        { GameSessionMode::Championship, "CHAMPIONSHIP", "A season across circuits" },
-        { GameSessionMode::Race, "QUICK RACE", "Grid start against AI" },
-        { GameSessionMode::Drift, "DRIFT", "Score runs on the drift pad" },
-        { GameSessionMode::DragRace, "DRAG RACE", "Standing start, quarter mile" },
-    };
-    for (const ModeRow& row : kModes) {
-        m_items.push_back({ row.label, ready ? row.hint : hint,
-            [this, mode = row.mode]() { startDriving(mode); }, false, ready });
+    // One row per entry of singleplayer.modes, in the order the config lists
+    // them; a file that names none gets the built-in eight. Each row starts the
+    // session with that mode's own defaults (laps, grid, clock).
+    for (GameSessionMode mode : effectiveSingleplayerModes()) {
+        m_items.push_back({ singleplayerLabel(mode), ready ? singleplayerHint(mode) : hint,
+            [this, mode]() { startDriving(mode); }, false, ready });
     }
     m_items.push_back({ "RESULTS", "Session standings",
         [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
