@@ -518,6 +518,8 @@ private:
     int m_currentLap = 0;
     int m_totalLaps = 0;
     double m_timeRemaining = 0.0;
+    // false = rolling start: beginRaceSession() skips the countdown.
+    bool m_sessionStandingStart = true;
 
     ks::physics::PhysicsGolden m_goldenRecorder;
     bool m_goldenExportActive = false;

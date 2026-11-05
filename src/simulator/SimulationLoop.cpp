@@ -1376,13 +1376,14 @@ void SimulationLoop::beginRaceSession() {
         }
     }
     m_raceSession.startSession();
-    if (rc.sessionType == RaceConfig::SessionType::Race) {
+    if (rc.sessionType == RaceConfig::SessionType::Race && m_sessionStandingStart) {
         m_raceSession.startCountdown(5.0f);
         m_sessionPhase = PHASE_COUNTDOWN;
         m_timeRemaining = 5.0;
     } else {
-        // Open session: straight to green (onCountdownFinished never fires,
-        // so set the phase here — lap timing was armed by start()).
+        // Green straight away: an open session, or a race asked for a rolling
+        // start. onCountdownFinished never fires, so the phase is set here —
+        // lap timing was armed by start().
         m_sessionPhase = PHASE_GREEN_FLAG;
         m_timeRemaining = 0.0;
     }
@@ -1657,6 +1658,8 @@ void SimulationLoop::startSession(GameSessionMode mode, const SessionStartParams
         setAiCarCount(0); // practice, hotlap and time attack are solo by definition
     std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI, clock %ds)\n",
                  sessionModeName(mode), m_totalLaps, m_aiCarCount, params.sessionTimeSeconds);
+    // beginRaceSession() reads this to decide countdown or green flag.
+    m_sessionStandingStart = params.standingStart;
     start();
     // A countdown owns the clock during a race, so the session clock is armed
     // afterwards for the modes that run green from the first metre.

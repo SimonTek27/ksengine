@@ -335,55 +335,64 @@
         "laps": 0,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "Qualifying": {
         "laps": 0,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "HotLap": {
         "laps": 0,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "TimeAttack": {
         "laps": 0,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "Race": {
         "laps": 10,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "Weekend": {
         "laps": 12,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "Championship": {
         "laps": 15,
         "aiCars": 0,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "Drift": {
         "laps": 0,
         "aiCars": 0,
         "clockSeconds": 180,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       },
       "DragRace": {
         "laps": 1,
         "aiCars": 1,
         "clockSeconds": 0,
-        "startInGarage": false
+        "startInGarage": false,
+        "standingStart": true
       }
     },
     "sources": [
@@ -397,7 +406,7 @@
         "feature": "modeSetup",
         "status": "live",
         "landsAs": "MODE SETUP screen (laps, AI cars, clock, garage start)",
-        "note": "One screen per mode with steps of one lap, one AI car and five minutes, a garage-start toggle and a summary of what is about to start. The values begin at singleplayer.defaults for that mode and fall back to defaultsForMode() for the fields the file leaves out; the screen is where a single session is then adjusted."
+        "note": "One screen per mode with steps of one lap, one AI car and five minutes, a garage-start toggle, a standing-start toggle and a summary of what is about to start. A standing start runs the five-second countdown; turning it off goes green straight away, grid included. The values begin at singleplayer.defaults for that mode and fall back to defaultsForMode() for the fields the file leaves out; the screen is where a single session is then adjusted."
       },
       {
         "feature": "sessionSetup",
@@ -429,7 +438,7 @@
         "landsAs": null
       }
     ],
-    "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock and the garage flag as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
+    "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock, the garage flag and the standing start as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
   },
   "multiplayer": {
     "hostPort": 40000,

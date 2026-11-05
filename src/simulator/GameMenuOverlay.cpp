@@ -182,6 +182,14 @@ void GameMenuOverlay::buildModeConfigMenu()
             m_menuDirty = true;
         } });
 
+    std::snprintf(text, sizeof(text), "STANDING START  [%s]",
+                  p.standingStart ? "ON" : "OFF");
+    m_items.push_back({ text, "OFF starts rolling instead of counting down",
+        [this]() {
+            m_configParams.standingStart = !m_configParams.standingStart;
+            m_menuDirty = true;
+        } });
+
     std::snprintf(text, sizeof(text), "START IN GARAGE  [%s]",
                   p.startInGarage ? "ON" : "OFF");
     m_items.push_back({ text, "Begin in the pit box instead of on the grid",

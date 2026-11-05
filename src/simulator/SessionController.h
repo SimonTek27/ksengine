@@ -95,6 +95,7 @@ struct SessionDefaultsOverride {
     int aiCars = -1;
     int sessionTimeSeconds = -1;
     int startInGarage = -1; // 0/1, -1 = not in the file
+    int standingStart = -1; // 0/1, -1 = not in the file
 };
 
 /** The table singleplayer.defaults fills at start-up. The menu and the loop
@@ -137,6 +138,7 @@ inline SessionStartParams defaultsForMode(GameSessionMode m) {
         if (o.aiCars >= 0) p.aiCars = std::min(31, o.aiCars);
         if (o.sessionTimeSeconds >= 0) p.sessionTimeSeconds = o.sessionTimeSeconds;
         if (o.startInGarage >= 0) p.startInGarage = o.startInGarage != 0;
+        if (o.standingStart >= 0) p.standingStart = o.standingStart != 0;
     }
     return p;
 }
@@ -173,6 +175,8 @@ inline std::vector<std::string> applySessionDefaults(const ks::engine::json::Val
             o.sessionTimeSeconds = std::max(0, static_cast<int>(v->asNumber()));
         const int garageFlag = readFlag(entry->find("startInGarage"));
         if (garageFlag >= 0) o.startInGarage = garageFlag;
+        const int standingFlag = readFlag(entry->find("standingStart"));
+        if (standingFlag >= 0) o.standingStart = standingFlag;
     }
     return unknown;
 }

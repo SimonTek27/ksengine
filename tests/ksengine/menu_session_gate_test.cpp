@@ -239,6 +239,38 @@ int main() {
         KS_CHECK(merged.sessionTimeSeconds == 600);
         KS_CHECK(merged.startInGarage);
         KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Practice).aiCars == 1);
+        // A rolling race is a real choice: the flag reaches the loop, which
+        // skips the countdown, and the screen has a row for it.
+        ks::sim::clearSessionDefaultsOverride();
+        ks::engine::json::Value rollBlock;
+        KS_CHECK(ks::engine::json::parse("{\"Race\":{\"standingStart\":false}}",
+                                        rollBlock, &error));
+        KS_CHECK(ks::sim::applySessionDefaults(rollBlock).empty());
+        KS_CHECK(!ks::sim::defaultsForMode(GameSessionMode::Race).standingStart);
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Hotlap).standingStart);
+
+        const int beforeRoll = calls;
+        menu.setVisible(true);
+        if (menu.state() != ks::sim::MenuState::Singleplayer)
+            KS_CHECK(menu.handleKeyPress(0x1B));
+        menu.setSelectedIndex(kQuickRace);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        int standingRow = -1, startRowB = -1;
+        const std::vector<MenuItem> rowsB = menu.items();
+        for (size_t r = 0; r < rowsB.size(); ++r) {
+            if (rowsB[r].text.rfind("STANDING START", 0) == 0) standingRow = static_cast<int>(r);
+            if (rowsB[r].text.rfind("START SESSION", 0) == 0) startRowB = static_cast<int>(r);
+        }
+        KS_CHECK(standingRow >= 0 && startRowB >= 0);
+        KS_CHECK(rowsB[static_cast<size_t>(standingRow)].text == "STANDING START  [OFF]");
+        menu.setSelectedIndex(standingRow);
+        KS_CHECK(menu.handleKeyPress(0x0D)); // OFF -> ON
+        menu.setSelectedIndex(startRowB);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(calls == beforeRoll + 1);
+        KS_CHECK(chosen.standingStart);
+        ks::sim::clearSessionDefaultsOverride();
+
         // A mode the user file never mentions keeps the system entry whole.
         KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Hotlap).aiCars == 0);
 
