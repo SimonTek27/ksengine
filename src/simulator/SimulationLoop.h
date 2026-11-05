@@ -544,6 +544,10 @@ private:
     // True once the player picked a paint: an explicit choice may replace a
     // livery, while the factory colour never does.
     bool m_carPaintExplicit = false;
+    // True when the car folder declares its own colour list. Without one
+    // there is no factory paint at all, so the body keeps the texture it
+    // ships with instead of being repainted white.
+    bool m_carPaintDeclared = false;
     std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
 
     // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,

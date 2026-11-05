@@ -424,6 +424,7 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         const std::vector<ks::sim::CarPaint> paints = ks::sim::carPaintsFor(carDir);
         m_carPaintExplicit = false;
         m_carPaint[0] = m_carPaint[1] = m_carPaint[2] = 1.0f;
+        m_carPaintDeclared = !paints.empty();
         if (!paints.empty()) {
             m_carPaint[0] = paints.front().r;
             m_carPaint[1] = paints.front().g;
@@ -1067,7 +1068,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     // pick lands everywhere, and there it replaces the colour.
                     const bool liveryBody =
                         !skinDir.empty() && !readSkinTexture(albedo).empty();
-                    if (!liveryBody || m_carPaintExplicit) {
+                    // No declared colours means no factory paint: tinting by a
+                    // white default would only be the identity, while the log
+                    // then claimed a repaint that never happened.
+                    if ((!liveryBody && m_carPaintDeclared) || m_carPaintExplicit) {
                         nm.tint[0] = m_carPaint[0];
                         nm.tint[1] = m_carPaint[1];
                         nm.tint[2] = m_carPaint[2];
@@ -1173,8 +1177,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     m_carPaintExplicit ? " (solid)" : "");
         std::putchar(10);
     } else if (painted > 0) {
-        std::printf("[paint] livery owns the %d painted mesh(es), paint not applied\n",
-                    painted);
+        // Say which of the two it is: a livery already carries the body colour,
+        // while a car with no colour list has no factory paint to apply at all.
+        std::printf("[paint] %d painted mesh(es): %s\n", painted,
+                    m_carPaintDeclared ? "livery owns them, paint not applied"
+                                       : "no factory colour declared, left as authored");
         std::putchar(10);
     }
         std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, "

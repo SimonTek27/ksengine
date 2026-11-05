@@ -7,8 +7,9 @@
  * open the menu and the select screens explain where content goes.
  *
  * Optional metadata files (first hit wins):
- *   <car>/ui_car.json  { "name", "brand", "class", "year",
- *                        "colors": [ { "name", "rgb": [r,g,b] } ] }
+ *   <car>/ui_car.json  (or <car>/ui/ui_car.json, the layout AC ships)
+ *                       { "name", "brand", "class", "year",
+ *                         "colors": [ { "name", "rgb": [r,g,b] } ] }
  *  Colours are the car's own paint list: a channel above 1 is taken as a
  *  0..255 value and scaled down, so both list styles land in 0..1.
  *   <car>/data/car.json
@@ -49,7 +50,8 @@ namespace content_detail {
 inline void applyCarMeta(ContentEntry& entry) {
     namespace fs = std::filesystem;
     const char* candidates[] = {
-        "ui_car.json",
+        "ui_car.json",      // where the ksim content tools put it
+        "ui/ui_car.json",   // where Assetto Corsa itself puts it
         "data/car.json",
         "car.json",
     };
@@ -100,6 +102,11 @@ inline void applyCarMeta(ContentEntry& entry) {
                 entry.paints.push_back(std::move(paint));
             }
         }
+        // One line per car that declared metadata: the CARS page filters and
+        // the paint picker both read exactly what this parsed.
+        std::printf("[content] %s: \"%s\" class=%s year=%d colours=%d\n",
+                    entry.id.c_str(), entry.label.c_str(), entry.carClass.c_str(),
+                    entry.year, static_cast<int>(entry.paints.size()));
         break;
     }
 }
