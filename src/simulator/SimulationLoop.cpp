@@ -422,6 +422,7 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     // the next. The CARS page can repaint from here (setCarPaint).
     {
         const std::vector<ks::sim::CarPaint> paints = ks::sim::carPaintsFor(carDir);
+        m_carPaintExplicit = false;
         m_carPaint[0] = m_carPaint[1] = m_carPaint[2] = 1.0f;
         if (!paints.empty()) {
             m_carPaint[0] = paints.front().r;
@@ -997,14 +998,20 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 }
                 if (presetId == graphics::MaterialPresetId::Paint) {
                     ++painted;
-                    ++tinted;
-                    // Bodywork carries the paint the car folder declares (the
-                    // CARS colour list). The tint multiplies the albedo in both
-                    // shaders, so the panel keeps its texture detail and only
-                    // its colour moves; 1,1,1 is the texture as baked.
-                    nm.tint[0] = m_carPaint[0];
-                    nm.tint[1] = m_carPaint[1];
-                    nm.tint[2] = m_carPaint[2];
+                    // A livery texture already carries the body colour: the
+                    // factory colour must never multiply it, or a bright livery
+                    // red turns into a dark maroon. The factory paint only lands
+                    // on a body that shows the car's own texture; an explicit
+                    // pick lands everywhere, and there it replaces the colour.
+                    const bool liveryBody =
+                        !skinDir.empty() && !readSkinTexture(albedo).empty();
+                    if (!liveryBody || m_carPaintExplicit) {
+                        nm.tint[0] = m_carPaint[0];
+                        nm.tint[1] = m_carPaint[1];
+                        nm.tint[2] = m_carPaint[2];
+                        nm.paintSolid = liveryBody ? 1.0f : 0.0f;
+                        ++tinted;
+                    }
                 }
                 if (presetId == graphics::MaterialPresetId::BrushedMetal ||
                     presetId == graphics::MaterialPresetId::Chrome ||
@@ -1099,8 +1106,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     if (meshes == 0) return false;
     if (tinted > 0) {
         // Runtime proof that the paint reached the bodywork, not just the file.
-        std::printf("[paint] body %d mesh(es) tinted %.3f %.3f %.3f\n", tinted,
-                    m_carPaint[0], m_carPaint[1], m_carPaint[2]);
+        std::printf("[paint] body %d mesh(es) tinted %.3f %.3f %.3f%s\n", tinted,
+                    m_carPaint[0], m_carPaint[1], m_carPaint[2],
+                    m_carPaintExplicit ? " (solid)" : "");
+        std::putchar(10);
+    } else if (painted > 0) {
+        std::printf("[paint] livery owns the %d painted mesh(es), paint not applied\n",
+                    painted);
         std::putchar(10);
     }
         std::printf("[kn5] %s: %d mesh(es), %d normal map(s), %d painted, %d bare metal, "
@@ -2670,6 +2682,7 @@ void SimulationLoop::setCarPaint(float r, float g, float b)
         want[2] == m_carPaint[2])
         return; // same paint: no rebuild
     for (int i = 0; i < 3; ++i) m_carPaint[i] = want[i];
+    m_carPaintExplicit = true;
     std::printf("[paint] body tint %.3f %.3f %.3f\n", m_carPaint[0], m_carPaint[1],
                 m_carPaint[2]);
     // The material block is static per mesh, so the body has to be re-uploaded.

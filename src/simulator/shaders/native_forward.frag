@@ -64,6 +64,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintR;       // bodywork paint: multiplies the albedo (1,1,1 = baked)
     float tintG;
     float tintB;
+    float paintSolid;  // 1 = tint replaces the albedo instead of multiplying it
     float padTint;     // keeps the block on its 16-byte std140 stride
 } material;
 
@@ -136,7 +137,10 @@ void main() {
     // KN5 alpha test: decals, grilles and light covers are cut out instead of
     // drawn as opaque cards.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
-    vec3 albedo = albedoSample.rgb * vec3(material.tintR, material.tintG, material.tintB);
+    // A livery texture carries its own colour, so a paint the player picked
+    // replaces it; painting a plain body only tints it.
+    vec3 paint = vec3(material.tintR, material.tintG, material.tintB);
+    vec3 albedo = mix(albedoSample.rgb * paint, paint, material.paintSolid);
 
     vec3 N = normalize(fragNormal);
     // Normal map sampled unconditionally so the derivatives inside

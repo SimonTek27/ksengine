@@ -45,6 +45,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintR;       // bodywork paint: multiplies the albedo (1,1,1 = baked)
     float tintG;
     float tintB;
+    float paintSolid;  // 1 = tint replaces the albedo (explicit paint)
     float padTint;     // 16-byte std140 stride, same as native_forward.frag
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
@@ -83,8 +84,9 @@ void main() {
     // KN5 alpha test, same rule as native_forward.frag: without it a decal
     // plane writes opaque albedo and the deferred path fills its quad.
     if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
-    outAlbedoAO = vec4(albedoSample.rgb * vec3(material.tintR, material.tintG, material.tintB),
-                      metalness);
+    vec3 paint = vec3(material.tintR, material.tintG, material.tintB);
+    outAlbedoAO = vec4(mix(albedoSample.rgb * paint, paint, material.paintSolid),
+                       metalness);
 
     // Normal comes from the material instead of the old hardcoded 0.75:
     // material.roughness feeds deferred_lighting.frag's GGX directly, so an

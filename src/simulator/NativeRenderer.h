@@ -129,6 +129,9 @@ struct NativeMesh {
     // Bodywork paint tint (CARS colour): multiplies the albedo in both the
     // forward and the GBuffer shader. 1,1,1 = as baked.
     float tint[3] = {1.0f, 1.0f, 1.0f};
+    // 1 = tint replaces the albedo (an explicit paint over a livery), 0 = the
+    // tint multiplies it (painting a body that shows its own texture).
+    float paintSolid = 0.0f;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is

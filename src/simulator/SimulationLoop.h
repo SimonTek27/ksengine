@@ -541,6 +541,9 @@ private:
     std::string m_carName;
     // Bodywork tint currently applied (1,1,1 = the texture as baked).
     float m_carPaint[3] = {1.0f, 1.0f, 1.0f};
+    // True once the player picked a paint: an explicit choice may replace a
+    // livery, while the factory colour never does.
+    bool m_carPaintExplicit = false;
     std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
 
     // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,

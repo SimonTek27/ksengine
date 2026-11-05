@@ -797,9 +797,10 @@ struct MaterialUBO {
     // 1,1,1 is the baked texture untouched, so a mesh that announces no paint
     // renders exactly as it did before this field existed.
     float tint[3] = {1.0f, 1.0f, 1.0f};
-    // 16-byte stride pad of the std140 block (the three floats above are read
-    // by the shaders, these are not).
-    float pad3[3] = {0.0f, 0.0f, 0.0f};
+    // 1 = the tint replaces the albedo (explicit paint over a livery), 0 = it
+    // multiplies it. Sits in the old padding: the block stays 64 bytes.
+    float paintSolid = 0.0f;
+    float pad3[2] = {0.0f, 0.0f};
 };
 static_assert(sizeof(MaterialUBO) == 64, "MaterialUBO is read as a std140 uniform block");
 
@@ -1587,6 +1588,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.tint[0] = mesh.tint[0];
     ubo.tint[1] = mesh.tint[1];
     ubo.tint[2] = mesh.tint[2];
+    ubo.paintSolid = mesh.paintSolid;
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1732,6 +1734,7 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
         mesh.tint[0] = material->tint[0];
         mesh.tint[1] = material->tint[1];
         mesh.tint[2] = material->tint[2];
+        mesh.paintSolid = material->paintSolid;
         mesh.albedoTexture =
             MaterialCache::resolveTexturePath(textureDir, material->albedo);
         mesh.normalTexture =

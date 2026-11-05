@@ -80,6 +80,10 @@ struct MeshMaterial {
     // albedo in both shaders. 1,1,1 leaves the baked texture untouched, which
     // is what every mesh gets unless the car declares colours.
     float tint[3] = {1.0f, 1.0f, 1.0f};
+    // 1 = the tint REPLACES the albedo instead of multiplying it. A livery
+    // texture already carries its colour, so a paint the player picked must
+    // overwrite it rather than darken it.
+    float paintSolid = 0.0f;
 };
 
 class MaterialCache final {
