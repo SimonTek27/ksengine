@@ -92,7 +92,7 @@ void GameMenuOverlay::buildMainMenu()
     // GARAGE and REPLAY used to live here. The garage is one level down, in
     // the in-car pause overlay, where a running session is what a setup is
     // for; this screen only opens it through the pause screen now.
-    m_items.push_back({ "SINGLE PLAYER", "Practice, race and time attack",
+    m_items.push_back({ "SINGLE PLAYER", "Practice, hotlap, time attack and more",
         [this]() { switchMenu(MenuState::Singleplayer); }, false, true, "user" });
     m_items.push_back({ "MULTIPLAYER", "Online and LAN events, ranked or not",
         [this]() { switchMenu(MenuState::Multiplayer); }, false, true, "users" });
@@ -136,15 +136,28 @@ void GameMenuOverlay::buildSingleplayerMenu()
     if (!carOk && !trackOk) hint = "Select a car and a track first";
     else if (!carOk) hint = "Select a car first";
     else hint = "Select a track first";
-    m_items.push_back({ "PRACTICE",
-        ready ? "Open session on the selected circuit" : hint,
-        [this]() { startDriving(GameSessionMode::Practice); }, false, ready });
-    m_items.push_back({ "QUICK RACE",
-        ready ? "Grid start against AI" : hint,
-        [this]() { startDriving(GameSessionMode::Race); }, false, ready });
-    m_items.push_back({ "TIME ATTACK",
-        ready ? "Clean laps against the clock" : hint,
-        [this]() { startDriving(GameSessionMode::TimeAttack); }, false, ready });
+    // One row per entry of system/cfg/ksengine.json singleplayer.modes, in
+    // that order. Each starts the session with that mode's own defaults
+    // (laps, grid, clock), which live in defaultsForMode().
+    struct ModeRow {
+        GameSessionMode mode;
+        const char* label;
+        const char* hint;
+    };
+    static const ModeRow kModes[] = {
+        { GameSessionMode::Practice, "PRACTICE", "Open session on the selected circuit" },
+        { GameSessionMode::Hotlap, "HOTLAP", "Flying laps on your own" },
+        { GameSessionMode::TimeAttack, "TIME ATTACK", "Clean laps against the clock" },
+        { GameSessionMode::Weekend, "WEEKEND", "Practice, qualifying and race" },
+        { GameSessionMode::Championship, "CHAMPIONSHIP", "A season across circuits" },
+        { GameSessionMode::Race, "QUICK RACE", "Grid start against AI" },
+        { GameSessionMode::Drift, "DRIFT", "Score runs on the drift pad" },
+        { GameSessionMode::DragRace, "DRAG RACE", "Standing start, quarter mile" },
+    };
+    for (const ModeRow& row : kModes) {
+        m_items.push_back({ row.label, ready ? row.hint : hint,
+            [this, mode = row.mode]() { startDriving(mode); }, false, ready });
+    }
     m_items.push_back({ "RESULTS", "Session standings",
         [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
     m_items.push_back({ "", "", nullptr, true });

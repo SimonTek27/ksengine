@@ -10,6 +10,7 @@
 #include "simulator/GameMenuOverlay.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 using ks::sim::GameMenuOverlay;
@@ -18,9 +19,14 @@ using ks::sim::MenuItem;
 using ks::sim::MenuState;
 
 namespace {
-// Row order built by buildSingleplayerMenu() (TEAM added by roadmap 2.8).
-constexpr int kCar = 0, kTrack = 1, kTeam = 2, kPractice = 4, kQuickRace = 5,
-              kTimeAttack = 6, kResults = 7;
+// Row order built by buildSingleplayerMenu(): the eight singleplayer.modes
+// entries of the config, in that order, then RESULTS.
+constexpr int kCar = 0, kTrack = 1, kTeam = 2;
+constexpr int kPractice = 4, kHotlap = 5, kTimeAttack = 6, kWeekend = 7,
+              kChampionship = 8, kQuickRace = 9, kDrift = 10, kDragRace = 11,
+              kResults = 12;
+constexpr int kModes[] = {kPractice, kHotlap, kTimeAttack, kWeekend,
+                          kChampionship, kQuickRace, kDrift, kDragRace};
 }
 
 int main() {
@@ -42,9 +48,7 @@ int main() {
     {
         const std::vector<MenuItem> items = menu.items();
         KS_CHECK(items.size() > kResults);
-        KS_CHECK(!items[kPractice].enabled);
-        KS_CHECK(!items[kQuickRace].enabled);
-        KS_CHECK(!items[kTimeAttack].enabled);
+        for (int row : kModes) KS_CHECK(!items[row].enabled);
         KS_CHECK(items[kResults].enabled); // results never gated
         KS_CHECK(items[kPractice].description == "Select a car and a track first");
         KS_CHECK(items[kTeam].enabled);
@@ -77,12 +81,15 @@ int main() {
     menu.setTeamName("ksim_racing");
     {
         const std::vector<MenuItem> items = menu.items();
-        KS_CHECK(items[kPractice].enabled);
-        KS_CHECK(items[kQuickRace].enabled);
-        KS_CHECK(items[kTimeAttack].enabled);
+        for (int row : kModes) KS_CHECK(items[row].enabled);
         KS_CHECK(items[kPractice].description == "Open session on the selected circuit");
-        KS_CHECK(items[kQuickRace].description == "Grid start against AI");
+        KS_CHECK(items[kHotlap].description == "Flying laps on your own");
         KS_CHECK(items[kTimeAttack].description == "Clean laps against the clock");
+        KS_CHECK(items[kWeekend].description == "Practice, qualifying and race");
+        KS_CHECK(items[kChampionship].description == "A season across circuits");
+        KS_CHECK(items[kQuickRace].description == "Grid start against AI");
+        KS_CHECK(items[kDrift].description == "Score runs on the drift pad");
+        KS_CHECK(items[kDragRace].description == "Standing start, quarter mile");
         KS_CHECK(items[kCar].description == "gt3"); // selection surfaced
         KS_CHECK(items[kTrack].description == "monza");
         KS_CHECK(items[kTeam].description == "ksim_racing");
@@ -107,6 +114,24 @@ int main() {
     KS_CHECK(calls == 3);
     KS_CHECK(picked == GameSessionMode::TimeAttack);
     KS_CHECK(!menu.isVisible());
+
+    // The five modes added after the original three report their own mode too.
+    const std::pair<int, GameSessionMode> extra[] = {
+        {kHotlap, GameSessionMode::Hotlap},
+        {kWeekend, GameSessionMode::Weekend},
+        {kChampionship, GameSessionMode::Championship},
+        {kDrift, GameSessionMode::Drift},
+        {kDragRace, GameSessionMode::DragRace},
+    };
+    int expected = 3;
+    for (const auto& e : extra) {
+        menu.setVisible(true);
+        menu.setSelectedIndex(e.first);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(calls == ++expected);
+        KS_CHECK(picked == e.second);
+        KS_CHECK(!menu.isVisible());
+    }
 
     return KS_TEST_RESULT("menu_session_gate_test");
 }
