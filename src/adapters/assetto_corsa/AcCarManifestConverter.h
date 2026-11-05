@@ -37,7 +37,10 @@ namespace fs = std::filesystem;
 //     which feed the root "fuel" object together with fuel_cons.ini.
 //
 // Entries AC only implies are added here and only here, never invented per
-// car: fuel density and the minimum ride height default. A naturally aspirated
+// car: fuel density, the minimum ride height, the brake temperature profile,
+// engine power curve standard and humidity reference, the AI tyre hint and wing
+// variation, the ABS_V2/EDL shapes older cars predate, and the camera pitches
+// an unwritten [GRAPHICS] leaves out. A naturally aspirated
 // car gets no turbo/ERS block, because nothing in its .ini set declares one --
 // that is the "only what belongs to this vehicle type" rule.
 class AcCarManifestConverter {
@@ -1146,6 +1149,23 @@ private:
         }
     }
 
+    // Brake temperature profile a car that writes no [TEMPS_FRONT]/[TEMPS_REAR]
+    // falls back to. The values are the ones the reference manifests carry; only
+    // the leading cooling factor differs between the axles.
+    static Json brakeTempProfile(double coolSpeedFactor0) {
+        Json profile = Json::object();
+        profile.insert("TRANSFER", Json(0.4));
+        profile.insert("COOL_TRANSFER", Json(0.002));
+        profile.insert("TORQUE_K", Json(0.4));
+        profile.insert("PERF_CURVE", Json("(0=0.3409|400=1|900=0.9659|1200=0.5909|2000=0.3409)"));
+        profile.insert("COOL_SPEED_FACTOR", Json(0.06));
+        profile.insert("COOL_SPEED_FACTOR_0", Json(coolSpeedFactor0));
+        profile.insert("CORE_TRANSFER_IN", Json(0.16));
+        profile.insert("CORE_TRANSFER_OUT", Json(0.5));
+        profile.insert("CORE_TRANSFER_AIR", Json(0.0));
+        return profile;
+    }
+
     static void addTypeDefaults(Json& root, Json& fuel) {
         if (!fuel.contains("KG_PER_LITER") &&
             (fuel.contains("MAX_FUEL") || fuel.contains("FUEL")))
@@ -1166,6 +1186,98 @@ private:
         if (!root.contains("SHORT_NAME")) {
             const std::string brand = root["brand"].toString();
             if (brand.size() >= 3) root.insert("SHORT_NAME", Json(upper(brand.substr(0, 3))));
+        }
+
+        // addImpliedDefaults: the entries every car must carry but older content
+        // never writes, because AC keeps them inside its own physics code. Each
+        // one is added here and only here, across vehicle types, never per car.
+        //
+        // One scope per section: objectAt(root, ...) may insert into root, and a
+        // reference taken before that insertion can dangle afterwards.
+        {
+            // brakes.ini [TEMPS_FRONT]/[TEMPS_REAR] are optional overrides.
+            Json& brakes = objectAt(root, "brakes");
+            if (!brakes.contains("TEMPS_FRONT")) brakes.insert("TEMPS_FRONT", brakeTempProfile(0.05));
+            if (!brakes.contains("TEMPS_REAR")) brakes.insert("TEMPS_REAR", brakeTempProfile(0.04));
+        }
+        {
+            // engine.ini [HEADER] and [ENGINE_DATA]: which power curve standard
+            // the torque curve follows, the humidity the correction was measured
+            // at, and whether ambient conditions change the output.
+            Json& engine = objectAt(root, "engine");
+            Json& header = objectAt(engine, "HEADER");
+            if (!header.contains("POWER_CURVE_STANDARD")) header.insert("POWER_CURVE_STANDARD", Json(2));
+            if (!header.contains("HUMIDITY_REF")) header.insert("HUMIDITY_REF", Json(0));
+            Json& engineData = objectAt(engine, "ENGINE_DATA");
+            if (!engineData.contains("AMBIENT_EFFECT"))
+                engineData.insert("AMBIENT_EFFECT", Json(0));
+        }
+        {
+            // ai.ini [TYRES]/[WING_VARIATION]: how much grip the AI is allowed to
+            // assume, and whether it trades wing for speed. No car without them
+            // moves either, so both stay at the values the references carry.
+            Json& ai = objectAt(root, "ai");
+            if (!ai.contains("TYRES")) {
+                Json tyres = Json::object();
+                tyres.insert("HINT", Json(1));
+                ai.insert("TYRES", tyres);
+            }
+            if (!ai.contains("WING_VARIATION")) {
+                Json wing = Json::object();
+                wing.insert("VALUE", Json(0));
+                ai.insert("WING_VARIATION", wing);
+            }
+        }
+        {
+            // electronics.ini: older cars carry [ABS]/[TRACTION_CONTROL] and no
+            // ABS_V2/EDL block. The newer shapes mirror what the car declares,
+            // so nothing is invented for a car that never had these systems.
+            Json& electronics = objectAt(root, "electronics");
+            if (!electronics.contains("ABS_V2")) {
+                Json abs2 = Json::object();
+                const Json* v1 = electronics.contains("ABS") && electronics["ABS"].isObject()
+                                     ? &electronics["ABS"]
+                                     : nullptr;
+                static const char* kShared[] = {"SLIP_RATIO_LIMIT", "CURVE", "PRESENT",
+                                                "ACTIVE", "RATE_HZ"};
+                for (const char* key : kShared) {
+                    if (v1 && v1->contains(key)) abs2.insert(key, (*v1)[key]);
+                }
+                if (!abs2.contains("SLIP_RATIO_LIMIT")) abs2.insert("SLIP_RATIO_LIMIT", Json(0.12));
+                if (!abs2.contains("CURVE")) abs2.insert("CURVE", Json(""));
+                if (!abs2.contains("PRESENT")) abs2.insert("PRESENT", Json(0));
+                if (!abs2.contains("ACTIVE")) abs2.insert("ACTIVE", Json(0));
+                if (!abs2.contains("RATE_HZ")) abs2.insert("RATE_HZ", Json(100));
+                abs2.insert("CHANNELS", Json(4));
+                electronics.insert("ABS_V2", abs2);
+            }
+            if (!electronics.contains("EDL")) {
+                Json edl = Json::object();
+                const Json* tc =
+                    electronics.contains("TRACTION_CONTROL") && electronics["TRACTION_CONTROL"].isObject()
+                        ? &electronics["TRACTION_CONTROL"]
+                        : nullptr;
+                edl.insert("PRESENT", tc && tc->contains("PRESENT") ? (*tc)["PRESENT"] : Json(0));
+                edl.insert("ACTIVE", tc && tc->contains("ACTIVE") ? (*tc)["ACTIVE"] : Json(0));
+                edl.insert("MAX_SPIN_POWER", Json(0.55));
+                edl.insert("MAX_SPIN_COAST", Json(0.4));
+                edl.insert("BRAKE_TORQUE_POWER", Json(140));
+                edl.insert("BRAKE_TORQUE_COAST", Json(420));
+                edl.insert("DEAD_ZONE_POWER", Json(0.12));
+                edl.insert("DEAD_ZONE_COAST", Json(0.12));
+                electronics.insert("EDL", edl);
+            }
+        }
+        {
+            // Camera angles car.ini [GRAPHICS] declares per car. A car that
+            // writes none gets no tilt, which is exactly what AC does with a key
+            // it does not find: the camera looks straight ahead.
+            Json& car = objectAt(root, "car");
+            Json& graphics = objectAt(car, "GRAPHICS");
+            for (const char* key : {"BONNET_CAMERA_PITCH", "BUMPER_CAMERA_PITCH",
+                                    "CHASE_CAMERA_PITCH"}) {
+                if (!graphics.contains(key)) graphics.insert(key, Json(0));
+            }
         }
     }
 };
