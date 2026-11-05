@@ -378,6 +378,10 @@ static void normalizeBrakes(Json& root) {
     // serves the .ini conversion and the legacy split.
     static bool writeDocuments(const fs::path& carDir, const Json& root, Result& result) {
         std::error_code ec;
+        if (!writeBrakeTempLuts(carDir)) {
+            result.error = "cannot write the brake temperature curves";
+            return false;
+        }
         const std::vector<std::string> names = documents();
         std::vector<Json> docs;
         docs.reserve(names.size());
@@ -1149,15 +1153,37 @@ private:
         }
     }
 
+    // The brake temperature performance curve is a curve like every other one,
+    // so it ships as a .lut file beside the documents instead of an inline
+    // string: the same x|y lines power.lut and the aero curves use.
+    static constexpr const char* kBrakeTempFrontLut = "brake_temp_front.lut";
+    static constexpr const char* kBrakeTempRearLut = "brake_temp_rear.lut";
+
+    static const char* brakeTempCurveText() {
+        return "0|0.3409\r\n400|1\r\n900|0.9659\r\n1200|0.5909\r\n2000|0.3409\r\n";
+    }
+
+    static bool writeBrakeTempLuts(const fs::path& carDir) {
+        const fs::path dir = carDir / "data";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        for (const char* name : {kBrakeTempFrontLut, kBrakeTempRearLut}) {
+            std::ofstream file(dir / name, std::ios::binary | std::ios::trunc);
+            if (!file) return false;
+            file << brakeTempCurveText();
+        }
+        return true;
+    }
+
     // Brake temperature profile a car that writes no [TEMPS_FRONT]/[TEMPS_REAR]
     // falls back to. The values are the ones the reference manifests carry; only
     // the leading cooling factor differs between the axles.
-    static Json brakeTempProfile(double coolSpeedFactor0) {
+    static Json brakeTempProfile(const char* lutName, double coolSpeedFactor0) {
         Json profile = Json::object();
         profile.insert("TRANSFER", Json(0.4));
         profile.insert("COOL_TRANSFER", Json(0.002));
         profile.insert("TORQUE_K", Json(0.4));
-        profile.insert("PERF_CURVE", Json("(0=0.3409|400=1|900=0.9659|1200=0.5909|2000=0.3409)"));
+        profile.insert("PERF_CURVE", Json(lutName));
         profile.insert("COOL_SPEED_FACTOR", Json(0.06));
         profile.insert("COOL_SPEED_FACTOR_0", Json(coolSpeedFactor0));
         profile.insert("CORE_TRANSFER_IN", Json(0.16));
@@ -1197,8 +1223,10 @@ private:
         {
             // brakes.ini [TEMPS_FRONT]/[TEMPS_REAR] are optional overrides.
             Json& brakes = objectAt(root, "brakes");
-            if (!brakes.contains("TEMPS_FRONT")) brakes.insert("TEMPS_FRONT", brakeTempProfile(0.05));
-            if (!brakes.contains("TEMPS_REAR")) brakes.insert("TEMPS_REAR", brakeTempProfile(0.04));
+            if (!brakes.contains("TEMPS_FRONT"))
+                brakes.insert("TEMPS_FRONT", brakeTempProfile(kBrakeTempFrontLut, 0.05));
+            if (!brakes.contains("TEMPS_REAR"))
+                brakes.insert("TEMPS_REAR", brakeTempProfile(kBrakeTempRearLut, 0.04));
         }
         {
             // engine.ini [HEADER] and [ENGINE_DATA]: which power curve standard
