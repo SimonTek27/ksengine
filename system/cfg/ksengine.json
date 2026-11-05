@@ -5,13 +5,34 @@
     "config": "system/cfg/ksengine.json",
     "playerOverrides": "user/<player>/settings.json",
     "precedence": "system/cfg first, user file second, later wins per key",
-    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and the features it owns, with the status each one has today. Only physics.fixedDt, audio.master, assist.tc and assist.abs are consumed by the runtime; every other key is documentation and is ignored by the loader, so it can never break a session."
+    "note": "Sections below mirror the menu sections that exist in the simulator. Each section lists its effective values and the features it owns, with the status each one has today. The keys listed in effectiveKeys are consumed by the runtime; every other key is documentation. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden."
   },
   "effectiveKeys": [
     "physics.fixedDt",
     "audio.master",
     "assist.tc",
-    "assist.abs"
+    "assist.abs",
+    "video.resolution",
+    "video.fullscreen",
+    "video.vsync",
+    "video.frameLimit",
+    "video.ssao",
+    "video.ssr",
+    "video.ssgi",
+    "video.ssgiRadius",
+    "video.ssgiIntensity",
+    "video.motionBlur",
+    "video.exposure",
+    "video.tonemap",
+    "video.postProcessFilter",
+    "video.hdrOutput",
+    "video.msaa",
+    "video.anisotropicFiltering",
+    "video.shadowMapSize",
+    "video.shadowCascades",
+    "video.particles",
+    "video.headPhysics",
+    "singleplayer.modes"
   ],
   "physics": {
     "fixedDt": 0.008333333333333333,

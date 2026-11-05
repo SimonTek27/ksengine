@@ -31,6 +31,8 @@
 #include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
 #include <cstdio>
+#include <utility>
+#include <algorithm>
 #include "engine/Config/Json.h"
 #include <iterator>
 #include <fstream>
@@ -837,6 +839,51 @@ static void initSimulation() {
             }
             uiMenu->setSingleplayerModes(modes);
             printf("[INIT] Single player modes: %s\n", listed.c_str());
+        }
+    }
+    // Keys the runtime never reads. The file documents far more than it drives,
+    // so a typo used to be silent; this names the ones nobody consumes.
+    {
+        const std::vector<std::pair<std::string, std::vector<std::string>>> known = {
+            {"physics", {"fixedDt", "note"}},
+            {"audio", {"master", "note", "engineVolume", "environmentVolume",
+             "showroomAmbience", "showroomMusic", "sources"}},
+            {"assist", {"tc", "abs", "note"}},
+            {"video",
+             {"resolution", "resolutions", "fullscreen", "vsync", "frameLimit", "ssao",
+              "ssr", "ssgi", "ssgiRadius", "ssgiIntensity", "motionBlur", "exposure",
+              "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
+              "anisotropicFiltering", "shadowMapSize", "shadowCascades",
+              "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
+            {"singleplayer", {"modes", "note", "sources", "assistTc", "assistAbs",
+                             "fixedDt", "weather"}},
+        };
+        for (const std::string& file :
+             {ks::engine::assets::Paths::systemCfgFile("ksengine.json"),
+              g_userLayout.settings}) {
+            std::ifstream in(file, std::ios::binary);
+            if (!in) continue;
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            ks::engine::json::Value root;
+            std::string error;
+            if (!ks::engine::json::parse(text, root, &error)) continue; // reported above
+            std::string unread;
+            size_t unreadCount = 0;
+            for (const auto& section : known) {
+                const ks::engine::json::Value* block = root.find(section.first);
+                if (!block || !block->isObject()) continue;
+                for (const std::string& key : block->keys()) {
+                    if (std::find(section.second.begin(), section.second.end(), key) !=
+                        section.second.end())
+                        continue;
+                    if (unreadCount++ > 0) unread += ", ";
+                    unread += section.first + "." + key;
+                }
+            }
+            if (unreadCount > 0)
+                printf("[INIT] %s: %zu key(s) the engine does not read: %s\n",
+                       file.c_str(), unreadCount, unread.c_str());
         }
     }
     uiMenu->setVisible(true);
