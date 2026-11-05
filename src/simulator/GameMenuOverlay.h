@@ -195,7 +195,7 @@ public:
     void openModeConfig(GameSessionMode mode);
 
     std::function<void()> onExitRequested;
-    std::function<void(GameSessionMode, const SessionStartParams&)> onStartDrivingRequested;
+    std::function<void(GameSessionMode)> onStartDrivingRequested;
     std::function<void()> onResetRequested;
     std::function<void()> onRestartSessionRequested;
     std::function<void()> onToggleFullscreenRequested;
