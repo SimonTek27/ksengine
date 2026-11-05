@@ -438,6 +438,19 @@ public:
     void setVsync(bool enabled);
     bool vsync() const { return m_vsync; }
 
+    /** Re-reads every .spv this renderer owns and rebuilds the pipelines that
+     *  use them, in place: the forward pair now, the deferred block on the
+     *  next frame (it is torn down here and rebuilt lazily). Shaders are
+     *  compiled at every start - there is no on-disk pipeline cache - so the
+     *  only thing a driver update can leave behind is a stale running session;
+     *  this is the same code path the options page's reload row uses.
+     *  Waits for the device to go idle; call it between frames. */
+    bool reloadShaders();
+    /** "device | vendor | device id | driver version | api version" of the
+     *  physical device. Part of the stamp that decides whether the driver
+     *  changed since the last run. */
+    std::string driverStamp() const;
+
     // UI overlay GPU pass. SimulationLoop owns the pass (it builds the font
     // atlas + per-frame dynamic VB/IB); NativeRenderer keeps it alive and
     // pumps a frame through it while its render pass is open.
@@ -507,6 +520,15 @@ public:
     void clearTextureCache();
 
 private:
+    // Forward pipeline pieces, split out of loadPipelines() so reloadShaders()
+    // can rebuild them without recreating the descriptors and IBL maps.
+    bool loadForwardShaderModules();
+    bool createForwardPipelineObjects();
+    /** FNV digest of every .spv in m_shaderDir (name + size + mtime). */
+    std::string shaderDigest() const;
+    /** Logs and records a driver or shader-set change since the last run: the
+     *  pipelines a previous session compiled were built by another driver. */
+    void warnIfDriverOrShadersChanged();
     bool createCommandPoolAndBuffer();
     bool createSyncObjects();
     bool createDepthResources(uint32_t width, uint32_t height);

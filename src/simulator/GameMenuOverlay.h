@@ -176,6 +176,16 @@ public:
     }
     void openOptionsAudio();
 
+    /** Video options: ask for every pipeline to be rebuilt from the .spv set
+     *  on disk. The request is taken by the loop rather than acted on here, so
+     *  the menu never touches the device mid-draw. */
+    void requestShaderReload() { m_shaderReloadRequested = true; }
+    bool takeShaderReloadRequest() {
+        const bool requested = m_shaderReloadRequested;
+        m_shaderReloadRequested = false;
+        return requested;
+    }
+
     const std::vector<MenuItem>& items() const { return m_items; }
     int selectedIndex() const { return m_selectedIndex; }
     int hoverIndex() const { return m_hoverIndex; }
@@ -277,6 +287,8 @@ private:
     int m_resIdx = 0;
     std::vector<std::string> m_resolutions;
     bool m_vsyncEnabled = true;
+
+    bool m_shaderReloadRequested = false;
     int m_qualityIdx = 0;
     int kNumQualities = 3;
     int m_aaIdx = 0;

@@ -27,6 +27,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <filesystem>
+#include <cstdint>
 
 // No Qt anywhere in this file. Unlike ks::VulkanRenderer::createDevice()
 // (whose entire body is wrapped in `#if QT_CONFIG(vulkan)` and calls into a
@@ -575,13 +577,56 @@ bool NativeRenderer::recreateSwapChain(uint32_t width, uint32_t height) {
 
 bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     m_shaderDir = shaderDir;
-    m_vertModule = createShaderModule(m_device, readFile(shaderDir + "/native_forward.vert.spv"));
-    m_fragModule = createShaderModule(m_device, readFile(shaderDir + "/native_forward.frag.spv"));
-    if (!m_vertModule || !m_fragModule) {
-        fprintf(stderr, "[NativeRenderer] failed to load native_forward.{vert,frag}.spv from %s\n", shaderDir.c_str());
+    if (!loadForwardShaderModules()) return false;
+    warnIfDriverOrShadersChanged();
+
+    // ---- IBL maps (brief P2): generated + uploaded before the first
+    // descriptor write, so set 0 can bind them unconditionally. ----
+    if (!createIblResources()) {
+        fprintf(stderr, "[NativeRenderer] ibl resources failed; ambient stays flat\n");
+        // Non-fatal: the 1x1 fallbacks (or nothing at all) still leave the
+        // descriptor sets complete and iblParams.x = 0.
+    }
+
+    // Descriptor set 0: frame-global UBO (light + cascade matrices) + shadow
+    // cascade array sampler + the three IBL samplers (brief P2) — the
+    // persistent layout/pool/set/UBO/dummy texture are created here and
+    // written each frame in endFrame().
+    if (!createFrameDescriptorResources()) {
+        fprintf(stderr, "[NativeRenderer] failed to create frame descriptor resources\n");
         return false;
     }
 
+    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo/normal samplers +
+    // material UBO. Required before any mesh uploads, since setMesh() writes
+    // its descriptor immediately (and the sweep below covers meshes that
+    // were uploaded before the pipeline existed).
+    if (!createMaterialDescriptorResources()) {
+        fprintf(stderr, "[NativeRenderer] failed to create material descriptor resources\n");
+        return false;
+    }
+    for (auto& [name, mesh] : m_meshes) {
+        if (!mesh.materialSet) createMaterialDescriptor(mesh);
+    }
+
+    return createForwardPipelineObjects();
+}
+
+
+// Reads the two forward shader modules from m_shaderDir. Split out of
+// loadPipelines() so reloadShaders() can re-read them on demand.
+bool NativeRenderer::loadForwardShaderModules() {
+    m_vertModule = createShaderModule(m_device, readFile(m_shaderDir + "/native_forward.vert.spv"));
+    m_fragModule = createShaderModule(m_device, readFile(m_shaderDir + "/native_forward.frag.spv"));
+    if (!m_vertModule || !m_fragModule) {
+        fprintf(stderr, "[NativeRenderer] failed to load native_forward.{vert,frag}.spv from %s{NL}",
+                m_shaderDir.c_str());
+        return false;
+    }
+    return true;
+}
+
+bool NativeRenderer::createForwardPipelineObjects() {
     VkPipelineShaderStageCreateInfo stages[2]{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
@@ -645,35 +690,6 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     dynState.dynamicStateCount = 2;
     dynState.pDynamicStates = dynStates;
 
-    // ---- IBL maps (brief P2): generated + uploaded before the first
-    // descriptor write, so set 0 can bind them unconditionally. ----
-    if (!createIblResources()) {
-        fprintf(stderr, "[NativeRenderer] ibl resources failed; ambient stays flat\n");
-        // Non-fatal: the 1x1 fallbacks (or nothing at all) still leave the
-        // descriptor sets complete and iblParams.x = 0.
-    }
-
-    // Descriptor set 0: frame-global UBO (light + cascade matrices) + shadow
-    // cascade array sampler + the three IBL samplers (brief P2) — the
-    // persistent layout/pool/set/UBO/dummy texture are created here and
-    // written each frame in endFrame().
-    if (!createFrameDescriptorResources()) {
-        fprintf(stderr, "[NativeRenderer] failed to create frame descriptor resources\n");
-        return false;
-    }
-
-    // Descriptor set 1 (Roadmap 2.3): per-mesh albedo/normal samplers +
-    // material UBO. Required before any mesh uploads, since setMesh() writes
-    // its descriptor immediately (and the sweep below covers meshes that
-    // were uploaded before the pipeline existed).
-    if (!createMaterialDescriptorResources()) {
-        fprintf(stderr, "[NativeRenderer] failed to create material descriptor resources\n");
-        return false;
-    }
-    for (auto& [name, mesh] : m_meshes) {
-        if (!mesh.materialSet) createMaterialDescriptor(mesh);
-    }
-
     VkPushConstantRange pcRange{};
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pcRange.size = sizeof(float) * 16 * 2; // model + mvp
@@ -732,6 +748,114 @@ bool NativeRenderer::loadPipelines(const std::string& shaderDir) {
     glassCi.pDepthStencilState = &glassDepth;
     return vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &glassCi, nullptr,
                                      &m_transparentPipeline) == VK_SUCCESS;
+}
+
+std::string NativeRenderer::driverStamp() const {
+    if (!m_physicalDevice) return "no-device";
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &props);
+    // vendor/device/driverVersion/apiVersion is what makes a compiled pipeline
+    // belong to one driver build; the device name is there for the log.
+    char buffer[320];
+    std::snprintf(buffer, sizeof(buffer),
+                  "%s | vendor=0x%04x | device=0x%04x | driver=0x%08x | api=%u.%u",
+                  props.deviceName, props.vendorID, props.deviceID, props.driverVersion,
+                  VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion));
+    return buffer;
+}
+
+std::string NativeRenderer::shaderDigest() const {
+    // A replaced .spv has to invalidate a compiled pipeline exactly like a new
+    // driver does, so the stamp covers the shader set too.
+    std::error_code ec;
+    std::uint64_t hash = 1469598103934665603ull;  // FNV-1a
+    const auto mix = [&hash](std::uint64_t v) {
+        hash ^= v;
+        hash *= 1099511628211ull;
+    };
+    if (!m_shaderDir.empty()) {
+        std::vector<std::string> names;
+        for (const auto& entry : std::filesystem::directory_iterator(m_shaderDir, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
+            if (entry.path().extension() != ".spv") continue;
+            names.push_back(entry.path().filename().string());
+        }
+        std::sort(names.begin(), names.end());
+        for (const std::string& name : names) {
+            for (unsigned char c : name) mix(c);
+            const auto path = std::filesystem::path(m_shaderDir) / name;
+            mix(static_cast<std::uint64_t>(std::filesystem::file_size(path, ec)));
+            const auto written = std::filesystem::last_write_time(path, ec);
+            mix(static_cast<std::uint64_t>(written.time_since_epoch().count()));
+        }
+    }
+    char hex[32];
+    std::snprintf(hex, sizeof(hex), "%016llx", static_cast<unsigned long long>(hash));
+    return hex;
+}
+
+void NativeRenderer::warnIfDriverOrShadersChanged() {
+    // Every start compiles the pipelines from the .spv on disk, so a driver
+    // update can never reuse a stale compilation; this records which driver
+    // produced the current set and says so out loud when it moved. The options
+    // page's reload row runs through the same stamp, so the two cannot diverge.
+    const std::string current = driverStamp() + " | spv=" + shaderDigest();
+    const char* path = "system/cfg/shader_stamp.txt";
+    std::string previous;
+    if (FILE* f = std::fopen(path, "rb")) {
+        char line[640];
+        if (std::fgets(line, sizeof(line), f)) previous = line;
+        std::fclose(f);
+        while (!previous.empty() && (previous.back() == '\n' || previous.back() == '\r'))
+            previous.pop_back();
+    }
+    if (previous == current) return;
+    if (previous.empty()) {
+        std::printf("[shaders] first run on %s\n", driverStamp().c_str());
+    } else {
+        std::printf("[shaders] driver or shader set changed since the last run\n"
+                    "[shaders]   was: %s\n[shaders]   now: %s\n"
+                    "[shaders] pipelines recompiled for the current driver\n",
+                    previous.c_str(), current.c_str());
+    }
+    if (FILE* f = std::fopen(path, "wb")) {
+        std::fprintf(f, "%s\n", current.c_str());
+        std::fclose(f);
+    }
+}
+
+bool NativeRenderer::reloadShaders() {
+    if (!m_device) return false;
+    // Nothing may still be recording against the pipelines about to go away.
+    vkDeviceWaitIdle(m_device);
+
+    if (m_pipeline) { vkDestroyPipeline(m_device, m_pipeline, nullptr); m_pipeline = VK_NULL_HANDLE; }
+    if (m_transparentPipeline) {
+        vkDestroyPipeline(m_device, m_transparentPipeline, nullptr);
+        m_transparentPipeline = VK_NULL_HANDLE;
+    }
+    if (m_pipelineLayout) {
+        vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+        m_pipelineLayout = VK_NULL_HANDLE;
+    }
+    if (m_vertModule) { vkDestroyShaderModule(m_device, m_vertModule, nullptr); m_vertModule = VK_NULL_HANDLE; }
+    if (m_fragModule) { vkDestroyShaderModule(m_device, m_fragModule, nullptr); m_fragModule = VK_NULL_HANDLE; }
+
+    const bool layouts = m_frameSetLayout != VK_NULL_HANDLE && m_materialSetLayout != VK_NULL_HANDLE;
+    const bool forwardOk = loadForwardShaderModules() && layouts && createForwardPipelineObjects();
+
+    // The deferred block owns its own modules, pipelines and targets: dropping
+    // it makes ensureDeferredResources() rebuild the whole set on the next
+    // frame, from the freshly read .spv. A failed build gets a second chance.
+    if (m_deferredReady || m_deferredFailed) {
+        destroyDeferredResources();
+        m_deferredFailed = false;
+    }
+    m_historyValid = false;
+    warnIfDriverOrShadersChanged();
+    std::printf("[shaders] reload from %s: %s (%s)\n", m_shaderDir.c_str(),
+                forwardOk ? "ok" : "forward pipeline failed", driverStamp().c_str());
+    return forwardOk;
 }
 
 // Layout must match the `FrameData` uniform block declared in

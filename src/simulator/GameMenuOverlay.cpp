@@ -595,6 +595,12 @@ void GameMenuOverlay::buildOptionsMenu()
             applyOptions();
         }, false, true, "settings" });
 
+    // Shaders are compiled from the .spv set at every start, but a running
+    // session keeps the pipelines it built: this row is how a replaced .spv or
+    // a driver update reaches the frame already on screen.
+    m_items.push_back({ "RELOAD SHADERS", "Re-read the .spv set and rebuild every pipeline",
+        [this]() { requestShaderReload(); }, false, true, "settings" });
+
     m_items.push_back({ "", "", nullptr, true });
     // Only the master gain is a setting: the engine and environment channels
     // are the session's (silent in the showroom, live in the car).

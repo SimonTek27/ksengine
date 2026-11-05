@@ -3054,6 +3054,33 @@ void SimulationLoop::paceFrame() {
 
 void SimulationLoop::tick() {
     m_frameStart = std::chrono::steady_clock::now();
+    // The video options page asks for a rebuild of every pipeline from the
+    // .spv on disk; the renderer owns the device wait and the reload, and this
+    // is before the frame opens, so nothing is recording. A dev hook
+    // (KS_RELOAD_SHADERS_AFTER=<seconds>) drives the same path headless.
+    if (m_vulkanRenderer) {
+        static const double reloadAfter = []() {
+            const char* value = std::getenv("KS_RELOAD_SHADERS_AFTER");
+            return value ? std::atof(value) : 0.0;
+        }();
+        static bool armed = false;
+        if (!armed && reloadAfter > 0.0) {
+            armed = true;
+            std::printf("[shaders] reload hook armed: %.1f s\n", reloadAfter);
+        }
+        if (m_ui.menu().takeShaderReloadRequest()) m_vulkanRenderer->reloadShaders();
+        if (reloadAfter > 0.0) {
+            static const auto started = std::chrono::steady_clock::now();
+            static bool reloaded = false;
+            const double elapsed =
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+            if (!reloaded && elapsed >= reloadAfter) {
+                reloaded = true;
+                m_vulkanRenderer->reloadShaders();
+            }
+        }
+    }
+
     static bool profileInit = false;
     if (!profileInit) {
         profileInit = true;
