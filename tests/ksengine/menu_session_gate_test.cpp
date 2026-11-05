@@ -40,7 +40,10 @@ int main() {
 
     GameSessionMode picked = GameSessionMode::Replay; // sentinel: untouched
     int calls = 0;
-    menu.onStartDrivingRequested = [&](GameSessionMode m) { picked = m; ++calls; };
+    ks::sim::SessionStartParams chosen;
+    menu.onStartDrivingRequested = [&](GameSessionMode m, const ks::sim::SessionStartParams& p) {
+        picked = m; ++calls; chosen = p;
+    };
 
     // Nothing selected: the three session rows are disabled and the hint
     // names both missing pieces. The TEAM row never gates anything — no
@@ -95,42 +98,70 @@ int main() {
         KS_CHECK(items[kTeam].description == "ksim_racing");
     }
 
-    // Each row reports its own mode and closes the menu.
-    menu.setSelectedIndex(kPractice);
-    KS_CHECK(menu.handleKeyPress(0x0D));
-    KS_CHECK(calls == 1);
-    KS_CHECK(picked == GameSessionMode::Practice);
-    KS_CHECK(!menu.isVisible());
-
-    menu.setVisible(true); // state stays Singleplayer after a start
-    menu.setSelectedIndex(kQuickRace);
-    KS_CHECK(menu.handleKeyPress(0x0D));
-    KS_CHECK(calls == 2);
-    KS_CHECK(picked == GameSessionMode::Race);
-
-    menu.setVisible(true);
-    menu.setSelectedIndex(kTimeAttack);
-    KS_CHECK(menu.handleKeyPress(0x0D));
-    KS_CHECK(calls == 3);
-    KS_CHECK(picked == GameSessionMode::TimeAttack);
-    KS_CHECK(!menu.isVisible());
-
-    // The five modes added after the original three report their own mode too.
-    const std::pair<int, GameSessionMode> extra[] = {
-        {kHotlap, GameSessionMode::Hotlap},
-        {kWeekend, GameSessionMode::Weekend},
-        {kChampionship, GameSessionMode::Championship},
-        {kDrift, GameSessionMode::Drift},
-        {kDragRace, GameSessionMode::DragRace},
+    // Each row opens MODE SETUP for its own mode instead of starting straight
+    // away; START SESSION reports the mode together with the values shown.
+    const GameSessionMode rowModes[] = {
+        GameSessionMode::Practice, GameSessionMode::Hotlap, GameSessionMode::TimeAttack,
+        GameSessionMode::Weekend, GameSessionMode::Championship, GameSessionMode::Race,
+        GameSessionMode::Drift, GameSessionMode::DragRace,
     };
-    int expected = 3;
-    for (const auto& e : extra) {
+    int expected = 0;
+    for (int i = 0; i < 8; ++i) {
         menu.setVisible(true);
-        menu.setSelectedIndex(e.first);
+        if (menu.state() != ks::sim::MenuState::Singleplayer) {
+            KS_CHECK(menu.handleKeyPress(0x1B)); // BACK out of MODE SETUP
+            KS_CHECK(menu.state() == ks::sim::MenuState::Singleplayer);
+        }
+        menu.setSelectedIndex(kModes[i]);
+        KS_CHECK(menu.handleKeyPress(0x0D)); // opens MODE SETUP
+        KS_CHECK(menu.state() == ks::sim::MenuState::ModeConfig);
+        int startRow = -1;
+        const std::vector<MenuItem> setup = menu.items();
+        for (size_t r = 0; r < setup.size(); ++r)
+            if (setup[r].text.rfind("START SESSION", 0) == 0) startRow = static_cast<int>(r);
+        KS_CHECK(startRow >= 0);
+        menu.setSelectedIndex(startRow);
         KS_CHECK(menu.handleKeyPress(0x0D));
         KS_CHECK(calls == ++expected);
-        KS_CHECK(picked == e.second);
+        KS_CHECK(picked == rowModes[i]);
         KS_CHECK(!menu.isVisible());
+        KS_CHECK(chosen.totalLaps == ks::sim::defaultsForMode(rowModes[i]).totalLaps);
+        KS_CHECK(chosen.aiCars == ks::sim::defaultsForMode(rowModes[i]).aiCars);
+    }
+
+    // The rows edit the values the session starts with, and BACK from MODE
+    // SETUP returns to the mode list without starting anything.
+    {
+        const int before = calls;
+        menu.setVisible(true);
+        KS_CHECK(menu.handleKeyPress(0x1B));
+        KS_CHECK(menu.state() == ks::sim::MenuState::Singleplayer);
+        menu.setSelectedIndex(kPractice);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(menu.state() == ks::sim::MenuState::ModeConfig);
+        const int laps = ks::sim::defaultsForMode(GameSessionMode::Practice).totalLaps;
+        const std::vector<MenuItem> setupRows = menu.items();
+        int plus = -1;
+        for (size_t r = 0; r < setupRows.size(); ++r)
+            if (setupRows[r].text.rfind("LAPS  +1", 0) == 0) plus = static_cast<int>(r);
+        KS_CHECK(plus >= 0);
+        menu.setSelectedIndex(plus);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(menu.handleKeyPress(0x0D)); // two more laps
+        const std::vector<MenuItem> edited = menu.items();
+        KS_CHECK(edited[static_cast<size_t>(plus)].text == "LAPS  +1"); // cursor kept
+        int startRow = -1;
+        for (size_t r = 0; r < edited.size(); ++r)
+            if (edited[r].text.rfind("START SESSION", 0) == 0) startRow = static_cast<int>(r);
+        KS_CHECK(startRow >= 0);
+        menu.setSelectedIndex(startRow);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(calls == before + 1);
+        KS_CHECK(chosen.totalLaps == laps + 2);
+        KS_CHECK(menu.state() == ks::sim::MenuState::ModeConfig);
+        menu.setVisible(true);
+        KS_CHECK(menu.handleKeyPress(0x1B));
+        KS_CHECK(menu.state() == ks::sim::MenuState::Singleplayer);
     }
 
     // A config that lists its own modes decides the rows: two entries mean two

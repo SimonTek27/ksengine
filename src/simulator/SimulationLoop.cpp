@@ -1629,6 +1629,11 @@ void SimulationLoop::stop() {
 }
 
 void SimulationLoop::startSession(GameSessionMode mode) {
+    // Rows that skip MODE SETUP start with the mode's own defaults.
+    startSession(mode, defaultsForMode(mode));
+}
+
+void SimulationLoop::startSession(GameSessionMode mode, const SessionStartParams& params) {
     // A session starts from the showroom: the turntable stops owning the
     // camera (and its music) the moment the player is driving.
     closeShowroom();
@@ -1636,20 +1641,31 @@ void SimulationLoop::startSession(GameSessionMode mode) {
     // Configure BEFORE start(): beginRaceSession() reads the session byte
     // (countdown + RaceSessionManager type), the lap limit and the AI count.
     m_sessionType = toNetSessionType(mode);
-    const SessionStartParams p = defaultsForMode(mode);
     // 0 = open session (RaceSessionManager only finishes on totalLaps > 0).
-    m_totalLaps = p.totalLaps;
-    if (mode == GameSessionMode::Race) {
-        // QUICK RACE promises a grid: keep an explicit KS_AI_CARS value,
-        // otherwise default to 5 opponents.
+    m_totalLaps = std::max(0, params.totalLaps);
+    // The grid the player asked for wins over the count left by the last
+    // session. A race with no AI in either place still fills five places;
+    // practice, hotlap and time attack are solo by definition.
+    if (params.aiCars > 0) {
+        setAiCarCount(params.aiCars);
+    } else if (mode == GameSessionMode::Race) {
         if (m_aiCarCount == 0) setAiCarCount(5);
     } else {
-        // Practice / time attack are solo by definition.
         setAiCarCount(0);
     }
-    std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI)\n",
-                 sessionModeName(mode), m_totalLaps, m_aiCarCount);
+    std::fprintf(stderr, "SimulationLoop: menu session %s (%d laps, %d AI, clock %ds)\n",
+                 sessionModeName(mode), m_totalLaps, m_aiCarCount, params.sessionTimeSeconds);
     start();
+    // A countdown owns the clock during a race, so the session clock is armed
+    // afterwards for the modes that run green from the first metre.
+    if (params.sessionTimeSeconds > 0 &&
+        m_sessionType != SESSION_RACE) {
+        m_timeRemaining = static_cast<double>(params.sessionTimeSeconds);
+    }
+    // MODE SETUP's garage start: the pose policy already parks practice and
+    // qualifying in the box, so this only holds a car that started on the grid.
+    if (params.startInGarage && m_hasPlayerBox)
+        m_garageExit.forceEnterGarage();
 }
 
 void SimulationLoop::reset() {

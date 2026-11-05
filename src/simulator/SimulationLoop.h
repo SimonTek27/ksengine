@@ -200,6 +200,9 @@ public:
     // Configures laps/AI/session byte BEFORE start(), which then builds the
     // grid and countdown from those values.
     void startSession(GameSessionMode mode);
+    /// Same, with the values MODE SETUP collected: laps, AI cars, session
+    /// clock and whether the player starts in the garage.
+    void startSession(GameSessionMode mode, const SessionStartParams& params);
     bool isRunning() const { return m_running; }
     void tick();
 

@@ -58,6 +58,7 @@ std::string GameMenuOverlay::sectionTitle() const
     switch (m_currentState) {
     case MenuState::Main: return "MAIN MENU";
     case MenuState::Singleplayer: return "SINGLE PLAYER";
+    case MenuState::ModeConfig: return "MODE SETUP";
     case MenuState::Multiplayer: return "MULTI PLAYER";
     case MenuState::Profile: return "DRIVER";
     case MenuState::Garage: return "GARAGE";
@@ -115,10 +116,95 @@ void GameMenuOverlay::setNationalityFromList(int index)
     }
 }
 
-void GameMenuOverlay::startDriving(GameSessionMode mode)
+void GameMenuOverlay::startDriving(GameSessionMode mode, const SessionStartParams& params)
 {
-    if (onStartDrivingRequested) onStartDrivingRequested(mode);
+    if (onStartDrivingRequested) onStartDrivingRequested(mode, params);
     setVisible(false);
+}
+
+// MODE SETUP: the limits of the session before it starts. It lives one level
+// under SINGLE PLAYER, so the mode comes from the row that opened it and the
+// values begin at that mode's own defaults.
+void GameMenuOverlay::openModeConfig(GameSessionMode mode)
+{
+    m_configMode = mode;
+    m_configParams = defaultsForMode(mode);
+    switchMenu(MenuState::ModeConfig);
+}
+
+void GameMenuOverlay::buildModeConfigMenu()
+{
+    m_items.clear();
+    const SessionStartParams& p = m_configParams;
+    char text[96];
+    char now[40];
+
+    auto clockText = [](int seconds, char* out, size_t n) {
+        if (seconds <= 0) std::snprintf(out, n, "no time limit");
+        else std::snprintf(out, n, "%d:%02d", seconds / 60, seconds % 60);
+    };
+
+    std::snprintf(now, sizeof(now), "now %d lap(s)", p.totalLaps);
+    m_items.push_back({ "LAPS  -1", p.totalLaps > 0 ? now : "now: open session",
+        [this]() {
+            m_configParams.totalLaps = std::max(0, m_configParams.totalLaps - 1);
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    m_items.push_back({ "LAPS  +1", "0 keeps the session open until you stop",
+        [this]() {
+            m_configParams.totalLaps = std::min(500, m_configParams.totalLaps + 1);
+            m_menuDirty = true;
+        }, false, true, "flag" });
+
+    std::snprintf(now, sizeof(now), "now %d car(s)", p.aiCars);
+    m_items.push_back({ "AI CARS  -1", now,
+        [this]() {
+            m_configParams.aiCars = std::max(0, m_configParams.aiCars - 1);
+            m_menuDirty = true;
+        }, false, true, "users" });
+    m_items.push_back({ "AI CARS  +1", "Up to 31 on the grid",
+        [this]() {
+            m_configParams.aiCars = std::min(31, m_configParams.aiCars + 1);
+            m_menuDirty = true;
+        }, false, true, "users" });
+
+    clockText(p.sessionTimeSeconds, now, sizeof(now));
+    m_items.push_back({ "CLOCK  -5 min", now,
+        [this]() {
+            m_configParams.sessionTimeSeconds =
+                std::max(0, m_configParams.sessionTimeSeconds - 300);
+            m_menuDirty = true;
+        } });
+    m_items.push_back({ "CLOCK  +5 min", "0 runs the session on laps only",
+        [this]() {
+            m_configParams.sessionTimeSeconds =
+                std::min(3 * 3600, m_configParams.sessionTimeSeconds + 300);
+            m_menuDirty = true;
+        } });
+
+    std::snprintf(text, sizeof(text), "START IN GARAGE  [%s]",
+                  p.startInGarage ? "ON" : "OFF");
+    m_items.push_back({ text, "Begin in the pit box instead of on the grid",
+        [this]() {
+            m_configParams.startInGarage = !m_configParams.startInGarage;
+            m_menuDirty = true;
+        } });
+
+    m_items.push_back({ "", "", nullptr, true });
+
+    const char* modeName = sessionModeName(m_configMode);
+    if (!modeName) modeName = "SESSION";
+    clockText(p.sessionTimeSeconds, now, sizeof(now));
+    if (p.totalLaps > 0)
+        std::snprintf(text, sizeof(text), "%s - %d lap(s), %d AI, %s",
+                      modeName, p.totalLaps, p.aiCars, now);
+    else
+        std::snprintf(text, sizeof(text), "%s - open, %d AI, %s",
+                      modeName, p.aiCars, now);
+    m_items.push_back({ "START SESSION", text,
+        [this]() { startDriving(m_configMode, m_configParams); }, false, true, "flag" });
+    m_items.push_back({ "BACK", "Back to the mode list",
+        [this]() { goBack(); } });
 }
 
 void GameMenuOverlay::buildMainMenu()
@@ -181,7 +267,7 @@ void GameMenuOverlay::buildSingleplayerMenu()
     // session with that mode's own defaults (laps, grid, clock).
     for (GameSessionMode mode : effectiveSingleplayerModes()) {
         m_items.push_back({ singleplayerLabel(mode), ready ? singleplayerHint(mode) : hint,
-            [this, mode]() { startDriving(mode); }, false, ready });
+            [this, mode]() { openModeConfig(mode); }, false, ready });
     }
     m_items.push_back({ "RESULTS", "Session standings",
         [this]() { if (onShowResultsRequested) onShowResultsRequested(); } });
@@ -708,6 +794,7 @@ void GameMenuOverlay::switchMenu(MenuState state)
     switch (state) {
     case MenuState::Main: buildMainMenu(); break;
     case MenuState::Singleplayer: buildSingleplayerMenu(); break;
+    case MenuState::ModeConfig: buildModeConfigMenu(); break;
     case MenuState::Multiplayer: buildMultiplayerMenu(); break;
     case MenuState::Profile: buildProfileMenu(); break;
     case MenuState::Garage: buildGarageMenu(); break;
@@ -762,6 +849,11 @@ void GameMenuOverlay::goBack()
             switchMenu(MenuState::Main);
         return;
     }
+    // MODE SETUP sits one level under the mode list.
+    if (m_currentState == MenuState::ModeConfig) {
+        switchMenu(MenuState::Singleplayer);
+        return;
+    }
     // Screens opened from the pause overlay go back to it, so ESC from the
     // garage while driving never drops the player on the pre-session menu.
     if (m_previousState == MenuState::Pause) {
@@ -787,6 +879,14 @@ void GameMenuOverlay::activateSelected()
         else if (m_menuDirty && m_currentState == MenuState::Garage) {
             const int sel = m_selectedIndex;
             buildGarageMenu();
+            m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+            m_menuDirty = false;
+        }
+        // MODE SETUP rows carry their value in the label or the "now ..."
+        // description, so they rebuild after each step with the cursor kept.
+        else if (m_menuDirty && m_currentState == MenuState::ModeConfig) {
+            const int sel = m_selectedIndex;
+            buildModeConfigMenu();
             m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
             m_menuDirty = false;
         }

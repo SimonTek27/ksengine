@@ -891,9 +891,9 @@ static void initSimulation() {
         g_running = false;
         PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
     };
-    uiMenu->onStartDrivingRequested = [](ks::sim::GameSessionMode mode) {
+    uiMenu->onStartDrivingRequested = [](ks::sim::GameSessionMode mode, const ks::sim::SessionStartParams& params) {
         g_simulation->ui().menu().setVisible(false);
-        g_simulation->startSession(mode);
+        g_simulation->startSession(mode, params);
         printf("Session started: %s\n", ks::sim::sessionModeName(mode));
     };
     uiMenu->onTrackChosen = [](const std::string& dir) {
