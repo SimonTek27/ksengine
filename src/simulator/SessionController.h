@@ -5,6 +5,11 @@
 #include <string>
 #include <cstdint>
 #include <cctype>
+#include <algorithm>
+#include <map>
+#include <vector>
+
+#include "engine/Config/Json.h"
 
 namespace ks {
 namespace sim {
@@ -82,6 +87,25 @@ inline GameSessionMode modeFromMenuEntry(std::string entry) {
     return mode;
 }
 
+/** One entry of singleplayer.defaults. Only the fields the file carried are
+ *  applied (-1 = leave the built-in value), so an entry that sets the laps does
+ *  not silently zero the grid and the clock of that mode. */
+struct SessionDefaultsOverride {
+    int totalLaps = -1;
+    int aiCars = -1;
+    int sessionTimeSeconds = -1;
+    int startInGarage = -1; // 0/1, -1 = not in the file
+};
+
+/** The table singleplayer.defaults fills at start-up. The menu and the loop
+ *  both ask defaultsForMode(), so one table keeps them in step. */
+inline std::map<GameSessionMode, SessionDefaultsOverride>& sessionDefaultsOverride() {
+    static std::map<GameSessionMode, SessionDefaultsOverride> table;
+    return table;
+}
+
+inline void clearSessionDefaultsOverride() { sessionDefaultsOverride().clear(); }
+
 inline SessionStartParams defaultsForMode(GameSessionMode m) {
     SessionStartParams p;
     switch (m) {
@@ -104,7 +128,53 @@ inline SessionStartParams defaultsForMode(GameSessionMode m) {
         p.totalLaps = 1; p.aiCars = 1; p.standingStart = true; break;
     default: break;
     }
+    // singleplayer.defaults wins over the table above, field by field.
+    const auto& overrides = sessionDefaultsOverride();
+    const auto it = overrides.find(m);
+    if (it != overrides.end()) {
+        const SessionDefaultsOverride& o = it->second;
+        if (o.totalLaps >= 0) p.totalLaps = o.totalLaps;
+        if (o.aiCars >= 0) p.aiCars = std::min(31, o.aiCars);
+        if (o.sessionTimeSeconds >= 0) p.sessionTimeSeconds = o.sessionTimeSeconds;
+        if (o.startInGarage >= 0) p.startInGarage = o.startInGarage != 0;
+    }
     return p;
+}
+
+/** Reads singleplayer.defaults into the override table: an object keyed by mode
+ *  name, each value carrying any of laps, aiCars, clockSeconds, startInGarage.
+ *  Returns the names that match no mode, so a typo is reported instead of
+ *  quietly turning the entry into a race. */
+inline std::vector<std::string> applySessionDefaults(const ks::engine::json::Value& block) {
+    std::vector<std::string> unknown;
+    if (!block.isObject()) return unknown;
+    const auto readFlag = [](const ks::engine::json::Value* v) -> int {
+            if (!v) return -1;
+            if (v->isBool()) return v->asBool() ? 1 : 0;
+            if (v->isNumber()) return v->asNumber() != 0 ? 1 : 0;
+            return -1;
+    };
+    for (const std::string& name : block.keys()) {
+        GameSessionMode mode = GameSessionMode::Race;
+        if (!tryModeFromMenuEntry(name, &mode)) {
+            unknown.push_back(name);
+            continue;
+        }
+        const ks::engine::json::Value* entry = block.find(name);
+        if (!entry || !entry->isObject()) continue;
+        // Merged into whatever an earlier file set, so the user file can
+        // override one field without dropping the rest of the entry.
+        SessionDefaultsOverride& o = sessionDefaultsOverride()[mode];
+        if (const ks::engine::json::Value* v = entry->find("laps"); v && v->isNumber())
+            o.totalLaps = std::max(0, static_cast<int>(v->asNumber()));
+        if (const ks::engine::json::Value* v = entry->find("aiCars"); v && v->isNumber())
+            o.aiCars = std::max(0, static_cast<int>(v->asNumber()));
+        if (const ks::engine::json::Value* v = entry->find("clockSeconds"); v && v->isNumber())
+            o.sessionTimeSeconds = std::max(0, static_cast<int>(v->asNumber()));
+        const int garageFlag = readFlag(entry->find("startInGarage"));
+        if (garageFlag >= 0) o.startInGarage = garageFlag;
+    }
+    return unknown;
 }
 
 inline uint8_t toNetSessionType(GameSessionMode m) {

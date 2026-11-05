@@ -5,7 +5,7 @@
     "config": "system/cfg/ksengine.json",
     "playerOverrides": "user/<player>/settings.json",
     "precedence": "system/cfg first, user file second, later wins per key",
-    "note": "Sections below mirror the menu sections that exist in the simulator. effectiveKeys is exactly what the runtime reads today; every other key documents a feature and the status it has. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden. MODE SETUP takes its starting values from defaultsForMode() in the code, not from this file."
+    "note": "Sections below mirror the menu sections that exist in the simulator. effectiveKeys is exactly what the runtime reads today; every other key documents a feature and the status it has. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden. MODE SETUP takes its starting values from singleplayer.defaults below, falling back to defaultsForMode() in the code for whatever the file leaves out."
   },
   "effectiveKeys": [
     "physics.fixedDt",
@@ -28,7 +28,8 @@
     "video.headPhysics",
     "video.shadowMapSize",
     "video.shadowCascades",
-    "singleplayer.modes"
+    "singleplayer.modes",
+    "singleplayer.defaults"
   ],
   "physics": {
     "fixedDt": 0.008333333333333333,
@@ -329,6 +330,62 @@
       "Drift",
       "DragRace"
     ],
+    "defaults": {
+      "Practice": {
+        "laps": 0,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "Qualifying": {
+        "laps": 0,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "HotLap": {
+        "laps": 0,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "TimeAttack": {
+        "laps": 0,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "Race": {
+        "laps": 10,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "Weekend": {
+        "laps": 12,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "Championship": {
+        "laps": 15,
+        "aiCars": 0,
+        "clockSeconds": 0,
+        "startInGarage": false
+      },
+      "Drift": {
+        "laps": 0,
+        "aiCars": 0,
+        "clockSeconds": 180,
+        "startInGarage": false
+      },
+      "DragRace": {
+        "laps": 1,
+        "aiCars": 1,
+        "clockSeconds": 0,
+        "startInGarage": false
+      }
+    },
     "sources": [
       {
         "feature": "sessionModes",
@@ -340,7 +397,7 @@
         "feature": "modeSetup",
         "status": "live",
         "landsAs": "MODE SETUP screen (laps, AI cars, clock, garage start)",
-        "note": "One screen per mode with steps of one lap, one AI car and five minutes, a garage-start toggle and a summary of what is about to start. The values begin at defaultsForMode() for that mode - 10 laps for Race, 12 for Weekend, 15 for Championship, 180 s for Drift, 1 lap and 1 AI for DragRace - and the screen, not this file, is where they are set."
+        "note": "One screen per mode with steps of one lap, one AI car and five minutes, a garage-start toggle and a summary of what is about to start. The values begin at singleplayer.defaults for that mode and fall back to defaultsForMode() for the fields the file leaves out; the screen is where a single session is then adjusted."
       },
       {
         "feature": "sessionSetup",
@@ -371,7 +428,8 @@
         "status": "missing",
         "landsAs": null
       }
-    ]
+    ],
+    "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock and the garage flag as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
   },
   "multiplayer": {
     "hostPort": 40000,

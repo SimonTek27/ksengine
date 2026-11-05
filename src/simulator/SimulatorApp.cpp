@@ -806,6 +806,15 @@ static void initSimulation() {
                 continue;
             }
             const ks::engine::json::Value* block = root.find("singleplayer");
+            // singleplayer.defaults: what MODE SETUP starts from, field by field.
+            if (block) {
+                if (const ks::engine::json::Value* defs = block->find("defaults");
+                    defs && defs->isObject()) {
+                    for (const std::string& name : ks::sim::applySessionDefaults(*defs))
+                        printf("[INIT] %s singleplayer.defaults: unknown mode '%s', ignored\n",
+                               file.c_str(), name.c_str());
+                }
+            }
             const ks::engine::json::Value* rows = block ? block->find("modes") : nullptr;
             if (!rows || !rows->isArray() || rows->size() == 0) continue;
             std::vector<ks::sim::GameSessionMode> parsed;
@@ -855,7 +864,7 @@ static void initSimulation() {
               "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
               "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
-            {"singleplayer", {"modes", "note", "sources"}},
+            {"singleplayer", {"modes", "note", "sources", "defaults"}},
         };
         for (const std::string& file :
              {ks::engine::assets::Paths::systemCfgFile("ksengine.json"),

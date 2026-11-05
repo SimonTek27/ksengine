@@ -181,6 +181,49 @@ int main() {
         KS_CHECK(rows[6].enabled); // RESULTS follows the two configured rows
     }
 
+    // singleplayer.defaults overrides the built-in table field by field: the
+    // laps land, the fields the entry omits keep their built-in value, another
+    // mode is untouched, and an unknown name is reported instead of applied.
+    {
+        ks::sim::clearSessionDefaultsOverride();
+        ks::engine::json::Value block;
+        std::string error;
+        KS_CHECK(ks::engine::json::parse(
+            "{\"Practice\":{\"laps\":20,\"aiCars\":3},\"Endurance\":{\"laps\":5}}",
+            block, &error));
+        const std::vector<std::string> unknown = ks::sim::applySessionDefaults(block);
+        KS_CHECK(unknown.size() == 1);
+        KS_CHECK(unknown[0] == "Endurance");
+        const ks::sim::SessionStartParams practice = ks::sim::defaultsForMode(GameSessionMode::Practice);
+        KS_CHECK(practice.totalLaps == 20);
+        KS_CHECK(practice.aiCars == 3);
+        KS_CHECK(practice.sessionTimeSeconds == 0); // built-in, not zeroed by the entry
+        KS_CHECK(!practice.startInGarage);
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Hotlap).totalLaps == 0);
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Race).totalLaps == 10);
+
+        // MODE SETUP opens on the overridden values, and START hands them on.
+        const int before = calls;
+        menu.setVisible(true);
+        if (menu.state() != ks::sim::MenuState::Singleplayer)
+            KS_CHECK(menu.handleKeyPress(0x1B));
+        menu.setSelectedIndex(kPractice);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        int startRow = -1;
+        const std::vector<MenuItem> setup = menu.items();
+        for (size_t r = 0; r < setup.size(); ++r)
+            if (setup[r].text.rfind("START SESSION", 0) == 0) startRow = static_cast<int>(r);
+        KS_CHECK(startRow >= 0);
+        menu.setSelectedIndex(startRow);
+        KS_CHECK(menu.handleKeyPress(0x0D));
+        KS_CHECK(calls == before + 1);
+        KS_CHECK(chosen.totalLaps == 20);
+        KS_CHECK(chosen.aiCars == 3);
+
+        ks::sim::clearSessionDefaultsOverride();
+        KS_CHECK(ks::sim::defaultsForMode(GameSessionMode::Practice).totalLaps == 0);
+    }
+
     // The strict parser a config goes through: known names map, an unknown one
     // is refused and leaves the caller's mode alone (KS_SESSION still races).
     {
