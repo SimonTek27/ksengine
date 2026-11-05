@@ -846,6 +846,37 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         decodedTextures.emplace(wanted, key);
         return key;
     };
+    // AC fakes wheel blur with a second, pre-blurred copy of the rim and the
+    // tyre, swapped in above a speed threshold (data/blurred_objects.ini).
+    // This engine knows the motion, so it blurs at runtime: the baked stand-in
+    // mesh is never drawn and a baked blur texture is never sampled.
+    int blurStandIns = 0;
+    auto stripBakedBlur = [](const std::string& name) -> std::string {
+        std::string folded;
+        folded.reserve(name.size());
+        for (char c : name) {
+            if (c >= 'A' && c <= 'Z') folded.push_back(static_cast<char>(c - 'A' + 'a'));
+            else folded.push_back(c);
+        }
+        const std::size_t at = folded.find("blur");
+        if (at == std::string::npos) return name;
+        // "rim_blur" -> "rim", "Tyre_Blur_D" -> "Tyre_D": the sharp twin the
+        // stand-in was baked from.
+        std::string fixed = name.substr(0, at) + name.substr(at + 4);
+        std::string collapsed;
+        collapsed.reserve(fixed.size());
+        for (char c : fixed) {
+            if (c == '_' && (collapsed.empty() || collapsed.back() == '_')) continue;
+            collapsed.push_back(c);
+        }
+        while (!collapsed.empty() && collapsed.back() == '_') collapsed.pop_back();
+        const std::size_t dangling = collapsed.find("_.");
+        if (dangling != std::string::npos) collapsed.erase(dangling, 1);
+        std::printf("[blur] baked blur texture %s -> %s (engine blurs from motion)\n",
+                    name.c_str(), collapsed.c_str());
+        return collapsed;
+    };
+
     float bboxMin[3] = {1e9f, 1e9f, 1e9f};
     float bboxMax[3] = {-1e9f, -1e9f, -1e9f};
     std::function<void(const ff::Kn5Node&)> walk = [&](const ff::Kn5Node& node) {
@@ -858,6 +889,14 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         const auto& m = node.mesh;
         if (node.node_class == ff::Kn5NodeClass::mesh && node.has_mesh &&
             !m.indices.empty() && m.positions.size() >= 3) {
+            // A stand-in exists only to be swapped in by speed; drawing it
+            // puts a frozen baked blur on a wheel that is standing still.
+            if (m.name.find("BLUR") != std::string::npos ||
+                m.name.find("blur") != std::string::npos) {
+                ++blurStandIns;
+                std::printf("[blur] stand-in skipped: %s\n", m.name.c_str());
+                return;
+            }
             const std::size_t count = m.positions.size() / 3;
             NativeMesh nm;
             nm.vertices.resize(count);
@@ -940,6 +979,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     if (fallbackAlbedo.empty()) fallbackAlbedo = mapping.texture;
                 }
                 if (albedo.empty()) albedo = fallbackAlbedo;
+                // A baked blur map is one still frame of a spinning wheel: the
+                // engine's own blur replaces it, so the sharp twin is sampled.
+                albedo = stripBakedBlur(albedo);
+                normal = stripBakedBlur(normal);
+                detail = stripBakedBlur(detail);
                 // "..._Ref" names an environment/reflection probe: it carries
                 // the room reflected in a surface, not the surface's own colour.
                 // A venue is the exception: its hall is painted with exactly such

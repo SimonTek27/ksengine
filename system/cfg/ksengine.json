@@ -61,7 +61,7 @@
     "frameLimit": 0,
     "ssao": false,
     "ssr": false,
-    "motionBlur": false,
+    "motionBlur": true,
     "exposure": 1.0,
     "tonemap": "ACES",
     "tonemaps": [
