@@ -53,6 +53,12 @@ public:
      *  the foot brake and outside the bias. */
     void setHandbrake(double v);
 
+    /** Brake fade follows the car's own data/brake_temp_front.lut and
+     *  data/brake_temp_rear.lut (temperature -> torque multiplier). Empty curves
+     *  leave the thermal model on its config thresholds. */
+    void setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
+                            const std::vector<std::pair<float, float>>& rear);
+
     SimulationState getState() const { return m_state; }
     SimulationState& state() { return m_state; }
 

@@ -8,6 +8,9 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace ks {
 namespace physics {
@@ -50,6 +53,21 @@ public:
     float fade(int wheel) const { return state(wheel).fade; }
     float discTemp(int wheel) const { return state(wheel).discTemp; }
 
+    /**
+     * Fade from the car's own curve (data/brake_temp_front.lut and the rear one,
+     * a temperature -> torque multiplier table) instead of the config
+     * thresholds. An empty curve keeps fadeStartTemp/fadeFullTemp, which is what
+     * a car that ships no table falls back to.
+     */
+    void setPerfCurve(int wheel, const std::vector<std::pair<float, float>>& curve);
+    /** Curve value at tempC, linearly interpolated between the points and held
+     *  flat outside them. 1.0 when the wheel has no curve. */
+    float perfCurveMultiplier(int wheel, float tempC) const;
+    /** Parse a "temperature|multiplier" .lut. False when the file is missing or
+     *  holds fewer than two usable points. */
+    static bool loadPerfCurve(const std::string& path,
+                              std::vector<std::pair<float, float>>& out);
+
     /** Effective brake torque after fade. */
     float effectiveTorque(int wheel, float commandedTorque) const {
         return commandedTorque * (1.0f - fade(wheel));
@@ -60,6 +78,7 @@ public:
 private:
     BrakeThermalConfig m_cfg;
     std::array<BrakeThermalState, 4> m_state{};
+    std::array<std::vector<std::pair<float, float>>, 4> m_curve{};
 };
 
 } // namespace physics

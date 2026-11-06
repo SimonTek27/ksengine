@@ -71,6 +71,15 @@ void VehicleSimulator::setSteering(double v) { m_steering = std::clamp(v, -1.0, 
 
 void VehicleSimulator::setHandbrake(double v) { m_handbrake = std::clamp(v, 0.0, 1.0); }
 
+void VehicleSimulator::setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
+                                          const std::vector<std::pair<float, float>>& rear) {
+    // The table is per axle: the front pair drives wheels 0/1, the rear 2/3.
+    m_brakes.setPerfCurve(0, front);
+    m_brakes.setPerfCurve(1, front);
+    m_brakes.setPerfCurve(2, rear);
+    m_brakes.setPerfCurve(3, rear);
+}
+
 void VehicleSimulator::setMass(double kg) {
     m_baseMass = std::max(200.0, kg);
     m_mass = m_baseMass + static_cast<double>(m_setup.ballastKg) + static_cast<double>(m_state.fuel) * 0.74;

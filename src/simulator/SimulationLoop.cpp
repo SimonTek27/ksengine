@@ -406,6 +406,22 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         tryLoad("drivetrain.ini", [&](const std::string& p) { m_vehicle->loadDrivetrainFromIni(p); });
         tryLoad("aero.ini", [&](const std::string& p) { m_vehicle->loadAeroFromIni(p); });
         tryLoad("suspension.ini", [&](const std::string& p) { m_vehicle->loadSuspensionFromIni(p); });
+        // The car's own brake temperature tables (data/brake_temp_front.lut and
+        // the rear one, temperature|multiplier): the fade follows the car, not a
+        // generic threshold. A car without them keeps the model's defaults.
+        {
+            std::vector<std::pair<float, float>> front, rear;
+            const fs::path dataDir = fs::path(carDir) / "data";
+            const bool hasFront = ks::physics::BrakeThermalModel::loadPerfCurve(
+                (dataDir / "brake_temp_front.lut").string(), front);
+            const bool hasRear = ks::physics::BrakeThermalModel::loadPerfCurve(
+                (dataDir / "brake_temp_rear.lut").string(), rear);
+            if (hasFront || hasRear) {
+                m_vehicle->setBrakeTempCurves(front, rear);
+                std::fprintf(stderr, "[brakes] brake temp curves: front=%zu rear=%zu points\n",
+                             front.size(), rear.size());
+            }
+        }
     }
 #endif
     // Roadmap 2.9: upgrade packages for this car (upgrades.ini, or the
