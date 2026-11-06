@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <cstdio>
 #include <fstream>
 #include <initializer_list>
 #include <sstream>
@@ -139,6 +140,83 @@ bool CarPhysicsJson::loadAcFuelCapacity(const std::string& carDir, double& litre
     takeNum(fuel, {"MAX_FUEL", "maxFuel", "fuelCapacityL"}, has, tank);
     if (!has || tank <= 4.0) return false;
     litres = tank;
+    return true;
+}
+
+namespace {
+// The reference profile the converter writes, and which the thermal model's own
+// defaults already encode.
+constexpr float kRefTransfer = 0.4f;      // disc -> pad share
+constexpr float kRefCoolTransfer = 0.002f; // disc -> air
+constexpr float kRefSpeedFactor0 = 0.05f;  // constant airflow term
+} // namespace
+
+bool CarPhysicsJson::loadAcBrakeTemps(const std::string& carDir, AcBrakeTemps& front,
+                                      AcBrakeTemps& rear, std::string* error) {
+    front = AcBrakeTemps{};
+    rear = AcBrakeTemps{};
+    const std::string path = resolveAcManifestPath(carDir);
+    if (path.empty()) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "data.json: cannot open " + path;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    bool ok = false;
+    std::string parseError;
+    const Json root = Json::parse(ss.str(), &ok, &parseError);
+    if (!ok || !root.isObject()) {
+        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
+        return false;
+    }
+    const Json& brakes = root["brakes"];
+    if (!brakes.isObject()) return false;
+    const auto read = [](const Json& obj, AcBrakeTemps& out) {
+        if (!obj.isObject()) return;
+        bool has = false;
+        double v = 0.0;
+        if (takeNum(obj, {"TRANSFER", "transfer"}, has, v) && v > 0.0)
+            out.transfer = static_cast<float>(v);
+        if (takeNum(obj, {"COOL_TRANSFER", "coolTransfer"}, has, v) && v > 0.0)
+            out.coolTransfer = static_cast<float>(v);
+        if (takeNum(obj, {"COOL_SPEED_FACTOR", "coolSpeedFactor"}, has, v) && v > 0.0)
+            out.coolSpeedFactor = static_cast<float>(v);
+        if (takeNum(obj, {"COOL_SPEED_FACTOR_0", "coolSpeedFactor0"}, has, v) && v > 0.0)
+            out.coolSpeedFactor0 = static_cast<float>(v);
+        out.valid = true;
+    };
+    read(brakes["TEMPS_FRONT"], front);
+    read(brakes["TEMPS_REAR"], rear);
+    return front.valid || rear.valid;
+}
+
+bool CarPhysicsJson::loadAcBrakeTempsForCarDir(const std::string& carDir, VehicleSimulator& v,
+                                               std::string* error) {
+    AcBrakeTemps front, rear;
+    if (!loadAcBrakeTemps(carDir, front, rear, error)) return false;
+    const BrakeThermalConfig ref;
+    const auto build = [&](const AcBrakeTemps& t) {
+        BrakeThermalConfig c;
+        // Normalised against the reference profile: a car carrying exactly the
+        // converter's numbers lands on the model's own defaults.
+        c.coolingBase = kRefSpeedFactor0 > 0.f ? t.coolSpeedFactor0 / kRefSpeedFactor0 : 1.f;
+        c.coolingSpeedFactor = t.coolSpeedFactor > 0.f ? t.coolSpeedFactor : ref.coolingSpeedFactor;
+        c.coolingCoeff = ref.coolingCoeff *
+                         (kRefCoolTransfer > 0.f ? t.coolTransfer / kRefCoolTransfer : 1.f);
+        c.padCoupling = ref.padCoupling * (kRefTransfer > 0.f ? t.transfer / kRefTransfer : 1.f);
+        return c;
+    };
+    if (front.valid) v.setBrakeThermalConfig(0, build(front));
+    if (rear.valid) v.setBrakeThermalConfig(1, build(rear));
+    std::fprintf(stderr,
+                 "[brakes] TEMPS: front=%d rear=%d cool_base=%0.3f/%0.3f cool_speed=%0.3f/%0.3f\n",
+                 front.valid ? 1 : 0, rear.valid ? 1 : 0,
+                 front.valid ? build(front).coolingBase : -1.f,
+                 rear.valid ? build(rear).coolingBase : -1.f,
+                 front.valid ? build(front).coolingSpeedFactor : -1.f,
+                 rear.valid ? build(rear).coolingSpeedFactor : -1.f);
     return true;
 }
 

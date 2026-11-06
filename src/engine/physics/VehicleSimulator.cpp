@@ -71,6 +71,16 @@ void VehicleSimulator::setSteering(double v) { m_steering = std::clamp(v, -1.0, 
 
 void VehicleSimulator::setHandbrake(double v) { m_handbrake = std::clamp(v, 0.0, 1.0); }
 
+void VehicleSimulator::setBrakeThermalConfig(int axle, const BrakeThermalConfig& c) {
+    if (axle == 0) {
+        m_brakes.setWheelConfig(0, c);
+        m_brakes.setWheelConfig(1, c);
+    } else if (axle == 1) {
+        m_brakes.setWheelConfig(2, c);
+        m_brakes.setWheelConfig(3, c);
+    }
+}
+
 void VehicleSimulator::setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
                                           const std::vector<std::pair<float, float>>& rear) {
     // The table is per axle: the front pair drives wheels 0/1, the rear 2/3.

@@ -56,6 +56,9 @@ public:
     /** Brake fade follows the car's own data/brake_temp_front.lut and
      *  data/brake_temp_rear.lut (temperature -> torque multiplier). Empty curves
      *  leave the thermal model on its config thresholds. */
+    /** Thermal config for one axle: 0 = front (wheels 0/1), 1 = rear (2/3). */
+    void setBrakeThermalConfig(int axle, const BrakeThermalConfig& c);
+
     void setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
                             const std::vector<std::pair<float, float>>& rear);
 

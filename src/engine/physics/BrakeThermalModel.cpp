@@ -17,32 +17,45 @@ void BrakeThermalModel::update(float dt, int wheel, float brakeTorqueNm, float w
     if (wheel < 0 || wheel >= 4) return;
     dt = std::clamp(dt, 1e-4f, 0.05f);
     auto& s = m_state[wheel];
+    const BrakeThermalConfig& cfg = wheelConfig(wheel);
 
     // Heat power = |T * omega|
     float power = std::abs(brakeTorqueNm * wheelOmega);
     s.energyAccum = power * dt;
 
-    float heatCapacity = std::max(m_cfg.discMass * m_cfg.discSpecificHeat, 1.0f);
+    float heatCapacity = std::max(cfg.discMass * cfg.discSpecificHeat, 1.0f);
     float dT = (s.energyAccum / heatCapacity) * 1.0f; // K
 
     // Cooling ~ (T - ambient) * (c0 + c1 * speed)
-    float coolWperK = m_cfg.coolingCoeff * (1.0f + 0.05f * std::max(speedMs, 0.0f));
-    float dTcool = -coolWperK * (s.discTemp - m_cfg.ambientTemp) * dt / heatCapacity;
+    float coolWperK = cfg.coolingCoeff *
+                       (cfg.coolingBase + cfg.coolingSpeedFactor * std::max(speedMs, 0.0f));
+    float dTcool = -coolWperK * (s.discTemp - cfg.ambientTemp) * dt / heatCapacity;
 
-    s.discTemp = std::clamp(s.discTemp + dT + dTcool, m_cfg.ambientTemp, m_cfg.maxTemp);
-    s.padTemp += (s.discTemp - s.padTemp) * 0.15f * dt;
+    s.discTemp = std::clamp(s.discTemp + dT + dTcool, cfg.ambientTemp, cfg.maxTemp);
+    s.padTemp += (s.discTemp - s.padTemp) * cfg.padCoupling * dt;
 
     if (!m_curve[wheel].empty()) {
         // The car's table already carries the fade shape, so its multiplier is
         // the whole answer; the thresholds below are the no-table fallback.
         s.fade = std::clamp(1.0f - perfCurveMultiplier(wheel, s.discTemp), 0.0f, 1.0f);
-    } else if (s.discTemp <= m_cfg.fadeStartTemp) {
+    } else if (s.discTemp <= cfg.fadeStartTemp) {
         s.fade = 0.0f;
-    } else if (s.discTemp >= m_cfg.fadeFullTemp) {
+    } else if (s.discTemp >= cfg.fadeFullTemp) {
         s.fade = 1.0f;
     } else {
-        s.fade = (s.discTemp - m_cfg.fadeStartTemp) / (m_cfg.fadeFullTemp - m_cfg.fadeStartTemp);
+        s.fade = (s.discTemp - cfg.fadeStartTemp) / (cfg.fadeFullTemp - cfg.fadeStartTemp);
     }
+}
+
+void BrakeThermalModel::setWheelConfig(int wheel, const BrakeThermalConfig& c) {
+    if (wheel < 0 || wheel >= 4) return;
+    m_wheelCfg[wheel] = c;
+    m_wheelCfgSet[wheel] = true;
+}
+
+const BrakeThermalConfig& BrakeThermalModel::wheelConfig(int wheel) const {
+    if (wheel >= 0 && wheel < 4 && m_wheelCfgSet[wheel]) return m_wheelCfg[wheel];
+    return m_cfg;
 }
 
 void BrakeThermalModel::setPerfCurve(int wheel,

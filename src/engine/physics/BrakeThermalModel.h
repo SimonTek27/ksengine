@@ -18,7 +18,13 @@ namespace physics {
 struct BrakeThermalConfig {
     float discMass = 6.5f;           // kg
     float discSpecificHeat = 480.0f; // J/(kg·K)
-    float coolingCoeff = 12.0f;      // W/K at 1 m/s reference
+    float coolingCoeff = 12.0f;      // W/K at the reference airflow
+    // The airflow term: cooling ~ coolingCoeff * (base + speedFactor * v).
+    // 1.0 / 0.05 is the shape the model always had; a car that declares
+    // COOL_SPEED_FACTOR(_0) replaces the two numbers.
+    float coolingBase = 1.0f;
+    float coolingSpeedFactor = 0.05f; // per m/s
+    float padCoupling = 0.15f;        // disc -> pad share per second
     float ambientTemp = 25.0f;       // C
     float fadeStartTemp = 320.0f;    // C
     float fadeFullTemp = 620.0f;     // C
@@ -59,6 +65,12 @@ public:
      * thresholds. An empty curve keeps fadeStartTemp/fadeFullTemp, which is what
      * a car that ships no table falls back to.
      */
+    /** Per-wheel thermal config, for the axles a car describes separately
+     *  (data.json brakes.TEMPS_FRONT / TEMPS_REAR). Unset wheels keep the
+     *  config given to setConfig(). */
+    void setWheelConfig(int wheel, const BrakeThermalConfig& c);
+    const BrakeThermalConfig& wheelConfig(int wheel) const;
+
     void setPerfCurve(int wheel, const std::vector<std::pair<float, float>>& curve);
     /** Curve value at tempC, linearly interpolated between the points and held
      *  flat outside them. 1.0 when the wheel has no curve. */
@@ -79,6 +91,8 @@ private:
     BrakeThermalConfig m_cfg;
     std::array<BrakeThermalState, 4> m_state{};
     std::array<std::vector<std::pair<float, float>>, 4> m_curve{};
+    std::array<BrakeThermalConfig, 4> m_wheelCfg{};
+    std::array<bool, 4> m_wheelCfgSet{};
 };
 
 } // namespace physics

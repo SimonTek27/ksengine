@@ -96,6 +96,37 @@ public:
     static bool loadAcFuelCapacity(const std::string& carDir, double& litres,
                                    std::string* error = nullptr);
 
+    /**
+     * One axle's brake temperature profile: the manifest's
+     * "brakes": { "TEMPS_FRONT": {...}, "TEMPS_REAR": {...} }, the block AC keeps
+     * out of brakes.ini. The fields keep AC's names; the model's shape is
+     * derived from them (see loadAcBrakeTempsForCarDir).
+     */
+    struct AcBrakeTemps {
+        bool valid = false;
+        float transfer = 0.4f;          // disc -> pad
+        float coolTransfer = 0.002f;    // disc -> air
+        float coolSpeedFactor = 0.06f;  // per m/s
+        float coolSpeedFactor0 = 0.05f; // constant airflow term
+    };
+
+    /** Read both axles' profiles. false when the manifest or the block is
+     *  missing; a single missing axle leaves that half invalid. */
+    static bool loadAcBrakeTemps(const std::string& carDir, AcBrakeTemps& front,
+                                 AcBrakeTemps& rear, std::string* error = nullptr);
+
+    /**
+     * loadAcBrakeTemps() + push it into the vehicle's thermal model, one config
+     * per axle. The converter writes a reference profile (TRANSFER 0.4,
+     * COOL_TRANSFER 0.002, COOL_SPEED_FACTOR 0.06, COOL_SPEED_FACTOR_0 0.05) that
+     * has to reproduce the model's own defaults, so each key is normalised
+     * against that reference rather than read as a physical unit. TORQUE_K and
+     * CORE_TRANSFER_* belong to AC's core-temperature model, which this engine
+     * does not have, and are therefore not consumed.
+     */
+    static bool loadAcBrakeTempsForCarDir(const std::string& carDir, VehicleSimulator& v,
+                                          std::string* error = nullptr);
+
     /** Parse JSON text. false on syntax error or when no section matches. */
     static bool parse(const std::string& jsonText, CarPhysicsData& out,
                       std::string* error = nullptr);

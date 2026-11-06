@@ -28,6 +28,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include "engine/FileFormat/Kn5Reader.h"
 #include <array>
 #include <functional>
+#include "engine/physics/CarPhysicsJson.h"
 #include "engine/FileFormat/DdsReader.h" // hall albedo decoded from the .kn5, in memory
 #include <map>
 #include "MaterialCache.h"   // car bakes pair with materials.txt too (roadmap 2.4)
@@ -417,6 +418,9 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
                 (dataDir / "brake_temp_front.lut").string(), front);
             const bool hasRear = ks::physics::BrakeThermalModel::loadPerfCurve(
                 (dataDir / "brake_temp_rear.lut").string(), rear);
+            // The cooling shape lives in the manifest's brakes.TEMPS_* block,
+            // not in brakes.ini: same car data, other file.
+            ks::physics::CarPhysicsJson::loadAcBrakeTempsForCarDir(carDir, *m_vehicle);
             if (hasFront || hasRear) {
                 m_vehicle->setBrakeTempCurves(front, rear);
                 std::fprintf(stderr, "[brakes] brake temp curves: front=%zu rear=%zu points\n",
