@@ -348,6 +348,22 @@ void VehicleSimulator::loadSuspensionFromIni(const std::string& path) {
     if (tw > 1.0f) m_trackWidth = tw;
 }
 
+void VehicleSimulator::loadBrakesFromIni(const std::string& path) {
+    auto m = parseIni(path);
+    const float maxTorque = getf(m, "DATA/MAX_TORQUE", getf(m, "MAX_TORQUE", 0.f));
+    const float frontShare = getf(m, "DATA/FRONT_SHARE", getf(m, "FRONT_SHARE", 0.f));
+    const float handbrake = getf(m, "DATA/HANDBRAKE_TORQUE", getf(m, "HANDBRAKE_TORQUE", 0.f));
+    if (maxTorque > 0.f) m_brakeMaxTorque = maxTorque;
+    if (frontShare > 0.05f && frontShare < 0.95f) m_brakeFrontShare = frontShare;
+    if (handbrake > 0.f) m_handbrakeTorque = handbrake;
+    m_brakeBiasAdjustable = getf(m, "DATA/COCKPIT_ADJUSTABLE",
+                                 getf(m, "COCKPIT_ADJUSTABLE", 0.f)) > 0.5f;
+    std::fprintf(stderr,
+                 "[brakes] DATA: max=%0.0f Nm front_share=%0.3f handbrake=%0.0f Nm adjustable=%d\n",
+                 m_brakeMaxTorque, m_brakeFrontShare, m_handbrakeTorque,
+                 m_brakeBiasAdjustable ? 1 : 0);
+}
+
 void VehicleSimulator::shiftGears() {
     if (m_rpm > m_maxRpm * 0.95 && m_currentGear < static_cast<int>(m_gearRatios.size()))
         ++m_currentGear;
@@ -795,8 +811,15 @@ void VehicleSimulator::integrate(double dt) {
         const float cut = std::clamp(0.1f * static_cast<float>(m_setup.tcLevel) * kappaRearAbs, 0.f, 0.9f);
         Tdrive *= (1.f - cut);
     }
-    const float biasF = std::clamp(m_setup.brakeBias, 0.3f, 0.8f);
+    // The car's own [DATA] FRONT_SHARE splits the torque whenever the cockpit
+    // cannot move the bias (COCKPIT_ADJUSTABLE=0); only an adjustable car lets
+    // the setup value steer it. A car that declares nothing keeps the setup.
+    const float biasF = std::clamp(
+        (m_brakeFrontShare > 0.f && !m_brakeBiasAdjustable) ? m_brakeFrontShare
+                                                            : m_setup.brakeBias,
+        0.3f, 0.8f);
     float TbrakeTot = brakeForceTarget * R;
+    if (m_brakeMaxTorque > 0.f) TbrakeTot = std::min(TbrakeTot, m_brakeMaxTorque);
     if (m_setup.absLevel > 0 && m_brake > 0.25f) {
         float kAbs = 0.25f * (std::fabs(srArr[0]) + std::fabs(srArr[1])
                             + std::fabs(srArr[2]) + std::fabs(srArr[3]));
@@ -813,7 +836,11 @@ void VehicleSimulator::integrate(double dt) {
     }
     // Handbrake: rear axle only, its own demand, so it locks the back wheels
     // while the pedal keeps the front ones free.
-    const float Thandbrake = static_cast<float>(m_handbrake) * mass * 6.0f * R;
+    // HANDBRAKE_TORQUE is the car's own total; a car without the entry keeps
+    // the mass-based estimate.
+    const float handbrakeTotal = m_handbrakeTorque > 0.f ? m_handbrakeTorque
+                                                        : mass * 6.0f * R;
+    const float Thandbrake = static_cast<float>(m_handbrake) * handbrakeTotal;
     float TbrakeF = 0.5f * TbrakeTot * biasF;
     float TbrakeR = 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake;
     // G15: brake thermal fade (per-wheel disc/pad)

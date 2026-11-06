@@ -204,6 +204,9 @@ public:
     void loadDrivetrainFromIni(const std::string& path);
     void loadAeroFromIni(const std::string& path);
     void loadSuspensionFromIni(const std::string& path);
+    /** models brakes.ini [DATA]: MAX_TORQUE, FRONT_SHARE, HANDBRAKE_TORQUE and
+     *  COCKPIT_ADJUSTABLE. A car that omits one leaves the engine's estimate. */
+    void loadBrakesFromIni(const std::string& path);
     /** AC has the real tank in [FUEL] MAX_FUEL (litres): data/data.json in
      *  converted content (read by CarPhysicsJson::loadAcFuelCapacity before
      *  the .ini set), data/car.ini in stock folders, and data/powertrain.ini
@@ -303,6 +306,12 @@ private:
     AeroModel m_aero;
     DifferentialModel m_diff;
     BrakeThermalModel m_brakes;
+    // brakes.ini [DATA]: 0 means "the car did not say", so the mass-based
+    // estimate stays in charge instead of a zero the setup would inherit.
+    float m_brakeMaxTorque = 0.f;
+    float m_brakeFrontShare = 0.f;
+    float m_handbrakeTorque = 0.f;
+    bool m_brakeBiasAdjustable = false;
     SuspensionModel m_suspension;
     DamageSystem m_damage;
     Rf2DamageParams m_rf2Dmg;

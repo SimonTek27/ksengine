@@ -406,6 +406,7 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         tryLoad("drivetrain.ini", [&](const std::string& p) { m_vehicle->loadDrivetrainFromIni(p); });
         tryLoad("aero.ini", [&](const std::string& p) { m_vehicle->loadAeroFromIni(p); });
         tryLoad("suspension.ini", [&](const std::string& p) { m_vehicle->loadSuspensionFromIni(p); });
+        tryLoad("brakes.ini", [&](const std::string& p) { m_vehicle->loadBrakesFromIni(p); });
         // The car's own brake temperature tables (data/brake_temp_front.lut and
         // the rear one, temperature|multiplier): the fade follows the car, not a
         // generic threshold. A car without them keeps the model's defaults.
