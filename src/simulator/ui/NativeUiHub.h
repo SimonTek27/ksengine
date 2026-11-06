@@ -879,6 +879,15 @@ private:
             m_menu->setSelectedIndex(hover);
     }
 
+    /** A label shortened with an ellipsis when it does not fit `maxW`, so a
+     *  long driver, car or track name cannot run out of its card. */
+    std::string elideToWidth(const std::string& text, float scale, float maxW) const {
+        if (maxW <= 0.f || m_text.measureWidth(text, scale) <= maxW) return text;
+        std::string cut = text;
+        while (!cut.empty() && m_text.measureWidth(cut + "...", scale) > maxW) cut.pop_back();
+        return cut.empty() ? std::string() : cut + "...";
+    }
+
     void buildCinematicMenu(DrawList& dl, int w, int h) {
         const float a = m_menu->fadeAlpha();
         if (a <= 0.01f) return;
@@ -1002,12 +1011,16 @@ private:
             // leading and each glyph its own offset, so the box centre sat
             // above the letters and the row read as out of step with its icon.
             const float labelScale = selected ? 1.35f : 1.2f;
+            // Room between the label and the card's inner right edge: a name
+            // that would overrun it is shortened instead of painted past it.
+            const float labelMaxW = (L.left - 12.f + L.listW + 24.f) - labelX - 16.f;
+            const std::string label = elideToWidth(it.text, labelScale, labelMaxW);
             float inkTop = 0.f, inkBottom = 0.f;
-            m_text.atlas().inkExtents(it.text, inkTop, inkBottom);
+            m_text.atlas().inkExtents(label, inkTop, inkBottom);
             const float inkH = (inkBottom - inkTop) * labelScale;
             m_text.draw(dl, labelX,
                         iy + std::max(0.f, (L.rowH - inkH) * 0.5f) - inkTop * labelScale,
-                        it.text, sty(titleCol, labelScale, selected));
+                        label, sty(titleCol, labelScale, selected));
 
             if (selected)
                 desc = it.description;

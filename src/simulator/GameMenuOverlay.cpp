@@ -1030,6 +1030,17 @@ void GameMenuOverlay::activateSelected()
 void GameMenuOverlay::render(int /*width*/, int /*height*/)
 {
     if (!m_visible && m_fadeAlpha <= 0.01f) return;
+    // The profile rows carry their value in the label, so a field written from
+    // outside the page - the text dialog, a loaded profile - has to rebuild
+    // them here: every other screen rebuilds from the action that changed it,
+    // and without this the page kept showing the old name beside a header that
+    // already read the new one.
+    if (m_menuDirty && m_currentState == MenuState::Profile) {
+        const int sel = m_selectedIndex;
+        buildProfileMenu();
+        m_selectedIndex = std::min(sel, static_cast<int>(m_items.size()) - 1);
+        m_menuDirty = false;
+    }
     m_animationTime += 0.016f;
     if (m_visible && m_fadeAlpha < 1.0f)
         m_fadeAlpha = std::min(1.0f, m_fadeAlpha + 0.07f);
