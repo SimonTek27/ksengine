@@ -51,7 +51,9 @@ enum class MenuState {
 
 struct DriverProfile {
     std::string name = "Player";
-    std::string nationality = "—";
+    // ASCII only: the atlas covers 32..126, so an unset field used to draw as
+    // "???" on the profile page.
+    std::string nationality = "NOT SET";
     int raceNumber = 1;
     std::string bio;
     int helmetDesign = 0;
