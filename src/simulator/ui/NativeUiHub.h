@@ -992,12 +992,22 @@ private:
                 const Color iconCol = selected
                     ? Color::rgba(1.f, 1.f, 1.f, a)
                     : Color::rgba(0.66f, 0.66f, 0.70f, a);
-                rowIcon->draw(dl, labelX, iy + (L.rowH - 6.f - iconSize) * 0.5f + 1.f,
+                // Centred on the row, like the label's ink: the two share a
+                // middle line however tall the glyphs beside it are.
+                rowIcon->draw(dl, labelX, iy + (L.rowH - iconSize) * 0.5f,
                               iconSize, iconCol, selected ? 1.15f : 1.f);
                 labelX += iconSize + 12.f;
             }
-            m_text.draw(dl, labelX, iy + 10.f, it.text,
-                        sty(titleCol, selected ? 1.35f : 1.2f, selected));
+            // Centred by its ink, not by its line box: the line carries the
+            // leading and each glyph its own offset, so the box centre sat
+            // above the letters and the row read as out of step with its icon.
+            const float labelScale = selected ? 1.35f : 1.2f;
+            float inkTop = 0.f, inkBottom = 0.f;
+            m_text.atlas().inkExtents(it.text, inkTop, inkBottom);
+            const float inkH = (inkBottom - inkTop) * labelScale;
+            m_text.draw(dl, labelX,
+                        iy + std::max(0.f, (L.rowH - inkH) * 0.5f) - inkTop * labelScale,
+                        it.text, sty(titleCol, labelScale, selected));
 
             if (selected)
                 desc = it.description;

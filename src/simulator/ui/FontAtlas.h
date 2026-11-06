@@ -79,6 +79,29 @@ public:
         return m_baseLineHeight * scale * 1.25f;
     }
 
+    /** Painted extent of one line, in atlas pixels before scaling: `top` is how
+     *  far the first inked row sits below the drawing y, `bottom` how far the
+     *  last one does. Line height includes the leading and a glyph's own
+     *  offset, so centring on it leaves the text looking off-centre; this is
+     *  what the eye actually sees. Both stay 0 for a line of spaces. */
+    void inkExtents(const std::string& text, float& top, float& bottom) const {
+        top = 0.f;
+        bottom = 0.f;
+        bool any = false;
+        for (unsigned char ch : text) {
+            if (ch == ' ' || ch == '\t' || ch == '\n') continue;
+            const GlyphInfo g = glyph(ch);
+            if (!any) {
+                top = g.yoff;
+                bottom = g.yoff + g.height;
+                any = true;
+            } else {
+                top = std::min(top, g.yoff);
+                bottom = std::max(bottom, g.yoff + g.height);
+            }
+        }
+    }
+
     /** Replace atlas from external R8 buffer (must be kAtlasW * kAtlasH). */
     bool loadR8(const uint8_t* data, int w, int h) {
         if (!data || w != kAtlasW || h != kAtlasH) return false;
