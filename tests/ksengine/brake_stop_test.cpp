@@ -141,7 +141,17 @@ StopResult stopFrom100(const std::vector<std::pair<float, float>>& curve,
         const double dz = endPosition.z - startPosition.z;
         r.positionDistance = std::sqrt(dx * dx + dz * dz);
     }
-    // Brake stays on for three more seconds: a held car must not creep away.
+    // Keep braking until the car is actually stationary, then hold the brake for
+    // three more seconds. The distance spent slowing from the stop threshold to
+    // zero is not creep; what happens after the stop is.
+    for (int i = 0; i < 5000; ++i) {
+        v.setThrottle(0.0);
+        v.setBrake(1.0);
+        v.setSteering(0.0);
+        v.updatePhysics(dt);
+        previous = v.getState().speed;
+        if (previous < 0.05) break;
+    }
     for (int i = 0; i < 3000; ++i) {
         v.setThrottle(0.0);
         v.setBrake(1.0);
@@ -204,8 +214,10 @@ int main()
     KS_CHECK(coldRun.distance > 0.0);
     // Held at a standstill: the brake keeps the car where it stopped instead of
     // letting the torque spin the wheels backwards and drag it away.
-    KS_CHECK(coldRun.creep > -0.5);
-    KS_CHECK(coldRun.creep < 0.5);
+    KS_CHECK(coldRun.creep > -0.2);
+    KS_CHECK(coldRun.creep < 0.2);
+    KS_CHECK(warmRun.creep > -0.2);
+    KS_CHECK(warmRun.creep < 0.2);
     // state().position follows the stop again: the damage cg shift is folded in
     // as a delta, so differencing it no longer drifts away from the real path.
     KS_CHECK(std::fabs(coldRun.positionDistance - coldRun.distance) <

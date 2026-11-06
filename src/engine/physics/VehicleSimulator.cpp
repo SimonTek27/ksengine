@@ -893,11 +893,20 @@ void VehicleSimulator::integrate(double dt) {
     };
     const float omegaMax = std::fabs(omegaFree) + 120.f;
     for (int i = 0; i < 4; ++i) {
+        const float omegaBefore = m_wheelOmega[i];
         m_wheelOmega[i] += (Tnet[i] / Iw) * fdt;
         m_wheelOmega[i] = std::clamp(m_wheelOmega[i], -omegaMax, omegaMax);
         if (speed < 0.25f && m_throttle < 0.02f && m_brake < 0.02f)
             m_wheelOmega[i] *= (1.f - 10.f * fdt);
-        if (brakeHold) m_wheelOmega[i] = 0.f;
+        // The brake is a resistance: it may bring a wheel to a stop, never spin
+        // it the other way. Without this a stopped car's wheels turn backwards
+        // and the tyres drag the car away in reverse.
+        if (brakeHold) {
+            m_wheelOmega[i] = 0.f;
+        } else if (m_brake > 0.05f && m_throttle < 0.05f && speed < 2.f &&
+                   omegaBefore * m_wheelOmega[i] < 0.f) {
+            m_wheelOmega[i] = 0.f;
+        }
     }
     const float omegaDriven = 0.5f * (m_wheelOmega[2] + m_wheelOmega[3]);
     m_rpm = std::max(800.0, static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive
