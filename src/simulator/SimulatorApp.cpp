@@ -1496,6 +1496,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             {"SETTINGS", ks::sim::MenuState::Settings},
             {"VIDEO", ks::sim::MenuState::Options},
             {"CONTENT", ks::sim::MenuState::ContentManager},
+            // The page calls itself DRIVER, like its tile: both names work, so
+            // a capture is never lost to the section's two spellings.
+            {"DRIVER", ks::sim::MenuState::Profile},
+            {"PROFILE", ks::sim::MenuState::Profile},
+            {"CREDITS", ks::sim::MenuState::Credits},
+        };
+        bool opened = false;
+        for (const Page& page : kPages) {
+            if (name != page.name) continue;
+            g_simulation->ui().menu().openScreen(page.state);
+            printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
+                   g_simulation->ui().menu().sectionTitle().c_str());
+            opened = true;
+            break;
+        }
+        if (!opened) {
+            printf("[menu] KS_MENU_SCREEN=%s: unknown page\n", screenEnv);
+            std::exit(2);
+        }
+    }
+    // KS_MENU_SELECT=<row>: put the selection further down a page, so a capture
+    // can show what a list does once it scrolls - the rows hidden above it and
+    // the caption that says so.
+    if (const char* selectEnv = std::getenv("KS_MENU_SELECT"); selectEnv && selectEnv[0]) {
+        const int count = static_cast<int>(g_simulation->ui().menu().items().size());
+        if (count <= 0) {
+            printf("[menu] KS_MENU_SELECT=%s: the page has no rows\n", selectEnv);
+        } else {
+            int row = std::atoi(selectEnv);
+            if (row < 0) row = 0;
+            if (row > count - 1) row = count - 1;
+            g_simulation->ui().menu().setSelectedIndex(row);
+            printf("[menu] selected row %d of %d on %s\n", row, count,
+                   g_simulation->ui().menu().sectionTitle().c_str());
+        }
+    }
+
+    
+    // KS_MENU_SCREEN=<page>: open a menu page before the capture frames run, so
+    // the screens behind the tiles can be judged without driving the window by
+    // hand. An unknown name leaves rather than writing a capture of the wrong
+    // page under the requested file name.
+    if (const char* screenEnv = std::getenv("KS_MENU_SCREEN"); screenEnv && screenEnv[0]) {
+        std::string name(screenEnv);
+        for (char& c : name)
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        struct Page { const char* name; ks::sim::MenuState state; };
+        static const Page kPages[] = {
+            {"MAIN", ks::sim::MenuState::Main},
+            {"SINGLE PLAYER", ks::sim::MenuState::Singleplayer},
+            {"SINGLEPLAYER", ks::sim::MenuState::Singleplayer},
+            {"MULTIPLAYER", ks::sim::MenuState::Multiplayer},
+            {"SETTINGS", ks::sim::MenuState::Settings},
+            {"VIDEO", ks::sim::MenuState::Options},
+            {"CONTENT", ks::sim::MenuState::ContentManager},
             {"PROFILE", ks::sim::MenuState::Profile},
             {"CREDITS", ks::sim::MenuState::Credits},
         };
