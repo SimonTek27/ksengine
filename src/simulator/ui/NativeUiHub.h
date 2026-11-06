@@ -955,7 +955,10 @@ private:
             const auto& it = items[i];
             const float advance = rowAdvance(it);
             if (iy + advance <= L.top) { iy += advance; continue; } // scrolled above
-            if (iy >= rowLimit) break;                              // scrolled below
+            // A row is only drawn when all of it fits: stopping at the row's
+            // top let the last one hang over the caption band, which is how
+            // MASTER VOLUME ended up under "v MORE BELOW".
+            if (iy + advance > rowLimit + 0.5f) break;              // scrolled below
             if (it.isSeparator) {
                 dl.addRectFilled({L.left, iy + L.rowH * 0.15f, L.listW * 0.55f, 1.f},
                                  Color::rgba(1, 1, 1, 0.12f * a));
