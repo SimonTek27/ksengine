@@ -1479,6 +1479,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     if (!g_headless) initWindow();
     initVulkanAndSimulation();
 
+    // KS_MENU_SCREEN=<page>: open a menu page before the capture frames run, so
+    // the screens behind the tiles can be judged without driving the window by
+    // hand. An unknown name leaves rather than writing a capture of the wrong
+    // page under the requested file name.
+    if (const char* screenEnv = std::getenv("KS_MENU_SCREEN"); screenEnv && screenEnv[0]) {
+        std::string name(screenEnv);
+        for (char& c : name)
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        struct Page { const char* name; ks::sim::MenuState state; };
+        static const Page kPages[] = {
+            {"MAIN", ks::sim::MenuState::Main},
+            {"SINGLE PLAYER", ks::sim::MenuState::Singleplayer},
+            {"SINGLEPLAYER", ks::sim::MenuState::Singleplayer},
+            {"MULTIPLAYER", ks::sim::MenuState::Multiplayer},
+            {"SETTINGS", ks::sim::MenuState::Settings},
+            {"VIDEO", ks::sim::MenuState::Options},
+            {"CONTENT", ks::sim::MenuState::ContentManager},
+            {"PROFILE", ks::sim::MenuState::Profile},
+            {"CREDITS", ks::sim::MenuState::Credits},
+        };
+        bool opened = false;
+        for (const Page& page : kPages) {
+            if (name != page.name) continue;
+            g_simulation->ui().menu().openScreen(page.state);
+            printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
+                   g_simulation->ui().menu().sectionTitle().c_str());
+            opened = true;
+            break;
+        }
+        if (!opened) {
+            printf("[menu] KS_MENU_SCREEN=%s: unknown page\n", screenEnv);
+            std::exit(2);
+        }
+    }
+
+    
     printf("KinetiKa Simulator started (%s)\n",
            g_headless ? "headless, no window/Vulkan" : "Win32 + Vulkan, no Qt");
 
