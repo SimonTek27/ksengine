@@ -35,6 +35,17 @@ public:
     bool authRequired() const;
     void stopServer();
     bool isHosting() const { return m_hosting; }
+    /** Phase 3.3: layout announced to guests (empty = let the loop decide). */
+    void setTrackLayout(const std::string& layoutId);
+    const std::string& trackLayout() const { return m_trackLayout; }
+    /** Layout the host announced in its welcome (empty before a welcome). */
+    const std::string& remoteLayoutId() const { return m_remoteLayoutId; }
+    /** Phase 3.3 — host side: which layout to announce when none is set
+     *  explicitly. The loop supplies it, so the transport never learns what a
+     *  layout is; empty when nothing is loaded. */
+    std::function<std::string()> localLayoutId;
+    /** Phase 3.3 — client side: the host's track and layout arrived. */
+    std::function<void(const std::string& trackName, const std::string& layoutId)> onServerWelcome;
     int clientCount() const;
     std::string clientName(int index) const;
 
@@ -150,6 +161,8 @@ private:
 
     std::string m_serverName;
     std::string m_trackName;
+    std::string m_trackLayout;
+    std::string m_remoteLayoutId;
     std::string m_driverName;
     std::string m_carName;
     uint16_t m_port = 0;

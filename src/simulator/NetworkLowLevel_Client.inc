@@ -143,6 +143,10 @@ void NetworkClient::processMessages() {
                 case MSG_SERVER_WELCOME: {
                     auto* welcome = (ServerWelcomeMessage*)msg;
                     m_clientId = welcome->clientId;
+                    // Phase 3.3: the layout has to reach the loop before the
+                    // first car spawns, so it travels with the welcome.
+                    if (onWelcome)
+                        onWelcome(std::string(welcome->trackName), std::string(welcome->layoutId));
                     if (onConnected) onConnected(m_clientId);
                     break;
                 }

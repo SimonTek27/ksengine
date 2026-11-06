@@ -120,12 +120,29 @@ int main()
     check(host.clientCount() == 1, "server sees 1 connected client (the host)");
 
     // --- 3. remote guest joins -------------------------------------------
+    // Phase 3.3: the host announces its layout, so the guest can rebind to it
+    // instead of running whatever its own folder defaults to.
+    host.setTrackLayout("national");
+    // The loop is what rebinds; here the test stands in for it and records the
+    // welcome so both halves are checked.
+    std::string welcomeTrack;
+    std::string welcomeLayout;
+    guest.onServerWelcome = [&](const std::string& track, const std::string& layout) {
+        welcomeTrack = track;
+        welcomeLayout = layout;
+    };
     check(guest.joinServer("127.0.0.1", port, "Alice", "gte3"),
           "guest joinServer opens the client transport");
     check(spin([&] { return guestIn && guestJoined; }, 5.0),
           "remote client welcomed and server observed MSG_CLIENT_JOIN");
     check(guestName == "Alice", "server records the joining driver name");
     check(guestIdx == 1, "remote client got the second server slot");
+    check(guest.remoteLayoutId() == "national",
+          "guest learned the host's layout from the welcome");
+    check(welcomeLayout == "national" && !welcomeTrack.empty(),
+          "welcome callback carried the track and the layout");
+    check(host.trackLayout() == "national",
+          "host keeps announcing the layout it set");
     check(host.clientCount() == 2, "server sees 2 connected clients");
 
     // --- 4b. in-car overlay gate, on this live session ---------------------

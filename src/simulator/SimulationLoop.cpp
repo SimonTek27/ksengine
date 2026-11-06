@@ -150,6 +150,13 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
     // multiCarManager() and a null pointer there is never re-checked.
     m_multiCar = std::make_unique<MultiCarManager>();
     m_network = std::make_unique<NetworkManager>(this);
+    // Phase 3.3 — the transport carries the layout id but does not act on it:
+    // the loop announces the layout it has bound and rebinds to the host's one
+    // when a welcome arrives, so both sides drive the same layout.
+    m_network->localLayoutId = [this]() { return activeLayoutId(); };
+    m_network->onServerWelcome = [this](const std::string&, const std::string& layoutId) {
+        if (!layoutId.empty()) switchLayout(layoutId);
+    };
     // Multiplayer (roadmap 3.1): NetworkManager only pumps the transport,
     // everything that reaches the simulation is wired here.
     m_network->onRemoteClientJoined = [this](int slot, uint32_t, const std::string&) {

@@ -12,7 +12,7 @@
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
 | **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **✅ Delivered** — secure transport, client auto-reconnect, headless host key/token flags; evidence `test_multiplayer` + `ks_server_smoke` |
-| **3.3** | Multi-layout without full reload | Medium | **In progress** — catalog + `switchLayout`/`KS_LAYOUT` wire + LAYOUT picker + tests; layout broadcast remains |
+| **3.3** | Multi-layout without full reload | Medium | **✅ Delivered** — catalog, `switchLayout`/`KS_LAYOUT`, LAYOUT picker, layout announced in the welcome; `track_layout_test` + `menu_layout_picker_test` + `test_multiplayer`. Remaining is content (a second real layout) |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
 | **3.6** | Triple monitor | Low | Not started |
@@ -78,7 +78,7 @@ without tearing down cars / renderer / session stack.
 1. ~~Merge SimulationLoop header/cpp wire (layout fields + `switchLayout`)~~ — done 2026-11-06.
 2. ~~Reload AI racing line on switch when layout ships its own `ai/*.ai`~~ — done: the binding names the folder, `switchLayout` reloads the line.
 3. ~~Menu UI to pick layout before session start~~ — done 2026-11-06: LAYOUT row, hidden below two layouts.
-4. Multiplayer: broadcast active layout id on join.
+4. ~~Multiplayer: broadcast active layout id on join~~ — done 2026-11-06: `ServerWelcomeMessage.layoutId` (protocol 3), the client rebinds on welcome.
 5. Real second layout content pack (e.g. Mugello national) when available.
 
 ### Smoke

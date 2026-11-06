@@ -141,6 +141,7 @@ void NetworkServer::processMessages() {
                                     welcome->clientId = static_cast<uint32_t>(ci);
                                     strncpy(welcome->serverName, m_serverName.c_str(), sizeof(welcome->serverName) - 1);
                                     strncpy(welcome->trackName, m_trackName.c_str(), sizeof(welcome->trackName) - 1);
+                                    strncpy(welcome->layoutId, m_trackLayout.c_str(), sizeof(welcome->layoutId) - 1);
                                     m_server->SendMessage(ci, CHANNEL_RELIABLE, welcome);
                                 }
                             }

@@ -96,6 +96,8 @@ public:
     std::function<void(const CarSetupMessage&)> onCarSetup;
     std::function<void(const CarCollisionMessage&)> onCarCollision;
     std::function<void(const std::string& /*reason*/)> onAuthFailed;
+    /** Phase 3.3: the host's track and layout arrive with the welcome. */
+    std::function<void(const std::string& /*trackName*/, const std::string& /*layoutId*/)> onWelcome;
 
 private:
     void processMessages();
@@ -130,6 +132,9 @@ public:
 
     void setSimulationLoop(SimulationLoop* loop) { m_simLoop = loop; }
     void setMultiCarManager(MultiCarManager* m) { m_multiCar = m; }
+    /** Phase 3.3: layout id announced in every welcome (empty = single layout). */
+    void setTrackLayout(const std::string& layoutId) { m_trackLayout = layoutId; }
+    const std::string& trackLayout() const { return m_trackLayout; }
     /** Empty = open; non-empty required on ClientJoin (constant-time compare). */
     void setAuthToken(const std::string& token) { m_authToken = token; m_authRequired = !token.empty(); }
     bool authRequired() const { return m_authRequired; }
@@ -186,6 +191,7 @@ private:
     MultiCarManager* m_multiCar = nullptr;
     std::string m_serverName;
     std::string m_trackName;
+    std::string m_trackLayout;
     std::string m_authToken;
     bool m_authRequired = false;
     uint8_t m_privateKey[ksnet::PRIVATE_KEY_BYTES] = {};

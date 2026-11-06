@@ -12,7 +12,9 @@
 namespace ks::sim::net {
 
 constexpr uint64_t PROTOCOL_ID = 0x11223344556677ULL;
-constexpr uint32_t PROTOCOL_VERSION = 2;
+// 3: the welcome carries the host's track layout, so a guest joins the layout
+// the host is actually driving instead of the one its own folder defaults to.
+constexpr uint32_t PROTOCOL_VERSION = 3;
 constexpr int MAX_CLIENTS = 32;
 
 enum ChannelId {
@@ -121,11 +123,15 @@ struct ServerWelcomeMessage : public ksnet::Message {
     uint32_t clientId = 0;
     char serverName[64] = {0};
     char trackName[64] = {0};
+    // Active layout id of the host's track (TrackLayout.h), empty when the
+    // host runs a folder with a single layout.
+    char layoutId[32] = {0};
     uint8_t sessionType = SESSION_PRACTICE;
     template <typename Stream> bool Serialize(Stream & stream) {
         serialize_uint32(stream, clientId);
         serialize_string(stream, serverName, sizeof(serverName));
         serialize_string(stream, trackName, sizeof(trackName));
+        serialize_string(stream, layoutId, sizeof(layoutId));
         serialize_bits(stream, sessionType, 8);
         return true;
     }

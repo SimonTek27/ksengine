@@ -64,6 +64,16 @@ void NetworkManager::rebindMultiCar() {
 }
 
 void NetworkManager::setupClientSignals() {
+    // Phase 3.3: the host's layout arrives with the welcome. The transport
+    // only reports it; the loop that owns the track is what rebinds, before
+    // the first car spawns.
+    m_client->onWelcome = [this](const std::string& trackName, const std::string& layoutId) {
+        m_remoteLayoutId = layoutId;
+        printf("NetworkManager: server track '%s' layout '%s'\n",
+               trackName.c_str(), layoutId.empty() ? "default" : layoutId.c_str());
+        if (onServerWelcome) onServerWelcome(trackName, layoutId);
+    };
+
     m_client->onConnected = [this](uint32_t clientId) {
         m_connected = true;
         m_localClientId = clientId;
@@ -172,6 +182,10 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 
     m_serverName = serverName;
     m_trackName = trackName;
+    // Phase 3.3: announce the layout the host is actually driving. An explicit
+    // setTrackLayout() wins; otherwise the loop's active layout is used, so a
+    // host that never mentions layouts still announces the right one.
+    if (m_trackLayout.empty() && localLayoutId) m_trackLayout = localLayoutId();
     m_port = port;
     m_driverName = "Host";
     m_carName = "gte3";
@@ -187,6 +201,7 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
 
     m_hosting = true;
     m_connected = true;
+    m_server->setTrackLayout(m_trackLayout);
 
     m_client->setSimulationLoop(m_simLoop);
     rebindMultiCar();
@@ -210,6 +225,13 @@ bool NetworkManager::hostServer(uint16_t port, int /*maxClients*/,
            port, STATE_SEND_HZ, m_interp.delay() * 1000.0);
     updatePlayerList();
     return true;
+}
+
+void NetworkManager::setTrackLayout(const std::string& layoutId) {
+    m_trackLayout = layoutId;
+    // A running server picks it up before the next welcome goes out, so the
+    // caller does not have to know whether hosting already started.
+    if (m_server) m_server->setTrackLayout(layoutId);
 }
 
 void NetworkManager::stopServer() {
