@@ -330,13 +330,16 @@ void GameMenuOverlay::buildProfileMenu()
     // Every row edits one field of the profile the header plate and the
     // results read from. The bio and the race number are fields the overlay
     // already carries, so the page lists them instead of losing them.
-    m_items.push_back({ "NAME", m_profile.name,
+    // The value rides on the label and the panel explains the row, the way the
+    // video page reads: these used to put the value in the panel, so NUMBER
+    // showed a bare "1" and the row itself showed nothing at all.
+    m_items.push_back({ "NAME  " + m_profile.name, "Press to type the driver name",
         [this]() { if (onTextInputRequested) onTextInputRequested("NAME", m_profile.name); },
         false, true, "user" });
-    m_items.push_back({ "NATIONALITY", m_profile.nationality,
+    m_items.push_back({ "NATIONALITY  " + m_profile.nationality, "Press to pick a country from the list",
         [this]() { if (onNationalityInputRequested) onNationalityInputRequested(); },
         false, true, "helmet" });
-    m_items.push_back({ "NUMBER", std::to_string(m_profile.raceNumber),
+    m_items.push_back({ "NUMBER  " + std::to_string(m_profile.raceNumber), "Press to cycle between 1 and 99",
         [this]() { m_profile.raceNumber = (m_profile.raceNumber % 99) + 1; m_menuDirty = true; },
         false, true, "drive" });
     m_items.push_back({ "BIO", m_profile.bio.empty() ? "Add a short biography" : m_profile.bio,

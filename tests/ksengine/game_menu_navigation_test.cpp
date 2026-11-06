@@ -37,6 +37,11 @@ int rowOf(const GameMenuOverlay& menu, const std::string& text) {
     const std::vector<MenuItem> items = menu.items();
     for (int i = 0; i < static_cast<int>(items.size()); ++i)
         if (items[i].text == text) return i;
+    // A row may carry its value on the label, two spaces after the name
+    // ("NAME  Player"), so a lookup by row name still finds it.
+    const std::string withValue = text + "  ";
+    for (int i = 0; i < static_cast<int>(items.size()); ++i)
+        if (!items[i].isSeparator && items[i].text.rfind(withValue, 0) == 0) return i;
     return -1;
 }
 
