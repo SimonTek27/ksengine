@@ -45,19 +45,32 @@
 static const char* AC_PATH = "F:/SteamLibrary/steamapps/common/assettocorsa";
 // Installed layout: SPIR-V lives in system/shaders next to ksim.exe
 // (cmake/KsInstallLayout.cmake).
-// Installed layout first, source tree second: a build drops the same SPIR-V in
-// build/shaders, so one lookup covers both instead of crashing a dev run that
-// started from the repository root (nothing loaded, no pipeline, no frame).
-// KS_SHADER_DIR wins over both for a harness that keeps them elsewhere.
+// Directory of ksim.exe: the build puts the SPIR-V in system/shaders next to
+// it, whatever the process working directory happens to be.
+static std::string exeDirectory() {
+    char buffer[MAX_PATH]{};
+    const DWORD length = GetModuleFileNameA(nullptr, buffer, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return std::string();
+    std::string path(buffer, length);
+    const auto slash = path.find_last_of("\\/");
+    return slash == std::string::npos ? std::string() : path.substr(0, slash);
+}
+
+// The shader set this build produced sits next to the exe, and a run from the
+// repository root has to find that one: an older scratch copy picked up from
+// the working directory shipped a vertex shader that mirrored the whole
+// overlay, and nothing said which set had been loaded. KS_SHADER_DIR still
+// wins for a harness that keeps them elsewhere.
 static std::string shaderDirectory() {
     static const std::string resolved = []() -> std::string {
         if (const char* env = std::getenv("KS_SHADER_DIR"); env != nullptr && env[0] != '\0')
             return std::string(env);
-        for (const char* candidate : {"system/shaders", "build/shaders"}) {
-            std::ifstream probe(std::string(candidate) + "/native_forward.vert.spv",
-                                std::ios::binary);
-            if (probe.good()) return std::string(candidate);
-        }
+        const std::string exe = exeDirectory();
+        if (!exe.empty() &&
+            std::ifstream(exe + "/system/shaders/native_forward.vert.spv", std::ios::binary).good())
+            return exe + "/system/shaders";
+        if (std::ifstream("system/shaders/native_forward.vert.spv", std::ios::binary).good())
+            return std::string("system/shaders");
         // Nothing found: report the installed path, which is the one an
         // incomplete install is missing.
         return std::string("system/shaders");
