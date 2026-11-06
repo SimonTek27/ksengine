@@ -1501,11 +1501,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             {"DRIVER", ks::sim::MenuState::Profile},
             {"PROFILE", ks::sim::MenuState::Profile},
             {"CREDITS", ks::sim::MenuState::Credits},
+            // The track list scans content/tracks on the way in, so it goes
+            // through its own opener instead of a bare page switch.
+            {"TRACKS", ks::sim::MenuState::TrackSelect},
         };
         bool opened = false;
         for (const Page& page : kPages) {
             if (name != page.name) continue;
-            g_simulation->ui().menu().openScreen(page.state);
+            if (page.state == ks::sim::MenuState::TrackSelect)
+                g_simulation->ui().menu().openTrackSelect();
+            else
+                g_simulation->ui().menu().openScreen(page.state);
             printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
                    g_simulation->ui().menu().sectionTitle().c_str());
             opened = true;
