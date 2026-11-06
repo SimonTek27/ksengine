@@ -62,7 +62,11 @@ if(TARGET mikktspace)
 	target_link_libraries(SimulatorServer PRIVATE mikktspace)
 endif()
 if(WIN32)
-	target_link_libraries(SimulatorServer PRIVATE dinput8 dxguid xinput ole32 user32 gdi32 ws2_32 winmm)
+	# Media Foundation is what Mp3Decode.cpp reads mp3s with; SimulatorApp links
+	# the same three and the server compiles the same source, so without them the
+	# link stops on MFMediaType_Audio and the audio tests never get a binary.
+	target_link_libraries(SimulatorServer PRIVATE dinput8 dxguid xinput ole32 user32 gdi32 ws2_32 winmm
+		mfplat mfreadwrite mfuuid)
 endif()
 
 message(STATUS "SimulatorServer (headless) configured - disc :20779, ctrl :20780")

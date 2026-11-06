@@ -136,6 +136,12 @@ int main()
     // The shift transient fires on a gear change and decays over 0.5 s; it
     // is measured last so the still-active envelope cannot leak into the
     // other layers' checks.
+    // The tick rides the gear channel, whose volume follows the engine slider
+    // (setVolume(ChGearShift, engineVol * masterVol)), so the engine muted for
+    // the checks above would silence the very layer measured here. Restoring
+    // it keeps that design and still isolates the tick: both measurements then
+    // carry the same idle hum and only the shift transient differs.
+    audio.setEngineVolume(1.0f);
     Params idle;
     const Measurement preShift = measure(audio, idle, "gear=1 idle");
     Params shifted = idle;

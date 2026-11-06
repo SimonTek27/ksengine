@@ -68,12 +68,15 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_render.cpp")
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/Mp3Decode.cpp")
     target_include_directories(test_audio_render PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
-    target_link_libraries(test_audio_render PRIVATE ksengine)
+    # The mp3 path goes through Media Foundation: the platform libraries travel
+    # with the test, as they do for SimulatorApp and showroom_audio_test.
+    target_link_libraries(test_audio_render PRIVATE ksengine mfplat mfreadwrite mfuuid)
     add_test(NAME test_audio_render COMMAND test_audio_render)
 endif()
 
@@ -84,12 +87,13 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_audio_3d.cpp")
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/WASAPIOutput.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioMixer.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SoundsIniParser.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/AudioBankManager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/Mp3Decode.cpp")
     target_include_directories(test_audio_3d PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
-    target_link_libraries(test_audio_3d PRIVATE ksengine)
+    target_link_libraries(test_audio_3d PRIVATE ksengine mfplat mfreadwrite mfuuid)
     add_test(NAME test_audio_3d COMMAND test_audio_3d)
 endif()
 
