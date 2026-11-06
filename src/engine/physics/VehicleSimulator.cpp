@@ -831,6 +831,10 @@ void VehicleSimulator::integrate(double dt) {
         0.3f, 0.8f);
     float TbrakeTot = brakeForceTarget * R;
     if (m_brakeMaxTorque > 0.f) TbrakeTot = std::min(TbrakeTot, m_brakeMaxTorque);
+    // A brake torque is not a clutch. Below walking pace, with the car already
+    // stopped, continuing to apply it spins the wheels backwards and the tyres
+    // then drag the car away in reverse. Hold it instead.
+    const bool brakeHold = m_brake > 0.05f && speed < 0.5f && m_throttle < 0.05f;
     if (m_setup.absLevel > 0 && m_brake > 0.25f) {
         float kAbs = 0.25f * (std::fabs(srArr[0]) + std::fabs(srArr[1])
                             + std::fabs(srArr[2]) + std::fabs(srArr[3]));
@@ -893,6 +897,7 @@ void VehicleSimulator::integrate(double dt) {
         m_wheelOmega[i] = std::clamp(m_wheelOmega[i], -omegaMax, omegaMax);
         if (speed < 0.25f && m_throttle < 0.02f && m_brake < 0.02f)
             m_wheelOmega[i] *= (1.f - 10.f * fdt);
+        if (brakeHold) m_wheelOmega[i] = 0.f;
     }
     const float omegaDriven = 0.5f * (m_wheelOmega[2] + m_wheelOmega[3]);
     m_rpm = std::max(800.0, static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive
@@ -977,6 +982,10 @@ void VehicleSimulator::integrate(double dt) {
     m_state.velocity.x += worldAx * fdt;
     m_state.velocity.z += worldAz * fdt;
     m_state.velocity.y = 0;
+    if (brakeHold) {
+        m_state.velocity.x = 0.f;
+        m_state.velocity.z = 0.f;
+    }
     m_state.position.x += m_state.velocity.x * fdt;
     m_state.position.z += m_state.velocity.z * fdt;
     m_state.position.y = 0.35f;

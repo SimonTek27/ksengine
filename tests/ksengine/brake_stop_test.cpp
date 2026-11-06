@@ -59,6 +59,7 @@ struct StopResult {
     double distance = 0.0;
     double stopTime = 0.0;
     double positionDistance = 0.0;
+    double creep = 0.0;
     float peakDiscTemp = 0.f;
     float endFade = 0.f;
     bool reached = false;
@@ -140,6 +141,16 @@ StopResult stopFrom100(const std::vector<std::pair<float, float>>& curve,
         const double dz = endPosition.z - startPosition.z;
         r.positionDistance = std::sqrt(dx * dx + dz * dz);
     }
+    // Brake stays on for three more seconds: a held car must not creep away.
+    for (int i = 0; i < 3000; ++i) {
+        v.setThrottle(0.0);
+        v.setBrake(1.0);
+        v.setSteering(0.0);
+        v.updatePhysics(dt);
+        const auto held = v.getState();
+        r.creep += 0.5 * (previous + held.speed) * dt;
+        previous = held.speed;
+    }
     r.stopTime = step * dt;
     r.endFade = v.brakes().fade(0);
     return r;
@@ -176,6 +187,8 @@ int main()
                 " Tmax=%.0f C, fade=%.2f) warm=%.1f m\n",
                 coldRun.distance, coldRun.stopTime, coldRun.v0, avgDecel,
                 coldRun.peakDiscTemp, coldRun.endFade, warmRun.distance);
+    std::printf("brake_stop: creep after the stop (3 s of brake): cold=%.2f m warm=%.2f m\n",
+                coldRun.creep, warmRun.creep);
     std::printf("brake_stop: reached=%d/%d stopped=%d/%d\n", coldRun.reached ? 1 : 0,
                 warmRun.reached ? 1 : 0, coldRun.stopped ? 1 : 0, warmRun.stopped ? 1 : 0);
 
@@ -189,6 +202,10 @@ int main()
     KS_CHECK(coldRun.stopped);
     KS_CHECK(warmRun.stopped);
     KS_CHECK(coldRun.distance > 0.0);
+    // Held at a standstill: the brake keeps the car where it stopped instead of
+    // letting the torque spin the wheels backwards and drag it away.
+    KS_CHECK(coldRun.creep > -0.5);
+    KS_CHECK(coldRun.creep < 0.5);
     // state().position follows the stop again: the damage cg shift is folded in
     // as a delta, so differencing it no longer drifts away from the real path.
     KS_CHECK(std::fabs(coldRun.positionDistance - coldRun.distance) <
