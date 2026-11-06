@@ -34,6 +34,7 @@ void VehicleSimulator::reset() {
     m_state.position = {0, 0.35f, 0};
     m_throttle = m_brake = m_steering = 0;
     m_handbrake = 0;
+    m_appliedCgShift = {};
     m_currentGear = 1;
     m_rpm = 1000;
     m_yawRate = 0;
@@ -980,9 +981,14 @@ void VehicleSimulator::integrate(double dt) {
     m_state.position.z += m_state.velocity.z * fdt;
     m_state.position.y = 0.35f;
 
+    // Damage moves the centre of gravity: the *change* shifts the model once.
+    // Adding the whole shift every step made the position drift by
+    // 0.01 * cg per step (10 * cg m/s at 1 kHz), which is why differencing the
+    // position gave distances that had nothing to do with how far the car went.
     const auto cg = m_damage.cgShift();
-    m_state.position.x += cg.x * 0.01f;
-    m_state.position.z += cg.z * 0.01f;
+    m_state.position.x += (cg.x - m_appliedCgShift.x) * 0.01f;
+    m_state.position.z += (cg.z - m_appliedCgShift.z) * 0.01f;
+    m_appliedCgShift = cg;
 
     m_state.speed = std::sqrt(m_state.velocity.x * m_state.velocity.x +
                               m_state.velocity.z * m_state.velocity.z);

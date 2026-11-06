@@ -58,6 +58,7 @@ struct StopResult {
     double v0 = 0.0;
     double distance = 0.0;
     double stopTime = 0.0;
+    double positionDistance = 0.0;
     float peakDiscTemp = 0.f;
     float endFade = 0.f;
     bool reached = false;
@@ -101,6 +102,7 @@ StopResult stopFrom100(const std::vector<std::pair<float, float>>& curve,
     if (!r.reached) return r;
 
     r.v0 = v.getState().speed;
+    const auto startPosition = v.getState().position;
     // Distance from the model's own speed, not from state().position: the
     // position is nudged by the damage cg shift on every step, so differencing
     // it accumulates a drift that has nothing to do with the stop.
@@ -132,6 +134,12 @@ StopResult stopFrom100(const std::vector<std::pair<float, float>>& curve,
         }
     }
     r.distance = travelled;
+    {
+        const auto endPosition = v.getState().position;
+        const double dx = endPosition.x - startPosition.x;
+        const double dz = endPosition.z - startPosition.z;
+        r.positionDistance = std::sqrt(dx * dx + dz * dz);
+    }
     r.stopTime = step * dt;
     r.endFade = v.brakes().fade(0);
     return r;
@@ -171,6 +179,9 @@ int main()
     std::printf("brake_stop: reached=%d/%d stopped=%d/%d\n", coldRun.reached ? 1 : 0,
                 warmRun.reached ? 1 : 0, coldRun.stopped ? 1 : 0, warmRun.stopped ? 1 : 0);
 
+    std::printf("brake_stop: position-based distance: cold=%.1f m warm=%.1f m\n",
+                coldRun.positionDistance, warmRun.positionDistance);
+
     // The script really drives the car: 100 km/h reached, then a stop.
     KS_CHECK(coldRun.reached);
     KS_CHECK(warmRun.reached);
@@ -178,6 +189,10 @@ int main()
     KS_CHECK(coldRun.stopped);
     KS_CHECK(warmRun.stopped);
     KS_CHECK(coldRun.distance > 0.0);
+    // state().position follows the stop again: the damage cg shift is folded in
+    // as a delta, so differencing it no longer drifts away from the real path.
+    KS_CHECK(std::fabs(coldRun.positionDistance - coldRun.distance) <
+             std::max(1.0, 0.02 * coldRun.distance));
 
     // A 1992 hypercar with cold, fading brakes: no 30 m miracle, no 200 m slide.
     KS_CHECK(coldRun.distance > 30.0);

@@ -269,6 +269,10 @@ private:
 
     double m_throttle = 0, m_brake = 0, m_steering = 0;
     double m_handbrake = 0.0; // rear-axle handbrake demand, 0..1
+    /** Damage cg shift already folded into m_state.position. Only the change
+     *  moves the model: applying the whole shift every step turned it into a
+     *  constant drift (0.01 * cg per step). */
+    PhysVec3 m_appliedCgShift{};
     double m_mass = 1200, m_enginePowerKw = 260, m_maxRpm = 8500;
     double m_cd = 0.35, m_frontalArea = 2.2, m_wheelBase = 2.6, m_trackWidth = 1.6;
     double m_wheelRadius = 0.33, m_finalDrive = 3.9;
