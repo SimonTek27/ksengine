@@ -1516,6 +1516,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             std::exit(2);
         }
     }
+    // KS_PROFILE_NAME / KS_PROFILE_NATIONALITY: fill the driver page before the
+    // capture, so a long name or a chosen country can be judged on screen - the
+    // defaults never show either.
+    if (const char* nameEnv = std::getenv("KS_PROFILE_NAME"); nameEnv && nameEnv[0])
+        g_simulation->ui().menu().setProfileField("NAME", nameEnv);
+    if (const char* natEnv = std::getenv("KS_PROFILE_NATIONALITY"); natEnv && natEnv[0])
+        g_simulation->ui().menu().setProfileField("NATIONALITY", natEnv);
     // KS_MENU_SELECT=<row>: put the selection further down a page, so a capture
     // can show what a list does once it scrolls - the rows hidden above it and
     // the caption that says so.
