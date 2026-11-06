@@ -212,6 +212,12 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
     m_ui.resize(m_viewW, m_viewH);
     m_ui.dashboard().setVisible(true);
     m_ui.menu().setVisible(false);
+    // Phase 3.3 — the SINGLE PLAYER page picks the layout of the chosen track.
+    // The loop owns the catalog, so the menu asks for the pairs and hands back
+    // an id: switching goes through switchLayout like any other caller.
+    m_ui.menu().layoutChoices = [this]() { return layoutChoices(); };
+    m_ui.menu().activeLayoutId = [this]() { return activeLayoutId(); };
+    m_ui.menu().onLayoutChosen = [this](const std::string& id) { switchLayout(id); };
     m_raceSession.onCountdownFinished = [this]() {
         m_sessionPhase = PHASE_GREEN_FLAG;
         m_timeRemaining = 0.0;
@@ -466,6 +472,24 @@ bool SimulationLoop::switchLayout(const std::string& layoutId) {
     std::fprintf(stderr, "SimulationLoop: switched layout '%s' (%s) length=%.1f\n",
                  layout->id.c_str(), m_trackData.name.c_str(), m_trackData.splineLength);
     return true;
+}
+
+std::vector<std::pair<std::string, std::string>> SimulationLoop::layoutChoices() const {
+    std::vector<std::pair<std::string, std::string>> out;
+    for (const auto& layout : m_layouts.layouts()) {
+        std::string name = layout.name.empty() ? layout.id : layout.name;
+        // The length is what actually changes on most layouts, so it belongs
+        // in the label; the default entry keeps the track's own name alone.
+        if (!layout.isDefault && layout.lengthM > 1.f)
+            name += " (" + std::to_string(static_cast<int>(layout.lengthM + 0.5f)) + " m)";
+        out.emplace_back(layout.id, name);
+    }
+    return out;
+}
+
+std::string SimulationLoop::activeLayoutId() const {
+    const TrackLayoutInfo* active = m_layouts.active();
+    return active ? active->id : std::string();
 }
 
 bool SimulationLoop::loadCar(const std::string& carDir) {

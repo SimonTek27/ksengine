@@ -259,6 +259,30 @@ void GameMenuOverlay::buildSingleplayerMenu()
     // It never gates the session rows — no team keeps the legacy identity.
     m_items.push_back({ "TEAM", m_teamName.empty() ? "Select a team (optional)" : m_teamName,
         [this]() { openTeamSelect(); } });
+    // Phase 3.3 — layout of the chosen track. The loop hands out the layouts
+    // it discovered; a single layout has nothing to pick, so no row.
+    if (layoutChoices && activeLayoutId) {
+        const auto choices = layoutChoices();
+        if (choices.size() > 1) {
+            const std::string active = activeLayoutId();
+            std::string label = active;
+            for (const auto& c : choices)
+                if (c.first == active) label = c.second;
+            m_items.push_back({ "LAYOUT  " + label,
+                std::to_string(choices.size()) + " layout(s) on this track",
+                [this, choices, active]() {
+                    size_t next = 0;
+                    for (size_t i = 0; i < choices.size(); ++i) {
+                        if (choices[i].first == active) {
+                            next = (i + 1) % choices.size();
+                            break;
+                        }
+                    }
+                    if (onLayoutChosen) onLayoutChosen(choices[next].first);
+                    m_menuDirty = true; // the label follows the new binding
+                } });
+        }
+    }
     m_items.push_back({ "", "", nullptr, true });
     // Fase 1 exit ("sessione practice da giocatore"): a session starts only
     // once BOTH sides are chosen — otherwise the player would drop into an

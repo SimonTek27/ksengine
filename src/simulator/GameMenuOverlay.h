@@ -4,6 +4,7 @@
 #include "SessionController.h"
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace ks { namespace engine { namespace config { class Locale; } } }
@@ -240,6 +241,13 @@ public:
     std::function<void(const std::string&)> onTeamChosen;
     std::function<std::vector<std::string>()> upgradeRowLabels;
     std::function<void(int)> onUpgradeRowCycled;
+    // Phase 3.3 — layout picker on the SINGLE PLAYER page. The loop owns the
+    // catalog: the menu asks for (id, name) pairs and which id is bound, and
+    // hands back the id it cycled to, so it never learns how a layout is
+    // stored. Fewer than two layouts = no row.
+    std::function<std::vector<std::pair<std::string, std::string>>()> layoutChoices;
+    std::function<std::string()> activeLayoutId;
+    std::function<void(const std::string&)> onLayoutChosen;
     std::function<void()> onShowResultsRequested;
     std::function<void(const std::string&)> onOpenSettingsPanelRequested;
     std::function<void(const MenuOptions&)> onOptionsChanged;

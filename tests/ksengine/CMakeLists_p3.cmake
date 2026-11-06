@@ -186,3 +186,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/AsphaltSkeleton.h")
     target_link_libraries(geotrack_skeleton_test PRIVATE ksengine)
     add_test(NAME geotrack_skeleton_test COMMAND geotrack_skeleton_test)
 endif()
+
+# Phase 3.3 — the LAYOUT row on the SINGLE PLAYER page. Header-only on the
+# overlay's own providers, so the test needs no renderer, loop or window.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/menu_layout_picker_test.cpp")
+    add_executable(menu_layout_picker_test
+        menu_layout_picker_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/GameMenuOverlay.cpp")
+    target_include_directories(menu_layout_picker_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(menu_layout_picker_test PRIVATE ksengine)
+    add_test(NAME menu_layout_picker_test COMMAND menu_layout_picker_test)
+    set_tests_properties(menu_layout_picker_test PROPERTIES TIMEOUT 60)
+endif()

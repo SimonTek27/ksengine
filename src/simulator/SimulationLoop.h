@@ -380,6 +380,9 @@ public:
     /** Phase 3.3: rebind layout-specific data without full track unload. */
     bool switchLayout(const std::string& layoutId);
     const TrackLayoutCatalog& layoutCatalog() const { return m_layouts; }
+    /** Phase 3.3: what a picker shows, in catalog order, and what is bound. */
+    std::vector<std::pair<std::string, std::string>> layoutChoices() const;
+    std::string activeLayoutId() const;
 
     // Trackside posts (TracksidePosts.h): the shared safety-car bay at the pit
     // exit and four marshals per corner. Loaded from the track manifest; the

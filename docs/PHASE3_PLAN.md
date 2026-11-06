@@ -12,7 +12,7 @@
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
 | **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **✅ Delivered** — secure transport, client auto-reconnect, headless host key/token flags; evidence `test_multiplayer` + `ks_server_smoke` |
-| **3.3** | Multi-layout without full reload | Medium | **In progress** — catalog + `switchLayout`/`KS_LAYOUT` wire + binding test; menu picker and layout broadcast remain |
+| **3.3** | Multi-layout without full reload | Medium | **In progress** — catalog + `switchLayout`/`KS_LAYOUT` wire + LAYOUT picker + tests; layout broadcast remains |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
 | **3.6** | Triple monitor | Low | Not started |
@@ -71,12 +71,13 @@ without tearing down cars / renderer / session stack.
 - [x] `cmake/CMakeLists_ksimulator_QtFree.cmake` compiles `TrackLayout.cpp`
 - [x] `SimulationLoop` wire (`switchLayout`, `KS_LAYOUT`) — merged 2026-11-06; the patches under `docs/patches/` are superseded
 - [x] `resolveLayoutBinding` (TrackLayout): a layout's own `data.json`, `.kn5` and `ai/` folder, covered by `track_layout_test`
+- [x] LAYOUT row on the SINGLE PLAYER page (`layoutChoices`/`activeLayoutId`/`onLayoutChosen`), covered by `menu_layout_picker_test`
 
 ### Remaining
 
 1. ~~Merge SimulationLoop header/cpp wire (layout fields + `switchLayout`)~~ — done 2026-11-06.
 2. ~~Reload AI racing line on switch when layout ships its own `ai/*.ai`~~ — done: the binding names the folder, `switchLayout` reloads the line.
-3. Menu UI to pick layout before session start.
+3. ~~Menu UI to pick layout before session start~~ — done 2026-11-06: LAYOUT row, hidden below two layouts.
 4. Multiplayer: broadcast active layout id on join.
 5. Real second layout content pack (e.g. Mugello national) when available.
 

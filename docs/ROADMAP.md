@@ -72,7 +72,7 @@ stato dettagliato in inglese: [ksengine.roadmap.md](ksengine.roadmap.md).
 |---|---|---|---|
 | 3.1 | Validazione gomme su telemetria reale | Alta | tooling pronto; campagna dati aperta |
 | 3.2 | `ksnet` secure-connect, reconnect, server dedicato | Media | ✅ secure transport, reconnect client, flag chiave/token sull'host headless — evidence `test_multiplayer` + `ks_server_smoke` |
-| 3.3 | Multi-layout senza reload completo | Media | 🟡 `switchLayout` + `KS_LAYOUT` cablati e coperti da `track_layout_test`; restano picker menu e broadcast del layout |
+| 3.3 | Multi-layout senza reload completo | Media | 🟡 `switchLayout` + `KS_LAYOUT` cablati, riga LAYOUT nel menu (`track_layout_test`, `menu_layout_picker_test`); resta il broadcast del layout |
 | 3.4 | Driver swap (endurance) | Media | ⬜ |
 | 3.5 | VR OpenXR | Bassa | ⬜ |
 | 3.6 | Triple monitor | Bassa | ⬜ |
