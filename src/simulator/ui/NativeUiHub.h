@@ -930,7 +930,11 @@ private:
         };
         float contentH = 0.f;
         for (const auto& row : items) contentH += rowAdvance(row);
-        const float windowH = bottomLimit - L.top;
+        // The caption band under the list is part of the window, not something
+        // painted over it: rows stop above it, so "MORE BELOW" never lands on
+        // the last visible label.
+        const float rowLimit = bottomLimit - 26.f;
+        const float windowH = rowLimit - L.top;
         float skip = 0.f;
         if (contentH > windowH && !items.empty()) {
             const int last = static_cast<int>(items.size()) - 1;
@@ -951,7 +955,7 @@ private:
             const auto& it = items[i];
             const float advance = rowAdvance(it);
             if (iy + advance <= L.top) { iy += advance; continue; } // scrolled above
-            if (iy >= bottomLimit) break;                           // scrolled below
+            if (iy >= rowLimit) break;                              // scrolled below
             if (it.isSeparator) {
                 dl.addRectFilled({L.left, iy + L.rowH * 0.15f, L.listW * 0.55f, 1.f},
                                  Color::rgba(1, 1, 1, 0.12f * a));
@@ -995,6 +999,21 @@ private:
             if (selected)
                 desc = it.description;
             iy += advance;
+        }
+
+        // A page taller than the window says so, on the side that has rows
+        // hidden, and says nothing when it fits. A track and thumb were tried
+        // first and read as a stray border: a page that overflows by two rows
+        // got a thumb the height of the list.
+        if (contentH > windowH) {
+            const auto moreRows = [&](float y, bool above) {
+                m_text.draw(dl, L.left + 8.f, y, above ? "^" : "v",
+                            sty(Color::rgba(0.90f, 0.25f, 0.25f, a), 0.85f, true));
+                m_text.draw(dl, L.left + 24.f, y, above ? "MORE ABOVE" : "MORE BELOW",
+                            sty(Color::rgba(0.60f, 0.60f, 0.64f, a), 0.85f));
+            };
+            if (skip > 1.f) moreRows(L.top - 22.f, true);
+            if (skip < contentH - windowH - 1.f) moreRows(rowLimit + 4.f, false);
         }
 
         if (!desc.empty()) {
