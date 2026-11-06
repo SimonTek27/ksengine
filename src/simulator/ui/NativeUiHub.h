@@ -919,15 +919,43 @@ private:
         L.left += slide;
         const auto& items = m_menu->items();
         const int sel = m_menu->selectedIndex();
-        float iy = L.top;
+        // The bar and the context line above it own the bottom of the screen: a
+        // page longer than that window scrolls inside it instead of running
+        // through them. Without this the last rows were painted off screen —
+        // SINGLE PLAYER lost BACK entirely and the context line sat on top of
+        // RESULTS.
+        const float bottomLimit = static_cast<float>(h) - 96.f;
+        const auto rowAdvance = [&L](const MenuItem& row) {
+            return row.isSeparator ? L.rowH * 0.45f : L.rowH;
+        };
+        float contentH = 0.f;
+        for (const auto& row : items) contentH += rowAdvance(row);
+        const float windowH = bottomLimit - L.top;
+        float skip = 0.f;
+        if (contentH > windowH && !items.empty()) {
+            const int last = static_cast<int>(items.size()) - 1;
+            const int selection = std::clamp(sel, 0, last);
+            float above = 0.f;
+            for (int i = 0; i < selection; ++i) above += rowAdvance(items[i]);
+            // Anchor the selection's bottom to the window's bottom, then never
+            // scroll past its own top: whichever way the row was reached, it
+            // ends up visible.
+            skip = std::clamp(above + rowAdvance(items[selection]) - windowH,
+                              0.f, contentH - windowH);
+            skip = std::min(skip, above);
+        }
+        float iy = L.top - skip;
         std::string desc;
 
         for (int i = 0; i < static_cast<int>(items.size()); ++i) {
             const auto& it = items[i];
+            const float advance = rowAdvance(it);
+            if (iy + advance <= L.top) { iy += advance; continue; } // scrolled above
+            if (iy >= bottomLimit) break;                           // scrolled below
             if (it.isSeparator) {
                 dl.addRectFilled({L.left, iy + L.rowH * 0.15f, L.listW * 0.55f, 1.f},
                                  Color::rgba(1, 1, 1, 0.12f * a));
-                iy += L.rowH * 0.45f;
+                iy += advance;
                 continue;
             }
 
@@ -966,7 +994,7 @@ private:
 
             if (selected)
                 desc = it.description;
-            iy += L.rowH;
+            iy += advance;
         }
 
         if (!desc.empty()) {
