@@ -30,6 +30,27 @@ struct TrackLayoutInfo {
     bool isDefault = false;
 };
 
+/**
+ * What an active layout contributes to the track, resolved once:
+ *   - folder: where its data lives (the track root for the default layout)
+ *   - lengthM / name: the layout's own figures, a layout's data/data.json
+ *     winning over its catalog entry (0 / empty = the layout declares none)
+ *   - kn5Path: geometry the layout brings with it (empty = keep the current)
+ *   - aiFolder: where its racing line is read from, the layout's own ai/
+ *     folder when it has one, otherwise the track root
+ * Reading this never touches the simulator, so the rules stay testable.
+ */
+struct TrackLayoutBinding {
+    std::string folder;
+    float lengthM = 0.f;
+    std::string name;
+    std::string kn5Path;
+    std::string aiFolder;
+};
+
+TrackLayoutBinding resolveLayoutBinding(const TrackLayoutInfo& layout,
+                                        const std::string& trackRoot);
+
 class TrackLayoutCatalog {
 public:
     void clear();

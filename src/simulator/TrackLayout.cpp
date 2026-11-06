@@ -69,6 +69,47 @@ bool jsonBoolValue(const std::string& text, size_t from, const std::string& key,
 
 } // namespace
 
+TrackLayoutBinding resolveLayoutBinding(const TrackLayoutInfo& layout,
+                                        const std::string& trackRoot) {
+    TrackLayoutBinding binding;
+    binding.folder = layout.folder.empty() ? trackRoot : layout.folder;
+    binding.lengthM = layout.lengthM;
+    binding.aiFolder = trackRoot;
+    // The default layout keeps the track's own name: its id is the track, not
+    // a layout of it, and the folder name is what the loader already used.
+    if (!layout.isDefault) binding.name = layout.name;
+
+    std::error_code ec;
+    const fs::path dataJson = fs::path(binding.folder) / "data" / "data.json";
+    if (fs::exists(dataJson, ec)) {
+        std::ifstream in(dataJson);
+        if (in) {
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            const std::string text = ss.str();
+            float length = jsonNumberValue(text, 0, "length_m");
+            if (length <= 0.f) length = jsonNumberValue(text, 0, "length");
+            if (length > 1.f) binding.lengthM = length;
+            const std::string name = jsonTextValue(text, 0, "name");
+            if (!name.empty()) binding.name = name;
+        }
+    }
+
+    const bool ownFolder = binding.folder != trackRoot;
+    if (ownFolder && fs::is_directory(binding.folder, ec)) {
+        for (const auto& entry : fs::directory_iterator(binding.folder, ec)) {
+            if (ec) break;
+            if (entry.path().extension() == ".kn5") {
+                binding.kn5Path = entry.path().string();
+                break;
+            }
+        }
+    }
+    if (ownFolder && fs::is_directory(fs::path(binding.folder) / "ai", ec))
+        binding.aiFolder = binding.folder;
+    return binding;
+}
+
 void TrackLayoutCatalog::clear() {
     m_layouts.clear();
     m_trackRoot.clear();

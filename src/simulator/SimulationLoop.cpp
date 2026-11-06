@@ -336,27 +336,44 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
     loadContentMods(trackDirectory); // Lua Mod SDK: <track>/scripts/*.lua
     m_trackData.directory = trackDirectory;
     m_trackData.name = fs::path(trackDirectory).filename().string();
+    // Phase 3.3 — a track folder may expose several layouts that share its
+    // assets (TrackLayout.h). Discover them once, let KS_LAYOUT pick one for
+    // headless runs, and keep the resolved folder on the track data so a
+    // later switchLayout() does not have to rediscover anything.
+    m_layouts.discover(trackDirectory);
+    if (const char* layoutEnv = std::getenv("KS_LAYOUT"); layoutEnv && layoutEnv[0]) {
+        if (!m_layouts.selectById(layoutEnv)) {
+            const TrackLayoutInfo* active = m_layouts.active();
+            std::fprintf(stderr, "SimulationLoop: KS_LAYOUT=%s not found, using '%s'\n",
+                         layoutEnv, active ? active->id.c_str() : "default");
+        }
+    }
+    const TrackLayoutInfo* layout = m_layouts.active();
+    const std::string layoutId = layout ? layout->id : std::string("default");
+    TrackLayoutBinding binding;
+    binding.folder = trackDirectory;
+    binding.aiFolder = trackDirectory;
+    if (layout) binding = resolveLayoutBinding(*layout, trackDirectory);
     // AI racing line (roadmap 3.5): load it at track-load time so the grid
     // can be spawned when the session starts. No file = spawnGrid is a no-op.
-    if (m_multiCar) m_multiCar->loadAiSpline(trackDirectory);
+    // A layout that ships its own ai/ folder brings its own line; otherwise
+    // the one at the track root still applies.
+    if (m_multiCar) m_multiCar->loadAiSpline(binding.aiFolder);
     // Native JSON manifest (data/data.json) preferred; surfaces.ini remains
     // the AC compatibility path when JSON is absent or fails to parse.
     {
         ks::ac::TrackDataJsonLoader trackJson;
-        if (trackJson.loadForTrackDir(trackDirectory)) {
-            if (!trackJson.meta().name.empty())
-                m_trackData.name = trackJson.meta().name;
-            if (trackJson.meta().lengthM > 1.f)
-                m_trackData.splineLength = trackJson.meta().lengthM;
-        } else {
-            fs::path surf = fs::path(trackDirectory) / "data" / "surfaces.ini";
-            if (!fs::exists(surf)) surf = fs::path(trackDirectory) / "surfaces.ini";
+        if (!trackJson.loadForTrackDir(binding.folder)) {
+            fs::path surf = fs::path(binding.folder) / "data" / "surfaces.ini";
+            if (!fs::exists(surf)) surf = fs::path(binding.folder) / "surfaces.ini";
+            if (!fs::exists(surf)) surf = fs::path(trackDirectory) / "data" / "surfaces.ini";
             if (fs::exists(surf)) {
                 ks::ac::AcSurfacesLoader loader;
                 loader.load(surf.string());
             }
         }
     }
+    if (!binding.name.empty()) m_trackData.name = binding.name;
     ks::physics::TrackSurface::instance().syncFromWeather(m_weather.trackWetness, m_weather.trackTemp);
     // A real AC track folder holds several .kn5 — the layout plus its
     // sub-layouts and decorative props — so directory order is not a choice:
@@ -378,12 +395,76 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
             kn5 = path.string();
         }
     }
-    if (!kn5.empty()) return loadTrack(kn5);
-    m_trackData.valid = true; m_trackLoaded = true;
+    // A layout folder of its own may carry its own geometry; the root scan
+    // above only sees the layouts that share the base assets.
+    if (kn5.empty() && !binding.kn5Path.empty()) kn5 = binding.kn5Path;
+    if (!kn5.empty()) {
+        if (!loadTrack(kn5)) return false;
+    } else {
+        m_trackData.valid = true; m_trackLoaded = true;
+        // Roadmap 1.2: a folder without a .kn5 can still carry a baked cache.
+        applyTrackVisuals(binding.folder);
+    }
+    // loadTrack() rebuilds SimTrackData from the .kn5, so the layout identity,
+    // its length and the manifest name are applied after it, not before.
+    m_trackData.directory = trackDirectory;
+    m_trackData.layoutId = layoutId;
+    m_trackData.layoutFolder = binding.folder;
+    if (binding.lengthM > 1.f) m_trackData.splineLength = binding.lengthM;
+    if (!binding.name.empty()) m_trackData.name = binding.name;
     m_ui.menu().setTrackName(m_trackData.name);
     m_lapTimer.configure(3);
-    // Roadmap 1.2: a folder without a .kn5 can still carry a baked cache.
-    applyTrackVisuals(trackDirectory);
+    std::fprintf(stderr,
+                 "SimulationLoop: track '%s' layout '%s' length=%.1f (%d layouts)\n",
+                 m_trackData.name.c_str(), layoutId.c_str(), m_trackData.splineLength,
+                 m_layouts.count());
+    return true;
+}
+
+bool SimulationLoop::switchLayout(const std::string& layoutId) {
+    namespace fs = std::filesystem;
+    if (m_trackData.directory.empty()) {
+        std::fprintf(stderr, "SimulationLoop::switchLayout: no track loaded\n");
+        return false;
+    }
+    if (m_layouts.empty()) m_layouts.discover(m_trackData.directory);
+    if (!m_layouts.selectById(layoutId)) {
+        std::fprintf(stderr, "SimulationLoop::switchLayout: unknown layout '%s'\n",
+                     layoutId.c_str());
+        return false;
+    }
+    const TrackLayoutInfo* layout = m_layouts.active();
+    if (!layout) return false;
+
+    const TrackLayoutBinding binding = resolveLayoutBinding(*layout, m_trackData.directory);
+    m_trackData.layoutId = layout->id;
+    m_trackData.layoutFolder = binding.folder;
+
+    // The layout's own manifest wins over its catalog entry for length and
+    // display name; both stay untouched when the folder has neither.
+    if (binding.lengthM > 1.f) m_trackData.splineLength = binding.lengthM;
+    if (!binding.name.empty()) m_trackData.name = binding.name;
+
+    // Prefer a layout-local .kn5; without one the current geometry stays, so
+    // only the data the layout owns actually changes.
+    if (!binding.kn5Path.empty()) {
+        m_trackData.kn5Path = binding.kn5Path;
+        applyTrackVisuals(binding.folder);
+    }
+
+    // Layout-local AI line when the layout ships one, otherwise the root's.
+    if (m_multiCar) m_multiCar->loadAiSpline(binding.aiFolder);
+
+    // The car, renderer and session stack stay alive: only the lap clock and
+    // the distance travelled along the new spline are reset.
+    m_ui.menu().setTrackName(m_trackData.name);
+    m_lapTimer.configure(3);
+    m_lapDistance = 0.f;
+    m_normalizedSpline = 0.f;
+    m_trackData.valid = true;
+    m_trackLoaded = true;
+    std::fprintf(stderr, "SimulationLoop: switched layout '%s' (%s) length=%.1f\n",
+                 layout->id.c_str(), m_trackData.name.c_str(), m_trackData.splineLength);
     return true;
 }
 

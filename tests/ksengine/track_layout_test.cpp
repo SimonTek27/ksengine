@@ -82,6 +82,62 @@ int main() {
         KS_CHECK(m.active() && m.active()->isDefault);
     }
 
+    // Binding rules: a layout's own data.json wins over its catalog entry, a
+    // layout that ships a .kn5 and an ai/ folder keeps them, and one that has
+    // neither inherits the track root's line and geometry.
+    {
+        const fs::path root3 = fs::temp_directory_path() / "ks_track_layout_binding";
+        fs::remove_all(root3);
+        fs::create_directories(root3 / "data");
+        fs::create_directories(root3 / "ai");
+        writeText(root3 / "data" / "data.json", R"({"name":"Root","length_m":1000})");
+        writeText(root3 / "track.kn5", "rootmesh");
+
+        fs::create_directories(root3 / "national" / "ai");
+        writeText(root3 / "national" / "data" / "data.json",
+                  R"({"name":"National","length_m":3200.5})");
+        writeText(root3 / "national" / "national.kn5", "nationalmesh");
+
+        // Only surfaces.ini: enough to be a layout, no geometry, no own line.
+        fs::create_directories(root3 / "short" / "data");
+        writeText(root3 / "short" / "data" / "surfaces.ini",
+                  "[SURFACE_0]\nKEY=ASPHALT\n");
+
+        ks::sim::TrackLayoutCatalog c;
+        KS_CHECK(c.discover(root3.string()) >= 3);
+
+        KS_CHECK(c.selectById("national"));
+        const ks::sim::TrackLayoutBinding nat =
+            ks::sim::resolveLayoutBinding(*c.active(), root3.string());
+        KS_CHECK(nat.folder.find("national") != std::string::npos);
+        KS_CHECK(nat.name == "National");
+        KS_CHECK(nat.lengthM > 3200.f && nat.lengthM < 3201.f);
+        KS_CHECK(nat.kn5Path.find("national.kn5") != std::string::npos);
+        KS_CHECK(nat.aiFolder.find("national") != std::string::npos);
+
+        KS_CHECK(c.selectById("short"));
+        const ks::sim::TrackLayoutBinding shortL =
+            ks::sim::resolveLayoutBinding(*c.active(), root3.string());
+        KS_CHECK(shortL.kn5Path.empty());
+        KS_CHECK(shortL.aiFolder == root3.string());
+        // No data.json of its own: the catalog's name for the layout stands,
+        // so the track does not keep presenting itself as the old layout.
+        KS_CHECK(shortL.name == "short");
+
+        KS_CHECK(c.selectById("default"));
+        const ks::sim::TrackLayoutBinding rootL =
+            ks::sim::resolveLayoutBinding(*c.active(), root3.string());
+        KS_CHECK(rootL.folder == root3.string());
+        KS_CHECK(rootL.name == "Root");
+        KS_CHECK(rootL.lengthM > 999.f && rootL.lengthM < 1001.f);
+        KS_CHECK(rootL.aiFolder == root3.string());
+        KS_CHECK(rootL.kn5Path.empty());
+
+        fs::remove_all(root3);
+    }
+
     fs::remove_all(root);
-    return 0;
+    // A failing KS_CHECK has to fail the run: returning 0 made CTest pass the
+    // suite while the log carried FAIL lines.
+    return KS_TEST_RESULT("track_layout_test");
 }
