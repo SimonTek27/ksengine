@@ -45,7 +45,25 @@
 static const char* AC_PATH = "F:/SteamLibrary/steamapps/common/assettocorsa";
 // Installed layout: SPIR-V lives in system/shaders next to ksim.exe
 // (cmake/KsInstallLayout.cmake).
-static const char* SHADER_DIR = "system/shaders";
+// Installed layout first, source tree second: a build drops the same SPIR-V in
+// build/shaders, so one lookup covers both instead of crashing a dev run that
+// started from the repository root (nothing loaded, no pipeline, no frame).
+// KS_SHADER_DIR wins over both for a harness that keeps them elsewhere.
+static std::string shaderDirectory() {
+    static const std::string resolved = []() -> std::string {
+        if (const char* env = std::getenv("KS_SHADER_DIR"); env != nullptr && env[0] != '\0')
+            return std::string(env);
+        for (const char* candidate : {"system/shaders", "build/shaders"}) {
+            std::ifstream probe(std::string(candidate) + "/native_forward.vert.spv",
+                                std::ios::binary);
+            if (probe.good()) return std::string(candidate);
+        }
+        // Nothing found: report the installed path, which is the one an
+        // incomplete install is missing.
+        return std::string("system/shaders");
+    }();
+    return resolved;
+}
 
 static HINSTANCE g_hInstance = nullptr;
 static HWND g_hWnd = nullptr;
@@ -605,8 +623,20 @@ static void initVulkanAndSimulation() {
         g_nativeRenderer->createSwapChain(g_surface, rc.right - rc.left, rc.bottom - rc.top);
         printf("[INIT] Vulkan device + swap chain OK\n");
 
-        if (!g_nativeRenderer->loadPipelines(SHADER_DIR))
-            printf("[INIT] Pipeline load FAILED (missing %s shaders?)\n", SHADER_DIR);
+        // One directory for every shader load below (main pass and shadows):
+        // the installed layout or the source tree, decided once.
+        const std::string shaderDir = shaderDirectory();
+        printf("[INIT] Shader dir: %s\n", shaderDir.c_str());
+        // The main pass is what a frame cannot be recorded without. Running on
+        // with no pipeline drew nothing and then handed the driver null
+        // handles (the windowed SIGSEGV), so stop here and say why.
+        if (!g_nativeRenderer->loadPipelines(shaderDir.c_str())) {
+            printf("[INIT] Pipeline load FAILED (missing %s shaders?)\n", shaderDir.c_str());
+            // Nothing below can produce a frame, and this function returns void
+            // (the window and its Vulkan objects are process-lifetime): leaving
+            // here with a non-zero status beats a silent black window.
+            std::exit(1);
+        }
 
         // Culling is on by default; KS_FRUSTUM_CULL=0 turns it off so its
         // effect can be A/B compared from the frame stats it reports.
@@ -628,7 +658,7 @@ static void initVulkanAndSimulation() {
 
         if (g_shadowMap.initialize(g_nativeRenderer->physicalDevice(), g_nativeRenderer->device(),
                                    g_nativeRenderer->commandPool(), g_nativeRenderer->graphicsQueue(),
-                                   SHADER_DIR)) {
+                                   shaderDir.c_str())) {
             g_nativeRenderer->attachShadowMap(&g_shadowMap);
             printf("[INIT] Shadow map OK\n");
         } else {

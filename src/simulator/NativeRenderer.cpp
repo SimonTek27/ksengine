@@ -2149,6 +2149,19 @@ void NativeRenderer::setAnisotropicFiltering(int samples) {
 }
 
 bool NativeRenderer::beginFrame() {
+    // loadPipelines() never produced the main pass (missing SPIR-V): recording
+    // a frame now would hand the driver VK_NULL_HANDLE pipeline/layout/pass
+    // handles, and it does not survive that. No image is acquired either, so
+    // the presentation queue is never starved by a frame that cannot be shown.
+    if (m_pipeline == VK_NULL_HANDLE) {
+        static bool warned = false;
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr, "[NativeRenderer] no graphics pipeline loaded (missing SPIR-V) "
+                                 "- frames are skipped\n");
+        }
+        return false;
+    }
     vkWaitForFences(m_device, 1, &m_inFlightFence, VK_TRUE, UINT64_MAX);
 
     // The occlusion grid copied at the end of the previous frame is complete
@@ -2282,6 +2295,9 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
 }
 
 void NativeRenderer::endFrame() {
+    // Paired with the beginFrame() guard: nothing was recorded, and the fence
+    // stays as the last submitted frame left it.
+    if (m_pipeline == VK_NULL_HANDLE) return;
     vkResetFences(m_device, 1, &m_inFlightFence);
     vkResetCommandBuffer(m_commandBuffer, 0);
 
