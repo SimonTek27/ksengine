@@ -155,7 +155,12 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
     // when a welcome arrives, so both sides drive the same layout.
     m_network->localLayoutId = [this]() { return activeLayoutId(); };
     m_network->onServerWelcome = [this](const std::string&, const std::string& layoutId) {
-        if (!layoutId.empty()) switchLayout(layoutId);
+        if (layoutId.empty()) return;
+        if (switchLayout(layoutId)) return;
+        // The host drives a layout this copy does not have. Staying on the
+        // default silently would leave two drivers on different lengths, so
+        // the reason goes to the chat as well as to the HUD notice.
+        m_ui.chat().addLine("HOST LAYOUT: " + m_layoutNotice);
     };
     // Multiplayer (roadmap 3.1): NetworkManager only pumps the transport,
     // everything that reaches the simulation is wired here.
@@ -442,10 +447,15 @@ bool SimulationLoop::switchLayout(const std::string& layoutId) {
     }
     if (m_layouts.empty()) m_layouts.discover(m_trackData.directory);
     if (!m_layouts.selectById(layoutId)) {
-        std::fprintf(stderr, "SimulationLoop::switchLayout: unknown layout '%s'\n",
-                     layoutId.c_str());
+        // Kept rather than only logged: a guest whose copy of the track lacks
+        // the host's layout has to be told why it is on a different one.
+        m_layoutNotice = m_layouts.missingLayoutMessage(layoutId);
+        if (m_layoutNotice.empty())
+            m_layoutNotice = "layout '" + layoutId + "' not available";
+        std::fprintf(stderr, "SimulationLoop::switchLayout: %s\n", m_layoutNotice.c_str());
         return false;
     }
+    m_layoutNotice.clear();
     const TrackLayoutInfo* layout = m_layouts.active();
     if (!layout) return false;
 
@@ -476,6 +486,7 @@ bool SimulationLoop::switchLayout(const std::string& layoutId) {
     m_normalizedSpline = 0.f;
     m_trackData.valid = true;
     m_trackLoaded = true;
+    m_layoutNotice.clear();
     std::fprintf(stderr, "SimulationLoop: switched layout '%s' (%s) length=%.1f\n",
                  layout->id.c_str(), m_trackData.name.c_str(), m_trackData.splineLength);
     return true;
@@ -2403,7 +2414,11 @@ void SimulationLoop::syncUiFromVehicle() {
     // status (skipping the "ON TRACK" no-op label). Empty = stay quiet.
     s.statusText[0] = '\0';
     const std::string garageNow = garageStatus();
-    if (pitServiceBusy())
+    if (!m_layoutNotice.empty()) {
+        // A layout the host announced but this copy lacks outranks the pit
+        // labels: it is the reason this car is on a different track length.
+        std::snprintf(s.statusText, sizeof(s.statusText), "%s", m_layoutNotice.c_str());
+    } else if (pitServiceBusy())
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", pitServiceStatus());
     else if (!garageNow.empty() && garageNow != "ON TRACK")
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", garageNow.c_str());

@@ -12,7 +12,7 @@
 |---|------|----------|--------|
 | **3.1** | Tyre validation vs real telemetry | High | Tooling ready (`kstirenorm`, Milliken G1–G18 ✅); needs **data campaign** (real logs) |
 | **3.2** | ksnet secure-connect, reconnect, dedicated server | Medium | **✅ Delivered** — secure transport, client auto-reconnect, headless host key/token flags; evidence `test_multiplayer` + `ks_server_smoke` |
-| **3.3** | Multi-layout without full reload | Medium | **✅ Delivered** — catalog, `switchLayout`/`KS_LAYOUT`, LAYOUT picker, layout announced in the welcome; `track_layout_test` + `menu_layout_picker_test` + `test_multiplayer`. Remaining is content (a second real layout) |
+| **3.3** | Multi-layout without full reload | Medium | **✅ Delivered** — catalog, `switchLayout`/`KS_LAYOUT`, LAYOUT picker, layout announced in the welcome, and a guest told (chat + HUD) when the announced layout is missing from its copy; `track_layout_test` + `menu_layout_picker_test` + `test_multiplayer`. Remaining is content (a second real layout) |
 | **3.4** | Driver swap (endurance) | Medium | Not started (depends on pit + long session) |
 | **3.5** | VR OpenXR | Low | Not started |
 | **3.6** | Triple monitor | Low | Not started |

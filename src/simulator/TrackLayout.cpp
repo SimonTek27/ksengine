@@ -329,6 +329,19 @@ const TrackLayoutInfo* TrackLayoutCatalog::findById(const std::string& id) const
     return nullptr;
 }
 
+std::string TrackLayoutCatalog::missingLayoutMessage(const std::string& id) const {
+    if (id.empty() || findById(id) != nullptr) return {};
+    std::string message = "layout '" + id + "' not available (";
+    if (m_layouts.empty()) {
+        message += "no track loaded";
+    } else {
+        message += "have:";
+        for (const auto& layout : m_layouts) message += " " + layout.id;
+    }
+    message += ")";
+    return message;
+}
+
 std::string TrackLayoutCatalog::activeFolder() const {
     const TrackLayoutInfo* a = active();
     return a ? a->folder : std::string{};

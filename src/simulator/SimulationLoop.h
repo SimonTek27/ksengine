@@ -383,6 +383,9 @@ public:
     /** Phase 3.3: what a picker shows, in catalog order, and what is bound. */
     std::vector<std::pair<std::string, std::string>> layoutChoices() const;
     std::string activeLayoutId() const;
+    /** Why the last switchLayout() failed, for the HUD; empty = no problem.
+     *  A guest whose copy lacks the host's layout keeps this set. */
+    const std::string& layoutNotice() const { return m_layoutNotice; }
 
     // Trackside posts (TracksidePosts.h): the shared safety-car bay at the pit
     // exit and four marshals per corner. Loaded from the track manifest; the
@@ -622,6 +625,9 @@ private:
 
     // Phase 3.3: catalog of the track's layouts (TrackLayout.h).
     TrackLayoutCatalog m_layouts;
+    // Set when a requested layout is not in the catalog (e.g. a guest told to
+    // switch to a layout its copy of the track lacks); shown in the HUD.
+    std::string m_layoutNotice;
     // Marshal posts + safety-car bay, from <track>/data/data.json.
     TracksidePosts m_tracksidePosts;
     // Instances of the shared marshal asset, one per post; the mesh itself is

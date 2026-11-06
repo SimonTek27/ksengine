@@ -133,6 +133,14 @@ int main() {
         KS_CHECK(rootL.aiFolder == root3.string());
         KS_CHECK(rootL.kn5Path.empty());
 
+        // A guest told to switch to a layout this copy lacks gets a reason,
+        // naming what it does have; an existing id has nothing to report.
+        KS_CHECK(c.missingLayoutMessage("default").empty());
+        const std::string missing = c.missingLayoutMessage("endurance");
+        KS_CHECK(missing.find("endurance") != std::string::npos);
+        KS_CHECK(missing.find("have:") != std::string::npos);
+        KS_CHECK(missing.find("national") != std::string::npos);
+
         fs::remove_all(root3);
     }
 

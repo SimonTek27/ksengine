@@ -70,6 +70,9 @@ public:
 
     const TrackLayoutInfo* active() const;
     const TrackLayoutInfo* findById(const std::string& id) const;
+    /** What to tell a player when an id is not in this catalog, naming the ones
+     *  that are; empty when the id exists (or when none was asked for). */
+    std::string missingLayoutMessage(const std::string& id) const;
 
     /** Resolved absolute folder for the active layout (or empty). */
     std::string activeFolder() const;
