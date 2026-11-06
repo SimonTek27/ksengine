@@ -228,6 +228,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_fade_test.cpp")
     target_link_libraries(brake_fade_test PRIVATE ksengine)
     add_test(NAME brake_fade_test COMMAND brake_fade_test)
 endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_stop_test.cpp")
+    add_executable(brake_stop_test brake_stop_test.cpp)
+    target_link_libraries(brake_stop_test PRIVATE ksengine)
+    add_test(NAME brake_stop_test COMMAND brake_stop_test)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_race_flags.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp")
