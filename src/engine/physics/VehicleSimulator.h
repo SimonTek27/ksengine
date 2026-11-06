@@ -58,6 +58,11 @@ public:
      *  leave the thermal model on its config thresholds. */
     /** Thermal config for one axle: 0 = front (wheels 0/1), 1 = rear (2/3). */
     void setBrakeThermalConfig(int axle, const BrakeThermalConfig& c);
+    /** brakes.ini [DATA] as the car declared it; 0 = the car said nothing. */
+    float brakeMaxTorque() const { return m_brakeMaxTorque; }
+    float brakeFrontShare() const { return m_brakeFrontShare; }
+    float handbrakeTorque() const { return m_handbrakeTorque; }
+    bool brakeBiasAdjustable() const { return m_brakeBiasAdjustable; }
 
     void setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
                             const std::vector<std::pair<float, float>>& rear);

@@ -223,6 +223,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/physics_json_test.cpp")
     target_link_libraries(physics_json_test PRIVATE ksengine)
     add_test(NAME physics_json_test COMMAND physics_json_test)
 endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_fade_test.cpp")
+    add_executable(brake_fade_test brake_fade_test.cpp)
+    target_link_libraries(brake_fade_test PRIVATE ksengine)
+    add_test(NAME brake_fade_test COMMAND brake_fade_test)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_race_flags.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/RaceSessionManager.cpp")
