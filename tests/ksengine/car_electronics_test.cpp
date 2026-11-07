@@ -11,6 +11,7 @@
 #include "KsTest.h"
 
 #include "engine/physics/CarElectronics.h"
+#include "engine/physics/VehicleSimulator.h"
 
 #include <filesystem>
 #include <fstream>
@@ -187,6 +188,60 @@ int main() {
         const auto missing = ks::physics::readElectronicsLimitsForCar(car.string());
         KS_CHECK(!missing.declaredAbs && !missing.declaredTractionControl);
         KS_CHECK_NEAR(missing.tcSlipRatioLimit, 0.10, 1e-6);
+        fs::remove_all(car, ec);
+    }
+
+    // --- The simulator applies what the car declares ----------------------
+    // Reading the file is only half of it: the values have to reach the model that
+    // cuts torque, on the path a session actually takes.
+    {
+        namespace fs = std::filesystem;
+        const fs::path car = "car_electronics_test_session_car";
+        std::error_code ec;
+        fs::remove_all(car, ec);
+        fs::create_directories(car / "data", ec);
+        {
+            std::ofstream out(car / "data" / "data.json", std::ios::binary | std::ios::trunc);
+            out << "{\n  \"electronics\": {\n"
+                   "    \"TRACTION_CONTROL\": { \"SLIP_RATIO_LIMIT\": \"0.07\", "
+                   "\"PRESENT\": \"0\" },\n"
+                   "    \"ABS_V2\": { \"SLIP_RATIO_LIMIT\": \"0.14\", \"PRESENT\": \"1\" },\n"
+                   "    \"EDL\": { \"PRESENT\": \"0\", \"MAX_SPIN_POWER\": \"0.40\" }\n"
+                   "  }\n}\n";
+        }
+
+        ks::physics::VehicleSimulator sim;
+        // The setup asks both aids up front, as a driver who likes them would.
+        ks::physics::VehicleSimulator::SetupParams setup;
+        setup.tcLevel = 8;
+        setup.absLevel = 6;
+        sim.applySetup(setup);
+        // Nothing loaded yet: the setup alone decides, as it always did.
+        KS_CHECK(sim.tractionControlPresent() == -1);
+        KS_CHECK(sim.absPresent() == -1);
+        KS_CHECK(sim.tcEnabled());
+        KS_CHECK(sim.absEnabled());
+
+        sim.loadElectronicsForCar(car.string());
+        KS_CHECK_NEAR(sim.tractionControlSlipLimit(), 0.07, 1e-6);
+        KS_CHECK_NEAR(sim.absSlipLimit(), 0.14, 1e-6);
+        KS_CHECK(sim.tractionControlPresent() == 0);
+        KS_CHECK(sim.absPresent() == 1);
+        // The car has no traction control: no level can switch one on.
+        KS_CHECK(!sim.tcEnabled());
+        KS_CHECK(sim.absEnabled());
+
+        // A car with no manifest keeps answering to the level alone.
+        fs::remove(car / "data" / "data.json", ec);
+        ks::physics::VehicleSimulator plain;
+        plain.applySetup(setup);
+        plain.loadElectronicsForCar(car.string());
+        KS_CHECK(plain.tractionControlPresent() == -1);
+        KS_CHECK(plain.absPresent() == -1);
+        KS_CHECK(plain.tcEnabled());
+        KS_CHECK(plain.absEnabled());
+        KS_CHECK_NEAR(plain.tractionControlSlipLimit(), 0.10, 1e-6);
+        KS_CHECK_NEAR(plain.absSlipLimit(), 0.12, 1e-6);
         fs::remove_all(car, ec);
     }
 
