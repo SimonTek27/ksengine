@@ -376,6 +376,24 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
+    // A section called _EXTENSION (or any key carrying EXTENSION/EXTENDED in
+    // its name) says which build of the other simulator reads the file, not how
+    // the car behaves: REQUIRED_VERSION, RAIN_DEV, SCRIPT_INPUTS_REPLAY. This
+    // project has no use for it, so it never reaches a document, at any depth.
+    static void stripExtensionKeys(Json& node) {
+        if (!node.isObject()) return;
+        for (const std::string& key : node.keys()) {
+            if (!node.contains(key)) continue;
+            const std::string name = upper(key);
+            if (name.find("EXTENSION") != std::string::npos ||
+                name.find("EXTENDED") != std::string::npos) {
+                node.remove(key);
+                continue;
+            }
+            stripExtensionKeys(node[key]);
+        }
+    }
+
     // wing_animations.ini pairs each aero wing with the .ksanim that moves it:
     // the two halves belong to different documents. The animation table is a
     // model fact (which file moves which wing), so it goes to the model
@@ -513,8 +531,12 @@ for (const char* owner : {"suspensions", "car"}) {
             }
         }
         splitWingAnimations(docs, names);
-        // No document ships the format version of the ini sections.
-        for (Json& doc : docs) stripVersionHeaders(doc);
+        // No document ships the format version of the ini sections, and none
+        // carries the extension bookkeeping the other simulator reads.
+        for (Json& doc : docs) {
+            stripVersionHeaders(doc);
+            stripExtensionKeys(doc);
+        }
         // The car's overrides carry two subjects and each goes to its own
         // document: the driver model and the driver's hidden nodes to the driver
         // document, the model's sections and hidden nodes to the model one. A
