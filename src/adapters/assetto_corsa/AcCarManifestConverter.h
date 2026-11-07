@@ -408,7 +408,11 @@ static void normalizeBrakes(Json& root) {
                 node.remove(key);
                 continue;
             }
-            stripFormatVersion(node[key]);
+            Json& child = node[key];
+            stripFormatVersion(child);
+            // A section that held only the format number is not a section: it
+            // would leave an empty object behind.
+            if (child.isObject() && child.isEmpty()) node.remove(key);
         }
     }
 
