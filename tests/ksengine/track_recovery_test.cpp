@@ -8,6 +8,7 @@
 #include "TrackRecovery.h"
 
 #include <cmath>
+#include <cstring>
 
 namespace sim = ks::sim;
 
@@ -154,6 +155,29 @@ int main() {
         KS_CHECK(left > 0.f && left <= rule.config().marshalSec + 0.01f);
         rule.update(kDt, car);
         KS_CHECK(rule.secondsToTow() < left);
+    }
+
+    // 7. The HUD line: silent while there is nothing to say, the countdown once
+    //    the marshals know, silent again as soon as the car is moving.
+    {
+        TrackRecovery rule;
+        StrandedCar car = deadOutOnTrack();
+        char line[32];
+        KS_CHECK(!sim::recoveryStatusText(rule, line, sizeof(line)));
+        KS_CHECK(line[0] == '\0');
+
+        rule.update(kDt, car); // stopped, but the marshals do not know yet
+        KS_CHECK(sim::recoveryStatusText(rule, line, sizeof(line)));
+        KS_CHECK(std::strcmp(line, "RECOVERY") == 0);
+
+        for (int i = 0; i < 300; ++i) rule.update(kDt, car); // 3 s stranded
+        KS_CHECK(sim::recoveryStatusText(rule, line, sizeof(line)));
+        KS_CHECK(std::strcmp(line, "RECOVERY 19s") == 0);
+
+        StrandedCar rolling = car;
+        rolling.speedMs = 10.f;
+        rule.update(kDt, rolling);
+        KS_CHECK(!sim::recoveryStatusText(rule, line, sizeof(line)));
     }
 
     return ks::test::finish("track_recovery_test");

@@ -2454,11 +2454,18 @@ void SimulationLoop::syncUiFromVehicle() {
     // status (skipping the "ON TRACK" no-op label). Empty = stay quiet.
     s.statusText[0] = '\0';
     const std::string garageNow = garageStatus();
+    // A stranded car speaks before the pit labels: it is out on track with the
+    // marshals on the way, and the countdown is the one thing the driver can
+    // act on (vai ai box prima che ti portino loro).
+    char recoveryLine[32] = {};
+    const bool stranded = recoveryStatusText(m_recovery, recoveryLine, sizeof(recoveryLine));
     if (!m_layoutNotice.empty()) {
         // A layout the host announced but this copy lacks outranks the pit
         // labels: it is the reason this car is on a different track length.
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", m_layoutNotice.c_str());
-    } else if (pitServiceBusy())
+    } else if (stranded)
+        std::snprintf(s.statusText, sizeof(s.statusText), "%s", recoveryLine);
+    else if (pitServiceBusy())
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", pitServiceStatus());
     else if (!garageNow.empty() && garageNow != "ON TRACK")
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", garageNow.c_str());

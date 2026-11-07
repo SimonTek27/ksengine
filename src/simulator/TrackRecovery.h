@@ -24,6 +24,8 @@
  * that. Header-only and Qt-free like TracksidePosts.h / GarageExit.h.
  */
 #include <algorithm>
+#include <cstddef>
+#include <cstdio>
 #include <cstdint>
 
 namespace ks {
@@ -96,6 +98,26 @@ private:
     RecoveryState m_state = RecoveryState::Clear;
     float m_strandedSec = 0.f;
 };
+
+/**
+ * The one line the HUD shows while a car is stranded: nothing at all until the
+ * marshals know, then the countdown to the tow. Returns false (and leaves the
+ * buffer empty) when there is nothing to say, so the caller keeps its own
+ * status chain instead of printing an empty label.
+ */
+inline bool recoveryStatusText(const TrackRecovery& rule, char* buf, std::size_t n) {
+    if (!buf || n == 0) return false;
+    buf[0] = '\0';
+    if (rule.state() != RecoveryState::Stranded) return false;
+    // Before the marshals know there is no countdown to print; rounding the -1
+    // of secondsToTow() would truncate -0.5 to 0 and show a fake "0s".
+    if (!rule.armed()) {
+        std::snprintf(buf, n, "RECOVERY");
+        return true;
+    }
+    std::snprintf(buf, n, "RECOVERY %ds", static_cast<int>(rule.secondsToTow() + 0.5f));
+    return true;
+}
 
 } // namespace sim
 } // namespace ks
