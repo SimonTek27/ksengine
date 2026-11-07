@@ -222,7 +222,9 @@ public:
     InputManager* inputManager() { return m_input.get(); }
     CameraController* camera() { return m_camera.get(); }
     SimulatorAudio* audio() { return m_audio.get(); }
-    SetupGarage* setupGarage() { return m_setupGarage.get(); }
+    /** The garage screen, with the loaded car's own aid availability applied: a
+     *  car whose electronics say PRESENT = 0 offers no TC/ABS level. */
+    SetupGarage* setupGarage();
     ui::NativeUiHub& ui() { return m_ui; }
     ui::UiGpuPass* uiGpu() { return m_uiGpu.get(); }
     const SimTrackData& trackData() const { return m_trackData; }
@@ -472,6 +474,9 @@ private:
     std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<SimulatorAudio> m_audio;
     std::unique_ptr<SetupGarage> m_setupGarage;
+    // What the loaded car says about its aids: 1 has it, 0 does not, -1 unknown.
+    int m_tcPresent = -1;
+    int m_absPresent = -1;
     std::unique_ptr<ks::ac::AcSharedMemoryPublisher> m_shm;
     std::unique_ptr<ks::ac::AcRemoteTelemetryServer> m_acRemote;
     std::unique_ptr<UdpTelemetryBridge> m_udp;

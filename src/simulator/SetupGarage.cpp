@@ -65,8 +65,13 @@ void SetupGarage::rebuildRows()
     case GarageTab::Overview:
         addF("FUEL", "L", "Session fuel load", &m_setup.fuel, 5.f, 120.f, 1.f);
         addF("BALLAST", "kg", "Additional mass", &m_setup.ballast, 0.f, 80.f, 1.f);
-        addI("TC", "Traction control level", &m_setup.tcLevel, 0, 10);
-        addI("ABS", "Anti-lock level", &m_setup.absLevel, 0, 10);
+        // A car whose electronics say PRESENT = 0 has no such system, so there
+        // is no level to offer: the row is simply not there, which is what AC
+        // and Content Manager do. The stored level stays as it is, inert.
+        if (m_tcAvailable)
+            addI("TC", "Traction control level", &m_setup.tcLevel, 0, 10);
+        if (m_absAvailable)
+            addI("ABS", "Anti-lock level", &m_setup.absLevel, 0, 10);
         break;
     case GarageTab::Tyres:
         addF("PRESSURE FL", "bar", "Front left cold pressure", &m_setup.tirePressureFL, 1.4f, 3.2f, 0.05f);

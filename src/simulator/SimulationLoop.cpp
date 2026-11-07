@@ -510,6 +510,14 @@ std::string SimulationLoop::activeLayoutId() const {
     return active ? active->id : std::string();
 }
 
+SetupGarage* SimulationLoop::setupGarage() {
+    // The screen is created at different points on different paths, so the car's
+    // answer is applied every time it is handed out, not only at car load.
+    if (m_setupGarage)
+        m_setupGarage->setAidsAvailable(m_tcPresent != 0, m_absPresent != 0);
+    return m_setupGarage.get();
+}
+
 bool SimulationLoop::loadCar(const std::string& carDir) {
     namespace fs = std::filesystem;
     if (!fs::is_directory(carDir)) return false;
@@ -560,6 +568,17 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         }
     }
 #endif
+    // The car's electronics are read here as well: this path loads the physics
+    // file by file, so the unified loader that also reads the manifest never
+    // runs during a session.
+    if (m_vehicle) {
+        m_vehicle->loadElectronicsForCar(carDir);
+        m_tcPresent = m_vehicle->tractionControlPresent();
+        m_absPresent = m_vehicle->absPresent();
+    }
+    if (m_setupGarage) {
+        m_setupGarage->setAidsAvailable(m_tcPresent != 0, m_absPresent != 0);
+    }
     // Roadmap 2.9: upgrade packages for this car (upgrades.ini, or the
     // built-in stock packages when that file is missing = base content
     // fallback), then apply the selected physics on top of the baseline the

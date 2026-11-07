@@ -438,27 +438,9 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
         CarClutchConfig clutchCfg;
         if (CarPhysicsJson::loadAcClutch(carPath, clutchCfg)) setClutchConfig(clutchCfg);
     }
-    // The car's own electronics: [TRACTION_CONTROL] and [ABS] SLIP_RATIO_LIMIT
-    // decide where the aids start cutting. Read before either physics loader so
-    // both paths see the same limits; a car that declares none keeps the
-    // defaults this model has always used.
-    {
-        const ElectronicsLimits electronics = readElectronicsLimitsForCar(carPath);
-        setElectronicsSlipLimits(electronics.tcSlipRatioLimit, electronics.absSlipRatioLimit);
-        setEdlSettings(electronics.declaredEdl, electronics.edlMaxSpinPower,
-                       electronics.edlMaxSpinCoast, electronics.edlBrakeTorquePower,
-                       electronics.edlBrakeTorqueCoast, electronics.edlDeadZonePower,
-                       electronics.edlDeadZoneCoast);
-        setElectronicsPresence(electronics.tcPresent, electronics.absPresent);
-        if (electronics.declaredTractionControl || electronics.declaredAbs) {
-            std::fprintf(stderr,
-                         "[electronics] slip limits: tc=%0.3f (declared=%d present=%d) "
-                         "abs=%0.3f (declared=%d present=%d) edl=%d\n",
-                         m_tcSlipLimit, electronics.declaredTractionControl ? 1 : 0,
-                         m_tcPresent, m_absSlipLimit, electronics.declaredAbs ? 1 : 0,
-                         m_absPresent, m_edlDeclared ? 1 : 0);
-        }
-    }
+    // The car's own electronics, read before either physics loader so both paths
+    // see the same limits.
+    loadElectronicsForCar(carPath);
     if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
     loadVehicleParamsFromIni(carPath);
 }
@@ -497,6 +479,25 @@ void VehicleSimulator::setElectronicsSlipLimits(float tcLimit, float absLimit) {
     // model can honour, so the default stays and nothing is invented.
     if (tcLimit > 0.001f && tcLimit < 0.5f) m_tcSlipLimit = tcLimit;
     if (absLimit > 0.001f && absLimit < 0.5f) m_absSlipLimit = absLimit;
+}
+
+void VehicleSimulator::loadElectronicsForCar(const std::string& carPath) {
+    const ElectronicsLimits electronics = readElectronicsLimitsForCar(carPath);
+    setElectronicsSlipLimits(electronics.tcSlipRatioLimit, electronics.absSlipRatioLimit);
+    setEdlSettings(electronics.declaredEdl, electronics.edlMaxSpinPower,
+                   electronics.edlMaxSpinCoast, electronics.edlBrakeTorquePower,
+                   electronics.edlBrakeTorqueCoast, electronics.edlDeadZonePower,
+                   electronics.edlDeadZoneCoast);
+    setElectronicsPresence(electronics.tcPresent, electronics.absPresent);
+    if (electronics.tcPresent >= 0 || electronics.absPresent >= 0 ||
+        electronics.declaredTractionControl || electronics.declaredAbs) {
+        std::fprintf(stderr,
+                     "[electronics] slip limits: tc=%0.3f (declared=%d present=%d) "
+                     "abs=%0.3f (declared=%d present=%d) edl=%d\n",
+                     m_tcSlipLimit, electronics.declaredTractionControl ? 1 : 0,
+                     m_tcPresent, m_absSlipLimit, electronics.declaredAbs ? 1 : 0,
+                     m_absPresent, m_edlDeclared ? 1 : 0);
+    }
 }
 
 void VehicleSimulator::setElectronicsPresence(int tcPresent, int absPresent) {

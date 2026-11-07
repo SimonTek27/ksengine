@@ -80,6 +80,15 @@ public:
      *  car said nothing. A car that says it has no such hardware gets neither aid
      *  whatever level the setup asks for, which is what AC does with PRESENT = 0. */
     void setElectronicsPresence(int tcPresent, int absPresent);
+    /** Reads the car's electronics (data.json: aids, slip limits, EDL) and applies
+     *  them. Called by both physics loaders and by the session, which loads the
+     *  .ini set file by file and would otherwise never see the manifest. */
+    void loadElectronicsForCar(const std::string& carPath);
+    /** The car's own answer about its hardware: 1 has it, 0 does not, -1 said
+     *  nothing. The setup screen uses this to stop offering a level for a system
+     *  the car does not have. */
+    int tractionControlPresent() const { return m_tcPresent; }
+    int absPresent() const { return m_absPresent; }
     /** A selected level with the car's own hardware check applied. */
     bool tcEnabled() const { return m_setup.tcLevel > 0 && m_tcPresent != 0; }
     bool absEnabled() const { return m_setup.absLevel > 0 && m_absPresent != 0; }

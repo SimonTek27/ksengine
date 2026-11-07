@@ -81,6 +81,18 @@ public:
     void toggleVisible() { setVisible(!m_visible); }
     float fadeAlpha() const { return m_fadeIn; }
 
+    /** What the car says it has: a level is only offered for a system the car
+     *  declares present. A car that says nothing (the default here) keeps both
+     *  rows, so content that never mentioned its aids behaves as before. */
+    void setAidsAvailable(bool tc, bool abs)
+    {
+        if (m_tcAvailable == tc && m_absAvailable == abs) return;
+        m_tcAvailable = tc;
+        m_absAvailable = abs;
+        rebuildRows();
+    }
+    bool aidsAvailable(bool tc) const { return tc ? m_tcAvailable : m_absAvailable; }
+
     void setCarName(const std::string& n) { m_carName = n; }
     void setTrackName(const std::string& n) { m_trackName = n; }
 
@@ -111,6 +123,9 @@ private:
 
     std::string m_carName;
     std::string m_trackName;
+    // Rows the car's own electronics leave out (PRESENT = 0). Default: offered.
+    bool m_tcAvailable = true;
+    bool m_absAvailable = true;
 };
 
 } // namespace sim
