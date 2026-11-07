@@ -166,8 +166,23 @@ inline std::string uniqueSectionName(const Parsed& parsed, const std::string& na
 }
 
 /** Appends a section for one [HEADER] and returns its index: the keys that follow
- *  belong to this one, even when an earlier section carries the same name. */
-inline std::size_t addSection(Parsed& parsed, const std::string& name) {
+ *  belong to this one, even when an earlier section carries the same name.
+ *
+ *  A repeat inside one file is a new block and is numbered: the paint overrides
+ *  are written as one [Material_CarPaint_Metallic] per skin set, and collapsing
+ *  them would throw the other sets' values away. The same header in another file
+ *  of the same car (the root ext_config.ini and the one in extension/) is the
+ *  same subject instead, so it folds into the block already there and the file
+ *  read first wins where both set an entry. */
+inline std::size_t addSection(Parsed& parsed, const std::string& name,
+                             std::vector<std::string>& seenInFile) {
+    const bool repeatInFile =
+        std::find(seenInFile.begin(), seenInFile.end(), name) != seenInFile.end();
+    seenInFile.push_back(name);
+    if (!repeatInFile) {
+        for (std::size_t index = 0; index < parsed.sections.size(); ++index)
+            if (parsed.sections[index].name == name) return index;
+    }
     Section fresh;
     fresh.name = uniqueSectionName(parsed, name);
     fresh.driverOwned = isDriverSection(name);
@@ -183,6 +198,7 @@ inline bool readFile(const fs::path& file, Parsed& parsed) {
 
     std::string line;
     std::string group;
+    std::vector<std::string> seenInFile;
     std::size_t current = 0;
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -190,7 +206,7 @@ inline bool readFile(const fs::path& file, Parsed& parsed) {
         if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') continue;
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             group = utf8Safe(trimText(trimmed.substr(1, trimmed.size() - 2)));
-            current = addSection(parsed, group);
+            current = addSection(parsed, group, seenInFile);
             continue;
         }
         const std::size_t separator = trimmed.find_first_of("=:");
