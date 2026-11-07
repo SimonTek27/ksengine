@@ -155,6 +155,10 @@ public:
         // and the collision hull. Lights, instruments, shadows, ac_tyres and
         // the graphics offsets are settings, they stay with the car data.
         if (stem == "proview_nodes" || stem == "lods" || stem == "colliders") return kModelDocument;
+        // The per-wheel offsets are model geometry wherever they are written: a
+        // re-split hands them back at the root, and they have to reach the model
+        // document the same way car.ini and suspensions.ini do.
+        if (stem == "graphics_offsets") return kModelDocument;
         // Everything the AI drives with, and the per-compound wear table
         // that goes with it.
         if (stem == "ai" || stem == "ai_tyres") return kAiDocument;
