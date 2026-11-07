@@ -382,39 +382,57 @@ static void normalizeBrakes(Json& root) {
     // engine's idle/antistall numbers move into their own block, typed by the
     // hardware the car declares: an ERS store means the electric motor can crank
     // it, a turbo means the engine carries one, otherwise it is a plain engine.
-    // A car that declares none of this gets no block, and keeps the behaviour it
-    // had before the block existed.
+    //
+    // A car with no such script is not left out: engine.ini [ENGINE_DATA]
+    // MINIMUM is the rpm it holds at rest, and that is the idle its start
+    // settles on. A car that declares neither gets no block, and keeps the
+    // behaviour it had before the block existed.
     static void buildStartBlock(Json& root) {
-        if (!root.contains("script__car_params") || !root["script__car_params"].isObject())
-            return;
         if (root.contains("start") && root["start"].isObject() && !root["start"].isEmpty())
             return;
-        const auto take = [](Json& from, const char* key, Json& to, const char* name) {
-            if (!from.isObject() || !from.contains(key)) return;
-            to.insert(name, from[key]);
-            from.remove(key);
-        };
-        Json& params = root["script__car_params"];
         Json start = Json::object();
-        if (params.contains("STARTER") && params["STARTER"].isObject()) {
-            Json starter = Json::object();
-            // AC spells the keys after their section; the short forms are the
-            // spelling a hand-written file may use.
-            take(params["STARTER"], "STARTER_RPM", starter, "RPM");
-            take(params["STARTER"], "RPM", starter, "RPM");
-            take(params["STARTER"], "STARTER_CRANK_TIME", starter, "CRANK_TIME");
-            take(params["STARTER"], "CRANK_TIME", starter, "CRANK_TIME");
-            if (!starter.isEmpty()) start.insert("STARTER", starter);
+        // What a script spells out wins over what the engine data implies.
+        if (root.contains("script__car_params") && root["script__car_params"].isObject()) {
+            const auto take = [](Json& from, const char* key, Json& to, const char* name) {
+                if (!from.isObject() || !from.contains(key)) return;
+                to.insert(name, from[key]);
+                from.remove(key);
+            };
+            Json& params = root["script__car_params"];
+            if (params.contains("STARTER") && params["STARTER"].isObject()) {
+                Json starter = Json::object();
+                // AC spells the keys after their section; the short forms are the
+                // spelling a hand-written file may use.
+                take(params["STARTER"], "STARTER_RPM", starter, "RPM");
+                take(params["STARTER"], "RPM", starter, "RPM");
+                take(params["STARTER"], "STARTER_CRANK_TIME", starter, "CRANK_TIME");
+                take(params["STARTER"], "CRANK_TIME", starter, "CRANK_TIME");
+                if (!starter.isEmpty()) start.insert("STARTER", starter);
+            }
+            if (params.contains("ENGINE") && params["ENGINE"].isObject()) {
+                Json& engineParams = params["ENGINE"];
+                take(engineParams, "IDLE_RPM", start, "IDLE_RPM");
+                take(engineParams, "MINIMUM_RPM", start, "MINIMUM_RPM");
+                Json antistall = Json::object();
+                take(engineParams, "ANTISTALL_RPM", antistall, "RPM");
+                take(engineParams, "ANTISTALL_TIME", antistall, "TIME");
+                if (!antistall.isEmpty()) start.insert("ANTISTALL", antistall);
+                take(engineParams, "PITSTOP_RPM", start, "PITSTOP_RPM");
+            }
         }
-        if (params.contains("ENGINE") && params["ENGINE"].isObject()) {
-            Json& engineParams = params["ENGINE"];
-            take(engineParams, "IDLE_RPM", start, "IDLE_RPM");
-            take(engineParams, "MINIMUM_RPM", start, "MINIMUM_RPM");
-            Json antistall = Json::object();
-            take(engineParams, "ANTISTALL_RPM", antistall, "RPM");
-            take(engineParams, "ANTISTALL_TIME", antistall, "TIME");
-            if (!antistall.isEmpty()) start.insert("ANTISTALL", antistall);
-            take(engineParams, "PITSTOP_RPM", start, "PITSTOP_RPM");
+        // The idle every car already declares. Copied, never removed: the engine
+        // keeps the reading it was given, the start block reads the same number.
+        if (!start.contains("IDLE_RPM") && root.contains("engine") && root["engine"].isObject()) {
+            Json& engine = root["engine"];
+            // ENGINE_DATA is the section name; DATA is what an older conversion
+            // wrote for the same block.
+            for (const char* sectionName : {"ENGINE_DATA", "DATA"}) {
+                if (!engine.contains(sectionName) || !engine[sectionName].isObject()) continue;
+                Json& section = engine[sectionName];
+                if (!section.contains("MINIMUM") || !section["MINIMUM"].isDouble()) continue;
+                start.insert("IDLE_RPM", section["MINIMUM"]);
+                break;
+            }
         }
         if (start.isEmpty()) return;
         // Which hardware turns it: the car's own declarations, never a guess.

@@ -162,5 +162,28 @@ int main() {
         KS_CHECK(v.rpm() == 0.0);
     }
 
+    // A car that declares only its idle — no [STARTER] block — is the shape the
+    // other cars in the content get: engine.ini MINIMUM is the idle, the cranking
+    // speed and time stay the model's own, and it declares no antistall.
+    {
+        ph::CarStartConfig t;
+        t.declared = true;
+        t.type = ph::CarStartConfig::Type::Turbo;
+        t.idleRpm = 1050.0; // XJ220 [ENGINE_DATA] MINIMUM
+        ph::VehicleSimulator v;
+        v.setFuelL(50.f);
+        v.setEngineStartConfig(t);
+        v.setIgnition(true);
+        v.startSimulation();
+        KS_CHECK(v.engineRunState() == RunState::Off);
+        KS_CHECK(v.pressStarter(0.0));
+        run(v, 40);
+        KS_CHECK(v.engineRunState() == RunState::Running);
+        KS_CHECK(v.rpm() >= 1050.0);          // settles on the declared idle
+        KS_CHECK(v.engineStartConfig().starterRpm == 200.0);
+        KS_CHECK(v.engineStartConfig().crankTime == 0.15);
+        KS_CHECK(v.engineStartConfig().antistallRpm == 0.0);
+    }
+
     return ks::test::finish("engine_start_test");
 }
