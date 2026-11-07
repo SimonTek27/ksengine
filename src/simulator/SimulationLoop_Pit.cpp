@@ -198,6 +198,49 @@ bool SimulationLoop::loadTracksidePostsFromTrack(const std::string& trackDir) {
     return false;
 }
 
+void SimulationLoop::updateTrackRecovery(float dt) {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle) return;
+
+    const auto st = m_vehicle->getState();
+    StrandedCar car;
+    car.speedMs = static_cast<float>(st.speed);
+    car.engineRunning = m_vehicle->isEngineRunning();
+    car.inPitLane = st.inPitLane;
+    // The box counts as the pit lane, exactly as the crew starter does: a car
+    // parked in its own box is not an incident.
+    if (!car.inPitLane && m_hasPlayerBox) {
+        const float dx = static_cast<float>(st.position.x) - m_playerBox.x;
+        const float dz = static_cast<float>(st.position.z) - m_playerBox.z;
+        car.inPitLane = (dx * dx + dz * dz) <= m_pitBoxRadiusM * m_pitBoxRadiusM;
+    }
+
+    if (!m_recovery.update(dt, car)) return;
+
+    // Towed: the marshals drop it in its box with the engine still off. That is
+    // the point of the tow — the crew can fire it there and nowhere else.
+    if (!m_hasPlayerBox) return;
+    // Set the pose here instead of snapVehicleToPose(): that helper lives in a
+    // translation unit this build does not link (same as teleportToPit), so the
+    // call would only surface as an unresolved external.
+    auto& boxed = m_vehicle->state();
+    boxed.position.x = m_playerBox.x;
+    boxed.position.y = m_playerBox.y;
+    boxed.position.z = m_playerBox.z;
+    boxed.heading = m_playerBox.heading;
+    boxed.velocity = {};
+    boxed.angularVelocity = {};
+    boxed.speed = 0.f;
+    m_garageExit.forceEnterGarage();
+    std::fprintf(stderr,
+                 "SimulationLoop: recovery — car towed to the box (%.0f s stopped, engine off)\n",
+                 static_cast<double>(m_recovery.config().stopSec +
+                                     m_recovery.config().marshalSec));
+#else
+    (void)dt;
+#endif
+}
+
 void SimulationLoop::updateTracksidePosts(float dt) {
 #if HAS_VEHICLE_SIM
     if (!m_vehicle) return;

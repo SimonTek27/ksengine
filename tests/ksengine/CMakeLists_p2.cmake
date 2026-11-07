@@ -11,6 +11,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine_start_test.cpp")
     add_executable(engine_start_test engine_start_test.cpp)
     target_link_libraries(engine_start_test PRIVATE ksengine)
     add_test(NAME engine_start_test COMMAND engine_start_test)
+
+    # Track recovery: header-only rule, so the test compiles it by including it.
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/track_recovery_test.cpp")
+        add_executable(track_recovery_test track_recovery_test.cpp)
+        target_include_directories(track_recovery_test PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator")
+        target_link_libraries(track_recovery_test PRIVATE ksengine)
+        add_test(NAME track_recovery_test COMMAND track_recovery_test)
+    endif()
 endif()
 
 # The car's own electronics slip limits: [TRACTION_CONTROL] and [ABS]

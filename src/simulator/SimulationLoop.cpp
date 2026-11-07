@@ -3392,6 +3392,9 @@ void SimulationLoop::tick() {
             // Trackside marshals watch the same field on the same clock: an
             // incident raised by this step is flagged before the next frame.
             updateTracksidePosts(static_cast<float>(m_physicsDt));
+            // ...and the yellow is not the end of it: a car that stays there
+            // with a dead engine is recovered to its box on the same clock.
+            updateTrackRecovery(static_cast<float>(m_physicsDt));
             // AI cars freeze on the grid during the countdown and race once it
             // is over; physics runs at the same fixed 1 kHz as the player's.
             if (m_multiCar && !m_raceSession.isCountingDown())

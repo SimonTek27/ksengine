@@ -32,6 +32,7 @@
 #include "PitLaneQueue.h"    // roadmap 2.7: multi-car pit-lane order
 #include "TrackLayout.h"      // phase 3.3: multi-layout catalog
 #include "TracksidePosts.h"   // safety-car bay + four marshal posts per corner
+#include "TrackRecovery.h"     // stranded car -> marshals tow it to its box
 #include "PitLaneCollision.h" // pit-lane body collision
 #include "GarageSpawn.h"      // GarageLayout / GarageSpawnPolicy
 
@@ -397,6 +398,11 @@ public:
     RaceFlag localYellowFlag() const { return m_tracksidePosts.trackFlag(); }
     bool loadTracksidePostsFromTrack(const std::string& trackDir);
     void updateTracksidePosts(float dt);
+    // TrackRecovery (TrackRecovery.h): a car that stops out on track with a dead
+    // engine is towed to its box by the marshals — the one place the crew can
+    // fire it again.
+    void updateTrackRecovery(float dt);
+    const TrackRecovery& trackRecovery() const { return m_recovery; }
     // The marshal is one shared asset (content/characters/marshal), loaded once
     // and instanced at each post's coordinates: a track names positions, not
     // geometry of its own.
@@ -612,6 +618,7 @@ private:
     WorldPose m_playerBox{};     // garage box the service is bound to
     bool m_hasPlayerBox = false; // false until placePlayerForSession binds it
     float m_pitBoxRadiusM = 8.f; // "inside the box" footprint
+    TrackRecovery m_recovery;    // stranded car -> towed home (TrackRecovery.h)
     std::string m_pitStatus;     // last PitLaneRepair status text
     bool m_pitTyresApplied = false; // new rubber already fitted this stop
 
