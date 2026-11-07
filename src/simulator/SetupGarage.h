@@ -92,6 +92,9 @@ public:
         rebuildRows();
     }
     bool aidsAvailable(bool tc) const { return tc ? m_tcAvailable : m_absAvailable; }
+    /** The rows the current tab offers, in display order: what the screen shows,
+     *  readable without drawing it. */
+    const std::vector<GarageRow>& rows() const { return m_rows; }
 
     void setCarName(const std::string& n) { m_carName = n; }
     void setTrackName(const std::string& n) { m_trackName = n; }

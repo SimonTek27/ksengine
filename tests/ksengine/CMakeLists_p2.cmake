@@ -24,6 +24,23 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/car_electronics_test.cpp")
     add_test(NAME car_electronics_test COMMAND car_electronics_test)
 endif()
 
+# The garage's aid rows: a car whose own electronics say PRESENT = 0 offers no
+# TC or ABS level, so the row is not there to pick. Compiles SetupGarage.cpp
+# directly (main_menu_test pattern) with the text TUs it draws through.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/setup_garage_aids_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SetupGarage.cpp")
+    add_executable(setup_garage_aids_test
+        setup_garage_aids_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/SetupGarage.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/FontTtfLoader.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ui/TextRenderer.cpp")
+    target_include_directories(setup_garage_aids_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(setup_garage_aids_test PRIVATE ksengine)
+    add_test(NAME setup_garage_aids_test COMMAND setup_garage_aids_test)
+endif()
+
 # Content's brake-disc section: what [BRAKEDISC_FX] says about the glow the
 # thermal model produces (ACTIVE, GLOW_MULT), read from model.json.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_disc_fx_test.cpp")
