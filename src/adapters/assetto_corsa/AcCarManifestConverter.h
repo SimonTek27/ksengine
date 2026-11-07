@@ -174,9 +174,18 @@ public:
     // typology-bound (ERS, turbo, torque maps, controllers, script params) and
     // minus the counts that depend on the model (lights, instruments,
     // compounds, gears).
+    //
+    // An entry the car may legitimately not declare carries its source: the
+    // rule may only require what the content says, otherwise "every required
+    // entry is there" would ask the conversion to invent it. `key` null means
+    // the whole section; `metadata` points into ui_car.json instead of an .ini.
     struct Requirement {
         std::string document;
         std::string path;
+        const char* ini = nullptr;
+        const char* section = nullptr;
+        const char* key = nullptr;
+        const char* metadata = nullptr;
     };
 
     static std::vector<Requirement> requiredEntries() {
@@ -191,14 +200,17 @@ public:
             {kDataDocument, "engine.ENGINE_DATA.AMBIENT_EFFECT"},
             {kDataDocument, "engine.WATER_LIGHT_MAX_C"},
             {kDataDocument, "engine.OIL_LIGHT_MIN_BAR"},
-            {kAiDocument, "ai.LOOKAHEAD.SPEED_GAIN"},
+            {kAiDocument, "ai.LOOKAHEAD.SPEED_GAIN", "ai", "LOOKAHEAD", "SPEED_GAIN"},
             {kAiDocument, "ai.TYRES"},
             {kAiDocument, "ai.WING_VARIATION"},
             {kDataDocument, "electronics.ABS_V2"},
             {kDataDocument, "electronics.EDL"},
-            {kDataDocument, "drivetrain.UPSHIFT_PROFILE"},
-            {kDataDocument, "drivetrain.DAMAGE"},
-            {kDataDocument, "specs.range"},
+            // A car can say NONE for the upshift profile, or carry no drivetrain
+            // damage block at all: both are declarations, not gaps.
+            {kDataDocument, "drivetrain.UPSHIFT_PROFILE", "drivetrain", "UPSHIFT_PROFILE"},
+            {kDataDocument, "drivetrain.DAMAGE", "drivetrain", "DAMAGE"},
+            // Range is a menu spec: electric cars declare it, the others do not.
+            {kDataDocument, "specs.range", nullptr, nullptr, nullptr, "specs.range"},
             {kDriverDocument, "GRAPHICS.DRIVEREYES"},
             {kDriverDocument, "GRAPHICS.ON_BOARD_PITCH_ANGLE"},
             {kDriverDocument, "GRAPHICS.ONBOARD_EXPOSURE"},
@@ -215,10 +227,46 @@ public:
             {kDataDocument, "mirrors.MIRROR_POSITION"}};
     }
 
+    /** Does the car itself declare this entry? Derived entries are required of
+     *  every car; a conditional one only where the content carries it. */
+    static bool sourceDeclares(const fs::path& carDir, const Requirement& requirement) {
+        if (requirement.ini) {
+            const std::string stem = requirement.ini;
+            fs::path path = carDir / "data" / (stem + ".ini");
+            if (!fs::exists(path)) path = carDir / (stem + ".ini");
+            config::IniFile ini;
+            if (!fs::exists(path) || !ini.load(path.string())) return false;
+            const std::string section = upper(requirement.section ? requirement.section : "");
+            for (const auto& group : ini.groups()) {
+                if (!iequals(group.name, section)) continue;
+                if (!requirement.key) return true;
+                return ini.contains(section, requirement.key);
+            }
+            return false;
+        }
+        if (requirement.metadata) {
+            for (const fs::path& path : {carDir / "ui_car.json", carDir / "ui" / "ui_car.json"}) {
+                std::ifstream in(path, std::ios::binary);
+                if (!in) continue;
+                std::ostringstream buffer;
+                buffer << in.rdbuf();
+                bool ok = false;
+                std::string error;
+                const Json doc = Json::parse(buffer.str(), &ok, &error);
+                if (!ok || !doc.isObject()) continue;
+                return findPath(doc, requirement.metadata) != nullptr;
+            }
+            return false;
+        }
+        return true;
+    }
+
     static std::vector<std::string> missingRequired(const std::vector<Json>& docs,
-                                                    const std::vector<std::string>& names) {
+                                                    const std::vector<std::string>& names,
+                                                    const fs::path& carDir) {
         std::vector<std::string> missing;
         for (const Requirement& requirement : requiredEntries()) {
+            if (!sourceDeclares(carDir, requirement)) continue;
             const Json* node = nullptr;
             for (std::size_t i = 0; i < names.size(); ++i) {
                 if (names[i] == requirement.document) { node = &docs[i]; break; }
@@ -720,7 +768,7 @@ for (const char* owner : {"suspensions", "car"}) {
             ++result.documents;
             if (names[i] == kDataDocument) result.manifestPath = out.string();
         }
-        result.missing = missingRequired(docs, names);
+        result.missing = missingRequired(docs, names, carDir);
         return true;
     }
 
@@ -1149,7 +1197,7 @@ for (const char* owner : {"suspensions", "car"}) {
             }
             docs.push_back(doc);
         }
-        result.missing = missingRequired(docs, names);
+        result.missing = missingRequired(docs, names, carDir);
         if (!result.missing.empty()) {
             result.error = "required entries missing, refusing to prune";
             return result;
