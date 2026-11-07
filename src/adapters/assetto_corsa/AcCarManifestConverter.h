@@ -376,6 +376,54 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
+    // wing_animations.ini pairs each aero wing with the .ksanim that moves it:
+    // the two halves belong to different documents. The animation table is a
+    // model fact (which file moves which wing), so it goes to the model
+    // document; MIN, MAX and SPEED describe the wing's own travel and speed and
+    // are written on the wing the entry names, in data.json, where aero.ini
+    // already put it. Nothing stays at the root: a third copy is a place for
+    // the two halves to disagree.
+    static void splitWingAnimations(std::vector<Json>& docs,
+                                    const std::vector<std::string>& names) {
+        std::size_t dataIndex = 0;
+        std::size_t modelIndex = 0;
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            if (names[i] == kDataDocument) dataIndex = i;
+            if (names[i] == kModelDocument) modelIndex = i;
+        }
+        if (!docs[dataIndex].contains("wing_animations")) return;
+        const Json table = docs[dataIndex]["wing_animations"];
+        docs[dataIndex].remove("wing_animations");
+        if (!table.isObject() || table.isEmpty()) return;
+        Json& animations = objectAt(docs[modelIndex], "wing_animations");
+        const bool hasAero = docs[dataIndex].contains("aero") &&
+                             docs[dataIndex]["aero"].isObject();
+        for (const std::string& section : table.keys()) {
+            const Json& animation = table[section];
+            // Without a wing index there is nothing to attach the entry to, and
+            // guessing one would invent content the car never declared.
+            if (!animation.isObject() || !animation.contains("WING")) continue;
+            Json entry = Json::object();
+            for (const char* field : {"WING", "FILE", "MIN", "MAX", "SPEED"}) {
+                if (animation.contains(field)) entry.insert(field, animation[field]);
+            }
+            animations.insert(section, entry);
+            if (!hasAero) continue;
+            const int wing = static_cast<int>(animation["WING"].toDouble());
+            const std::string wingName = "WING_" + std::to_string(wing);
+            Json& aero = docs[dataIndex]["aero"];
+            if (!aero.contains(wingName) || !aero[wingName].isObject()) continue;
+            Json& target = aero[wingName];
+            if (target.contains("ANIMATION")) continue;
+            Json description = Json::object();
+            if (animation.contains("FILE")) description.insert("FILE", animation["FILE"]);
+            for (const char* field : {"MIN", "MAX", "SPEED"}) {
+                if (animation.contains(field)) description.insert(field, animation[field]);
+            }
+            target.insert("ANIMATION", description);
+        }
+    }
+
     // Writes the six documents from an assembled root object; the same routing
     // serves the .ini conversion and the legacy split.
     static bool writeDocuments(const fs::path& carDir, const Json& root, Result& result) {
@@ -454,6 +502,7 @@ for (const char* owner : {"suspensions", "car"}) {
     }
     parent.remove("GRAPHICS_OFFSETS");
 }
+        splitWingAnimations(docs, names);
         // No document ships the format version of the ini sections.
         for (Json& doc : docs) stripVersionHeaders(doc);
         // The car's overrides carry two subjects and each goes to its own
