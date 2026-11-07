@@ -397,10 +397,10 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
-    // digital_instruments.ini stamps VERSION on the sections an instrument list
-    // uses. It is the format's number, not the car's, so it goes at any depth
-    // under that root and nothing else is touched.
-    static void stripDigitalInstrumentVersions(Json& node) {
+    // digital_instruments.ini and tyres.ini stamp VERSION on their sections. It
+    // is the format's number, not the car's, so it goes at any depth under those
+    // two roots and nothing else is touched.
+    static void stripFormatVersion(Json& node) {
         if (!node.isObject()) return;
         for (const std::string& key : node.keys()) {
             if (!node.contains(key)) continue;
@@ -408,7 +408,7 @@ static void normalizeBrakes(Json& root) {
                 node.remove(key);
                 continue;
             }
-            stripDigitalInstrumentVersions(node[key]);
+            stripFormatVersion(node[key]);
         }
     }
 
@@ -573,8 +573,8 @@ for (const char* owner : {"suspensions", "car"}) {
             stripVersionHeaders(doc);
             stripExtensionKeys(doc);
             for (const std::string& key : doc.keys()) {
-                if (iequals(key, "digital_instruments"))
-                    stripDigitalInstrumentVersions(doc[key]);
+                if (iequals(key, "digital_instruments") || iequals(key, "tyres"))
+                    stripFormatVersion(doc[key]);
             }
         }
         // The car's overrides carry two subjects and each goes to its own
