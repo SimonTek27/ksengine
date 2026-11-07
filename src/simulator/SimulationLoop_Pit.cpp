@@ -48,6 +48,15 @@ void SimulationLoop::updateGarageExit(float dt) {
     m_requestReturnBox = false;
     // The start belongs to the vehicle: report what the engine is doing and let
     // the garage sequence crank it when its engine phase begins.
+    // The team lives in the pit lane: the crew starter is offered while the car
+    // is in it (the box sits inside the lane), never out on track.
+    bool crewAvailable = st.inPitLane;
+    if (!crewAvailable && m_hasPlayerBox) {
+        const float dx = static_cast<float>(st.position.x) - m_playerBox.x;
+        const float dz = static_cast<float>(st.position.z) - m_playerBox.z;
+        crewAvailable = (dx * dx + dz * dz) <= m_pitBoxRadiusM * m_pitBoxRadiusM;
+    }
+    m_vehicle->setCrewStarterAvailable(crewAvailable);
     if (m_garageExit.phase() == GarageExitPhase::EngineStart) {
         // The garage exit is the box, so this is where the team fires a car
         // that declares a crew start. A car with a key keeps cranking itself.

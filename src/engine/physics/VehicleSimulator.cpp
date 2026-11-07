@@ -253,6 +253,9 @@ bool VehicleSimulator::pressStarterByCrew(double speedMs) {
     // the crew cannot crank a car that is already moving.
     if (!m_start.declared || !m_start.startedByCrew) return false;
     if (speedMs >= 1.0) return false;
+    // In a race the team is in the pit lane and nowhere else: stopped out on
+    // track with a dead engine, an F1 stays there until it is recovered.
+    if (!m_crewStarterAvailable) return false;
     return startEngine(speedMs);
 }
 

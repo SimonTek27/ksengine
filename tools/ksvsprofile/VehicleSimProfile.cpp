@@ -86,8 +86,13 @@ int main(int argc, char** argv)
     if (!carPath.empty()) {
         for (auto& s : sims) {
             s.setIgnition(true);
-            if (crewStart) s.pressStarterByCrew(0.0);
-            else s.pressStarter(0.0);
+            // The bench stands in for the box: this is where the team would be.
+            if (crewStart) {
+                s.setCrewStarterAvailable(true);
+                s.pressStarterByCrew(0.0);
+            } else {
+                s.pressStarter(0.0);
+            }
         }
         // Cranking is real time: step a couple of seconds so the numbers below
         // are a running engine's, not a starter's.

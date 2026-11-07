@@ -194,5 +194,34 @@ int main() {
         KS_CHECK(v.engineStartConfig().antistallRpm == 0.0);
     }
 
+    // A crew start belongs to the team, and the team is in the pit lane: the
+    // key cannot fire it, the crew cannot fire it from out on track, and the
+    // driver keeps the kill switch.
+    {
+        ph::CarStartConfig c = declaredStart(ph::CarStartConfig::Type::Petrol);
+        c.startedByCrew = true;
+        ph::VehicleSimulator v;
+        v.setFuelL(50.f);
+        v.setEngineStartConfig(c);
+        v.setIgnition(true);
+        v.startSimulation();
+        KS_CHECK(!v.pressStarter(0.0));       // no starter button on this car
+        KS_CHECK(!v.pressStarterByCrew(0.0)); // and the team is not here yet
+        KS_CHECK(v.engineRunState() == RunState::Off);
+
+        v.setCrewStarterAvailable(true); // in the pit lane
+        KS_CHECK(!v.pressStarterByCrew(5.0)); // the crew cannot crank it moving
+        KS_CHECK(v.pressStarterByCrew(0.0));
+        run(v, 40);
+        KS_CHECK(v.isEngineRunning());
+
+        v.setCrewStarterAvailable(false); // back out on track
+        KS_CHECK(!v.pressStarterByCrew(0.0)); // no crew restart out here
+        KS_CHECK(v.isEngineRunning());        // the engine keeps running
+        KS_CHECK(v.pressStarter(0.0));        // the kill is still the driver's
+        KS_CHECK(!v.isEngineRunning());
+        KS_CHECK(v.rpm() == 0.0);
+    }
+
     return ks::test::finish("engine_start_test");
 }

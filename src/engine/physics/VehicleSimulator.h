@@ -295,6 +295,10 @@ public:
     /** The team's starter: a car that declares a crew start fires only from
      *  the box, and only at a standstill. */
     bool pressStarterByCrew(double speedMs);
+    /** The team works in the pit lane: outside it a crew start is refused. The
+     *  world sets this every step (the box counts as pit lane); a car nobody
+     *  told stays refused. */
+    void setCrewStarterAvailable(bool on) { m_crewStarterAvailable = on; }
 
     /** The car's declared clutch (drivetrain.ini [CLUTCH]/[AUTOCLUTCH]). */
     void setClutchConfig(const CarClutchConfig& c) { m_clutch = c; }
@@ -382,6 +386,8 @@ private:
     bool m_rpmFromWheels = true;
     CarClutchConfig m_clutch;
     double m_clutchPedal = 0.0;
+    /** True while the car is somewhere the crew can reach it (pit lane/box). */
+    bool m_crewStarterAvailable = false;
     bool m_antistallActive = false;
     double m_crankTimer = 0.0;
     double m_antistallTimer = 0.0;
