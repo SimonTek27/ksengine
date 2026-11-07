@@ -33,7 +33,12 @@ public:
         float c11 = 0.945f, c12 = 0.030f, c13 = 0.070f;
 
         float nominalLoadN = 4000.f;
-        float loadSensExp = 0.9f;
+        // Milliken Ch. 2: a racing tyre's grip coefficient falls about 18% over a
+        // 3x load range (1.1 at 500 lb to 0.9 at 1500 lb), i.e. force ~ Fz^0.83.
+        // An exponent of 1.0 means no load sensitivity at all; 0.9 loses only
+        // 3.4% at 1.5x the nominal load, which was measured as too weak for the
+        // load-transfer split to change the balance at all.
+        float loadSensExp = 0.83f;
         float loadSensMin = 0.55f;
         float loadSensMax = 1.25f;
         float optPressurePsi = 26.f;

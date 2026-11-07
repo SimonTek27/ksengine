@@ -24,6 +24,11 @@ struct Corner {
     float speed = 0.f;    // m/s
     float yawRate = 0.f;  // rad/s
     float beta = 0.f;     // rad, body sideslip
+    // The mechanism, not just the result: the split has to move load before it
+    // can move the car, and the axle force is what turns load into balance.
+    float fzFl = 0.f, fzFr = 0.f;
+    float fyFront = 0.f, fyRear = 0.f;
+    float ay = 0.f;       // m/s², lateral acceleration of the settled corner
 };
 
 // Run-up in a straight line, then hold a fixed steering angle and measure the
@@ -38,14 +43,16 @@ Corner cornerWith(float arbFront, float arbRear) {
     sim.applySetup(setup);
     sim.startSimulation();
 
-    sim.setThrottle(0.50);
-    for (int i = 0; i < 500; ++i) sim.updatePhysics(0.01); // 5 s run-up
+    sim.setThrottle(1.0);
+    for (int i = 0; i < 900; ++i) sim.updatePhysics(0.01); // 9 s run-up to speed
 
-    // The lateral curve is still softer than a real tyre's (roadmap 3.5): below
-    // this the car barely turns at all, above it both axles sit on the friction
-    // circle and the split stops mattering. This is the responsive band.
-    sim.setSteering(0.13);
-    for (int i = 0; i < 400; ++i) sim.updatePhysics(0.01); // 4 s to settle
+    // LLTD is a limit-behaviour lever. At 0.5 g both axles sit on the rising,
+    // nearly linear part of their curves (measured: 3.3 deg front, 4.9 deg rear,
+    // against a 9 deg peak) where the force is proportional to load and the split
+    // has nothing to divide. The corner has to be taken at the friction limit for
+    // the axle that loses grip first to set the radius.
+    sim.setSteering(0.05);
+    for (int i = 0; i < 500; ++i) sim.updatePhysics(0.01); // 5 s to settle
 
     const float heading0 = sim.getState().heading;
     double sumSpeed = 0.0;
@@ -61,6 +68,11 @@ Corner cornerWith(float arbFront, float arbRear) {
     out.yawRate = (heading1 - heading0) / 1.0f;
     out.radius = out.speed / std::max(std::fabs(out.yawRate), 1e-4f);
     out.beta = sim.sideslipBeta();
+    out.fzFl = sim.tireFz(0);
+    out.fzFr = sim.tireFz(1);
+    out.fyFront = sim.tireFy(0) + sim.tireFy(1);
+    out.fyRear = sim.tireFy(2) + sim.tireFy(3);
+    out.ay = out.speed * out.yawRate;
     return out;
 }
 
@@ -72,10 +84,18 @@ int main() {
     const Corner rearBar = cornerWith(0.f, 40000.f);
 
     std::fprintf(stderr,
-                 "[lltd] front-bar LLTD=%0.3f r=%0.1f m V=%0.2f beta=%0.4f | "
-                 "rear-bar LLTD=%0.3f r=%0.1f m V=%0.2f beta=%0.4f\n",
+                 "[lltd] front-bar LLTD=%0.3f r=%0.1f m V=%0.2f beta=%0.4f "
+                 "Fz=%0.0f/%0.0f FyF=%0.0f FyR=%0.0f Ay=%0.2f | diagrr=%+0.2f%%\n",
                  frontBar.lltdFront, frontBar.radius, frontBar.speed, frontBar.beta,
-                 rearBar.lltdFront, rearBar.radius, rearBar.speed, rearBar.beta);
+                 frontBar.fzFl, frontBar.fzFr, frontBar.fyFront, frontBar.fyRear,
+                 frontBar.ay,
+                 100.f * (frontBar.radius - rearBar.radius) / rearBar.radius);
+    std::fprintf(stderr,
+                 "[lltd] rear-bar  LLTD=%0.3f r=%0.1f m V=%0.2f beta=%0.4f "
+                 "Fz=%0.0f/%0.0f FyF=%0.0f FyR=%0.0f Ay=%0.2f\n",
+                 rearBar.lltdFront, rearBar.radius, rearBar.speed, rearBar.beta,
+                 rearBar.fzFl, rearBar.fzFr, rearBar.fyFront, rearBar.fyRear,
+                 rearBar.ay);
 
     // The split itself must move with the bars. It is the axle's share of roll
     // stiffness, so the springs dominate it and the bar shifts it by a few
@@ -88,13 +108,14 @@ int main() {
     // Same throttle, same steering: only the bar split differs.
     KS_CHECK(std::fabs(frontBar.speed - rearBar.speed) < 0.05f * rearBar.speed);
 
-    // Magnitude: the split now moves the arc by a fraction of a percent — 0.1%
-    // before the lateral stiffness floor, about 0.7% after it, so that floor is
-    // what makes the lever measurable at all. The sign is the opposite of the
-    // theory (a stiffer front bar should widen the arc; it narrows it), which
-    // means roll steer or compliance steer is setting the direction somewhere
-    // else in the chain. Recorded as measured, not asserted as correct: the bound
-    // below is what a working lever has to beat once that path is explained.
+    // Magnitude: the split moves real load — 623 N of front transfer against 525
+    // — and the arc by about a tenth of a percent, now in the direction the
+    // theory asks for (a stiffer front bar widens it). It is small because the
+    // corner sits at 0.5 g with both axles on the rising part of their curves
+    // (2.7 and 3.4 deg against a 9 deg peak): load sensitivity only bites near
+    // the limit, and holding the car there needs a driver loop, not a fixed
+    // steering angle. The bound below is what a working lever has to beat once
+    // that loop exists.
     KS_CHECK(std::fabs(frontBar.radius - rearBar.radius) < 0.02f * rearBar.radius);
 
     return ks::test::finish("lltd_balance_test");
