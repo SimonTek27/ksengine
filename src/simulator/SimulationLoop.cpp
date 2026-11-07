@@ -2095,12 +2095,23 @@ void SimulationLoop::applyInput() {
         m_vehicle->setBrake(0);
         m_vehicle->setSteering(0);
         m_vehicle->setHandbrake(0);
+        // Menus hold the clutch in: the car must not stall while the driver is
+        // in a menu it cannot drive out of.
+        m_vehicle->setClutchPedal(1.0);
         return;
     }
     m_vehicle->setThrottle(m_input->throttle());
     m_vehicle->setBrake(m_input->brake());
     m_vehicle->setSteering(m_input->steer());
     m_vehicle->setHandbrake(m_input->handbrake());
+    m_vehicle->setClutchPedal(m_input->clutch());
+    // The starter key is the driver's button: ignition on, then crank. While
+    // the engine runs it is the kill instead, and the vehicle applies its own
+    // standstill rule. A car without a declared start ignores both.
+    if (m_input->takeStarterRequest()) {
+        if (!m_vehicle->isEngineRunning()) m_vehicle->setIgnition(true);
+        m_vehicle->pressStarter(static_cast<double>(m_vehicle->getState().speed));
+    }
 #endif
 }
 

@@ -49,6 +49,7 @@ int main() {
     KS_CHECK(def.steerLeft == 'A' && def.steerRight == 'D');
     KS_CHECK(def.shiftUp == 'E' && def.shiftDown == 'Q');
     KS_CHECK(def.handbrake == 0x20);
+    KS_CHECK(def.clutch == 'Z' && def.starter == 'I');
     KS_CHECK(KeyboardMapping::AltThrottle == 0x26);
 
     // --- Save -> load round trip with a non-default mapping --------------
@@ -60,6 +61,8 @@ int main() {
     a.shiftUp = 0x60;
     a.shiftDown = 0x73;
     a.handbrake = 0x0D;
+    a.clutch = 'B';
+    a.starter = 'J';
     const char* path = "keyboard_mapping_test.ini";
     KS_CHECK(saveKeyboardMapping(path, a));
 
@@ -72,6 +75,8 @@ int main() {
     KS_CHECK(b.shiftUp == a.shiftUp);
     KS_CHECK(b.shiftDown == a.shiftDown);
     KS_CHECK(b.handbrake == a.handbrake);
+    KS_CHECK(b.clutch == a.clutch);
+    KS_CHECK(b.starter == a.starter);
 
     // --- Missing file: false + mapping untouched -------------------------
     KeyboardMapping c;
@@ -97,6 +102,18 @@ int main() {
     KS_CHECK(d.steerLeft == 'V');   // case-insensitive
     KS_CHECK(d.shiftUp == 0x60);
     std::remove(path);
+
+    // --- The starter is a press, not a level ----------------------------
+    // The vehicle cranks on the rising edge only: holding the key down is the
+    // same press (no second crank), and the release is not a crank either.
+    {
+        bool prev = false;
+        KS_CHECK(ks::sim::starterPressEdge(true, prev));   // pressed
+        KS_CHECK(!ks::sim::starterPressEdge(true, prev));  // still held
+        KS_CHECK(!ks::sim::starterPressEdge(false, prev)); // released
+        KS_CHECK(ks::sim::starterPressEdge(true, prev));   // pressed again
+        KS_CHECK(!ks::sim::starterPressEdge(false, prev));
+    }
 
     return KS_TEST_RESULT("keyboard_mapping_test");
 }

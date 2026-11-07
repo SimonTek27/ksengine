@@ -21,7 +21,7 @@ namespace ui {
 
 class KeyRebindOverlay {
 public:
-    static constexpr int kActions = 7;
+    static constexpr int kActions = 9;
 
     void setVisible(bool v) { m_visible = v; if (!v) m_capturing = false; }
     bool isVisible() const { return m_visible; }
@@ -38,7 +38,9 @@ public:
         case 3: return "Steer right";
         case 4: return "Shift up";
         case 5: return "Shift down";
-        default: return "Handbrake";
+        case 6: return "Handbrake";
+        case 7: return "Clutch";
+        default: return "Starter";
         }
     }
 
@@ -143,7 +145,9 @@ private:
         case 3: return &m_map.steerRight;
         case 4: return &m_map.shiftUp;
         case 5: return &m_map.shiftDown;
-        default: return &m_map.handbrake;
+        case 6: return &m_map.handbrake;
+        case 7: return &m_map.clutch;
+        default: return &m_map.starter;
         }
     }
 
@@ -155,7 +159,9 @@ private:
         case 3: return keyName(m_map.steerRight) + " / " + keyName(KeyboardMapping::AltSteerRight);
         case 4: return keyName(m_map.shiftUp);
         case 5: return keyName(m_map.shiftDown);
-        default: return keyName(m_map.handbrake);
+        case 6: return keyName(m_map.handbrake);
+        case 7: return keyName(m_map.clutch);
+        default: return keyName(m_map.starter);
         }
     }
 

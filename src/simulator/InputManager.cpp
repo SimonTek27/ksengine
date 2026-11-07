@@ -5,6 +5,7 @@
 #include <cstring>
 
 #ifdef _WIN32
+#include <windows.h>
 #include "devices/xinput/XInputDevice.h"
 #include "devices/DirectInputJoystick.h"
 #endif
@@ -92,6 +93,9 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
     } else {
         m_clutch = 0;
     }
+    // A keyboard key is a pedal held to the floor: it wins over a pad that may
+    // have no clutch at all (and over one that does, as the later input).
+    if (keyHeld(m_kb.clutch)) m_clutch = 1.0;
 
     // Handbrake follows the button while it is held, like the pedal axes follow
     // their own: a latched toggle would leave the brake on after the pad is gone.
@@ -133,9 +137,32 @@ void InputManager::processInjected() {
     applyMapping(m_axes, m_buttons);
 }
 
+bool InputManager::keyHeld(int vk) const {
+    if (vk <= 0) return false;
+    auto norm = [](int k) { return (k >= 'a' && k <= 'z') ? k - ('a' - 'A') : k; };
+    const int up = norm(vk);
+    if (isKeyDown(up)) return true;
+    const int low = (up >= 'A' && up <= 'Z') ? up + ('a' - 'A') : up;
+    if (isKeyDown(low)) return true;
+#ifdef _WIN32
+    // The app only forwards the bindings it knows about, and this header has no
+    // window procedure: read the key state directly so a rebound pedal works
+    // without the app having to know about it.
+    return (GetAsyncKeyState(up) & 0x8000) != 0 ||
+           (low != up && (GetAsyncKeyState(low) & 0x8000) != 0);
+#else
+    return false;
+#endif
+}
+
 void InputManager::update() {
     m_shiftUp = false;
     m_shiftDown = false;
+
+    // Starter: a rising edge is one crank request. Read on every path (pad,
+    // wheel, keyboard) because the branches below return early.
+    if (starterPressEdge(keyHeld(m_kb.starter), m_prevStarterKey))
+        m_starterRequested = true;
 
     if (m_hasInjected) {
         processInjected();
@@ -289,6 +316,7 @@ void InputManager::processKeyboard() {
     m_prevShiftDownKey = curDn;
 
     m_handbrake = pressed(m_kb.handbrake) ? 1.0 : 0.0;
+    m_clutch = keyHeld(m_kb.clutch) ? 1.0 : 0.0;
 
     m_steer = curve(m_steer, m_map.steerGamma, m_map.deadZone, true);
     m_throttle = std::clamp(m_throttle, 0.0, 1.0);
@@ -304,6 +332,7 @@ void InputManager::reset() {
     m_throttle = m_brake = m_steer = m_clutch = m_handbrake = 0;
     m_rawThrottle = m_rawBrake = m_rawSteer = 0;
     m_shiftUp = m_shiftDown = false;
+    m_starterRequested = m_prevStarterKey = false;
     m_keys.clear();
     m_buttons = 0;
     m_hasInjected = false;

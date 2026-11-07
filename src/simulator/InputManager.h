@@ -85,6 +85,10 @@ struct KeyboardMapping {
     int shiftUp = 'E';
     int shiftDown = 'Q';
     int handbrake = 0x20; // VK_SPACE
+    // Pedal and starter button: a car needs them to idle, launch and restart.
+    // 'Z' sits under the left hand next to the WASD cluster, 'I' is ignition.
+    int clutch = 'Z';
+    int starter = 'I';
 
     static constexpr int AltThrottle = 0x26;   // VK_UP
     static constexpr int AltBrake = 0x28;      // VK_DOWN
@@ -156,11 +160,13 @@ inline bool saveKeyboardMapping(const std::string& path, const KeyboardMapping& 
     std::fprintf(f,
         "# ksengine keyboard bindings (roadmap 1.4)\n"
         "throttle=%s\nbrake=%s\nsteerLeft=%s\nsteerRight=%s\n"
-        "shiftUp=%s\nshiftDown=%s\nhandbrake=%s\n",
+        "shiftUp=%s\nshiftDown=%s\nhandbrake=%s\n"
+        "clutch=%s\nstarter=%s\n",
         keyName(m.throttle).c_str(), keyName(m.brake).c_str(),
         keyName(m.steerLeft).c_str(), keyName(m.steerRight).c_str(),
         keyName(m.shiftUp).c_str(), keyName(m.shiftDown).c_str(),
-        keyName(m.handbrake).c_str());
+        keyName(m.handbrake).c_str(), keyName(m.clutch).c_str(),
+        keyName(m.starter).c_str());
     std::fclose(f);
     return true;
 }
@@ -191,6 +197,8 @@ inline bool loadKeyboardMapping(const std::string& path, KeyboardMapping& m) {
         else if (key == "shiftUp") m.shiftUp = vk;
         else if (key == "shiftDown") m.shiftDown = vk;
         else if (key == "handbrake") m.handbrake = vk;
+        else if (key == "clutch") m.clutch = vk;
+        else if (key == "starter") m.starter = vk;
     }
     std::fclose(f);
     return true;
@@ -213,6 +221,8 @@ inline bool saveKeyboardMappingJson(const std::string& path, const KeyboardMappi
     root.set("shiftUp", json::Value::string(keyName(m.shiftUp)));
     root.set("shiftDown", json::Value::string(keyName(m.shiftDown)));
     root.set("handbrake", json::Value::string(keyName(m.handbrake)));
+    root.set("clutch", json::Value::string(keyName(m.clutch)));
+    root.set("starter", json::Value::string(keyName(m.starter)));
     return ks::engine::assets::UserData::writeFile(path, json::dump(root));
 }
 
@@ -251,7 +261,20 @@ inline bool loadKeyboardMappingJson(const std::string& path, KeyboardMapping& m)
     apply("shiftUp", m.shiftUp);
     apply("shiftDown", m.shiftDown);
     apply("handbrake", m.handbrake);
+    apply("clutch", m.clutch);
+    apply("starter", m.starter);
     return applied > 0;
+}
+
+/**
+ * One crank request per press: the starter is a button to the driver, so the
+ * vehicle hears the rising edge only. Holding the key down is the same press,
+ * and releasing it is not one either.
+ */
+inline bool starterPressEdge(bool held, bool& previous) {
+    const bool edge = held && !previous;
+    previous = held;
+    return edge;
 }
 
 class InputManager {
@@ -287,6 +310,14 @@ public:
 
     bool shiftUp() const { return m_shiftUp; }
     bool shiftDown() const { return m_shiftDown; }
+
+    /** One crank request per starter press, cleared when read: the key is a
+     *  button to the driver, not a state the vehicle should hold. */
+    bool takeStarterRequest() {
+        const bool r = m_starterRequested;
+        m_starterRequested = false;
+        return r;
+    }
 
     /** Menu navigation from the pad, as the virtual keys the UI already
      *  understands (arrows / ENTER / ESC), one per press. Polled on every
@@ -325,6 +356,10 @@ public:
 
 private:
     void processKeyboard();
+    /** Held down, from the keys the app forwards or from the keyboard itself:
+     *  the clutch and the starter are read here so a binding works the moment
+     *  the player sets it. */
+    bool keyHeld(int vk) const;
     void processXInput();
     void processInjected();
     void applyMapping(const double axes[AXIS_COUNT], unsigned buttons);
@@ -336,6 +371,7 @@ private:
     bool m_shiftUp = false, m_shiftDown = false;
     bool m_prevShiftUpKey = false, m_prevShiftDownKey = false;
     bool m_prevShiftUpBtn = false, m_prevShiftDownBtn = false;
+    bool m_starterRequested = false, m_prevStarterKey = false;
 
     JoystickMapping m_map = JoystickMapping::gamepadDefault();
     KeyboardMapping m_kb;
