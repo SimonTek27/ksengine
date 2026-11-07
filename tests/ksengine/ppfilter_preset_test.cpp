@@ -6,6 +6,7 @@
 // with the values its file carries.
 
 #include "engine/Config/PPFilterPreset.h"
+#include "engine/material/PngCodec.h"
 
 #include <cmath>
 #include <cstdio>
@@ -72,7 +73,7 @@ const char* kSample = R"({
     "colorTemp": 6026, "whiteBalance": 6500
   },
   "colorLut": { "enabled": true, "strength": 0.75, "file": "sample.lut.png" },
-  "display": { "exposure": 1.35, "tonemapMode": 2 }
+  "display": { "exposure": 1.35, "tonemapMode": 2, "bloomStrength": 0.6 }
 })";
 
 void testFullMapping() {
@@ -123,6 +124,7 @@ void testFullMapping() {
     checkNear(p.colorGrading.brightness, 1.01, 1e-6, "colour brightness");
     check(p.colorGrading.colorTemp == 6026, "colour temperature");
     check(p.colorGrading.whiteBalance == 6500, "white balance");
+    check(p.colorGradingDeclared, "colour grading block declared");
 
     check(p.colorLut.enabled, "lut enabled");
     checkNear(p.colorLut.strength, 0.75, 1e-6, "lut strength");
@@ -130,6 +132,7 @@ void testFullMapping() {
 
     checkNear(p.display.exposure, 1.35, 1e-6, "display exposure");
     check(p.display.tonemapMode == 2, "display tonemap mode");
+    checkNear(p.display.bloomStrength, 0.6, 1e-6, "display bloom weight");
 }
 
 void testDefaultsAndFallbacks() {
@@ -148,10 +151,12 @@ void testDefaultsAndFallbacks() {
     check(p.glare.enabled, "default glare enabled");
     check(p.depthOfField.apertureFrontLevels == -1, "default dof levels");
     check(p.godRays.color[0] == 1.0f, "default god rays colour");
+    check(!p.colorGradingDeclared, "minimal keeps colour grading undeclared");
 
     // Without a display block the tone-mapping values stand in for it.
     checkNear(p.display.exposure, 0.44, 1e-6, "display exposure falls back to tone mapping");
     check(p.display.tonemapMode == 4, "display mode falls back to tone function");
+    checkNear(p.display.bloomStrength, -1.0, 1e-6, "unset bloom keeps the renderer's weight");
 
     // A partial preset that also leaves tone mapping alone has no display.
     ks::engine::config::PPFilterPreset bare;
@@ -195,6 +200,19 @@ void testShippedPresets() {
         check(!p.name.empty(), (id + " has a name").c_str());
         check(p.toneMapping.exposure > 0.0f, (id + " has an exposure").c_str());
         check(p.display.exposure > 0.0f, (id + " resolves a display exposure").c_str());
+
+        // Every strip the preset points at must exist next to it and decode as
+        // the 32^3 cube the display pass samples (1024x32 RGB PNG).
+        if (!p.colorLut.file.empty()) {
+            const std::string lutPath = p.colorLutPath(path);
+            ks::image::RawImage image;
+            std::string lutError;
+            const bool decoded = ks::image::loadImageFile(lutPath, &image, &lutError);
+            if (!decoded) std::printf("  %s: %s\n", id.c_str(), lutError.c_str());
+            check(decoded, (id + " lut decodes").c_str());
+            check(image.width == 1024 && image.height == 32,
+                  (id + " lut is 1024x32").c_str());
+        }
     }
 
     // normal.json points its colour grading at a strip next to the file: the
@@ -202,8 +220,8 @@ void testShippedPresets() {
     ks::engine::config::PPFilterPreset normal;
     std::string error;
     if (ks::engine::config::PPFilterPreset::loadFile(dir + "/normal.json", normal, &error)) {
-        check(normal.colorLut.file == "normal.lut.png", "normal lut file name");
-        check(normal.colorLutPath(dir + "/normal.json") == dir + "/normal.lut.png",
+        check(normal.colorLut.file == "normal.lut", "normal lut file name");
+        check(normal.colorLutPath(dir + "/normal.json") == dir + "/normal.lut",
               "normal lut resolves next to the preset");
     } else {
         check(false, "normal.json parses");

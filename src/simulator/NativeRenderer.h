@@ -387,6 +387,49 @@ public:
     void setHdrWhiteNits(float nits) { if (nits > 0.0f) m_hdrWhiteNits = nits; }
     float hdrWhiteNits() const { return m_hdrWhiteNits; }
 
+    // Colour grading of the display pass: the preset's colorGrading block and
+    // the video config's saturation/contrast ride these. The defaults keep
+    // the exact image the hardcoded push constants produced before them.
+    void setSaturation(float s) {
+        m_saturation = s < 0.0f ? 0.0f : (s > 3.0f ? 3.0f : s);
+    }
+    float saturation() const { return m_saturation; }
+    void setContrast(float c) {
+        m_contrast = c < 0.01f ? 0.01f : (c > 3.0f ? 3.0f : c);
+    }
+    float contrast() const { return m_contrast; }
+    // Fold-in weight of the half-res bloom in the display pass (the shader's
+    // old hardcoded 0.3). Clamped so a bad caller cannot dim or blow up the
+    // frame from the config file.
+    void setBloomStrength(float b) {
+        m_bloomStrength = b < 0.0f ? 0.0f : (b > 2.0f ? 2.0f : b);
+    }
+    float bloomStrength() const { return m_bloomStrength; }
+
+    // ---- Depth of field of the display pass (the preset's depthOfField
+    // block; photo mode's "camera"). Values map 1:1 onto the push-constant
+    // block in tonemap.frag; doBarriers in endFrame() handle the depth image
+    // layout. focal in metres; a negative focal makes the record-time code
+    // derive it from the camera's actual vertical FOV (f = 0.5*sensor*proj(1,1)).
+    void setDepthOfField(bool enabled, int quality, float fNumber, float sensorHeight,
+                         float focalLength, float apertureParameter,
+                         int frontLevels, int backLevels,
+                         float meteringWidth, float meteringHeight) {
+        m_dofEnabled = enabled;
+        m_dofQuality = quality < 0 ? 0 : (quality > 5 ? 5 : quality);
+        m_dofFNumber = fNumber > 0.0f ? fNumber : 2.8f;
+        m_dofSensorH = sensorHeight > 0.0f ? sensorHeight : 0.025f;
+        m_dofFocal = focalLength;
+        m_dofApertureParam = apertureParameter > 0.0f ? apertureParameter : 1.0f;
+        m_dofFrontLevels = frontLevels;
+        m_dofBackLevels = backLevels;
+        // meteringWidth/Height arrive in percent, as the (shared) autoExposure
+        // metering values do; the shader wants the half-size in UV fractions.
+        m_dofMeterHalfX = meteringWidth > 0.0f ? meteringWidth / 200.0f : 0.5f;
+        m_dofMeterHalfY = meteringHeight > 0.0f ? meteringHeight / 200.0f : 0.5f;
+    }
+    bool depthOfFieldEnabled() const { return m_dofEnabled; }
+
     // HDR10 output. Requests a VK_COLOR_SPACE_HDR10_ST2084_EXT swapchain
     // (10-bit A2B10G10R10, PQ/Rec.2020) and makes the display pass encode
     // for it; falls back to the 8-bit sRGB swapchain (with an explicit log)
@@ -637,7 +680,7 @@ private:
     // Per-frame half of the display/bloom descriptors: both the bright-pass
     // extract and the tonemap pass read the history slot *this* frame's
     // resolve writes, so they are re-pointed every frame.
-    void writeDisplayDescriptorSets(VkImageView resolvedView);
+    void writeDisplayDescriptorSets(VkImageView resolvedView, VkImageView depthView);
 
     // --- Occlusion culling: previous-frame max-depth grid ---
     // ensureOcclusionResources() builds the downsample pass + host readback
@@ -681,6 +724,23 @@ private:
     // made the same frame ~2.5x brighter than SDR. Override per machine with
     // KS_HDR_WHITE_NITS.
     float m_hdrWhiteNits = 80.0f;
+    // Colour grading of the display pass (see setSaturation/setContrast).
+    float m_saturation = 1.0f;
+    float m_contrast = 1.0f;
+    // Bloom fold-in weight of the display pass (was the shader's hardcoded
+    // 0.3 — see setBloomStrength).
+    float m_bloomStrength = 0.3f;
+    // Depth of field of the display pass (see setDepthOfField).
+    bool m_dofEnabled = false;
+    int m_dofQuality = 2;
+    float m_dofFNumber = 2.8f;
+    float m_dofSensorH = 0.025f;   // metres
+    float m_dofFocal = -1.0f;      // <= 0: derived from the camera FOV at record
+    float m_dofApertureParam = 1.0f;
+    int m_dofFrontLevels = -1;
+    int m_dofBackLevels = -1;
+    float m_dofMeterHalfX = 0.5f;  // metering half-size, UV fractions
+    float m_dofMeterHalfY = 0.5f;
 
     VkFormat m_gbufferFormats[kGBufferCount] = {
         VK_FORMAT_R8G8B8A8_UNORM,

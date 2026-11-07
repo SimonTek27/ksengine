@@ -53,6 +53,14 @@ struct PPFilterPreset {
         int apertureShape = 3;
     };
 
+    /** Thin lens of the depthOfField block: focal length in metres for the
+     *  preset's own imageSensorHeight + baseFOV (f = 0.5 * sensor/tan(fov/2),
+     *  the 35mm-format identity the DoC presets are authored against). The
+     *  renderer derives its focal from the running camera instead, so the
+     *  blur follows a zoomed view; this one describes the preset itself and
+     *  is what the tests check. */
+    float dofFocalLength() const;
+
     struct ChromaticAberration {
         bool enabled = true;
         int samples = 5;
@@ -114,6 +122,9 @@ struct PPFilterPreset {
     struct Display {
         float exposure = -1.0f;
         int tonemapMode = -1;
+        /** -1 keeps the renderer's bloom fold-in weight (0.3, see
+         *  NativeRenderer::setBloomStrength); 0 turns the glow off. */
+        float bloomStrength = -1.0f;
     };
 
     std::string schema;
@@ -129,6 +140,14 @@ struct PPFilterPreset {
     Glare glare;
     GodRays godRays;
     ColorGrading colorGrading;
+    /** True only when the document carried a colorGrading block. The struct
+     *  default (saturation 0.95) is a look, not a neutral: presets that never
+     *  named one must not have it applied. */
+    bool colorGradingDeclared = false;
+    /** Same guard for the depthOfField block: photo mode only forces the
+     *  blur onto presets that speak the block, so an arbitrary struct
+     *  default (f/12) cannot invent bokeh for one that never asked. */
+    bool depthOfFieldDeclared = false;
     ColorLut colorLut;
     Display display;
 

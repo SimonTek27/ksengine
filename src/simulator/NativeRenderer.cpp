@@ -960,8 +960,26 @@ struct TonemapPC {
     // Post-processing preset grading, appended at the END (add-only rule).
     float lutStrength;    // 64  0 = off
     int32_t lutEnabled;   // 68  1 = sample the bound grading strip
+    // Bloom fold-in weight, appended at the END (add-only rule): the gain the
+    // display pass multiplies the half-res bloom with when folding it back.
+    float bloomStrength;  // 72
+    // Depth of field (preset depthOfField block, photo mode), appended at the
+    // END (add-only rule). The block finishes at exactly 128 bytes — the
+    // guaranteed push-constant limit — so it cannot grow further.
+    float depthR22;       // 76  projection row 2 of the rendering camera
+    float depthR23;       // 80  (linearizeDepth(): dist = r23 / (ndc + r22))
+    int32_t dofEnabled;   // 84  1 = sample depthSampler in the display pass
+    int32_t dofSamples;   // 88  taps (quality-mapped, <= 24)
+    float dofFocal;       // 92  focal length, metres (PPFilterPreset::dofFocalLength)
+    float dofAperture;    // 96  aperture diameter, metres = focal / fNumber
+    float dofGain;        // 100 px per metre of sensor CoC (extent/sensor * apertureParameter)
+    float dofFocus;       // 104 fixed focus distance; 0 = meter inside the shader
+    float dofMeterHalfX;  // 108 focus metering half-size (UV), screen-centred
+    float dofMeterHalfY;  // 112
+    float dofFrontPx;     // 116 blur radius caps (px), near / far side
+    float dofBackPx;      // 120
 };
-static_assert(sizeof(TonemapPC) == 72, "TonemapPC must match tonemap.frag's ToneMapPC");
+static_assert(sizeof(TonemapPC) == 124, "TonemapPC must match tonemap.frag's ToneMapPC");
 
 // Bright-pass push constants (glareExtract.frag): threshold + soft knee in
 // scene-linear units, i.e. 1.0 is "already brighter than SDR paper white".
@@ -2692,7 +2710,8 @@ void NativeRenderer::endFrame() {
         // not shimmer), the horizontal blur reads its output, the vertical
         // blur reads that and writes the result back to slot A, which is
         // what the display pass samples. ----
-        writeDisplayDescriptorSets(m_historyViews[historyWrite]);
+        writeDisplayDescriptorSets(m_historyViews[historyWrite],
+                                   deferred ? m_gbufferDepthView : m_depthView);
         {
         m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Resolve);
             VkViewport bvp{0, 0, float(m_bloomExtent.width), float(m_bloomExtent.height), 0.0f, 1.0f};
@@ -2737,6 +2756,32 @@ void NativeRenderer::endFrame() {
         // whichever surface the swapchain was created with: sRGB OETF on the
         // 8-bit path, PQ/Rec.2020 on HDR10. ----
         {
+            // Depth of field wants the geometry depth readable, exactly the
+            // way recordOcclusionPass() moves it for the grid downsample:
+            // attachment writes -> shader reads. The display pass then never
+            // writes to it, so flipping it back right after the pass keeps
+            // every later consumer (the occlusion grid, the next frame's
+            // GBuffer clear) untouched — DOF off skips both barriers and the
+            // depth stays exactly as the GBuffer pass left it.
+            if (m_dofEnabled && m_gbufferDepthImage) {
+                VkImageMemoryBarrier dofIn{};
+                dofIn.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                dofIn.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                dofIn.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                dofIn.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dofIn.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dofIn.image = m_gbufferDepthImage;
+                dofIn.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+                dofIn.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                dofIn.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                dofIn.subresourceRange.levelCount = 1;
+                dofIn.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(m_commandBuffer,
+                                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                     VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     0, 0, nullptr, 0, nullptr, 1, &dofIn);
+            }
             VkClearValue dClear{};
             dClear.color = {{0.0f, 0.0f, 0.0f, 1.0f}};
 
@@ -2764,14 +2809,50 @@ void NativeRenderer::endFrame() {
             // 236/255 instead of the 214 the linear value maps to).
             t.gamma = 1.0f;
             t.whitePoint = 11.2f;   // Uncharted2 paper white (its default)
-            t.saturation = 1.0f;
-            t.contrast = 1.0f;
+            t.saturation = m_saturation;
+            t.contrast = m_contrast;
             t.mode = m_tonemapMode;
             t.lutStrength = m_lutStrength;
             t.lutEnabled = (m_lutReady && m_lutStrength > 0.0f) ? 1 : 0;
             t.hdrOutput = m_hdrOutput ? 1 : 0;
             t.whiteNits = m_hdrWhiteNits;
             t.peakNits = kHdrPeakNits;
+            // Bloom fold-in weight (tonemap.frag slides the half-res glow back
+            // in with it); m_bloomStrength because the constant 0.3 was
+            // exposed so the preset and the config can drive it.
+            t.bloomStrength = m_bloomStrength;
+            // Depth of field: the projection rows linearise the depth into
+            // view distances (same two numbers the occlusion grid uses; the
+            // jitter never touches row 2). The physical outputs of the
+            // preset block are folded into three numbers so the shader's
+            // tap loop stays simple.
+            t.depthR22 = m_proj(2, 2);
+            t.depthR23 = m_proj(2, 3);
+            t.dofEnabled = (m_dofEnabled && m_gbufferDepthImage) ? 1 : 0;
+            static constexpr int kDofSamplesByQuality[6] = {4, 8, 12, 16, 20, 24};
+            t.dofSamples = kDofSamplesByQuality[m_dofQuality];
+            // Focal length from the runtime camera when the preset did not
+            // provide one: proj(1,1) = 1/tan(fovY/2) (row 1 can be flipped for
+            // Vulkan NDC Y, hence the absolute value — same for row 2 the
+            // occlusion grid already reuses).
+            const float tanHalfFov = 1.0f / std::fabs(m_proj(1, 1));
+            const float focal = m_dofFocal > 0.0f
+                                    ? m_dofFocal
+                                    : 0.5f * m_dofSensorH * (1.0f / tanHalfFov);
+            t.dofFocal = focal;
+            t.dofAperture = focal / m_dofFNumber;
+            // Thin-lens CoC in metres on the sensor -> pixels: the sensor
+            // height maps onto the view height, and the preset's
+            // apertureParameter scales the result as its scene-scale knob.
+            t.dofGain = float(m_swapChainExtent.height) / m_dofSensorH * m_dofApertureParam;
+            t.dofFocus = 0.0f; // always auto-focus inside the metering rect
+            t.dofMeterHalfX = m_dofMeterHalfX;
+            t.dofMeterHalfY = m_dofMeterHalfY;
+            // apertureFront/BackLevels: -1 leaves the physical CoC uncapped
+            // (the sky-safety clamps below still bound it), 0..N give each
+            // level a 4 px step like the arc's blur ladder.
+            t.dofFrontPx = m_dofFrontLevels >= 0 ? float(m_dofFrontLevels) * 4.0f : 4096.0f;
+            t.dofBackPx = m_dofBackLevels >= 0 ? float(m_dofBackLevels) * 4.0f : 4096.0f;
             // Brief P4 — light sharpen follows the TAA state (see TonemapPC).
             t.sharpenTexelX = 1.0f / float(m_swapChainExtent.width);
             t.sharpenTexelY = 1.0f / float(m_swapChainExtent.height);
@@ -2782,6 +2863,30 @@ void NativeRenderer::endFrame() {
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             recordUiOverlay(m_displayRenderPass, m_commandBuffer);
             vkCmdEndRenderPass(m_commandBuffer);
+
+            // DOF — depth reads are done: hand the image back to whatever the
+            // rest of the frame expects (the attachment layout it had on the
+            // way in).
+            if (m_dofEnabled && m_gbufferDepthImage) {
+                VkImageMemoryBarrier dofOut{};
+                dofOut.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                dofOut.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                dofOut.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                dofOut.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dofOut.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                dofOut.image = m_gbufferDepthImage;
+                dofOut.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                dofOut.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+                                       VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+                dofOut.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                dofOut.subresourceRange.levelCount = 1;
+                dofOut.subresourceRange.layerCount = 1;
+                vkCmdPipelineBarrier(m_commandBuffer,
+                                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                     VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+                                     0, 0, nullptr, 0, nullptr, 1, &dofOut);
+            }
         }
     m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Display);
     } else {
@@ -4729,21 +4834,22 @@ bool NativeRenderer::ensureDeferredResources() {
         vkUpdateDescriptorSets(m_device, 2, writes, 0, nullptr);
     }
 
-    // ---- Display descriptors: the resolved HDR frame + the finished bloom.
+    // ---- Display descriptors: the resolved HDR frame + the finished bloom
+    // + the grading strip + the geometry depth (DOF, tonemap.frag binding 3).
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[3]{};
-        for (int i = 0; i < 3; ++i)
+        VkDescriptorSetLayoutBinding bindings[4]{};
+        for (int i = 0; i < 4; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 3;
+        dslCi.bindingCount = 4;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
-        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
+        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolCi.maxSets = 1;
@@ -5398,7 +5504,8 @@ void NativeRenderer::writeResolveDescriptorSet() {
     vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
 }
 
-void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView) {
+void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
+                                                VkImageView depthView) {
     if (!m_displaySet || !m_bloomExtractSet) return;
 
     // Both readers take the history slot the resolve pass wrote this frame
@@ -5426,7 +5533,7 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView) {
     lutInfo.imageView = m_lutView;
     lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[4]{};
+    VkWriteDescriptorSet writes[5]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -5455,7 +5562,25 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView) {
     writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[3].pImageInfo = &lutInfo;
 
-    vkUpdateDescriptorSets(m_device, 4, writes, 0, nullptr);
+    // Binding 3: the geometry depth, for the display pass's DOF. The image
+    // layout claim is SHADER_READ_ONLY because that is what the image is in
+    // while the pass runs — endFrame() moves it there (and back) with the
+    // same barrier pattern recordOcclusionPass() already uses. The view is
+    // always written so the set is complete whether or not DOF is enabled;
+    // pc.dofEnabled alone gates the shader's reads.
+    VkDescriptorImageInfo depthInfo{};
+    depthInfo.sampler = m_hizSampler;
+    depthInfo.imageView = depthView;
+    depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[4].dstSet = m_displaySet;
+    writes[4].dstBinding = 3;
+    writes[4].descriptorCount = 1;
+    writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[4].pImageInfo = &depthInfo;
+
+    vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
 }
 
 } // namespace ks::sim

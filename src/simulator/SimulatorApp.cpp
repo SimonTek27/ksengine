@@ -98,6 +98,7 @@ static ks::engine::config::EngineSettings g_engineSettings;
 
 static bool g_throttle = false, g_brake = false;
 static bool g_steerLeft = false, g_steerRight = false;
+static bool g_consoleToggle = false; // CTRL+INS toggle state
 static bool g_handbrake = false;
 static bool g_running = true;
 
@@ -117,11 +118,10 @@ static int g_shotDelay = 60;
 static bool g_shotRequested = false;
 static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
+static bool g_photoMode = false;
+static char g_photoModeKey = 0;
 
-// Roadmap 2.14 — windowed profile run: KS_PROFILE_SECONDS=N auto-exits a
-// rendered session after N seconds through the same deterministic teardown
-// (the KS_HEADLESS_SECONDS twin for when the GPU must be in the numbers).
-// The profile itself is requested with KS_PROFILE=1 (same switch the tick
+// Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
 // scopes and the GPU markers read) and dumped on the way out; KS_PROFILE_CSV
 // additionally writes it as CSV.
 static double g_profileSeconds = 0.0;
@@ -233,6 +233,36 @@ static void handleKeyDown(int vk) {
     if (vk == kb.brake || vk == ks::sim::KeyboardMapping::AltBrake) {
         g_brake = true;
         if (im) im->setKeyDown(vk);
+        return;
+    }
+    // Roadmap 4.x — photo mode toggle (F12 by default, or KS_PHOTOMODE=<key>).
+    if (g_photoMode && vk == g_photoModeKey) {
+        g_simulation->setCameraMode(ks::sim::CameraController::Mode::Free);
+        g_simulation->ui().dashboard().setVisible(false);
+        g_simulation->ui().menu().setVisible(false);
+        g_photoMode = !g_photoMode; // toggle: first press enters, second exits
+        printf("[photo] %sphoto mode %s (key %c)\n", g_photoMode ? "entered" : "exited", g_photoModeKey ? "press again to exit" : "", g_photoModeKey);
+        if (!g_photoMode) {
+            g_simulation->ui().dashboard().setVisible(true);
+            g_simulation->ui().menu().setVisible(true);
+            g_simulation->start(); // resume simulation
+        }
+        return;
+    }
+    // Roadmap 4.x — developer console toggle (CTRL+INSERT).
+    // VK_CONTROL = 0x12, VK_INSERT = 0x2D
+    if (vk == 0x2D) { // INSERT key
+        bool ctrlDown = (GetAsyncKeyState(0x12) & 0x8000) != 0;
+        if (ctrlDown && !g_consoleToggle) {
+            g_consoleToggle = true;
+            g_simulation->ui().console().setVisible(true);
+            g_simulation->ui().console().startTyping();
+            printf("[console] opened (CTRL+INSERT)\n");
+        } else if (!ctrlDown) {
+            g_consoleToggle = false;
+            g_simulation->ui().console().setVisible(false);
+            printf("[console] closed (CTRL released)\n");
+        }
         return;
     }
     if (vk == kb.steerLeft || vk == ks::sim::KeyboardMapping::AltSteerLeft) {
@@ -529,11 +559,29 @@ static void initVulkanAndSimulation() {
         std::string pfError;
         if (ks::engine::config::PPFilterPreset::loadFile(pfPath, preset, &pfError)) {
             ks::engine::config::PPFilterPreset::instance() = preset;
+            // Colour grading only where the preset declared the block: the
+            // struct default (saturation 0.95) is a look, not a neutral, and
+            // must not leak into presets that never named one.
+            if (preset.colorGradingDeclared) {
+                g_nativeRenderer->setSaturation(preset.colorGrading.saturation);
+                g_nativeRenderer->setContrast(preset.colorGrading.contrast);
+            }
+            const float brightness = preset.colorGradingDeclared
+                                         ? (preset.colorGrading.brightness > 0.0f
+                                                ? preset.colorGrading.brightness
+                                                : 1.0f)
+                                         : 1.0f;
             if (preset.display.exposure > 0.0f) {
-                g_nativeRenderer->setExposure(preset.display.exposure);
+                // Brightness is a pre-curve linear gain: the same place the
+                // display pass applies exposure, so the two multiply here
+                // rather than double-encoding.
+                g_nativeRenderer->setExposure(preset.display.exposure * brightness);
             }
             if (preset.display.tonemapMode >= 0 && preset.display.tonemapMode <= 4) {
                 g_nativeRenderer->setTonemapMode(preset.display.tonemapMode);
+            }
+            if (preset.display.bloomStrength > 0.0f) {
+                g_nativeRenderer->setBloomStrength(preset.display.bloomStrength);
             }
             // Exposure, tone curve and the grading strip all live in the
             // display pass, which only the deferred path runs: a preset asks
@@ -545,10 +593,14 @@ static void initVulkanAndSimulation() {
                     printf("[INIT] PP preset LUT not loaded: %s\n", lutPath.c_str());
                 }
             }
-            printf("[INIT] Post-processing preset \'%s\': exposure %.3f, tonemap %d, lut %s\n",
+            printf("[INIT] Post-processing preset '%s': exposure %.3f, tonemap %d, "
+                   "saturation %.2f, contrast %.2f, bloom %.2f, lut %s\n",
                    preset.name.c_str(),
                    static_cast<double>(preset.display.exposure),
                    preset.display.tonemapMode,
+                   static_cast<double>(g_nativeRenderer->saturation()),
+                   static_cast<double>(g_nativeRenderer->contrast()),
+                   static_cast<double>(g_nativeRenderer->bloomStrength()),
                    preset.colorLut.file.empty() ? "none" : preset.colorLut.file.c_str());
         } else {
             printf("[INIT] KS_PPFILTER \'%s\' not loaded: %s\n", pfName, pfError.c_str());
@@ -913,6 +965,7 @@ static void initSimulation() {
             {"video",
              {"note", "resolution", "resolutions", "fullscreen", "vsync", "frameLimit", "ssao",
               "ssr", "ssgi", "ssgiRadius", "ssgiIntensity", "motionBlur", "exposure",
+              "saturation", "contrast",
               "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
               "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
@@ -1081,6 +1134,8 @@ static void initSimulation() {
         mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
         mergeVideo(g_userLayout.settings, videoConfig);
         const double exposure = videoConfig.numberAt("exposure", -1.0);
+        const double saturation = videoConfig.numberAt("saturation", -1.0);
+        const double contrast = videoConfig.numberAt("contrast", -1.0);
         const std::string tonemap = videoConfig.stringAt("tonemap");
         const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
         const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
@@ -1106,6 +1161,11 @@ static void initSimulation() {
         }
         if (auto* renderer = g_simulation->renderer()) {
             if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));
+            // Colour grading: the config wins over the preset read above (the
+            // preset already set the renderer's members), so a negative or
+            // missing value keeps what the preset left in place.
+            if (saturation >= 0.0) renderer->setSaturation(static_cast<float>(saturation));
+            if (contrast > 0.0) renderer->setContrast(static_cast<float>(contrast));
             for (int i = 0; i < ks::sim::GameMenuOverlay::kTonemapCount; ++i) {
                 if (tonemap == ks::sim::GameMenuOverlay::kTonemapNames[i])
                     renderer->setTonemapMode(i);
@@ -1436,6 +1496,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         const int d = std::atoi(sd);
         if (d >= 0) g_shotDelay = d;
     }
+    // Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
+    if (const char* pm = std::getenv("KS_PHOTOMODE")) {
+        g_photoMode = true;
+        g_photoModeKey = pm[0];
+    }
     // Roadmap 2.14 — timed profile run (see globals).
     // --track <dir>: the KS_TRACK setting, from the command line. WinMain gets
     // the raw ANSI tail, so this is a minimal quoted-word split; anything it
@@ -1546,95 +1611,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         }
     }
 
-    
-    // KS_MENU_SCREEN=<page>: open a menu page before the capture frames run, so
-    // the screens behind the tiles can be judged without driving the window by
-    // hand. An unknown name leaves rather than writing a capture of the wrong
-    // page under the requested file name.
-    if (const char* screenEnv = std::getenv("KS_MENU_SCREEN"); screenEnv && screenEnv[0]) {
-        std::string name(screenEnv);
-        for (char& c : name)
-            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-        struct Page { const char* name; ks::sim::MenuState state; };
-        static const Page kPages[] = {
-            {"MAIN", ks::sim::MenuState::Main},
-            {"SINGLE PLAYER", ks::sim::MenuState::Singleplayer},
-            {"SINGLEPLAYER", ks::sim::MenuState::Singleplayer},
-            {"MULTIPLAYER", ks::sim::MenuState::Multiplayer},
-            {"SETTINGS", ks::sim::MenuState::Settings},
-            {"VIDEO", ks::sim::MenuState::Options},
-            {"CONTENT", ks::sim::MenuState::ContentManager},
-            {"PROFILE", ks::sim::MenuState::Profile},
-            {"CREDITS", ks::sim::MenuState::Credits},
-        };
-        bool opened = false;
-        for (const Page& page : kPages) {
-            if (name != page.name) continue;
-            g_simulation->ui().menu().openScreen(page.state);
-            printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
-                   g_simulation->ui().menu().sectionTitle().c_str());
-            opened = true;
-            break;
-        }
-        if (!opened) {
-            printf("[menu] KS_MENU_SCREEN=%s: unknown page\n", screenEnv);
-            std::exit(2);
-        }
-    }
-    // KS_MENU_SELECT=<row>: put the selection further down a page, so a capture
-    // can show what a list does once it scrolls - the rows hidden above it and
-    // the caption that says so.
-    if (const char* selectEnv = std::getenv("KS_MENU_SELECT"); selectEnv && selectEnv[0]) {
-        const int count = static_cast<int>(g_simulation->ui().menu().items().size());
-        if (count <= 0) {
-            printf("[menu] KS_MENU_SELECT=%s: the page has no rows\n", selectEnv);
-        } else {
-            int row = std::atoi(selectEnv);
-            if (row < 0) row = 0;
-            if (row > count - 1) row = count - 1;
-            g_simulation->ui().menu().setSelectedIndex(row);
-            printf("[menu] selected row %d of %d on %s\n", row, count,
-                   g_simulation->ui().menu().sectionTitle().c_str());
-        }
-    }
-
-    
-    // KS_MENU_SCREEN=<page>: open a menu page before the capture frames run, so
-    // the screens behind the tiles can be judged without driving the window by
-    // hand. An unknown name leaves rather than writing a capture of the wrong
-    // page under the requested file name.
-    if (const char* screenEnv = std::getenv("KS_MENU_SCREEN"); screenEnv && screenEnv[0]) {
-        std::string name(screenEnv);
-        for (char& c : name)
-            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-        struct Page { const char* name; ks::sim::MenuState state; };
-        static const Page kPages[] = {
-            {"MAIN", ks::sim::MenuState::Main},
-            {"SINGLE PLAYER", ks::sim::MenuState::Singleplayer},
-            {"SINGLEPLAYER", ks::sim::MenuState::Singleplayer},
-            {"MULTIPLAYER", ks::sim::MenuState::Multiplayer},
-            {"SETTINGS", ks::sim::MenuState::Settings},
-            {"VIDEO", ks::sim::MenuState::Options},
-            {"CONTENT", ks::sim::MenuState::ContentManager},
-            {"PROFILE", ks::sim::MenuState::Profile},
-            {"CREDITS", ks::sim::MenuState::Credits},
-        };
-        bool opened = false;
-        for (const Page& page : kPages) {
-            if (name != page.name) continue;
-            g_simulation->ui().menu().openScreen(page.state);
-            printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
-                   g_simulation->ui().menu().sectionTitle().c_str());
-            opened = true;
-            break;
-        }
-        if (!opened) {
-            printf("[menu] KS_MENU_SCREEN=%s: unknown page\n", screenEnv);
-            std::exit(2);
-        }
-    }
-
-    
     printf("KinetiKa Simulator started (%s)\n",
            g_headless ? "headless, no window/Vulkan" : "Win32 + Vulkan, no Qt");
 
@@ -1687,6 +1663,42 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
                 PostMessageW(g_hWnd, WM_CLOSE, 0, 0);
             }
         }
+        // Roadmap 4.x — photo mode screenshot: capture the current frame
+        // with the active ppfilter LUT applied, at the window's resolution.
+        if (g_photoMode && g_nativeRenderer && g_nativeRenderer->screenshotReady() && !g_shotRequested) {
+            g_shotRequested = true;
+            // Use a photo-mode specific path if KS_SCREENSHOT is also set,
+            // otherwise just log and leave the file next to the exe.
+            std::string photoPath = g_shotPath.empty() ?
+                "screenshot_photo.png" : g_shotPath;
+            // The readback is already in sRGB; we apply the preset's LUT
+            // strength/exposure in the shader, but here we just save the
+            // display-referred pixels as-is (the LUT was already applied
+            // during the frame).  Save at window extents.
+            ks::image::RawImage img;
+            img.resize(g_nativeRenderer->extent().width,
+                       g_nativeRenderer->extent().height);
+            const auto& px = g_nativeRenderer->screenshotPixels();
+            for (size_t i = 0; i + 3 < px.size(); i += 4) {
+                img.rgba[i] = px[i + 2];   // R
+                img.rgba[i + 1] = px[i + 1]; // G
+                img.rgba[i + 2] = px[i];   // B
+                img.rgba[i + 3] = 255;     // A
+            }
+            std::string err;
+            if (ks::image::saveImageFile(photoPath, img, &err)) {
+                printf("[photo] saved %s (%ux%u)\n", photoPath.c_str(),
+                       img.width, img.height);
+            } else {
+                printf("[photo] save failed: %s\n", err.c_str());
+            }
+            // Exit photo mode after the shot
+            g_photoMode = false;
+            g_simulation->ui().dashboard().setVisible(true);
+            g_simulation->ui().menu().setVisible(true);
+            g_simulation->start(); // resume simulation
+        }
+
         if (g_headless && g_headlessSeconds > 0.0) {
             g_headlessElapsed += elapsed;
             if (g_headlessElapsed >= g_headlessSeconds) {

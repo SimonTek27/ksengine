@@ -31,6 +31,14 @@ layout(set = 0, binding = 1) uniform sampler2D bloomBuffer;
 // horizontally (1024 x 32). Bound by NativeRenderer::loadColorLut(); when
 // pc.lutEnabled is 0 it is never sampled.
 layout(set = 0, binding = 2) uniform sampler2D gradeLut;
+// The geometry depth this frame's geometry pass wrote: the GBuffer depth on
+// the deferred path, m_depthImage on the forward one. Its layout is turned
+// to SHADER_READ_ONLY just before this pass runs (see the DOF barrier in
+// NativeRenderer::endFrame) and turned back to the attachment layout right
+// after, so the occlusion downsample sees exactly what it saw before. Only
+// read when pc.dofEnabled == 1; when DOF is off the binding is still written
+// (the set must stay complete) but the shader never samples it.
+layout(set = 0, binding = 3) uniform sampler2D depthSampler;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -58,6 +66,25 @@ layout(push_constant) uniform ToneMapPC {
     // Post-processing preset grading, appended at the END (add-only rule).
     float lutStrength;   // 64  0 = off
     int   lutEnabled;    // 68  1 = sample gradeLut
+    // Bloom fold-in weight, appended at the END (add-only rule): the gain the
+    // half-res bloom is folded back in with. 1.0 folds what the bright pass
+    // produced; the constant the shader used to hardcode was 0.3.
+    float bloomStrength; // 72
+    // Depth of field (photo mode), appended at the END (add-only rule). The
+    // whole block finishes at exactly 128 bytes, the guaranteed push-constant
+    // limit, so nothing can grow beyond it.
+    float depthR22;      // 76  projection row 2 (see engine/Math/OcclusionTest.h
+    float depthR23;      // 80  linearizeDepth(): dist = r23 / (ndc + r22))
+    int   dofEnabled;    // 84  1 = the preset's depthOfField block is active
+    int   dofSamples;    // 88  tap count (quality-mapped on the CPU, <= 24)
+    float dofFocal;      // 92  focal length (metres, dofFocalLength())
+    float dofAperture;   // 96  aperture diameter (metres) = focal / fNumber
+    float dofGain;       // 100 px per metre of sensor CoC (extent/sensor * apertureParameter)
+    float dofFocus;      // 104 focus distance (metres); 0 = focus inside the metering check
+    float dofMeterHalfX; // 108 focus metering half-size, centred on the screen (UV)
+    float dofMeterHalfY; // 112
+    float dofFrontPx;    // 116 blur radius caps (px) in front of / behind focus
+    float dofBackPx;     // 120
 } pc;
 
 layout(location = 0) in vec2 fragUV;
@@ -146,12 +173,97 @@ vec3 applyGradeLut(vec3 c) {
     vec3 hi = lutTile(c.rg, b1);
     return mix(lo, hi, b - b0);
 }
+// ---- Depth of field (the preset's depthOfField block, photo mode) ----
+// The thin-lens circle of confusion, in metres on the sensor plane, for a
+// point at view distance d:
+//
+//   coc = aperture * focal * |d - focus| / (d * |focus - focal|)
+//
+// dofGain converts it to pixels (view height / sensor height, times the
+// preset's apertureParameter). The view distance comes from the geometry
+// depth exactly like the occlusion grid linearises it — same formula, same
+// numbers passed at record time.
+float dofViewDist(ivec2 px) {
+    float ndc = texelFetch(depthSampler, px, 0).r;
+    float den = ndc + pc.depthR22;
+    if (den >= -1e-9) return 1e7; // beyond the far plane = sky
+    return pc.depthR23 / den;
+}
+
+// Focus distance: the metering rectangle is what the autoExposure block
+// already describes (meteringWidth/Height in 0..100%), centred like the
+// default offsets do. Sky distances do not vote; if the rectangle holds only
+// sky the focus falls back to the far plane (a view of nothing close —
+// everything near gets defocused, which is what the view physically is).
+float dofFocusDistance(ivec2 fragPx, ivec2 extent) {
+    ivec2 meterHalf = ivec2(vec2(extent) * vec2(pc.dofMeterHalfX, pc.dofMeterHalfY));
+    ivec2 lo = ivec2(vec2(extent) * 0.5) - meterHalf;
+    ivec2 hi = ivec2(vec2(extent) * 0.5) + meterHalf;
+    float sum = 0.0;
+    float count = 0.0;
+    const int taps = 12;
+    for (int i = 0; i < taps; ++i) {
+        // Golden-angle disc inside the metering rectangle (one gaussian of
+        // 13 points, the exact focus spot AC's autopip brackets).
+        float a = float(i) * 2.399963229728653;
+        float r = 0.9 * sqrt((float(i) + 0.5) / float(taps));
+        vec2 uv = (vec2(lo + hi) * 0.5 + vec2(cos(a), sin(a)) * r * vec2(meterHalf)) /
+                  vec2(extent);
+        float d = dofViewDist(ivec2(uv * vec2(extent)));
+        if (d < 9e5) {
+            sum += d;
+            count += 1.0;
+        }
+    }
+    return count > 0.0 ? sum / count : 1e7;
+}
+
+vec3 dofBlur(vec3 center, vec2 fragUV, ivec2 px, ivec2 extent, float focus) {
+    float d = dofViewDist(px);
+    float coc = pc.dofAperture * pc.dofFocal * abs(d - focus) /
+                (d * max(abs(focus - pc.dofFocal), 1e-4));
+    float radiusPx = min(coc * pc.dofGain,
+                         d < focus ? pc.dofFrontPx : pc.dofBackPx);
+    if (radiusPx < 0.5)
+        return center;
+    const int taps = 24;
+    vec3 sum = center; // the centre pixel counts as one tap (its own weight)
+    float weight = 1.0;
+    for (int i = 0; i < taps && i < pc.dofSamples; ++i) {
+        float a = float(i) * 2.399963229728653; // golden angle
+        float r = radiusPx * sqrt((float(i) + 0.5) / float(taps));
+        vec2 off = vec2(cos(a), sin(a)) * r * vec2(pc.sharpenTexelX, pc.sharpenTexelY);
+        vec3 c = texture(hdrBuffer, fragUV + off).rgb;
+        float w = 1.0;
+        // A tap that lives far away must not drag a near pixel towards the
+        // sky: weight the harder-looking samples down (the classic bleeding
+        // guard of a cheap gather DOF).
+        ivec2 tp = clamp(px + ivec2(off * vec2(extent)), ivec2(0), extent - ivec2(1));
+        float td = dofViewDist(tp);
+        if (td < 9e5 && d < 9e5 && abs(td - d) > max(focus * 0.25, 2.0))
+            w = 0.25;
+        sum += c * w;
+        weight += w;
+    }
+    return sum / weight;
+}
 
 void main() {
     // The HDR frame and the bloom buffer are both scene-linear and both
     // pre-exposure, so exposure lands on their sum (same order the old
     // shader used).
     vec3 color = texture(hdrBuffer, fragUV).rgb;
+    // Depth of field runs on the scene-linear light, before the bloom fold
+    // and before the curve: a photographic lens blurs light, not the graded
+    // image. dofEnabled 0 leaves every byte of this untouched.
+    if (pc.dofEnabled != 0) {
+        ivec2 extent = ivec2(vec2(1.0) / vec2(pc.sharpenTexelX, pc.sharpenTexelY));
+        ivec2 px = ivec2(fragUV * vec2(extent));
+        float focus = pc.dofFocus > 0.0 ? pc.dofFocus
+                                        : dofFocusDistance(px, extent);
+        color = dofBlur(color, fragUV, px, extent, focus);
+    }
+
     // Brief P4 — light sharpen: unsharp mask on the scene HDR, applied
     // BEFORE the bloom glow is folded in so the glow itself stays soft
     // ("small radius, no foggy glow"). Amount 0 (non-TAA frames) skips
@@ -164,7 +276,7 @@ void main() {
                      texture(hdrBuffer, fragUV + vec2(0.0, -t.y)).rgb) * 0.25;
         color += (color - blur) * pc.sharpenAmount;
     }
-    color += texture(bloomBuffer, fragUV).rgb * 0.3;
+    color += texture(bloomBuffer, fragUV).rgb * pc.bloomStrength;
     vec3 exposed = color * pc.exposure;
 
     vec3 y;

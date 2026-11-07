@@ -2,6 +2,7 @@
 
 #include "engine/FileFormat/Json.h"
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -121,6 +122,7 @@ bool PPFilterPreset::loadFromJsonText(const std::string& text, std::string* erro
     toneMapping.offsetY = num(tm, "offsetY", toneMapping.offsetY);
 
     const Json dof = child(root, "depthOfField");
+    depthOfFieldDeclared = root.contains("depthOfField") && dof.isObject();
     depthOfField.enabled = flag(dof, "enabled", depthOfField.enabled);
     depthOfField.quality = integer(dof, "quality", depthOfField.quality);
     depthOfField.apertureFNumber = num(dof, "apertureFNumber", depthOfField.apertureFNumber);
@@ -178,6 +180,9 @@ bool PPFilterPreset::loadFromJsonText(const std::string& text, std::string* erro
     quad(gr, "color", godRays.color);
 
     const Json cg = child(root, "colorGrading");
+    // Declared counts the block, not the keys: a preset that names the block
+    // in even one key speaks the whole block, the defaults stay out.
+    colorGradingDeclared = root.contains("colorGrading") && cg.isObject();
     colorGrading.hue = num(cg, "hue", colorGrading.hue);
     colorGrading.saturation = num(cg, "saturation", colorGrading.saturation);
     colorGrading.brightness = num(cg, "brightness", colorGrading.brightness);
@@ -196,6 +201,7 @@ bool PPFilterPreset::loadFromJsonText(const std::string& text, std::string* erro
     const Json displayBlock = child(root, "display");
     display.exposure = num(displayBlock, "exposure", -1.0f);
     display.tonemapMode = integer(displayBlock, "tonemapMode", -1);
+    display.bloomStrength = num(displayBlock, "bloomStrength", -1.0f);
     if (display.exposure <= 0.0f) display.exposure = toneMapping.exposure;
     if (display.tonemapMode < 0) display.tonemapMode = toneMapping.function;
 
@@ -242,6 +248,16 @@ std::string PPFilterPreset::colorLutPath(const std::string& presetPath) const {
     // generic_string(): forward slashes on every platform, so a caller that
     // compares the path against the preset's own text gets the same spelling.
     return (parent / colorLut.file).generic_string();
+}
+
+float PPFilterPreset::dofFocalLength() const {
+    // f = 0.5 * sensor / tan(fov/2): a 25mm sensor at a 50deg vertical FOV is
+    // the 26.8mm lens the photo preset's CoC was tuned against.
+    constexpr double kPi = 3.14159265358979323846;
+    const double halfRad = static_cast<double>(depthOfField.baseFOV) * 0.5 * kPi / 180.0;
+    if (halfRad <= 0.0) return -1.0f;
+    return static_cast<float>(0.5 * static_cast<double>(depthOfField.imageSensorHeight) /
+                              std::tan(halfRad));
 }
 
 }}} // namespace ks::engine::config
