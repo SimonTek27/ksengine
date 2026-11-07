@@ -502,6 +502,16 @@ for (const char* owner : {"suspensions", "car"}) {
     }
     parent.remove("GRAPHICS_OFFSETS");
 }
+        // The two rendering-only stems never reach a document, whichever path
+        // built the root: not the .ini conversion (which skips them above) and
+        // not a document written before that rule, whose copy is dropped here.
+        for (Json& doc : docs) {
+            for (const char* skipped : {"blurred_objects", "ambient_shadows"}) {
+                for (const std::string& key : doc.keys()) {
+                    if (iequals(key, skipped)) doc.remove(key);
+                }
+            }
+        }
         splitWingAnimations(docs, names);
         // No document ships the format version of the ini sections.
         for (Json& doc : docs) stripVersionHeaders(doc);
@@ -1020,10 +1030,15 @@ for (const char* owner : {"suspensions", "car"}) {
                 continue;
             }
             // Stems that carry nothing the car needs: escmode.ini only declares
-            // the AC electronic-aid presets a road car cycles through, and
+            // the AC electronic-aid presets a road car cycles through,
             // ac_tyres.ini repeats the tyre geometry, width and radius already
-            // held by tyres.ini. Both files stay in the folder, untouched.
-            if (iequals(stem, "escmode") || iequals(stem, "ac_tyres")) continue;
+            // held by tyres.ini, and blurred_objects.ini / ambient_shadows.ini
+            // only tell the renderer which props spin-blur and where the baked
+            // shadows sit. All four files stay in the folder, untouched.
+            if (iequals(stem, "escmode") || iequals(stem, "ac_tyres") ||
+                iequals(stem, "blurred_objects") || iequals(stem, "ambient_shadows")) {
+                continue;
+            }
             Json& target = objectAt(root, stem);
             for (const auto& group : ini.groups()) {
                 const std::string section = upper(group.name);
