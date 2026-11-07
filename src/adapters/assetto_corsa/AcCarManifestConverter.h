@@ -1267,6 +1267,13 @@ for (const char* owner : {"suspensions", "car"}) {
             result.documents = 2;
         }
         writeSkinOverrides(carDir);
+        // The checklist is part of a converted car: refresh it here too, or the
+        // caller reports a car with documents as one that was never converted.
+        const Result audit = verify(carDir);
+        result.claims = audit.claims;
+        result.checked = audit.checked;
+        result.mismatches = audit.mismatches;
+        result.verified = audit.verified;
         result.converted = true;
         return result;
     }
