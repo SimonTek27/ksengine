@@ -246,6 +246,10 @@ static void handleKeyDown(int vk) {
             g_simulation->ui().dashboard().setVisible(true);
             g_simulation->ui().menu().setVisible(true);
             g_simulation->start(); // resume simulation
+            // Disabilita DOF quando si esce dalla photo mode, tornando allo
+            // stato "senza DOF" (il renderer mantiene l'ultimo setDepthOfField
+            // chiamato; qui gli passiamo false per coerenza).
+            g_nativeRenderer->setDepthOfField(false, 0, 0.0f, 0.0f, -1.0f, 0.0f, -1, -1, 0.0f, 0.0f);
         }
         return;
     }
@@ -582,6 +586,24 @@ static void initVulkanAndSimulation() {
             }
             if (preset.display.bloomStrength > 0.0f) {
                 g_nativeRenderer->setBloomStrength(preset.display.bloomStrength);
+            }
+            // Depth of field: only activate when the preset explicitly declared
+            // the depthOfField block (the struct default f/12 cannot invent bokeh
+            // for a preset that never asked for it). The renderer's setDepthOfField()
+            // maps the block's aperture/sensor/focal into the push-constant block
+            // of tonemap.frag.
+            if (preset.depthOfFieldDeclared) {
+                g_nativeRenderer->setDepthOfField(
+                    preset.depthOfField.enabled,
+                    preset.depthOfField.quality,
+                    preset.depthOfField.apertureFNumber,
+                    preset.depthOfField.imageSensorHeight,
+                    /*focalLength=*/-1.0f,   // renderer derives from camera FOV
+                    preset.depthOfField.apertureParameter,
+                    preset.depthOfField.apertureFrontLevels,
+                    preset.depthOfField.apertureBackLevels,
+                    /*meteringWidth=*/100.0f,   // full frame by default
+                    /*meteringHeight=*/100.0f);
             }
             // Exposure, tone curve and the grading strip all live in the
             // display pass, which only the deferred path runs: a preset asks
