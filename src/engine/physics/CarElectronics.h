@@ -51,6 +51,9 @@ struct ElectronicsLimits {
      *  reference values where the car declares none, so `declaredEdl` says the
      *  document has them, not that the car was built with the system. */
     bool declaredEdl = false;
+    /** [EDL] PRESENT: 1 has it, 0 does not, -1 the car said nothing. `declaredEdl`
+     *  only says the document carries numbers; this says the car has the aid. */
+    int edlPresent = -1;
     float edlMaxSpinPower = 0.55f;
     float edlMaxSpinCoast = 0.40f;
     float edlBrakeTorquePower = 140.0f;
@@ -183,6 +186,7 @@ inline ElectronicsLimits readElectronicsLimits(const Json& document) {
         if (numberOf(*edl, "DEAD_ZONE_COAST", value) && value >= 0.0 && value < 0.5)
             out.edlDeadZoneCoast = static_cast<float>(value);
         out.declaredEdl = declared;
+        out.edlPresent = flagOf(*edl, "PRESENT");
     }
     return out;
 }

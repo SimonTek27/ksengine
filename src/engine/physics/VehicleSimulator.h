@@ -74,6 +74,15 @@ public:
     void setEdlSettings(bool declared, float maxSpinPower, float maxSpinCoast,
                         float brakeTorquePower, float brakeTorqueCoast,
                         float deadZonePower, float deadZoneCoast);
+    /** [EDL] PRESENT: whether the car has the brake-based aid at all. 0 means the
+     *  document's numbers are not a system the car was built with. */
+    void setEdlPresence(int present) {
+        m_edlPresent = (present == 0 || present == 1) ? present : -1;
+    }
+    int edlPresent() const { return m_edlPresent; }
+    /** Declared numbers and declared hardware both: what a call site needs to
+     *  apply the aid. Unknown presence keeps the previous behaviour. */
+    bool edlFitted() const { return m_edlDeclared && m_edlPresent != 0; }
     float tractionControlSlipLimit() const { return m_tcSlipLimit; }
     float absSlipLimit() const { return m_absSlipLimit; }
     /** The car's [TRACTION_CONTROL]/[ABS] PRESENT: 1 has it, 0 does not, -1 the
@@ -405,6 +414,7 @@ private:
     int m_absPresent = -1;
     // [EDL] as the car's document declares it (the conversion always writes it).
     bool m_edlDeclared = false;
+    int m_edlPresent = -1;
     float m_edlMaxSpinPower = 0.55f;
     float m_edlMaxSpinCoast = 0.40f;
     float m_edlBrakeTorquePower = 140.f;

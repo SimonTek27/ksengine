@@ -489,14 +489,15 @@ void VehicleSimulator::loadElectronicsForCar(const std::string& carPath) {
                    electronics.edlBrakeTorqueCoast, electronics.edlDeadZonePower,
                    electronics.edlDeadZoneCoast);
     setElectronicsPresence(electronics.tcPresent, electronics.absPresent);
+    setEdlPresence(electronics.edlPresent);
     if (electronics.tcPresent >= 0 || electronics.absPresent >= 0 ||
         electronics.declaredTractionControl || electronics.declaredAbs) {
         std::fprintf(stderr,
                      "[electronics] slip limits: tc=%0.3f (declared=%d present=%d) "
-                     "abs=%0.3f (declared=%d present=%d) edl=%d\n",
+                     "abs=%0.3f (declared=%d present=%d) edl=%d (present=%d)\n",
                      m_tcSlipLimit, electronics.declaredTractionControl ? 1 : 0,
                      m_tcPresent, m_absSlipLimit, electronics.declaredAbs ? 1 : 0,
-                     m_absPresent, m_edlDeclared ? 1 : 0);
+                     m_absPresent, m_edlDeclared ? 1 : 0, m_edlPresent);
     }
 }
 
@@ -1127,7 +1128,7 @@ void VehicleSimulator::integrate(double dt) {
     // block in the car's document, and the aid follows the driver's TC level, so
     // aids off means aids off.
     float edlBrake[4] = {0.f, 0.f, 0.f, 0.f};
-    if (m_edlDeclared && tcEnabled() && speed > 1.f) {
+    if (edlFitted() && tcEnabled() && speed > 1.f) {
         const bool onPower = m_throttle > 0.05f;
         const float maxSpin = onPower ? m_edlMaxSpinPower : m_edlMaxSpinCoast;
         const float deadZone = onPower ? m_edlDeadZonePower : m_edlDeadZoneCoast;

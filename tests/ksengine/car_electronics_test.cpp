@@ -138,6 +138,7 @@ int main() {
             "\"DEAD_ZONE_POWER\": \"0.05\", \"DEAD_ZONE_COAST\": \"0.08\" }\n"
             "  }\n}\n"));
         KS_CHECK(limits.declaredEdl);
+        KS_CHECK(limits.edlPresent == 1);
         KS_CHECK_NEAR(limits.edlMaxSpinPower, 0.45, 1e-6);
         KS_CHECK_NEAR(limits.edlMaxSpinCoast, 0.30, 1e-6);
         KS_CHECK_NEAR(limits.edlBrakeTorquePower, 200.0, 1e-3);
@@ -162,6 +163,15 @@ int main() {
         const auto limits = readElectronicsLimits(parseDocument(
             "{\n  \"electronics\": { \"ABS\": { \"SLIP_RATIO_LIMIT\": \"0.1\" } }\n}\n"));
         KS_CHECK(!limits.declaredEdl);
+        KS_CHECK(limits.edlPresent == -1);
+    }
+
+    // --- An EDL block with numbers but no PRESENT says nothing about hardware
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": { \"EDL\": { \"MAX_SPIN_POWER\": \"0.45\" } }\n}\n"));
+        KS_CHECK(limits.declaredEdl);
+        KS_CHECK(limits.edlPresent == -1);
     }
 
     // --- The folder reader finds the manifest the conversion writes -------
@@ -242,6 +252,32 @@ int main() {
         KS_CHECK(plain.absEnabled());
         KS_CHECK_NEAR(plain.tractionControlSlipLimit(), 0.10, 1e-6);
         KS_CHECK_NEAR(plain.absSlipLimit(), 0.12, 1e-6);
+
+        // Traction control fitted, EDL not: the document's EDL numbers are not a
+        // system, so the brake-based aid stays off even with TC up.
+        {
+            std::ofstream out(car / "data" / "data.json", std::ios::binary | std::ios::trunc);
+            out << "{\n  \"electronics\": {\n"
+                   "    \"TRACTION_CONTROL\": { \"PRESENT\": \"1\" },\n"
+                   "    \"EDL\": { \"PRESENT\": \"0\", \"MAX_SPIN_POWER\": \"0.45\" }\n"
+                   "  }\n}\n";
+        }
+        ks::physics::VehicleSimulator noEdl;
+        noEdl.applySetup(setup);
+        noEdl.loadElectronicsForCar(car.string());
+        KS_CHECK(noEdl.tcEnabled());
+        KS_CHECK(noEdl.edlPresent() == 0);
+        KS_CHECK(!noEdl.edlFitted());
+
+        // Without PRESENT the numbers are not a "no": the aid applies as before.
+        {
+            std::ofstream out(car / "data" / "data.json", std::ios::binary | std::ios::trunc);
+            out << "{\n  \"electronics\": { \"EDL\": { \"MAX_SPIN_POWER\": \"0.45\" } }\n}\n";
+        }
+        ks::physics::VehicleSimulator unknownEdl;
+        unknownEdl.loadElectronicsForCar(car.string());
+        KS_CHECK(unknownEdl.edlPresent() == -1);
+        KS_CHECK(unknownEdl.edlFitted());
         fs::remove_all(car, ec);
     }
 
