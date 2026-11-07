@@ -77,8 +77,6 @@ private:
     void evaluateTraffic(const vec3& carPos, float carHeading, float speed,
                          int nearestIdx, const std::vector<AiTrafficCar>& traffic,
                          int selfId, float& targetSpeedInOut);
-    float calculateSteering(const vec3& carPos, float carHeading,
-                            const vec3& targetPos) const;
     float calculateThrottle(float currentSpeed, float targetSpeed,
                             float curvature, float dt) const;
     float calculateBrake(float currentSpeed, float targetSpeed,

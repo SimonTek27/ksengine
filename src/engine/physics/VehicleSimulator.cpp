@@ -118,6 +118,61 @@ void VehicleSimulator::setMass(double kg) {
 }
 void VehicleSimulator::setEnginePower(double kw) { m_enginePowerKw = std::max(10.0, kw); }
 void VehicleSimulator::setMaxRpm(double rpm) { m_maxRpm = std::max(3000.0, rpm); }
+
+void VehicleSimulator::setTorqueCurve(std::vector<std::pair<float, float>> curve) {
+    // A curve is only usable when rpm rises with every point: a repeated or
+    // descending one is not a lookup table and would make torqueAtRpm() lie.
+    m_torqueCurve.clear();
+    for (const auto& p : curve) {
+        if (p.first < 0.f) continue;
+        if (!m_torqueCurve.empty() && p.first <= m_torqueCurve.back().first) continue;
+        m_torqueCurve.push_back(p);
+    }
+    // One point is not a curve: the analytic shape stays in charge.
+    if (m_torqueCurve.size() < 2) m_torqueCurve.clear();
+}
+
+void VehicleSimulator::loadPowerCurveForCar(const std::string& carPath) {
+    // engine.ini names the file in HEADER POWER_CURVE and the content keeps it
+    // as data/power.lut; the flat spelling covers folders that ship it beside
+    // the car. Both are the car's own data — nothing is estimated here.
+    const fs::path candidates[2] = {fs::path(carPath) / "data" / "power.lut",
+                                    fs::path(carPath) / "power.lut"};
+    for (const auto& path : candidates) {
+        std::error_code ec;
+        if (!fs::is_regular_file(path, ec)) continue;
+        const auto curve = EngineModel::loadPowerLut(path.string());
+        if (curve.size() < 2) continue;
+        std::vector<std::pair<float, float>> points;
+        points.reserve(curve.size());
+        float peak = 0.f;
+        for (const auto& pt : curve) {
+            points.emplace_back(pt.rpm, pt.torque);
+            peak = std::max(peak, pt.torque);
+        }
+        setTorqueCurve(std::move(points));
+        if (m_torqueCurve.size() >= 2) {
+            std::fprintf(stderr, "[engine] power.lut %s: %zu points, peak %0.0f Nm\n",
+                         path.string().c_str(), m_torqueCurve.size(), peak);
+            return;
+        }
+    }
+}
+
+float VehicleSimulator::torqueAtRpm(double rpm) const {
+    if (m_torqueCurve.size() < 2) return 0.f;
+    if (rpm <= m_torqueCurve.front().first) return m_torqueCurve.front().second;
+    if (rpm >= m_torqueCurve.back().first) return m_torqueCurve.back().second;
+    for (std::size_t i = 1; i < m_torqueCurve.size(); ++i) {
+        if (rpm > m_torqueCurve[i].first) continue;
+        const auto& lo = m_torqueCurve[i - 1];
+        const auto& hi = m_torqueCurve[i];
+        const float span = hi.first - lo.first;
+        const float t = span > 1e-3f ? static_cast<float>((rpm - lo.first) / span) : 0.f;
+        return lo.second + (hi.second - lo.second) * t;
+    }
+    return m_torqueCurve.back().second;
+}
 void VehicleSimulator::setDragCoeff(double cd) {
     m_cd = std::max(0.1, cd);
     auto c = m_aero.getConfig();
@@ -301,6 +356,20 @@ double VehicleSimulator::engineRpmTarget(double wheelRpm, double speedMs) const 
     double target = m_clutch.declared
                         ? idle + (wheelRpm - idle) * clutchEngagement(speedMs)
                         : std::max(idle, wheelRpm);
+    // A standing start is the clutch slipping, not the engine being dragged to
+    // zero: below the top of the car's own AUTOCLUTCH band the throttle sets the
+    // revs between MIN_RPM and MAX_RPM while the clutch slips the difference.
+    // Closing the clutch 100% at 0 m/s was what stalled the 1991 engines on
+    // launch (idle 3000 against a 3500-5000 band). Both numbers are the car's.
+    if (m_clutch.declared && m_throttle > 0.05) {
+        const double lo = m_clutch.autoClutchMinRpm;
+        const double hi = m_clutch.autoClutchMaxRpm;
+        if (hi > lo && lo > idle && wheelRpm < hi) {
+            const double launch = std::clamp(lo + m_throttle * (hi - lo), idle, hi);
+            const double e = std::clamp((wheelRpm - lo) / (hi - lo), 0.0, 1.0);
+            target = launch * (1.0 - e) + wheelRpm * e;
+        }
+    }
     // The antistall opens the throttle body: it holds the declared rpm.
     if (m_antistallActive) target = std::max(target, m_start.antistallRpm);
     return std::max(0.0, target);
@@ -449,6 +518,9 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
         CarClutchConfig clutchCfg;
         if (CarPhysicsJson::loadAcClutch(carPath, clutchCfg)) setClutchConfig(clutchCfg);
     }
+    // The real torque curve (engine.ini HEADER POWER_CURVE -> data/power.lut),
+    // read before either physics loader so both paths see the same engine.
+    loadPowerCurveForCar(carPath);
     // The car's own electronics, read before either physics loader so both paths
     // see the same limits.
     loadElectronicsForCar(carPath);
@@ -834,9 +906,19 @@ void VehicleSimulator::integrate(double dt) {
     const size_t gi2 = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     gearRatio = static_cast<float>(m_gearRatios[gi2]);
 
-    float peakTorque = static_cast<float>(m_enginePowerKw * 1000.0 / (m_maxRpm * 2.0 * 3.14159265 / 60.0));
-    float rpmN = static_cast<float>(std::min(m_rpm / m_maxRpm, 1.0));
-    float engineTorque = peakTorque * std::sin(rpmN * 3.14159265f) * static_cast<float>(m_throttle) * dmgPower;
+    // The car's own curve when it ships one: two 1991 engines with the same
+    // power and limiter must not answer the same torque at the same rpm. The
+    // analytic sin shape stays as the fallback for cars with no power.lut.
+    const float rpmN = static_cast<float>(std::min(m_rpm / m_maxRpm, 1.0));
+    float engineTorque;
+    if (m_torqueCurve.size() >= 2) {
+        engineTorque = torqueAtRpm(m_rpm) * static_cast<float>(m_throttle) * dmgPower;
+    } else {
+        const float peakTorque = static_cast<float>(
+            m_enginePowerKw * 1000.0 / (m_maxRpm * 2.0 * 3.14159265 / 60.0));
+        engineTorque = peakTorque * std::sin(rpmN * 3.14159265f) *
+                       static_cast<float>(m_throttle) * dmgPower;
+    }
     // A cranking or stopped engine makes no torque.
     if (!engineDrivesWheels()) engineTorque = 0.f;
     // The clutch passes what it can hold, and nothing while it is open.

@@ -138,6 +138,14 @@ public:
     void setMass(double kg);
     void setEnginePower(double kw);
     void setMaxRpm(double rpm);
+    /** The car's own torque curve (rpm, Nm) from its power.lut. An empty curve
+     *  keeps the analytic sin shape the model always used, so a car without a
+     *  curve behaves exactly as before. */
+    void setTorqueCurve(std::vector<std::pair<float, float>> curve);
+    /** Reads data/power.lut (or power.lut beside it) for this car directory. */
+    void loadPowerCurveForCar(const std::string& carPath);
+    /** Torque at rpm from the loaded curve; 0 when there is none. */
+    float torqueAtRpm(double rpm) const;
     void setDragCoeff(double cd);
     void setFrontalArea(double m2);
     void setWheelBase(double m);
@@ -354,6 +362,8 @@ private:
      *  constant drift (0.01 * cg per step). */
     PhysVec3 m_appliedCgShift{};
     double m_mass = 1200, m_enginePowerKw = 260, m_maxRpm = 8500;
+    /** power.lut points (rpm, Nm), empty = analytic curve. */
+    std::vector<std::pair<float, float>> m_torqueCurve;
     double m_cd = 0.35, m_frontalArea = 2.2, m_wheelBase = 2.6, m_trackWidth = 1.6;
     double m_wheelRadius = 0.33, m_finalDrive = 3.9;
     std::vector<double> m_gearRatios = {3.5, 2.5, 1.8, 1.4, 1.1, 0.9};

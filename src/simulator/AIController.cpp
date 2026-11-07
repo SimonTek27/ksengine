@@ -6,6 +6,11 @@
 
 namespace ks::sim {
 
+namespace {
+/** VehicleSimulator maps a steering input of 1.0 to 0.45 rad of road wheel. */
+constexpr float kSteerFullScaleRad = 0.45f;
+} // namespace
+
 AIController::AIController() = default;
 AIController::~AIController() = default;
 
@@ -96,43 +101,28 @@ void AIController::update(const vec3& carPosition, float carHeading,
         targetPos.z += tx * m_lateralOffset;
     }
 
-    m_steering = calculateSteering(carPosition, carHeading, targetPos);
-
-    // Curvature feedforward: pure heading-error feedback must first build a
-    // cross-track error before it can hold the wheel, which hunted around
-    // the line in a ~12 s limit cycle (3.5). The spline tangent tells us
-    // the needed yaw direction (+steer yaws towards -heading in this
-    // engine); scale by speed^2 since the slip angles that realise the
-    // geometric radius grow with v^2.
-    float w = tangentHeading(lookahead) - tangentHeading(nearest);
-    // Wrap: tangentHeading is an atan2, so the difference jumps by 2*pi
-    // when the lookahead straddles the +-pi boundary (w=5.76 flipped the
-    // feedforward sign and full-locked the wrong way, hunting the line).
-    while (w > 3.14159f) w -= 6.28318f;
-    while (w < -3.14159f) w += 6.28318f;
-    // Normalised by Ld so the term is signed curvature (w/Ld = 1/R),
-    // independent of the lookahead distance itself.
-    const float ff = -(w / lookaheadDist) * (speed * speed) * 0.09f;
-    m_steering = std::clamp(m_steering + ff, -1.0f, 1.0f);
-
-    // Derivative damping: with only P+FF the cross-track loop hunted in a
-    // ~16 s limit cycle (plant lag ~4 s). Double low-pass (err, then dErr)
-    // keeps the nearest-index quantisation out of the derivative.
+    // Stanley steering: heading error against the spline tangent, plus a
+    // cross-track term that grows with the distance from the line and is
+    // divided by speed. Both are angles, so nothing here is a gain tuned on a
+    // particular tyre: the old P (0.6 of the heading error) plus a 0.09*v^2
+    // curvature gain was calibrated against a tyre that needed 14 deg of slip,
+    // and with the real one (peak at 9 deg) it spun the car off the line.
+    // The yaw of this plant answers the opposite way to the steering input
+    // (measured: steer +0.05 gives Ay -4.95), so the sum is negated once.
     {
-        float dx = targetPos.x - carPosition.x;
-        float dz = targetPos.z - carPosition.z;
-        float err = std::atan2(dx, dz) - carHeading;
-        while (err > 3.14159f) err -= 6.28318f;
-        while (err < -3.14159f) err += 6.28318f;
-        const float ad = std::clamp(dt / 0.25f, 0.0f, 1.0f);
-        m_errLP += (err - m_errLP) * ad;
-        if (!m_errInit) { m_errLPPrev = m_errLP; m_errInit = true; }
-        const float dErr = (m_errLP - m_errLPPrev) / std::max(dt, 1e-4f);
-        m_errLPPrev = m_errLP;
-        m_dErrLP += (dErr - m_dErrLP) * std::clamp(dt / 0.30f, 0.0f, 1.0f);
-        m_steering = std::clamp(
-            m_steering - std::clamp(m_dErrLP * 1.0f, -0.4f, 0.4f),
-            -1.0f, 1.0f);
+        const auto& nearPoint = m_spline.points[static_cast<size_t>(nearest)];
+        float tx = 0.f, tz = 1.f;
+        tangentAt(nearest, tx, tz);
+        // Signed distance from the line along the spline normal, offset by
+        // whatever the overtake logic asked for.
+        const float crossErr = (carPosition.x - nearPoint.position.x) * (-tz) +
+                               (carPosition.z - nearPoint.position.z) * tx -
+                               m_lateralOffset;
+        float headErr = tangentHeading(nearest) - carHeading;
+        while (headErr > 3.14159f) headErr -= 6.28318f;
+        while (headErr < -3.14159f) headErr += 6.28318f;
+        const float wheel = headErr + std::atan2(crossErr, std::max(speed, 3.0f));
+        m_steering = -std::clamp(wheel / kSteerFullScaleRad, -1.0f, 1.0f);
     }
 
     m_throttle = calculateThrottle(speed, targetSpeed, curvature, dt);
@@ -258,22 +248,6 @@ float AIController::tangentHeading(int idx) const
     const std::size_t j = (i + 1) % pts.size();
     return std::atan2(pts[j].position.x - pts[i].position.x,
                       pts[j].position.z - pts[i].position.z);
-}
-
-float AIController::calculateSteering(const vec3& carPos, float carHeading,
-                                      const vec3& targetPos) const
-{
-    float dx = targetPos.x - carPos.x;
-    float dz = targetPos.z - carPos.z;
-    float targetHeading = std::atan2(dx, dz);
-    float err = targetHeading - carHeading;
-    while (err > 3.14159f) err -= 6.28318f;
-    while (err < -3.14159f) err += 6.28318f;
-    // Negated: VehicleSimulator's yaw response is net opposite to the
-    // steering input (the tire slip chain dominates the kinematic nudge in
-    // updatePhysics), so closing the loop on err needs the flipped sign —
-    // positive err (target towards +heading) must yield negative steering.
-    return -std::clamp(err * 0.6f, -1.0f, 1.0f);
 }
 
 float AIController::calculateThrottle(float currentSpeed, float targetSpeed,

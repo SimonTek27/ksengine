@@ -149,6 +149,11 @@ int main(int argc, char** argv)
         const auto& st = sims[0].getState();
         std::printf("  car result: speed=%.2f m/s (%.1f km/h) rpm=%.0f gear=%d\n\n",
                     st.speed, st.speed * 3.6, sims[0].rpm(), sims[0].currentGear());
+        // What the engine actually delivers at that rpm, and whether the rear
+        // axle is spinning: a flat-out run measures the engine only when the
+        // tyres are not the limit.
+        std::printf("  torque at rpm=%.0f Nm  rear slip=%.3f\n",
+                    sims[0].torqueAtRpm(sims[0].rpm()), sims[0].slipRatio(2));
     }
 
     // Scale estimate

@@ -169,6 +169,7 @@ int main()
                 maxOffTrack, distToLine(line, st.position.x, st.position.z));
         }
     }
+    std::printf("[ai] max off the line: %.2f m (limit 12.00)\n", maxOffTrack);
     KS_CHECK(maxOffTrack < 12.0f);
 
     for (int i = 0; i < 25000; ++i) mc.update(kDt); // +25 s -> full lap
