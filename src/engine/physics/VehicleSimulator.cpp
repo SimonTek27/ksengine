@@ -445,6 +445,10 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
     {
         const ElectronicsLimits electronics = readElectronicsLimitsForCar(carPath);
         setElectronicsSlipLimits(electronics.tcSlipRatioLimit, electronics.absSlipRatioLimit);
+        setEdlSettings(electronics.declaredEdl, electronics.edlMaxSpinPower,
+                       electronics.edlMaxSpinCoast, electronics.edlBrakeTorquePower,
+                       electronics.edlBrakeTorqueCoast, electronics.edlDeadZonePower,
+                       electronics.edlDeadZoneCoast);
         if (electronics.declaredTractionControl || electronics.declaredAbs) {
             std::fprintf(stderr,
                          "[electronics] slip limits: tc=%0.3f (declared=%d) abs=%0.3f (declared=%d)\n",
@@ -490,6 +494,21 @@ void VehicleSimulator::setElectronicsSlipLimits(float tcLimit, float absLimit) {
     // model can honour, so the default stays and nothing is invented.
     if (tcLimit > 0.001f && tcLimit < 0.5f) m_tcSlipLimit = tcLimit;
     if (absLimit > 0.001f && absLimit < 0.5f) m_absSlipLimit = absLimit;
+}
+
+void VehicleSimulator::setEdlSettings(bool declared, float maxSpinPower, float maxSpinCoast,
+                                     float brakeTorquePower, float brakeTorqueCoast,
+                                     float deadZonePower, float deadZoneCoast) {
+    m_edlDeclared = declared;
+    // A spin ratio is a fraction of the car's speed: (0, 1) or it is not one.
+    if (maxSpinPower > 0.f && maxSpinPower < 1.f) m_edlMaxSpinPower = maxSpinPower;
+    if (maxSpinCoast > 0.f && maxSpinCoast < 1.f) m_edlMaxSpinCoast = maxSpinCoast;
+    if (brakeTorquePower > 0.f && brakeTorquePower < 10000.f)
+        m_edlBrakeTorquePower = brakeTorquePower;
+    if (brakeTorqueCoast > 0.f && brakeTorqueCoast < 10000.f)
+        m_edlBrakeTorqueCoast = brakeTorqueCoast;
+    if (deadZonePower >= 0.f && deadZonePower < 0.5f) m_edlDeadZonePower = deadZonePower;
+    if (deadZoneCoast >= 0.f && deadZoneCoast < 0.5f) m_edlDeadZoneCoast = deadZoneCoast;
 }
 
 void VehicleSimulator::loadEngineFromIni(const std::string& path) {
@@ -1090,13 +1109,31 @@ void VehicleSimulator::integrate(double dt) {
     m_diff.update(fdt, Tdrive, m_wheelOmega[2], m_wheelOmega[3]);
     const float TdrvL = m_diff.getLeftTorque();
     const float TdrvR = m_diff.getRightTorque();
+    // EDL: the car's brake-based traction aid. It brakes the rear wheel that
+    // spins faster than the car allows — MAX_SPIN_POWER on power, MAX_SPIN_COAST
+    // off it — once past its dead zone, adding up to BRAKE_TORQUE_* of torque on
+    // that wheel alone instead of cutting the engine. The numbers are the [EDL]
+    // block in the car's document, and the aid follows the driver's TC level, so
+    // aids off means aids off.
+    float edlBrake[4] = {0.f, 0.f, 0.f, 0.f};
+    if (m_edlDeclared && m_setup.tcLevel > 0 && speed > 1.f) {
+        const bool onPower = m_throttle > 0.05f;
+        const float maxSpin = onPower ? m_edlMaxSpinPower : m_edlMaxSpinCoast;
+        const float deadZone = onPower ? m_edlDeadZonePower : m_edlDeadZoneCoast;
+        const float torque = onPower ? m_edlBrakeTorquePower : m_edlBrakeTorqueCoast;
+        for (int i = 2; i < 4; ++i) {
+            const float spin = (std::fabs(m_wheelOmega[i]) * R / std::max(speed, 0.5f)) - 1.f;
+            const float excess = spin - maxSpin - deadZone;
+            if (excess > 0.f) edlBrake[i] = torque * std::clamp(excess / 0.5f, 0.f, 1.f);
+        }
+    }
     // T_net = T_drive − T_brake − Fx·R  → I ω̇
     const float TbFL = m_brakes.effectiveTorque(0, 0.5f * TbrakeTot * biasF);
     const float TbFR = m_brakes.effectiveTorque(1, 0.5f * TbrakeTot * biasF);
-    const float TbRL =
-        m_brakes.effectiveTorque(2, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake);
-    const float TbRR =
-        m_brakes.effectiveTorque(3, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake);
+    const float TbRL = m_brakes.effectiveTorque(
+        2, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake + edlBrake[2]);
+    const float TbRR = m_brakes.effectiveTorque(
+        3, 0.5f * TbrakeTot * (1.f - biasF) + 0.5f * Thandbrake + edlBrake[3]);
     const float Tnet[4] = {
         -TbFL - m_tireFx[0] * R,
         -TbFR - m_tireFx[1] * R,

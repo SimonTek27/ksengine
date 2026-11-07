@@ -68,6 +68,12 @@ public:
      *  data.json): where traction control and ABS start cutting. Defaults are the
      *  values this model used before the file was read. */
     void setElectronicsSlipLimits(float tcLimit, float absLimit);
+    /** The car's [EDL] block: the brake-based traction aid and the spin it
+     *  allows on power and off it. Floats rather than a struct so this header
+     *  keeps its own includes. */
+    void setEdlSettings(bool declared, float maxSpinPower, float maxSpinCoast,
+                        float brakeTorquePower, float brakeTorqueCoast,
+                        float deadZonePower, float deadZoneCoast);
     float tractionControlSlipLimit() const { return m_tcSlipLimit; }
     float absSlipLimit() const { return m_absSlipLimit; }
 
@@ -378,6 +384,14 @@ private:
     // |slip ratio| at which the aids may cut, as the car declares it.
     float m_tcSlipLimit = 0.10f;
     float m_absSlipLimit = 0.12f;
+    // [EDL] as the car's document declares it (the conversion always writes it).
+    bool m_edlDeclared = false;
+    float m_edlMaxSpinPower = 0.55f;
+    float m_edlMaxSpinCoast = 0.40f;
+    float m_edlBrakeTorquePower = 140.f;
+    float m_edlBrakeTorqueCoast = 420.f;
+    float m_edlDeadZonePower = 0.12f;
+    float m_edlDeadZoneCoast = 0.12f;
     bool m_brakeBiasAdjustable = false;
     SuspensionModel m_suspension;
     DamageSystem m_damage;

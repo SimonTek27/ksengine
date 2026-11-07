@@ -33,6 +33,20 @@ struct ElectronicsLimits {
     bool declaredAbs = false;
     float tcSlipRatioLimit = 0.10f;  ///< drive torque is cut above this |kappa|
     float absSlipRatioLimit = 0.12f; ///< brake torque is cut above this |kappa|
+
+    /** [EDL]: the brake-based aid that slows one spinning rear wheel instead of
+     *  cutting the engine. Spin is the wheel's ratio over the car's speed, so
+     *  0.55 means "may spin half again as fast as the car is moving". The
+     *  conversion writes this block for every converted car, carrying AC's own
+     *  reference values where the car declares none, so `declaredEdl` says the
+     *  document has them, not that the car was built with the system. */
+    bool declaredEdl = false;
+    float edlMaxSpinPower = 0.55f;
+    float edlMaxSpinCoast = 0.40f;
+    float edlBrakeTorquePower = 140.0f;
+    float edlBrakeTorqueCoast = 420.0f;
+    float edlDeadZonePower = 0.12f;
+    float edlDeadZoneCoast = 0.12f;
 };
 
 namespace electronics_detail {
@@ -117,6 +131,35 @@ inline ElectronicsLimits readElectronicsLimits(const Json& document) {
             out.declaredAbs = true;
             break;
         }
+    }
+    // EDL: the brake-based traction aid. A spin ratio belongs in (0, 1), a brake
+    // torque in a range a car can actually produce, a dead zone in [0, 0.5);
+    // anything else keeps the default instead of being clamped into a shape the
+    // car never asked for.
+    if (const Json* edl = child(electronics, "EDL")) {
+        bool declared = false;
+        const auto readSpin = [&](const char* name, float& target) {
+            double value = 0.0;
+            if (!numberOf(*edl, name, value) || value <= 0.0 || value >= 1.0) return;
+            target = static_cast<float>(value);
+            declared = true;
+        };
+        readSpin("MAX_SPIN_POWER", out.edlMaxSpinPower);
+        readSpin("MAX_SPIN_COAST", out.edlMaxSpinCoast);
+        double value = 0.0;
+        if (numberOf(*edl, "BRAKE_TORQUE_POWER", value) && value > 0.0 && value < 10000.0) {
+            out.edlBrakeTorquePower = static_cast<float>(value);
+            declared = true;
+        }
+        if (numberOf(*edl, "BRAKE_TORQUE_COAST", value) && value > 0.0 && value < 10000.0) {
+            out.edlBrakeTorqueCoast = static_cast<float>(value);
+            declared = true;
+        }
+        if (numberOf(*edl, "DEAD_ZONE_POWER", value) && value >= 0.0 && value < 0.5)
+            out.edlDeadZonePower = static_cast<float>(value);
+        if (numberOf(*edl, "DEAD_ZONE_COAST", value) && value >= 0.0 && value < 0.5)
+            out.edlDeadZoneCoast = static_cast<float>(value);
+        out.declaredEdl = declared;
     }
     return out;
 }

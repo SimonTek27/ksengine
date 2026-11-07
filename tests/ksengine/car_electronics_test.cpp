@@ -97,6 +97,42 @@ int main() {
         KS_CHECK(!text.declaredAbs);
     }
 
+    // --- The EDL block: the brake-based aid and the spin it allows --------
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": {\n"
+            "    \"EDL\": { \"PRESENT\": \"1\", \"ACTIVE\": \"1\", "
+            "\"MAX_SPIN_POWER\": \"0.45\", \"MAX_SPIN_COAST\": \"0.30\", "
+            "\"BRAKE_TORQUE_POWER\": \"200\", \"BRAKE_TORQUE_COAST\": \"380\", "
+            "\"DEAD_ZONE_POWER\": \"0.05\", \"DEAD_ZONE_COAST\": \"0.08\" }\n"
+            "  }\n}\n"));
+        KS_CHECK(limits.declaredEdl);
+        KS_CHECK_NEAR(limits.edlMaxSpinPower, 0.45, 1e-6);
+        KS_CHECK_NEAR(limits.edlMaxSpinCoast, 0.30, 1e-6);
+        KS_CHECK_NEAR(limits.edlBrakeTorquePower, 200.0, 1e-3);
+        KS_CHECK_NEAR(limits.edlBrakeTorqueCoast, 380.0, 1e-3);
+        KS_CHECK_NEAR(limits.edlDeadZonePower, 0.05, 1e-6);
+        KS_CHECK_NEAR(limits.edlDeadZoneCoast, 0.08, 1e-6);
+    }
+
+    // --- Nonsense EDL values keep AC's reference numbers -------------------
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": {\n"
+            "    \"EDL\": { \"MAX_SPIN_POWER\": \"3\", \"BRAKE_TORQUE_POWER\": \"-5\", "
+            "\"DEAD_ZONE_COAST\": \"0.9\" }\n  }\n}\n"));
+        KS_CHECK_NEAR(limits.edlMaxSpinPower, 0.55, 1e-6);
+        KS_CHECK_NEAR(limits.edlBrakeTorquePower, 140.0, 1e-3);
+        KS_CHECK_NEAR(limits.edlDeadZoneCoast, 0.12, 1e-6);
+    }
+
+    // --- No EDL block: the aid is not declared at all ---------------------
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": { \"ABS\": { \"SLIP_RATIO_LIMIT\": \"0.1\" } }\n}\n"));
+        KS_CHECK(!limits.declaredEdl);
+    }
+
     // --- The folder reader finds the manifest the conversion writes -------
     {
         namespace fs = std::filesystem;
