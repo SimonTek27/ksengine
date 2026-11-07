@@ -622,6 +622,25 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
+    // flames.ini [HEADER] carries the emitter settings together with the flame
+    // editor's own state: EDIT_MODE, EDIT_BIG and EDIT_STATE say how large that
+    // editor draws its gizmo and which tab was open. They say nothing about how
+    // the car burns fuel, so they never reach a document. Run on every document
+    // so both the .ini conversion and a re-split drop them.
+    static void stripFlameEditorKeys(Json& node) {
+        if (!node.isObject() || !node.contains("flames")) return;
+        Json& flames = node["flames"];
+        if (!flames.isObject()) return;
+        for (const std::string& section : flames.keys()) {
+            if (!flames.contains(section)) continue;
+            Json& entry = flames[section];
+            if (!entry.isObject()) continue;
+            for (const char* editorKey : {"EDIT_MODE", "EDIT_BIG", "EDIT_STATE"}) {
+                if (entry.contains(editorKey)) entry.remove(editorKey);
+            }
+        }
+    }
+
     // Writes the six documents from an assembled root object; the same routing
     // serves the .ini conversion and the legacy split.
     static bool writeDocuments(const fs::path& carDir, const Json& root, Result& result) {
@@ -730,6 +749,7 @@ for (const char* owner : {"suspensions", "car"}) {
         for (Json& doc : docs) {
             stripVersionHeaders(doc);
             stripExtensionKeys(doc);
+            stripFlameEditorKeys(doc);
             for (const std::string& key : doc.keys()) {
                 if (iequals(key, "digital_instruments") || iequals(key, "tyres"))
                     stripFormatVersion(doc[key]);
