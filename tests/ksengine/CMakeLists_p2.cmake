@@ -13,6 +13,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine_start_test.cpp")
     add_test(NAME engine_start_test COMMAND engine_start_test)
 endif()
 
+# Content's brake-disc section: what [BRAKEDISC_FX] says about the glow the
+# thermal model produces (ACTIVE, GLOW_MULT), read from model.json.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_disc_fx_test.cpp")
+    add_executable(brake_disc_fx_test brake_disc_fx_test.cpp)
+    target_include_directories(brake_disc_fx_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(brake_disc_fx_test PRIVATE ksengine)
+    add_test(NAME brake_disc_fx_test COMMAND brake_disc_fx_test)
+endif()
+
 # Roadmap 2.6/2.7/2.8/2.9 gate tests and other special-link tests.
 # (Recovered body part 2 of tests/ksengine/CMakeLists.txt)
 

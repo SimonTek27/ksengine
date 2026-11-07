@@ -516,6 +516,14 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
     loadContentMods(carDir); // Lua Mod SDK: <car>/scripts/*.lua
     m_carName = fs::path(carDir).filename().string();
     m_carDir = carDir; // roadmap 2.8/2.9: livery + upgrades resolve against it
+    // The content's own brake-disc settings: the [BRAKEDISC_FX] sections the
+    // conversion folded into model.json. A car that declares none keeps the
+    // glow the thermal model computes, unchanged.
+    m_brakeDiscFx = ks::graphics::readBrakeDiscFx(carDir);
+    if (m_brakeDiscFx.declared) {
+        std::fprintf(stderr, "[brakes] content disc fx: active=%d glowMult=%.3f\n",
+                     m_brakeDiscFx.active ? 1 : 0, m_brakeDiscFx.glowMult);
+    }
 #if HAS_VEHICLE_SIM
     if (m_vehicle) {
         m_vehicle->setMass(1200); m_vehicle->setEnginePower(260); m_vehicle->setMaxRpm(8500);
@@ -3490,6 +3498,12 @@ void SimulationLoop::tick() {
             for (int w = 0; w < 4; ++w)
                 maxDisc = std::max(maxDisc, m_vehicle->brakes().discTemp(w));
             glow = std::clamp((maxDisc - 400.0f) / 400.0f, 0.0f, 1.0f);
+            // The car's own [BRAKEDISC_FX]: ACTIVE = 0 means the content replaced
+            // the disc shader, so there is no glow to show, and GLOW_MULT scales
+            // what the thermal model produced. A cold disc is 0 either way: the
+            // content scales the signal, it never invents one.
+            if (!m_brakeDiscFx.active) glow = 0.0f;
+            else glow = std::clamp(glow * static_cast<float>(m_brakeDiscFx.glowMult), 0.0f, 1.0f);
         }
         m_vulkanRenderer->setBrakeGlow(glow);
     }

@@ -270,7 +270,9 @@
       "steerRight": "D",
       "shiftUp": "E",
       "shiftDown": "Q",
-      "handbrake": "SPACE"
+      "handbrake": "SPACE",
+      "clutch": "Z",
+      "starter": "I"
     },
     "file": "user/<player>/controls.json",
     "sources": [
@@ -278,7 +280,7 @@
         "feature": "keyboardBindings",
         "status": "partial",
         "landsAs": "keyboard rebind page",
-        "note": "Keyboard only: seven actions, each captured and swapped so two actions never share a key. Arrow keys stay reserved."
+        "note": "Keyboard only: nine actions (throttle, brake, both steering directions, both shifts, handbrake, clutch, starter), each captured and swapped so two actions never share a key; the clutch is a pedal level and the starter is a rising edge, so holding the key does not crank again. Arrow keys stay reserved."
       },
       {
         "feature": "forceFeedback",
@@ -556,7 +558,7 @@
         "feature": "brakeGlow",
         "status": "partial",
         "landsAs": "brake glow",
-        "note": "Discs glow with temperature; there is no glow texture or spark set."
+        "note": "Discs glow with temperature from the brake thermal model. The car's own [BRAKEDISC_FX] sections scale it: GLOW_MULT multiplies the value and ACTIVE = 0 turns it off, both read from the model document at car load; there is still no glow texture or spark set."
       },
       {
         "feature": "walkMode",
@@ -935,6 +937,12 @@
         "status": "partial",
         "landsAs": "content scan",
         "note": "Partially implemented: see landsAs for the part that exists."
+      },
+      {
+        "feature": "carOverrides",
+        "status": "partial",
+        "landsAs": "model.json and driver.json overrides",
+        "note": "The content's car-wide ext_config.ini, whether at the car root or in extension/, is folded into the car's documents by the converter: hidden_nodes and driver_model are applied, a skin's own file goes to skins/<id>/skin.json, and every other section is kept verbatim under sections. Of those sections the runtime reads one today, BRAKEDISC_FX (ACTIVE, GLOW_MULT); the rest describe a renderer this engine does not have and stay as content, not as guesses."
       },
       {
         "feature": "materialMapping",

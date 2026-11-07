@@ -19,6 +19,7 @@
 #include "ui/NativeUiHub.h"
 #include "CameraController.h"
 #include "NativeRenderer.h"
+#include "engine/Graphics/BrakeDiscFx.h" // content's [BRAKEDISC_FX] -> disc glow
 #include "engine/Graphics/ParticleSystem.h"
 #include "RaceSessionManager.h"
 #include "FeatureHub.h"
@@ -555,6 +556,9 @@ private:
     // ships with instead of being repainted white.
     bool m_carPaintDeclared = false;
     std::string m_carDir; // car folder of the loaded car (roadmap 2.8/2.9)
+    // Content's [BRAKEDISC_FX], from the car's model document: ACTIVE turns the
+    // disc glow off, GLOW_MULT scales it. Read at loadCar, never per frame.
+    ks::graphics::BrakeDiscFx m_brakeDiscFx;
 
     // Roadmap 2.8 — team roster (team.ini): empty slots = no team loaded,
     // which keeps the legacy identity ("AI N", standings "Car N").
