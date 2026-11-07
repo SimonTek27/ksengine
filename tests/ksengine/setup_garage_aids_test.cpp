@@ -11,8 +11,11 @@
 #include "KsTest.h"
 
 #include "SetupGarage.h"
+#include "ui/NativeUiTypes.h"
+#include "ui/TextRenderer.h"
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -25,6 +28,40 @@ bool hasRow(const ks::sim::SetupGarage& garage, const char* label) {
 
 int rowCount(const ks::sim::SetupGarage& garage) {
     return static_cast<int>(garage.rows().size());
+}
+
+/** Draw one settled frame into `dl`: the screen fades in over a few frames, so
+ *  a single build() call would draw almost nothing. */
+void buildFrame(ks::sim::SetupGarage& garage, ks::sim::ui::DrawList& dl,
+                ks::sim::ui::TextRenderer& text, int w, int h) {
+    garage.setVisible(true);
+    for (int i = 0; i < 12; ++i) {
+        dl.clear();
+        garage.build(dl, text, w, h, nullptr);
+    }
+}
+
+/** Whether the frame carries that string as drawn text. Text commands keep the
+ *  string, so this asks what the screen puts on the glass, not what the row list
+ *  holds internally. */
+bool drawsText(const ks::sim::ui::DrawList& dl, const char* s) {
+    for (const auto& cmd : dl.commands()) {
+        if (cmd.text == s) return true;
+    }
+    return false;
+}
+
+/** Shapes that leave the viewport. Text is skipped: a text command records where
+ *  the string starts, and the glyph box is the renderer's business. */
+int commandsOutside(const ks::sim::ui::DrawList& dl, int w, int h) {
+    int outside = 0;
+    for (const auto& cmd : dl.commands()) {
+        if (cmd.type == ks::sim::ui::DrawCmdType::Text) continue;
+        if (cmd.x0 < -1.f || cmd.y0 < -1.f || cmd.x1 > float(w) + 1.f ||
+            cmd.y1 > float(h) + 1.f)
+            ++outside;
+    }
+    return outside;
 }
 
 } // namespace
@@ -92,6 +129,42 @@ int main() {
         garage.setAidsAvailable(false, false);
         KS_CHECK(garage.selectedRow() >= 0);
         KS_CHECK(garage.selectedRow() < rowCount(garage));
+    }
+
+    // --- What reaches the glass, not just the row list ---------------------
+    // The row list and the frame are two different things: a row could be built
+    // and never drawn, or drawn in the wrong place. This builds real frames.
+    {
+        ks::sim::ui::DrawList dl;
+        ks::sim::ui::TextRenderer text;
+
+        SetupGarage full;
+        buildFrame(full, dl, text, 1280, 720);
+        KS_CHECK(drawsText(dl, "TC"));
+        KS_CHECK(drawsText(dl, "ABS"));
+        KS_CHECK(drawsText(dl, "FUEL"));
+        KS_CHECK(commandsOutside(dl, 1280, 720) == 0);
+        const int fullCommands = static_cast<int>(dl.commands().size());
+        KS_CHECK(fullCommands > 10);
+
+        // A car with neither system: the labels are not on the screen either.
+        SetupGarage bare;
+        bare.setAidsAvailable(false, false);
+        buildFrame(bare, dl, text, 1280, 720);
+        KS_CHECK(!drawsText(dl, "TC"));
+        KS_CHECK(!drawsText(dl, "ABS"));
+        KS_CHECK(drawsText(dl, "FUEL"));
+        KS_CHECK(drawsText(dl, "BALLAST"));
+        KS_CHECK(commandsOutside(dl, 1280, 720) == 0);
+        KS_CHECK(static_cast<int>(dl.commands().size()) < fullCommands);
+
+        // The shortened tab still fits the smallest window the app runs in: the
+        // two remaining rows sit above the footer, nothing runs off the bottom.
+        SetupGarage narrow;
+        narrow.setAidsAvailable(false, false);
+        buildFrame(narrow, dl, text, 1280, 480);
+        KS_CHECK(commandsOutside(dl, 1280, 480) == 0);
+        KS_CHECK(!drawsText(dl, "TC"));
     }
 
     return ks::test::finish("setup_garage_aids_test");
