@@ -2134,7 +2134,9 @@ void SimulationLoop::applyInput() {
     m_vehicle->setClutchPedal(m_input->clutch());
     // The starter key is the driver's button: ignition on, then crank. While
     // the engine runs it is the kill instead, and the vehicle applies its own
-    // standstill rule. A car without a declared start ignores both.
+    // standstill rule. A car that declares a crew start accepts only the kill
+    // here — the team fires it in the box, through the garage sequence. A car
+    // without a declared start ignores both.
     if (m_input->takeStarterRequest()) {
         if (!m_vehicle->isEngineRunning()) m_vehicle->setIgnition(true);
         m_vehicle->pressStarter(static_cast<double>(m_vehicle->getState().speed));

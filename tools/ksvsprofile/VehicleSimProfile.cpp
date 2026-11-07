@@ -80,10 +80,14 @@ int main(int argc, char** argv)
         s.setSteering(0.15);
     }
 
+    // Who fires it comes from the car: an F1 declares a crew start (no onboard
+    // starter), so the tool asks the team in the box, not the key.
+    const bool crewStart = !carPath.empty() && sims[0].engineStartConfig().startedByCrew;
     if (!carPath.empty()) {
         for (auto& s : sims) {
             s.setIgnition(true);
-            s.pressStarter(0.0);
+            if (crewStart) s.pressStarterByCrew(0.0);
+            else s.pressStarter(0.0);
         }
         // Cranking is real time: step a couple of seconds so the numbers below
         // are a running engine's, not a starter's.
@@ -93,6 +97,7 @@ int main(int argc, char** argv)
         std::printf("  gears=%d finalDrive=%.2f wheelRadius=%.3f running=%s\n",
                     static_cast<int>(sims[0].gearRatios().size()), sims[0].finalDrive(),
                     sims[0].wheelRadius(), sims[0].isEngineRunning() ? "yes" : "no");
+        std::printf("  started by: %s\n", crewStart ? "crew (box)" : "driver (key)");
     }
 
     auto& prof = ks::physics::PhysicsProfiler::instance();

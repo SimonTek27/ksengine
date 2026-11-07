@@ -49,8 +49,13 @@ void SimulationLoop::updateGarageExit(float dt) {
     // The start belongs to the vehicle: report what the engine is doing and let
     // the garage sequence crank it when its engine phase begins.
     if (m_garageExit.phase() == GarageExitPhase::EngineStart) {
+        // The garage exit is the box, so this is where the team fires a car
+        // that declares a crew start. A car with a key keeps cranking itself.
         m_vehicle->setIgnition(true);
-        m_vehicle->pressStarter(static_cast<double>(st.speed));
+        if (m_vehicle->engineStartConfig().startedByCrew)
+            m_vehicle->pressStarterByCrew(static_cast<double>(st.speed));
+        else
+            m_vehicle->pressStarter(static_cast<double>(st.speed));
     }
     in.engineRunning = m_vehicle->isEngineRunning();
     in.ignitionOn = m_vehicle->ignitionOn();

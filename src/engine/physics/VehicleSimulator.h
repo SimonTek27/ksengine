@@ -292,6 +292,9 @@ public:
     void setIgnition(bool on);
     /** Starter button: cranks when it can, asks a running engine to stop. */
     bool pressStarter(double speedMs);
+    /** The team's starter: a car that declares a crew start fires only from
+     *  the box, and only at a standstill. */
+    bool pressStarterByCrew(double speedMs);
 
     /** The car's declared clutch (drivetrain.ini [CLUTCH]/[AUTOCLUTCH]). */
     void setClutchConfig(const CarClutchConfig& c) { m_clutch = c; }
@@ -341,6 +344,9 @@ private:
     static float getf(const std::map<std::string, std::string>& m, const std::string& k, float def);
     void integrate(double dt);
     void shiftGears();
+    /** The cranking sequence itself, shared by the driver's key and the crew's
+     *  starter: who may press it is decided by the two public entry points. */
+    bool startEngine(double speedMs);
     void stepEngineStart(double speedMs, double dt);
     double engineIdleFloor() const;
     bool engineDrivesWheels() const;

@@ -31,6 +31,11 @@ struct CarStartConfig {
     double antistallRpm = 0.0;   // 0 = the car declares no antistall
     double antistallTime = 0.0;  // seconds the antistall may hold the idle
     double pitstopRpm = 0.0;
+    /** Who fires the engine: the crew in the box (an F1 has no onboard
+     *  starter) or the driver with the key. The manifest states it in
+     *  "BY": "CREW" | "DRIVER"; absent means the driver, the behaviour every
+     *  car had before the field existed. */
+    bool startedByCrew = false;
 
     bool cranksFromErs() const { return type == Type::Hybrid; }
     bool restartsWhileMoving() const { return type == Type::Hybrid; }

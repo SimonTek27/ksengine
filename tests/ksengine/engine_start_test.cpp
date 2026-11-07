@@ -154,8 +154,17 @@ int main() {
         // ten seconds and then the engine stalls.
         v.setBrake(1.0);
         v.setThrottle(0.1);
-        run(v, 60);
+        // The launch holds the declared AUTOCLUTCH band, so the engine is
+        // several thousand rpm above its idle when the brake goes on: the
+        // drivetrain needs time to drag it down to the antistall. Bounded, so a
+        // regression that never reaches it still fails here.
+        int settle = 0;
+        while (!v.antistallActive() && settle < 600) {
+            v.updatePhysics(0.01);
+            ++settle;
+        }
         KS_CHECK(v.antistallActive());
+        KS_CHECK(settle < 600);
         run(v, 1400); // 14 s in total, past the 10 s the car declares
         KS_CHECK(v.engineRunState() == RunState::Stalled);
         KS_CHECK(!v.isEngineRunning());

@@ -267,6 +267,15 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
         if (takeNum(antistall, {"TIME", "ANTISTALL_TIME"}, has, v) && v > 0.0)
             out.antistallTime = v;
     }
+    // Who fires it: CREW for a car with no onboard starter, DRIVER otherwise.
+    // Anything else is not a declaration this model knows, so the driver's key
+    // stays in charge rather than a guess being invented.
+    if (start.contains("BY") && start["BY"].isString()) {
+        std::string by = start["BY"].toString();
+        for (char& c : by)
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+        out.startedByCrew = (by == "crew");
+    }
     out.declared = true;
     return true;
 }

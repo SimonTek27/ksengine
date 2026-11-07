@@ -239,6 +239,24 @@ void VehicleSimulator::setIgnition(bool on) {
 }
 
 bool VehicleSimulator::pressStarter(double speedMs) {
+    // A car with an external starter has no button on the wheel: the crew fires
+    // it. The kill switch stays the driver's, so a running engine is still
+    // stopped by the same press.
+    if (m_start.declared && m_start.startedByCrew &&
+        m_runState != EngineRunState::Running)
+        return false;
+    return startEngine(speedMs);
+}
+
+bool VehicleSimulator::pressStarterByCrew(double speedMs) {
+    // Only the car that declares a crew start answers it, and only in the box:
+    // the crew cannot crank a car that is already moving.
+    if (!m_start.declared || !m_start.startedByCrew) return false;
+    if (speedMs >= 1.0) return false;
+    return startEngine(speedMs);
+}
+
+bool VehicleSimulator::startEngine(double speedMs) {
     if (m_start.declared && !m_ignitionOn) return false;
     if (m_runState == EngineRunState::Running) {
         // The kill is a standstill action: the car's own rule is under 5 m/s.
@@ -361,10 +379,15 @@ double VehicleSimulator::engineRpmTarget(double wheelRpm, double speedMs) const 
     // revs between MIN_RPM and MAX_RPM while the clutch slips the difference.
     // Closing the clutch 100% at 0 m/s was what stalled the 1991 engines on
     // launch (idle 3000 against a 3500-5000 band). Both numbers are the car's.
-    if (m_clutch.declared && m_throttle > 0.05) {
+    // With the brake held the clutch is closed, so no band applies: that is
+    // lugging, and it is allowed to end in a stall.
+    if (m_clutch.declared && m_throttle > 0.05 && m_brake < 0.5) {
         const double lo = m_clutch.autoClutchMinRpm;
         const double hi = m_clutch.autoClutchMaxRpm;
-        if (hi > lo && lo > idle && wheelRpm < hi) {
+        // Only the top of the band has to be above idle: a car whose MIN_RPM
+        // sits below its idle (Benetton: 2500-3000 against a 3000 minimum)
+        // launches by holding that idle with the clutch slipping.
+        if (hi > lo && hi >= idle && wheelRpm < hi) {
             const double launch = std::clamp(lo + m_throttle * (hi - lo), idle, hi);
             const double e = std::clamp((wheelRpm - lo) / (hi - lo), 0.0, 1.0);
             target = launch * (1.0 - e) + wheelRpm * e;

@@ -435,9 +435,53 @@ static void normalizeBrakes(Json& root) {
     // MINIMUM is the rpm it holds at rest, and that is the idle its start
     // settles on. A car that declares neither gets no block, and keeps the
     // behaviour it had before the block existed.
-    static void buildStartBlock(Json& root) {
-        if (root.contains("start") && root["start"].isObject() && !root["start"].isEmpty())
+    // An F1 has no onboard starter: the team fires it in the box, while a road
+    // car is started by its driver with the key. No .ini says which, so the rule
+    // reads what the car declares about itself: a ui_car.json class or tag that
+    // names F1 (or a formula) is a crew start, everything else is the driver's
+    // key. A manifest that already names its starter keeps that, so the rule
+    // never overwrites an explicit declaration.
+    static bool declaresCrewStart(const fs::path& carDir) {
+        for (const fs::path& path : {carDir / "ui_car.json", carDir / "ui" / "ui_car.json"}) {
+            std::ifstream in(path, std::ios::binary);
+            if (!in) continue;
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            bool ok = false;
+            std::string error;
+            const Json doc = Json::parse(buffer.str(), &ok, &error);
+            if (!ok || !doc.isObject()) continue;
+            std::vector<std::string> labels;
+            if (doc.contains("class") && doc["class"].isString())
+                labels.push_back(doc["class"].toString());
+            if (doc.contains("tags") && doc["tags"].isArray()) {
+                for (int i = 0; i < doc["tags"].size(); ++i) {
+                    if (doc["tags"].at(i).isString())
+                        labels.push_back(doc["tags"].at(i).toString());
+                }
+            }
+            for (const std::string& label : labels) {
+                const std::string value = lower(label);
+                if (value == "f1" || value.rfind("f1 ", 0) == 0 || value == "formula" ||
+                    value.rfind("formula ", 0) == 0)
+                    return true;
+            }
+            return false;
+        }
+        return false;
+    }
+
+    static void buildStartBlock(Json& root, const fs::path& carDir) {
+        // Who fires it: the car's own word where it has one, otherwise what it
+        // says it is. Declared once, for every path that builds the block.
+        const auto stampStarter = [&carDir](Json& start) {
+            if (start.contains("BY")) return;
+            start.insert("BY", Json(std::string(declaresCrewStart(carDir) ? "CREW" : "DRIVER")));
+        };
+        if (root.contains("start") && root["start"].isObject() && !root["start"].isEmpty()) {
+            stampStarter(root["start"]);
             return;
+        }
         Json start = Json::object();
         // What a script spells out wins over what the engine data implies.
         if (root.contains("script__car_params") && root["script__car_params"].isObject()) {
@@ -496,6 +540,7 @@ static void normalizeBrakes(Json& root) {
             turbo = root["engine"].contains("TURBO_0") || root["engine"].contains("TURBO_1");
         }
         start.insert("TYPE", Json(std::string(hybrid ? "HYBRID" : (turbo ? "TURBO" : "PETROL"))));
+        stampStarter(start);
         root.insert("start", start);
         // A parameter block that only held the start sequence is not a block.
         Json& rest = root["script__car_params"]; // re-fetch: the insert above may move it
@@ -514,7 +559,7 @@ static void normalizeBrakes(Json& root) {
         Json& fuel = objectAt(root, "fuel");
         addTypeDefaults(root, fuel);
         foldFuelExtension(root);
-        buildStartBlock(root);
+        buildStartBlock(root, carDir);
     }
 
     // Every .ini section repeats a HEADER carrying the format VERSION, and
