@@ -2,10 +2,10 @@
 /**
  * The content's own overrides, folded into the documents that own each part.
  *
- * A car folder can carry two files of overrides: one at the car root, which holds
- * for every skin, and one per skin, which holds only for that skin. Both describe
- * the same three things, so both are stored the same way, in words that are this
- * project's own:
+ * A car folder can carry two files of overrides: one for the whole car and one
+ * per skin. The car-wide file sits at the car root, or in extension/ where some
+ * content keeps it; both describe the same three things, so both are stored the
+ * same way, in words that are this project's own:
  *
  *   hidden_nodes  node names to leave out of the model (case-insensitive, '?' one
  *                 character, '*' any run). A hidden group takes its children.
@@ -121,14 +121,31 @@ struct Parsed {
 
 inline bool isDriverSection(const std::string& name) { return beginsWith(name, "DRIVER3D_"); }
 
-inline Section& sectionAt(Parsed& parsed, const std::string& name) {
-    for (Section& section : parsed.sections)
-        if (section.name == name) return section;
+/** Section names are unique in the document, but content repeats headers on
+ *  purpose: the paint overrides are written as one [Material_CarPaint_Metallic]
+ *  per skin set. A repeat is numbered instead of collapsing into the first
+ *  block, which would throw the other sets' values away. */
+inline std::string uniqueSectionName(const Parsed& parsed, const std::string& name) {
+    const auto taken = [&](const std::string& candidate) {
+        for (const Section& section : parsed.sections)
+            if (section.name == candidate) return true;
+        return false;
+    };
+    if (!taken(name)) return name;
+    for (int index = 2;; ++index) {
+        const std::string candidate = name + "_" + std::to_string(index);
+        if (!taken(candidate)) return candidate;
+    }
+}
+
+/** Appends a section for one [HEADER] and returns its index: the keys that follow
+ *  belong to this one, even when an earlier section carries the same name. */
+inline std::size_t addSection(Parsed& parsed, const std::string& name) {
     Section fresh;
-    fresh.name = name;
+    fresh.name = uniqueSectionName(parsed, name);
     fresh.driverOwned = isDriverSection(name);
     parsed.sections.push_back(fresh);
-    return parsed.sections.back();
+    return parsed.sections.size() - 1;
 }
 
 /** Read one overrides file. Returns false when it cannot be opened; an empty
@@ -139,13 +156,14 @@ inline bool readFile(const fs::path& file, Parsed& parsed) {
 
     std::string line;
     std::string group;
+    std::size_t current = 0;
     while (std::getline(in, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         const std::string trimmed = trimText(line);
         if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') continue;
         if (trimmed.front() == '[' && trimmed.back() == ']') {
             group = trimText(trimmed.substr(1, trimmed.size() - 2));
-            sectionAt(parsed, group);
+            current = addSection(parsed, group);
             continue;
         }
         const std::size_t separator = trimmed.find_first_of("=:");
@@ -154,7 +172,7 @@ inline bool readFile(const fs::path& file, Parsed& parsed) {
         const std::string value = unquoteText(trimText(trimmed.substr(separator + 1)));
         if (key.empty()) continue;
 
-        Section& section = sectionAt(parsed, group);
+        Section& section = parsed.sections[current];
         if (!section.entries.contains(key)) section.entries.insert(key, Json(value));
 
         if (beginsWith(group, "DRIVER3D_HIDE_OBJECT") && beginsWith(key, "NAME"))
@@ -294,17 +312,23 @@ inline int writeSkinOverrides(const std::filesystem::path& carDir) {
     return written;
 }
 
-/** Fold the car-root overrides into the model and driver documents. A skin's own
- *  file goes to its skin.json instead, never into these. Returns 1 when the car
- *  root file was read. */
+/** Fold the car-wide overrides into the model and driver documents. The root file
+ *  and the one some content keeps in extension/ say the same kind of thing, so
+ *  they are read as one set and the root wins where both repeat an entry. A
+ *  skin's own file goes to its skin.json instead, never into these. A car with
+ *  neither file keeps whatever its documents already carry: deleting the source
+ *  must not empty the record it produced. Returns the number of files read. */
 inline int mergeOverrides(const std::filesystem::path& carDir, Json& modelDocument,
                           Json& driverDocument) {
     using namespace overrides_detail;
     Parsed parsed;
-    const bool any = readFile(carDir / "ext_config.ini", parsed);
+    int read = 0;
+    if (readFile(carDir / "ext_config.ini", parsed)) ++read;
+    if (readFile(carDir / "extension" / "ext_config.ini", parsed)) ++read;
+    if (read == 0) return 0;
 
-    const bool model = any && subjectHasContent(parsed, false);
-    const bool driver = any && subjectHasContent(parsed, true);
+    const bool model = subjectHasContent(parsed, false);
+    const bool driver = subjectHasContent(parsed, true);
     setOrRemove(modelDocument, "hidden_nodes", model, namesJson(parsed.modelHidden));
     setOrRemove(modelDocument, "sections", model, sectionsJson(sectionsOf(parsed, false)));
     setOrRemove(driverDocument, "hidden_nodes", driver, namesJson(parsed.driverHidden));
@@ -317,7 +341,7 @@ inline int mergeOverrides(const std::filesystem::path& carDir, Json& modelDocume
             driverModel.insert("position", position);
     }
     setOrRemove(driverDocument, "driver_model", driver && !driverModel.isEmpty(), driverModel);
-    return any ? 1 : 0;
+    return read;
 }
 
 } // namespace assetto_corsa
