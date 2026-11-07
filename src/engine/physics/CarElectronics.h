@@ -34,6 +34,16 @@ struct ElectronicsLimits {
     float tcSlipRatioLimit = 0.10f;  ///< drive torque is cut above this |kappa|
     float absSlipRatioLimit = 0.12f; ///< brake torque is cut above this |kappa|
 
+    /** Whether the car says it has the system at all, and whether it is on when
+     *  the session starts: [TRACTION_CONTROL]/[ABS] PRESENT and ACTIVE, as AC
+     *  reads them. -1 means the car said nothing, and the aid keeps working from
+     *  the level the driver picks — the behaviour before these were read; 0 means
+     *  the car has no such hardware, so no level can switch it on. */
+    int tcPresent = -1;
+    int tcActive = -1;
+    int absPresent = -1;
+    int absActive = -1;
+
     /** [EDL]: the brake-based aid that slows one spinning rear wheel instead of
      *  cutting the engine. Spin is the wheel's ratio over the car's speed, so
      *  0.55 means "may spin half again as fast as the car is moving". The
@@ -101,6 +111,13 @@ inline bool numberOf(const Json& object, const char* name, double& out) {
 /** A slip ratio limit worth honouring: a positive fraction well below 1. */
 inline bool usableLimit(double value) { return value > 0.001 && value < 0.5; }
 
+/** A 0/1 flag as AC writes it, or -1 when the block does not carry the key. */
+inline int flagOf(const Json& object, const char* name) {
+    double value = 0.0;
+    if (!numberOf(object, name, value)) return -1;
+    return value != 0.0 ? 1 : 0;
+}
+
 } // namespace electronics_detail
 
 /** Reads the electronics block of a car document (data.json). Absent, unreadable
@@ -115,6 +132,8 @@ inline ElectronicsLimits readElectronicsLimits(const Json& document) {
     // Traction control: the car's own [TRACTION_CONTROL] block. EDL is derived
     // from it by the conversion and carries spin power, not a slip limit.
     if (const Json* tc = child(electronics, "TRACTION_CONTROL")) {
+        out.tcPresent = flagOf(*tc, "PRESENT");
+        out.tcActive = flagOf(*tc, "ACTIVE");
         double limit = 0.0;
         if (numberOf(*tc, "SLIP_RATIO_LIMIT", limit) && usableLimit(limit)) {
             out.tcSlipRatioLimit = static_cast<float>(limit);
@@ -122,14 +141,18 @@ inline ElectronicsLimits readElectronicsLimits(const Json& document) {
         }
     }
     // ABS: the car's [ABS] block, or the ABS_V2 the conversion derived from it.
+    // Presence is read from the first block that exists; the limit from the first
+    // one that carries a usable number.
     for (const char* name : {"ABS", "ABS_V2"}) {
         const Json* abs = child(electronics, name);
         if (abs == nullptr) continue;
+        if (out.absPresent < 0) out.absPresent = flagOf(*abs, "PRESENT");
+        if (out.absActive < 0) out.absActive = flagOf(*abs, "ACTIVE");
+        if (out.declaredAbs) continue;
         double limit = 0.0;
         if (numberOf(*abs, "SLIP_RATIO_LIMIT", limit) && usableLimit(limit)) {
             out.absSlipRatioLimit = static_cast<float>(limit);
             out.declaredAbs = true;
-            break;
         }
     }
     // EDL: the brake-based traction aid. A spin ratio belongs in (0, 1), a brake

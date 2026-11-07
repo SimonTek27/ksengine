@@ -76,6 +76,13 @@ public:
                         float deadZonePower, float deadZoneCoast);
     float tractionControlSlipLimit() const { return m_tcSlipLimit; }
     float absSlipLimit() const { return m_absSlipLimit; }
+    /** The car's [TRACTION_CONTROL]/[ABS] PRESENT: 1 has it, 0 does not, -1 the
+     *  car said nothing. A car that says it has no such hardware gets neither aid
+     *  whatever level the setup asks for, which is what AC does with PRESENT = 0. */
+    void setElectronicsPresence(int tcPresent, int absPresent);
+    /** A selected level with the car's own hardware check applied. */
+    bool tcEnabled() const { return m_setup.tcLevel > 0 && m_tcPresent != 0; }
+    bool absEnabled() const { return m_setup.absLevel > 0 && m_absPresent != 0; }
 
     void setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
                             const std::vector<std::pair<float, float>>& rear);
@@ -384,6 +391,9 @@ private:
     // |slip ratio| at which the aids may cut, as the car declares it.
     float m_tcSlipLimit = 0.10f;
     float m_absSlipLimit = 0.12f;
+    // PRESENT: 1 = the car has the system, 0 = it does not, -1 = it said nothing.
+    int m_tcPresent = -1;
+    int m_absPresent = -1;
     // [EDL] as the car's document declares it (the conversion always writes it).
     bool m_edlDeclared = false;
     float m_edlMaxSpinPower = 0.55f;

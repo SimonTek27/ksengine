@@ -449,11 +449,14 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
                        electronics.edlMaxSpinCoast, electronics.edlBrakeTorquePower,
                        electronics.edlBrakeTorqueCoast, electronics.edlDeadZonePower,
                        electronics.edlDeadZoneCoast);
+        setElectronicsPresence(electronics.tcPresent, electronics.absPresent);
         if (electronics.declaredTractionControl || electronics.declaredAbs) {
             std::fprintf(stderr,
-                         "[electronics] slip limits: tc=%0.3f (declared=%d) abs=%0.3f (declared=%d)\n",
+                         "[electronics] slip limits: tc=%0.3f (declared=%d present=%d) "
+                         "abs=%0.3f (declared=%d present=%d) edl=%d\n",
                          m_tcSlipLimit, electronics.declaredTractionControl ? 1 : 0,
-                         m_absSlipLimit, electronics.declaredAbs ? 1 : 0);
+                         m_tcPresent, m_absSlipLimit, electronics.declaredAbs ? 1 : 0,
+                         m_absPresent, m_edlDeclared ? 1 : 0);
         }
     }
     if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
@@ -494,6 +497,13 @@ void VehicleSimulator::setElectronicsSlipLimits(float tcLimit, float absLimit) {
     // model can honour, so the default stays and nothing is invented.
     if (tcLimit > 0.001f && tcLimit < 0.5f) m_tcSlipLimit = tcLimit;
     if (absLimit > 0.001f && absLimit < 0.5f) m_absSlipLimit = absLimit;
+}
+
+void VehicleSimulator::setElectronicsPresence(int tcPresent, int absPresent) {
+    // Only a definite statement counts: 1 = present, 0 = absent, anything else
+    // (no block, no key) leaves the aid answering to the selected level alone.
+    m_tcPresent = (tcPresent == 0 || tcPresent == 1) ? tcPresent : -1;
+    m_absPresent = (absPresent == 0 || absPresent == 1) ? absPresent : -1;
 }
 
 void VehicleSimulator::setEdlSettings(bool declared, float maxSpinPower, float maxSpinCoast,
@@ -831,11 +841,11 @@ void VehicleSimulator::integrate(double dt) {
         engineTorque *= 0.3f;
     float driveForceTarget = (engineTorque * gearRatio * static_cast<float>(m_finalDrive))
                              / static_cast<float>(m_wheelRadius);
-    if (m_setup.tcLevel > 0 && speed > 3.f && m_throttle > 0.3)
+    if (tcEnabled() && speed > 3.f && m_throttle > 0.3)
         driveForceTarget *= (1.f - 0.03f * static_cast<float>(m_setup.tcLevel));
     float brakeForceTarget = static_cast<float>(m_brake) * mass * 12.0f * dmgBrake;
     // Soft ABS: reduce brake force if high slip at high ABS level
-    if (m_setup.absLevel > 0 && speed > 5.f && m_brake > 0.4)
+    if (absEnabled() && speed > 5.f && m_brake > 0.4)
         brakeForceTarget *= (1.f - 0.04f * static_cast<float>(m_setup.absLevel));
     // TC: reduce drive when slip high
     // (applied after driveForceTarget)
@@ -1049,7 +1059,7 @@ void VehicleSimulator::integrate(double dt) {
                 m_wheelOmega[i] = std::max(m_wheelOmega[i], wMin);
         }
     }
-    if (m_setup.tcLevel > 0 && kappaRearAbs > m_tcSlipLimit && m_throttle > 0.15f) {
+    if (tcEnabled() && kappaRearAbs > m_tcSlipLimit && m_throttle > 0.15f) {
         const float cut = std::clamp(0.1f * static_cast<float>(m_setup.tcLevel) * kappaRearAbs, 0.f, 0.9f);
         Tdrive *= (1.f - cut);
     }
@@ -1066,7 +1076,7 @@ void VehicleSimulator::integrate(double dt) {
     // stopped, continuing to apply it spins the wheels backwards and the tyres
     // then drag the car away in reverse. Hold it instead.
     const bool brakeHold = m_brake > 0.05f && speed < 0.5f && m_throttle < 0.05f;
-    if (m_setup.absLevel > 0 && m_brake > 0.25f) {
+    if (absEnabled() && m_brake > 0.25f) {
         float kAbs = 0.25f * (std::fabs(srArr[0]) + std::fabs(srArr[1])
                             + std::fabs(srArr[2]) + std::fabs(srArr[3]));
         if (kAbs > m_absSlipLimit) {
@@ -1116,7 +1126,7 @@ void VehicleSimulator::integrate(double dt) {
     // block in the car's document, and the aid follows the driver's TC level, so
     // aids off means aids off.
     float edlBrake[4] = {0.f, 0.f, 0.f, 0.f};
-    if (m_edlDeclared && m_setup.tcLevel > 0 && speed > 1.f) {
+    if (m_edlDeclared && tcEnabled() && speed > 1.f) {
         const bool onPower = m_throttle > 0.05f;
         const float maxSpin = onPower ? m_edlMaxSpinPower : m_edlMaxSpinCoast;
         const float deadZone = onPower ? m_edlDeadZonePower : m_edlDeadZoneCoast;

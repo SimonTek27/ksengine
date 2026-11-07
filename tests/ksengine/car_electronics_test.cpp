@@ -97,6 +97,36 @@ int main() {
         KS_CHECK(!text.declaredAbs);
     }
 
+    // --- PRESENT and ACTIVE, read as AC reads them ------------------------
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": {\n"
+            "    \"TRACTION_CONTROL\": { \"PRESENT\": \"0\", \"ACTIVE\": \"0\" },\n"
+            "    \"ABS\": { \"PRESENT\": \"1\", \"ACTIVE\": \"0\" }\n"
+            "  }\n}\n"));
+        KS_CHECK(limits.tcPresent == 0);
+        KS_CHECK(limits.tcActive == 0);
+        KS_CHECK(limits.absPresent == 1);
+        KS_CHECK(limits.absActive == 0);
+    }
+
+    // --- A block without the keys says nothing, it does not say "absent" ---
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": { \"TRACTION_CONTROL\": { \"SLIP_RATIO_LIMIT\": \"0.08\" } }\n}\n"));
+        KS_CHECK(limits.tcPresent == -1);
+        KS_CHECK(limits.tcActive == -1);
+        KS_CHECK(limits.absPresent == -1);
+    }
+
+    // --- ABS_V2 stands in for presence when [ABS] is not there ------------
+    {
+        const auto limits = readElectronicsLimits(parseDocument(
+            "{\n  \"electronics\": { \"ABS_V2\": { \"PRESENT\": 0, \"SLIP_RATIO_LIMIT\": \"0.12\" } }\n}\n"));
+        KS_CHECK(limits.absPresent == 0);
+        KS_CHECK(limits.declaredAbs);
+    }
+
     // --- The EDL block: the brake-based aid and the spin it allows --------
     {
         const auto limits = readElectronicsLimits(parseDocument(
