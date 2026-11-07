@@ -271,6 +271,43 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
     return true;
 }
 
+bool CarPhysicsJson::loadAcClutch(const std::string& carDir, CarClutchConfig& out,
+                                  std::string* error) {
+    out = CarClutchConfig{};
+    const std::string path = resolveAcManifestPath(carDir);
+    if (path.empty()) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "data.json: cannot open " + path;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    bool ok = false;
+    std::string parseError;
+    const Json root = Json::parse(ss.str(), &ok, &parseError);
+    if (!ok || !root.isObject()) {
+        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
+        return false;
+    }
+    const Json& drivetrain = root["drivetrain"];
+    if (!drivetrain.isObject()) return false;
+    bool has = false;
+    double v = 0.0;
+    const Json& clutch = drivetrain["CLUTCH"];
+    if (clutch.isObject()) {
+        if (takeNum(clutch, {"MAX_TORQUE", "maxTorque"}, has, v) && v > 0.0)
+            out.maxTorqueNm = v;
+    }
+    const Json& autoclutch = drivetrain["AUTOCLUTCH"];
+    if (autoclutch.isObject()) {
+        if (takeNum(autoclutch, {"MIN_RPM"}, has, v) && v > 0.0) out.autoClutchMinRpm = v;
+        if (takeNum(autoclutch, {"MAX_RPM"}, has, v) && v > 0.0) out.autoClutchMaxRpm = v;
+    }
+    out.declared = clutch.isObject() || autoclutch.isObject();
+    return out.declared;
+}
+
 bool CarPhysicsJson::parse(const std::string& jsonText, CarPhysicsData& out,
                            std::string* error) {
     out = CarPhysicsData{};

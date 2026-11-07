@@ -241,6 +241,16 @@ public:
     /** Starter button: cranks when it can, asks a running engine to stop. */
     bool pressStarter(double speedMs);
 
+    /** The car's declared clutch (drivetrain.ini [CLUTCH]/[AUTOCLUTCH]). */
+    void setClutchConfig(const CarClutchConfig& c) { m_clutch = c; }
+    const CarClutchConfig& clutchConfig() const { return m_clutch; }
+    /** Pedal 0 = released (clutch closed), 1 = pressed (clutch open). */
+    void setClutchPedal(double v) { m_clutchPedal = std::clamp(v, 0.0, 1.0); }
+    double clutchPedal() const { return m_clutchPedal; }
+    /** How much torque the clutch can pass, 0..1: the load on the engine. */
+    double clutchEngagement(double speedMs) const;
+    bool antistallActive() const { return m_antistallActive; }
+
     int currentGear() const { return m_currentGear; }
     double rpm() const { return m_rpm; }
     const std::vector<double>& gearRatios() const { return m_gearRatios; }
@@ -282,6 +292,10 @@ private:
     void stepEngineStart(double speedMs, double dt);
     double engineIdleFloor() const;
     bool engineDrivesWheels() const;
+    /** Where the running engine settles: idle when the clutch is open, the
+     *  drivetrain when it is closed, the antistall's hold when that is on. */
+    double engineRpmTarget(double wheelRpm, double speedMs) const;
+    void approachEngineRpm(double target, double dt);
 
     SimulationState m_state;
     unsigned long long m_nanRecoveries = 0;
@@ -306,6 +320,9 @@ private:
     bool m_ignitionOn = true;
     /** False while cranking or stopped: the wheels do not set the revs then. */
     bool m_rpmFromWheels = true;
+    CarClutchConfig m_clutch;
+    double m_clutchPedal = 0.0;
+    bool m_antistallActive = false;
     double m_crankTimer = 0.0;
     double m_antistallTimer = 0.0;
     double m_yawRate = 0;

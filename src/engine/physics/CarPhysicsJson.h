@@ -37,6 +37,18 @@ struct CarStartConfig {
 };
 
 /**
+ * The clutch the car declares: drivetrain.ini [CLUTCH] MAX_TORQUE is what it can
+ * hold, [AUTOCLUTCH] MIN_RPM/MAX_RPM the range the car itself opens it in. A car
+ * that declares neither gets no clutch model, so it keeps the behaviour it had.
+ */
+struct CarClutchConfig {
+    bool declared = false;
+    double maxTorqueNm = 700.0;
+    double autoClutchMinRpm = 1000.0;
+    double autoClutchMaxRpm = 5800.0;
+};
+
+/**
  * Unified car physics data — the in-memory form of data/physics.json.
  *
  * One file replaces the runtime physics .ini set a car folder used to carry
@@ -129,6 +141,10 @@ public:
      */
     static bool loadAcStart(const std::string& carDir, CarStartConfig& out,
                             std::string* error = nullptr);
+
+    /** The manifest's drivetrain [CLUTCH] and [AUTOCLUTCH] blocks. */
+    static bool loadAcClutch(const std::string& carDir, CarClutchConfig& out,
+                             std::string* error = nullptr);
 
     /**
      * One axle's brake temperature profile: the manifest's

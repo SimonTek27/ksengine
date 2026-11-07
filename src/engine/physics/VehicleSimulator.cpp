@@ -41,6 +41,8 @@ void VehicleSimulator::reset() {
     m_rpmFromWheels = !m_start.declared;
     m_crankTimer = 0.0;
     m_antistallTimer = 0.0;
+    m_antistallActive = false;
+    m_clutchPedal = 0.0;
     m_rpm = m_start.declared ? 0.0 : 1000.0;
     m_yawRate = 0;
     m_lastAx = 0.f;
@@ -177,6 +179,7 @@ bool VehicleSimulator::pressStarter(double speedMs) {
         m_rpm = 0.0;
         m_rpmFromWheels = false;
         m_crankTimer = 0.0;
+        m_antistallActive = false;
         return true;
     }
     // The starter turns an engine the wheels are not driving; a car that cranks
@@ -186,6 +189,7 @@ bool VehicleSimulator::pressStarter(double speedMs) {
     m_runState = EngineRunState::Cranking;
     m_crankTimer = 0.0;
     m_rpmFromWheels = false;
+    m_antistallActive = false;
     return true;
 }
 
@@ -225,28 +229,34 @@ void VehicleSimulator::stepEngineStart(double speedMs, double dt) {
         m_rpmFromWheels = false;
         return;
     }
-    // Running: the wheels set the revs above the idle floor, and the declared
-    // antistall holds the engine up for as long as the car allows.
+    // Running: the clutch decides whether the wheels or the idle set the revs,
+    // and the declared antistall gets its time before the engine is declared
+    // stalled — it opens the throttle body and holds ANTISTALL_RPM.
     m_rpmFromWheels = true;
+    if (m_antistallActive) {
+        m_antistallTimer += dt;
+        const double hold = m_start.antistallTime > 0.0 ? m_start.antistallTime : 1.0;
+        if (m_rpm >= engineIdleFloor()) {
+            m_antistallActive = false;
+            m_antistallTimer = 0.0;
+        } else if (m_antistallTimer > hold) {
+            m_runState = EngineRunState::Stalled;
+            m_rpm = 0.0;
+            m_rpmFromWheels = false;
+            m_antistallActive = false;
+            m_antistallTimer = 0.0;
+        }
+        return;
+    }
+    if (m_start.antistallRpm > 0.0 && m_rpm < m_start.antistallRpm) {
+        m_antistallActive = true;
+        m_antistallTimer = 0.0;
+        return;
+    }
     if (m_rpm < m_start.minimumRpm) {
         m_runState = EngineRunState::Stalled;
         m_rpm = 0.0;
         m_rpmFromWheels = false;
-        m_antistallTimer = 0.0;
-        return;
-    }
-    if (m_start.antistallRpm > 0.0 && m_rpm < m_start.antistallRpm) {
-        m_antistallTimer += dt;
-        const double hold = m_start.antistallTime > 0.0 ? m_start.antistallTime : 1.0;
-        if (m_antistallTimer > hold) {
-            m_runState = EngineRunState::Stalled;
-            m_rpm = 0.0;
-            m_rpmFromWheels = false;
-            m_antistallTimer = 0.0;
-        } else {
-            m_rpm = m_start.antistallRpm;
-        }
-    } else {
         m_antistallTimer = 0.0;
     }
 }
@@ -257,6 +267,41 @@ double VehicleSimulator::engineIdleFloor() const {
 
 bool VehicleSimulator::engineDrivesWheels() const {
     return !m_start.declared || m_runState == EngineRunState::Running;
+}
+
+double VehicleSimulator::clutchEngagement(double speedMs) const {
+    // No start sequence and no declared clutch both mean "no clutch modelled".
+    if (!m_start.declared || !m_clutch.declared) return 1.0;
+    double engaged = 1.0 - m_clutchPedal;
+    // The autoclutch holds a stopped car at idle: below 1 m/s with the throttle
+    // closed the clutch is open, which is what keeps an engine alive at rest.
+    if (m_clutch.declared && speedMs < 1.0 && m_throttle < 0.05) engaged = 0.0;
+    return engaged;
+}
+
+double VehicleSimulator::engineRpmTarget(double wheelRpm, double speedMs) const {
+    if (!m_start.declared) return std::max(800.0, wheelRpm);
+    const double idle = engineIdleFloor();
+    // The clutch is the load: open, the engine idles; closed, the drivetrain
+    // drags it to the wheel speed. That is what stalls a car in gear. A car that
+    // declares no clutch keeps the idle floor it always had.
+    double target = m_clutch.declared
+                        ? idle + (wheelRpm - idle) * clutchEngagement(speedMs)
+                        : std::max(idle, wheelRpm);
+    // The antistall opens the throttle body: it holds the declared rpm.
+    if (m_antistallActive) target = std::max(target, m_start.antistallRpm);
+    return std::max(0.0, target);
+}
+
+void VehicleSimulator::approachEngineRpm(double target, double dt) {
+    if (!m_start.declared) {
+        m_rpm = target;
+        return;
+    }
+    // An engine has inertia: it cannot drop to the wheel speed in one step, so
+    // the antistall has the time it declares to catch it.
+    const double rate = 2500.0; // rpm/s
+    m_rpm = std::max(0.0, m_rpm + std::clamp(target - m_rpm, -rate * dt, rate * dt));
 }
 
 void VehicleSimulator::resetTyreWear() {
@@ -388,6 +433,8 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
     {
         CarStartConfig startCfg;
         if (CarPhysicsJson::loadAcStart(carPath, startCfg)) setEngineStartConfig(startCfg);
+        CarClutchConfig clutchCfg;
+        if (CarPhysicsJson::loadAcClutch(carPath, clutchCfg)) setClutchConfig(clutchCfg);
     }
     if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
     loadVehicleParamsFromIni(carPath);
@@ -715,7 +762,8 @@ void VehicleSimulator::integrate(double dt) {
     // allowed to set the revs at all: a cranking or stopped engine is not.
     stepEngineStart(static_cast<double>(speed), dt);
     const double wheelRpm = wheelOmega * gearRatio * m_finalDrive * 60.0 / (2.0 * 3.14159265);
-    if (m_rpmFromWheels) m_rpm = std::max(engineIdleFloor(), wheelRpm);
+    if (m_rpmFromWheels)
+        approachEngineRpm(engineRpmTarget(wheelRpm, static_cast<double>(speed)), dt);
     if (engineDrivesWheels() && !m_damage.isEngineFailed())
         shiftGears();
     const size_t gi2 = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
@@ -726,6 +774,12 @@ void VehicleSimulator::integrate(double dt) {
     float engineTorque = peakTorque * std::sin(rpmN * 3.14159265f) * static_cast<float>(m_throttle) * dmgPower;
     // A cranking or stopped engine makes no torque.
     if (!engineDrivesWheels()) engineTorque = 0.f;
+    // The clutch passes what it can hold, and nothing while it is open.
+    engineTorque *= static_cast<float>(clutchEngagement(static_cast<double>(speed)));
+    if (m_clutch.declared && m_clutch.maxTorqueNm > 0.0) {
+        const float cap = static_cast<float>(m_clutch.maxTorqueNm);
+        engineTorque = std::clamp(engineTorque, -cap, cap);
+    }
     // G16: engine braking / coast torque when throttle released
     if (engineDrivesWheels() && m_throttle < 0.05f && speed > 2.f && m_currentGear > 0) {
         const float coastNm = 25.f + 40.f * rpmN; // grows with rpm
@@ -1045,9 +1099,11 @@ void VehicleSimulator::integrate(double dt) {
     }
     const float omegaDriven = 0.5f * (m_wheelOmega[2] + m_wheelOmega[3]);
     if (m_rpmFromWheels)
-        m_rpm = std::max(engineIdleFloor(),
-                         static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive
-                             * 60.0 / (2.0 * 3.14159265));
+        approachEngineRpm(
+            engineRpmTarget(static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive *
+                                60.0 / (2.0 * 3.14159265),
+                            static_cast<double>(speed)),
+            dt);
 
     // Deposit rubber when sliding hard (angle or ratio)
     const float slipMag = std::abs(saFL) + std::abs(saFR)
