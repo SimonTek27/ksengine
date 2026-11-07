@@ -46,10 +46,14 @@ void SimulationLoop::updateGarageExit(float dt) {
     in.requestReturn = m_requestReturnBox;
     m_requestLeaveGarage = false;
     m_requestReturnBox = false;
-    // ksim has no ignition state yet — the engine is always considered
-    // running, so GarageExit's engine-start branch is a timed hop.
-    in.engineRunning = true;
-    in.ignitionOn = true;
+    // The start belongs to the vehicle: report what the engine is doing and let
+    // the garage sequence crank it when its engine phase begins.
+    if (m_garageExit.phase() == GarageExitPhase::EngineStart) {
+        m_vehicle->setIgnition(true);
+        m_vehicle->pressStarter(static_cast<double>(st.speed));
+    }
+    in.engineRunning = m_vehicle->isEngineRunning();
+    in.ignitionOn = m_vehicle->ignitionOn();
     in.speedMs = static_cast<float>(st.speed);
     in.throttle = st.throttle;
     in.brake = st.brake;

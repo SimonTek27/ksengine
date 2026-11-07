@@ -10,6 +10,7 @@
 #include "DamageSystem.h"
 #include "BrakeThermalModel.h"
 #include "Rf2DamageModel.h"
+#include "CarPhysicsJson.h"
 
 #include <string>
 #include <vector>
@@ -222,6 +223,24 @@ public:
      *  ksengine-side FUEL_CAPACITY override still wins. */
     void loadFuelCapacityFromIni(const std::string& path);
 
+    /** What the engine is doing: the state a start sequence goes through. */
+    enum class EngineRunState { Off, Cranking, Running, Stalled };
+
+    /**
+     * Apply the car's declared start sequence (data.json "start"). A car that
+     * declares none keeps the old behaviour: ignition on, engine running. A car
+     * that declares one spawns with the ignition off and is started on request.
+     */
+    void setEngineStartConfig(const CarStartConfig& c);
+    const CarStartConfig& engineStartConfig() const { return m_start; }
+
+    EngineRunState engineRunState() const { return m_runState; }
+    bool isEngineRunning() const { return m_runState == EngineRunState::Running; }
+    bool ignitionOn() const { return m_ignitionOn; }
+    void setIgnition(bool on);
+    /** Starter button: cranks when it can, asks a running engine to stop. */
+    bool pressStarter(double speedMs);
+
     int currentGear() const { return m_currentGear; }
     double rpm() const { return m_rpm; }
     const std::vector<double>& gearRatios() const { return m_gearRatios; }
@@ -260,6 +279,9 @@ private:
     static float getf(const std::map<std::string, std::string>& m, const std::string& k, float def);
     void integrate(double dt);
     void shiftGears();
+    void stepEngineStart(double speedMs, double dt);
+    double engineIdleFloor() const;
+    bool engineDrivesWheels() const;
 
     SimulationState m_state;
     unsigned long long m_nanRecoveries = 0;
@@ -279,6 +301,13 @@ private:
     std::vector<double> m_gearRatios = {3.5, 2.5, 1.8, 1.4, 1.1, 0.9};
     int m_currentGear = 1;
     double m_rpm = 1000;
+    CarStartConfig m_start;
+    EngineRunState m_runState = EngineRunState::Running;
+    bool m_ignitionOn = true;
+    /** False while cranking or stopped: the wheels do not set the revs then. */
+    bool m_rpmFromWheels = true;
+    double m_crankTimer = 0.0;
+    double m_antistallTimer = 0.0;
     double m_yawRate = 0;
     SetupParams m_setup{};
     double m_baseMass = 1200;

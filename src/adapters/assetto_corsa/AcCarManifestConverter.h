@@ -378,6 +378,64 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
+    // The start sequence belongs to the car, not to a script. [STARTER] and the
+    // engine's idle/antistall numbers move into their own block, typed by the
+    // hardware the car declares: an ERS store means the electric motor can crank
+    // it, a turbo means the engine carries one, otherwise it is a plain engine.
+    // A car that declares none of this gets no block, and keeps the behaviour it
+    // had before the block existed.
+    static void buildStartBlock(Json& root) {
+        if (!root.contains("script__car_params") || !root["script__car_params"].isObject())
+            return;
+        if (root.contains("start") && root["start"].isObject() && !root["start"].isEmpty())
+            return;
+        const auto take = [](Json& from, const char* key, Json& to, const char* name) {
+            if (!from.isObject() || !from.contains(key)) return;
+            to.insert(name, from[key]);
+            from.remove(key);
+        };
+        Json& params = root["script__car_params"];
+        Json start = Json::object();
+        if (params.contains("STARTER") && params["STARTER"].isObject()) {
+            Json starter = Json::object();
+            take(params["STARTER"], "RPM", starter, "RPM");
+            take(params["STARTER"], "CRANK_TIME", starter, "CRANK_TIME");
+            if (!starter.isEmpty()) start.insert("STARTER", starter);
+        }
+        if (params.contains("ENGINE") && params["ENGINE"].isObject()) {
+            Json& engineParams = params["ENGINE"];
+            take(engineParams, "IDLE_RPM", start, "IDLE_RPM");
+            take(engineParams, "MINIMUM_RPM", start, "MINIMUM_RPM");
+            Json antistall = Json::object();
+            take(engineParams, "ANTISTALL_RPM", antistall, "RPM");
+            take(engineParams, "ANTISTALL_TIME", antistall, "TIME");
+            if (!antistall.isEmpty()) start.insert("ANTISTALL", antistall);
+            take(engineParams, "PITSTOP_RPM", start, "PITSTOP_RPM");
+        }
+        if (start.isEmpty()) return;
+        // Which hardware turns it: the car's own declarations, never a guess.
+        bool hybrid = root.contains("ers") && root["ers"].isObject() && !root["ers"].isEmpty();
+        for (const std::string& key : root.keys()) {
+            if (lower(key).rfind("ctrl_ers", 0) == 0) {
+                hybrid = true;
+                break;
+            }
+        }
+        bool turbo = false;
+        if (root.contains("engine") && root["engine"].isObject()) {
+            turbo = root["engine"].contains("TURBO_0") || root["engine"].contains("TURBO_1");
+        }
+        start.insert("TYPE", Json(std::string(hybrid ? "HYBRID" : (turbo ? "TURBO" : "PETROL"))));
+        root.insert("start", start);
+        // A parameter block that only held the start sequence is not a block.
+        Json& rest = root["script__car_params"]; // re-fetch: the insert above may move it
+        if (rest.contains("STARTER") && rest["STARTER"].isObject() && rest["STARTER"].isEmpty())
+            rest.remove("STARTER");
+        if (rest.contains("ENGINE") && rest["ENGINE"].isObject() && rest["ENGINE"].isEmpty())
+            rest.remove("ENGINE");
+        if (rest.isEmpty()) root.remove("script__car_params");
+    }
+
     static void normalize(Json& root, const fs::path& carDir) {
         normalizeGraphics(root);
         normalizeBrakes(root);
@@ -386,6 +444,7 @@ static void normalizeBrakes(Json& root) {
         Json& fuel = objectAt(root, "fuel");
         addTypeDefaults(root, fuel);
         foldFuelExtension(root);
+        buildStartBlock(root);
     }
 
     // Every .ini section repeats a HEADER carrying the format VERSION, and

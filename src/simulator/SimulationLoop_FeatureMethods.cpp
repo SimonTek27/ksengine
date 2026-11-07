@@ -264,8 +264,8 @@ void SimulationLoop::updateGarageExit(float dt) {
     if (!m_vehicle) return;
     const auto st = m_vehicle->getState();
     GarageExitInput in;
-    in.engineRunning = st.rpm > 200.0;
-    in.ignitionOn = true;
+    in.engineRunning = m_vehicle->isEngineRunning();
+    in.ignitionOn = m_vehicle->ignitionOn();
     in.speedMs = static_cast<float>(st.speed);
     in.throttle = static_cast<float>(st.throttle);
     in.brake = static_cast<float>(st.brake);

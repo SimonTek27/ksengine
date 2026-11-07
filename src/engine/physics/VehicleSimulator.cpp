@@ -36,7 +36,12 @@ void VehicleSimulator::reset() {
     m_handbrake = 0;
     m_appliedCgShift = {};
     m_currentGear = 1;
-    m_rpm = 1000;
+    m_runState = m_start.declared ? EngineRunState::Off : EngineRunState::Running;
+    m_ignitionOn = !m_start.declared;
+    m_rpmFromWheels = !m_start.declared;
+    m_crankTimer = 0.0;
+    m_antistallTimer = 0.0;
+    m_rpm = m_start.declared ? 0.0 : 1000.0;
     m_yawRate = 0;
     m_lastAx = 0.f;
     m_lastAy = 0.f;
@@ -134,6 +139,124 @@ void VehicleSimulator::setFuelTankCapacity(float liters) {
     m_fuelTankL = std::clamp(liters, 5.f, 300.f);
     // A smaller tank must not keep fuel the car can no longer carry.
     if (m_state.fuel > m_fuelTankL) setFuelL(m_fuelTankL);
+}
+
+void VehicleSimulator::setEngineStartConfig(const CarStartConfig& c) {
+    m_start = c;
+    m_crankTimer = 0.0;
+    m_antistallTimer = 0.0;
+    if (c.declared) {
+        // A car that says how it starts starts when the driver asks.
+        m_ignitionOn = false;
+        m_runState = EngineRunState::Off;
+        m_rpm = 0.0;
+        m_rpmFromWheels = false;
+    } else {
+        m_ignitionOn = true;
+        m_runState = EngineRunState::Running;
+        m_rpmFromWheels = true;
+    }
+}
+
+void VehicleSimulator::setIgnition(bool on) {
+    m_ignitionOn = on;
+    if (on || !m_start.declared) return;
+    m_runState = EngineRunState::Off;
+    m_rpm = 0.0;
+    m_rpmFromWheels = false;
+    m_crankTimer = 0.0;
+    m_antistallTimer = 0.0;
+}
+
+bool VehicleSimulator::pressStarter(double speedMs) {
+    if (m_start.declared && !m_ignitionOn) return false;
+    if (m_runState == EngineRunState::Running) {
+        // The kill is a standstill action: the car's own rule is under 5 m/s.
+        if (speedMs >= 5.0) return false;
+        m_runState = EngineRunState::Off;
+        m_rpm = 0.0;
+        m_rpmFromWheels = false;
+        m_crankTimer = 0.0;
+        return true;
+    }
+    // The starter turns an engine the wheels are not driving; a car that cranks
+    // on its electric motor can do it on the move.
+    if (!m_start.restartsWhileMoving() && speedMs >= 1.0) return false;
+    if (m_state.fuel <= 0.f || m_damage.isEngineFailed()) return false;
+    m_runState = EngineRunState::Cranking;
+    m_crankTimer = 0.0;
+    m_rpmFromWheels = false;
+    return true;
+}
+
+void VehicleSimulator::stepEngineStart(double speedMs, double dt) {
+    if (!m_start.declared) {
+        m_rpmFromWheels = true;
+        return;
+    }
+    // The car's own script starts itself when the driver asks for throttle from
+    // a standstill (its pitlane launch). Same rule here, so a car waiting with
+    // the ignition on is never left dead.
+    if (m_ignitionOn && m_runState != EngineRunState::Running &&
+        m_runState != EngineRunState::Cranking && speedMs < 1.0 && m_throttle > 0.5) {
+        pressStarter(speedMs);
+    }
+    if (m_runState == EngineRunState::Cranking) {
+        m_crankTimer += dt;
+        const double crank = std::max(0.01, m_start.crankTime);
+        const double blend = std::min(1.0, dt * 6.0);
+        if (m_crankTimer <= crank) {
+            m_rpm += (m_start.starterRpm - m_rpm) * blend;
+        } else {
+            // The engine catches and settles on its idle.
+            const double catchRpm = m_start.idleRpm + 1500.0;
+            m_rpm += (catchRpm - m_rpm) * blend;
+            if (m_rpm >= m_start.idleRpm + 300.0 || m_crankTimer > crank + 1.5) {
+                m_runState = EngineRunState::Running;
+                m_rpm = std::max(m_rpm, m_start.idleRpm);
+                m_rpmFromWheels = true;
+            }
+        }
+        m_rpmFromWheels = false;
+        return;
+    }
+    if (m_runState != EngineRunState::Running) {
+        m_rpm = 0.0;
+        m_rpmFromWheels = false;
+        return;
+    }
+    // Running: the wheels set the revs above the idle floor, and the declared
+    // antistall holds the engine up for as long as the car allows.
+    m_rpmFromWheels = true;
+    if (m_rpm < m_start.minimumRpm) {
+        m_runState = EngineRunState::Stalled;
+        m_rpm = 0.0;
+        m_rpmFromWheels = false;
+        m_antistallTimer = 0.0;
+        return;
+    }
+    if (m_start.antistallRpm > 0.0 && m_rpm < m_start.antistallRpm) {
+        m_antistallTimer += dt;
+        const double hold = m_start.antistallTime > 0.0 ? m_start.antistallTime : 1.0;
+        if (m_antistallTimer > hold) {
+            m_runState = EngineRunState::Stalled;
+            m_rpm = 0.0;
+            m_rpmFromWheels = false;
+            m_antistallTimer = 0.0;
+        } else {
+            m_rpm = m_start.antistallRpm;
+        }
+    } else {
+        m_antistallTimer = 0.0;
+    }
+}
+
+double VehicleSimulator::engineIdleFloor() const {
+    return (m_start.declared && m_start.idleRpm > 100.0) ? m_start.idleRpm : 800.0;
+}
+
+bool VehicleSimulator::engineDrivesWheels() const {
+    return !m_start.declared || m_runState == EngineRunState::Running;
 }
 
 void VehicleSimulator::resetTyreWear() {
@@ -260,6 +383,12 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
     // Unified data/physics.json first (single-file car physics, roadmap
     // "unify the physics inis"); the per-file .ini set stays as the fallback
     // so stock AC content loads unchanged.
+    // How the car starts is declared in the manifest, not in a script: read it
+    // before the physics fallback so both loaders see the same state.
+    {
+        CarStartConfig startCfg;
+        if (CarPhysicsJson::loadAcStart(carPath, startCfg)) setEngineStartConfig(startCfg);
+    }
     if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
     loadVehicleParamsFromIni(carPath);
 }
@@ -582,8 +711,12 @@ void VehicleSimulator::integrate(double dt) {
     const size_t gi = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     float gearRatio = static_cast<float>(m_gearRatios[gi]);
     float wheelOmega = speed / static_cast<float>(m_wheelRadius);
-    m_rpm = std::max(800.0, wheelOmega * gearRatio * m_finalDrive * 60.0 / (2.0 * 3.14159265));
-    if (!m_damage.isEngineFailed())
+    // The start sequence runs once per step and decides whether the wheels are
+    // allowed to set the revs at all: a cranking or stopped engine is not.
+    stepEngineStart(static_cast<double>(speed), dt);
+    const double wheelRpm = wheelOmega * gearRatio * m_finalDrive * 60.0 / (2.0 * 3.14159265);
+    if (m_rpmFromWheels) m_rpm = std::max(engineIdleFloor(), wheelRpm);
+    if (engineDrivesWheels() && !m_damage.isEngineFailed())
         shiftGears();
     const size_t gi2 = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     gearRatio = static_cast<float>(m_gearRatios[gi2]);
@@ -591,8 +724,10 @@ void VehicleSimulator::integrate(double dt) {
     float peakTorque = static_cast<float>(m_enginePowerKw * 1000.0 / (m_maxRpm * 2.0 * 3.14159265 / 60.0));
     float rpmN = static_cast<float>(std::min(m_rpm / m_maxRpm, 1.0));
     float engineTorque = peakTorque * std::sin(rpmN * 3.14159265f) * static_cast<float>(m_throttle) * dmgPower;
+    // A cranking or stopped engine makes no torque.
+    if (!engineDrivesWheels()) engineTorque = 0.f;
     // G16: engine braking / coast torque when throttle released
-    if (m_throttle < 0.05f && speed > 2.f && m_currentGear > 0) {
+    if (engineDrivesWheels() && m_throttle < 0.05f && speed > 2.f && m_currentGear > 0) {
         const float coastNm = 25.f + 40.f * rpmN; // grows with rpm
         engineTorque = -coastNm * dmgPower;
     }
@@ -909,8 +1044,10 @@ void VehicleSimulator::integrate(double dt) {
         }
     }
     const float omegaDriven = 0.5f * (m_wheelOmega[2] + m_wheelOmega[3]);
-    m_rpm = std::max(800.0, static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive
-                                 * 60.0 / (2.0 * 3.14159265));
+    if (m_rpmFromWheels)
+        m_rpm = std::max(engineIdleFloor(),
+                         static_cast<double>(std::fabs(omegaDriven)) * gearRatio * m_finalDrive
+                             * 60.0 / (2.0 * 3.14159265));
 
     // Deposit rubber when sliding hard (angle or ratio)
     const float slipMag = std::abs(saFL) + std::abs(saFR)
@@ -1139,7 +1276,8 @@ void VehicleSimulator::updatePhysics(double dt) {
         if (!std::isfinite(m_state.position.z)) m_state.position.z = 0.f;
         if (!std::isfinite(m_state.heading)) m_state.heading = 0.f;
         m_yawRate = 0;
-        m_rpm = 1000;
+        // A recovered frame must not invent a running engine.
+        m_rpm = m_start.declared ? 0.0 : 1000.0;
     }
 }
 

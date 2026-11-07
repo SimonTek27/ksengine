@@ -220,6 +220,57 @@ bool CarPhysicsJson::loadAcBrakeTempsForCarDir(const std::string& carDir, Vehicl
     return true;
 }
 
+bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
+                                 std::string* error) {
+    out = CarStartConfig{};
+    const std::string path = resolveAcManifestPath(carDir);
+    if (path.empty()) return false;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        if (error) *error = "data.json: cannot open " + path;
+        return false;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    bool ok = false;
+    std::string parseError;
+    const Json root = Json::parse(ss.str(), &ok, &parseError);
+    if (!ok || !root.isObject()) {
+        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
+        return false;
+    }
+    const Json& start = root["start"];
+    if (!start.isObject()) return false;
+    // The type decides which hardware cranks the engine: the car declares it,
+    // the model does not guess.
+    const std::string type = start.contains("TYPE") && start["TYPE"].isString()
+                                 ? start["TYPE"].toString()
+                                 : std::string();
+    out.type = type == "HYBRID" ? CarStartConfig::Type::Hybrid
+             : type == "TURBO"  ? CarStartConfig::Type::Turbo
+                                : CarStartConfig::Type::Petrol;
+    bool has = false;
+    double v = 0.0;
+    const Json& starter = start["STARTER"];
+    if (starter.isObject()) {
+        if (takeNum(starter, {"RPM", "STARTER_RPM"}, has, v) && v > 0.0) out.starterRpm = v;
+        if (takeNum(starter, {"CRANK_TIME", "STARTER_CRANK_TIME"}, has, v) && v > 0.0)
+            out.crankTime = v;
+    }
+    if (takeNum(start, {"IDLE_RPM"}, has, v) && v > 0.0) out.idleRpm = v;
+    if (takeNum(start, {"MINIMUM_RPM"}, has, v) && v > 0.0) out.minimumRpm = v;
+    if (takeNum(start, {"PITSTOP_RPM"}, has, v) && v > 0.0) out.pitstopRpm = v;
+    const Json& antistall = start["ANTISTALL"];
+    if (antistall.isObject()) {
+        if (takeNum(antistall, {"RPM", "ANTISTALL_RPM"}, has, v) && v > 0.0)
+            out.antistallRpm = v;
+        if (takeNum(antistall, {"TIME", "ANTISTALL_TIME"}, has, v) && v > 0.0)
+            out.antistallTime = v;
+    }
+    out.declared = true;
+    return true;
+}
+
 bool CarPhysicsJson::parse(const std::string& jsonText, CarPhysicsData& out,
                            std::string* error) {
     out = CarPhysicsData{};

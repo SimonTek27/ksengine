@@ -5,6 +5,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_determinism.cpp")
     add_test(NAME test_determinism COMMAND test_determinism)
 endif()
 
+# Engine start — the sequence comes from the car's manifest (data.json
+# "start") and its type decides which hardware cranks it.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine_start_test.cpp")
+    add_executable(engine_start_test engine_start_test.cpp)
+    target_link_libraries(engine_start_test PRIVATE ksengine)
+    add_test(NAME engine_start_test COMMAND engine_start_test)
+endif()
+
 # Roadmap 2.6/2.7/2.8/2.9 gate tests and other special-link tests.
 # (Recovered body part 2 of tests/ksengine/CMakeLists.txt)
 

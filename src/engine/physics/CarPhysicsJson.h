@@ -11,6 +11,32 @@ namespace physics {
 class VehicleSimulator;
 
 /**
+ * How a car starts, from the manifest's "start" block.
+ *
+ * The block is the car's own declaration (the content pipeline writes it from
+ * [STARTER] and the engine's idle/antistall numbers), and its TYPE says which
+ * hardware cranks the engine: a hybrid cranks on the electric motor and may
+ * restart on the move, a turbo or a plain engine need the starter and a
+ * standstill. A car with no block is not started at all: it keeps the old
+ * "always running" behaviour.
+ */
+struct CarStartConfig {
+    enum class Type { Petrol, Turbo, Hybrid };
+    bool declared = false;
+    Type type = Type::Petrol;
+    double starterRpm = 200.0;   // cranking speed the starter reaches
+    double crankTime = 0.15;     // seconds at starterRpm before the engine catches
+    double idleRpm = 900.0;      // where a running engine settles
+    double minimumRpm = 500.0;   // below this the engine has stalled
+    double antistallRpm = 0.0;   // 0 = the car declares no antistall
+    double antistallTime = 0.0;  // seconds the antistall may hold the idle
+    double pitstopRpm = 0.0;
+
+    bool cranksFromErs() const { return type == Type::Hybrid; }
+    bool restartsWhileMoving() const { return type == Type::Hybrid; }
+};
+
+/**
  * Unified car physics data — the in-memory form of data/physics.json.
  *
  * One file replaces the runtime physics .ini set a car folder used to carry
@@ -95,6 +121,14 @@ public:
      */
     static bool loadAcFuelCapacity(const std::string& carDir, double& litres,
                                    std::string* error = nullptr);
+
+    /**
+     * The manifest's "start" block: how this car is started and by what. false
+     * when the car declares none, which is not an error — it means "no start
+     * sequence", not "start with guesses".
+     */
+    static bool loadAcStart(const std::string& carDir, CarStartConfig& out,
+                            std::string* error = nullptr);
 
     /**
      * One axle's brake temperature profile: the manifest's
