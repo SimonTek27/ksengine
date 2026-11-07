@@ -105,7 +105,7 @@ void KsTireModel::ensureCoeffCache(float Fz, float camberAbs, float mu) const
     // Raising it stiffens the curve and the axle stops resolving at a 10 ms
     // caller step (34 sign flips) — the substep cap is 8, so Bx = 10 is also the
     // stiffest this wheel is allowed to be. Pinned by the same test.
-    constexpr float kBxFloor = 10.f;
+    constexpr float kBxFloor = 8.f;
     if (std::fabs(BCD_x) < kBxFloor * Dx) BCD_x = kBxFloor * Dx;
     float Bx = std::clamp(std::fabs(BCD_x) / (Dx + 1e-3f), 0.1f, 40.0f);
     const float Cx = 1.65f;

@@ -116,7 +116,7 @@ Ordinati per impatto sul **feeling di bilanciamento** race (non per completezza 
 
 | # | Gap | Rif. Milliken | Azione ksengine |
 |---|-----|---------------|-----------------|
-| G1 | **LLTD esplicito** (roll stiffness F/R, RC height) | Ch. 7, 16, 18 | **Done** — Kφ da molle+ARB, h_RC, `lltdFrontFraction()` |
+| G1 | **LLTD esplicito** (roll stiffness F/R, RC height) | Ch. 7, 16, 18 | **Impianto done** — Kφ da molle+ARB, h_RC, `lltdFrontFraction()`. **Effetto su bilanciamento non ancora misurabile**: `lltd_balance_test` sposta LLTD 0.415→0.502 con le barre e il raggio cambia 0.1% (166.8→167.0 m), perché la curva laterale dà 14° di deriva a 0.3 g (gap 3.5) |
 | G2 | **Longitudinal load transfer** coerente con A_x e h | Ch. 18 | **Done** — `m * Ax * (h/ℓ)` su assi; Ax da step precedente |
 | G3 | **Slip ratio** reale da ω ruota / V (non solo proxy) | Ch. 2 | **Done** — `m_wheelOmega[]`, κ=(ωR−Vx)/|Vx|, RWD torque, TC/ABS soft |
 | G4 | Metriche **UG / SM / β** in telemetry | Ch. 5 | **Done** — `sideslipBeta`, `understeerGradientDegG`, `staticMargin` in state + API |
@@ -236,4 +236,5 @@ Assi: preferire convenzioni **SAE vehicle/tire** dove possibile (Ch. 4) per coer
 - **2026-10-06:** G15 brake thermal — disc/pad heat, fade 400–700°C, effectiveTorque per wheel; state.brakeDiscTemp/fade.
 - **2026-10-06:** G16 ride-height into AeroState, engine braking on closed throttle; state aero DF/drag/RH.
 - **2026-10-06:** G17–G18 pressure thermal, pair CLI, pitch; Milliken priority gaps closed.
+- **2026-11-07 (b):** `lltd_balance_test` — skid pad a sterzo costante. Le barre spostano `lltdFront` 0.415→0.502 e il raggio 166.8→167.0 m: la leva esiste nel codice ma non ancora nella risposta dell'auto, che a 0.3 g derapa 14° e satura la curva laterale. Il picco longitudinale, con `Bx` floor 8, è ora a κ=0.106 (dentro 0.10–0.15) e l'asse resta stabile a 0.5 ms (10.444 contro 10.437 a 10 ms vs 2 ms, zero flips).
 - **2026-11-07:** κ proiettato su `V·cos α` (§2.3) nel calcolo dello slip e nell'EDL; load sensitivity applicata al **coefficiente** (prima il carico premiava: 0.64/1.11/1.31 da 2 a 8 kN, cioè nessun costo al trasferimento); picco longitudinale misurato a κ≈0.09, al bordo inferiore della banda 0.10–0.15; sottomisura della ruota portata a 0.5 ms perché la curva ora cade oltre il picco (a 2 ms: 578 inversioni di segno).

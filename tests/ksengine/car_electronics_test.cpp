@@ -444,8 +444,10 @@ int main() {
         // more spin; with a falling branch the axle can sit just as well.
         KS_CHECK(low.meanSlip <= none.meanSlip * 1.05f);
         KS_CHECK(high.meanSlip <= low.meanSlip * 1.05f);
-        KS_CHECK(high.speed <= low.speed + 1e-3f);
-        KS_CHECK(low.speed <= none.speed + 1e-3f);
+        // A level may even gain speed: with the tyre's best at ~0.10 slip, an aid
+        // that pulls the axle back onto the peak recovers force instead of
+        // costing it. What must not happen is a level that is a net punishment —
+        // the 10% floor above is the bound that matters.
         // An aid must not be a punishment: whatever the level, the pull does not
         // lose more than 10% against the unaided car. It may gain, because the
         // tyre gives its best force at ~0.09 slip (Milliken p. 37) and an unaided

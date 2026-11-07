@@ -24,6 +24,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/car_electronics_test.cpp")
     add_test(NAME car_electronics_test COMMAND car_electronics_test)
 endif()
 
+# Balance lever: with load sensitivity costing the transfer, the front share of
+# roll stiffness (LLTD) must change the cornering radius at a fixed steer input.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lltd_balance_test.cpp")
+    add_executable(lltd_balance_test lltd_balance_test.cpp)
+    target_include_directories(lltd_balance_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(lltd_balance_test PRIVATE ksengine)
+    add_test(NAME lltd_balance_test COMMAND lltd_balance_test)
+endif()
+
 # The garage's aid rows: a car whose own electronics say PRESENT = 0 offers no
 # TC or ABS level, so the row is not there to pick. Compiles SetupGarage.cpp
 # directly (main_menu_test pattern) with the text TUs it draws through.
