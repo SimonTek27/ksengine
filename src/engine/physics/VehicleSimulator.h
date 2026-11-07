@@ -64,6 +64,12 @@ public:
     float brakeFrontShare() const { return m_brakeFrontShare; }
     float handbrakeTorque() const { return m_handbrakeTorque; }
     bool brakeBiasAdjustable() const { return m_brakeBiasAdjustable; }
+    /** The car's own electronics slip limits (data/electronics.ini through
+     *  data.json): where traction control and ABS start cutting. Defaults are the
+     *  values this model used before the file was read. */
+    void setElectronicsSlipLimits(float tcLimit, float absLimit);
+    float tractionControlSlipLimit() const { return m_tcSlipLimit; }
+    float absSlipLimit() const { return m_absSlipLimit; }
 
     void setBrakeTempCurves(const std::vector<std::pair<float, float>>& front,
                             const std::vector<std::pair<float, float>>& rear);
@@ -369,6 +375,9 @@ private:
     float m_brakeMaxTorque = 0.f;
     float m_brakeFrontShare = 0.f;
     float m_handbrakeTorque = 0.f;
+    // |slip ratio| at which the aids may cut, as the car declares it.
+    float m_tcSlipLimit = 0.10f;
+    float m_absSlipLimit = 0.12f;
     bool m_brakeBiasAdjustable = false;
     SuspensionModel m_suspension;
     DamageSystem m_damage;

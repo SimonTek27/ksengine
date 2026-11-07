@@ -13,6 +13,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/engine_start_test.cpp")
     add_test(NAME engine_start_test COMMAND engine_start_test)
 endif()
 
+# The car's own electronics slip limits: [TRACTION_CONTROL] and [ABS]
+# SLIP_RATIO_LIMIT from data.json, where the aids start cutting.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/car_electronics_test.cpp")
+    add_executable(car_electronics_test car_electronics_test.cpp)
+    target_include_directories(car_electronics_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(car_electronics_test PRIVATE ksengine)
+    add_test(NAME car_electronics_test COMMAND car_electronics_test)
+endif()
+
 # Content's brake-disc section: what [BRAKEDISC_FX] says about the glow the
 # thermal model produces (ACTIVE, GLOW_MULT), read from model.json.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/brake_disc_fx_test.cpp")

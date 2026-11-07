@@ -1,4 +1,6 @@
 #include "VehicleSimulator.h"
+
+#include "CarElectronics.h" // the car's own electronics slip limits
 #include "CarPhysicsJson.h"
 #include "TrackSurface.h"
 #include "PhysicsProfiler.h"
@@ -436,6 +438,20 @@ void VehicleSimulator::loadVehicleParams(const std::string& carPath) {
         CarClutchConfig clutchCfg;
         if (CarPhysicsJson::loadAcClutch(carPath, clutchCfg)) setClutchConfig(clutchCfg);
     }
+    // The car's own electronics: [TRACTION_CONTROL] and [ABS] SLIP_RATIO_LIMIT
+    // decide where the aids start cutting. Read before either physics loader so
+    // both paths see the same limits; a car that declares none keeps the
+    // defaults this model has always used.
+    {
+        const ElectronicsLimits electronics = readElectronicsLimitsForCar(carPath);
+        setElectronicsSlipLimits(electronics.tcSlipRatioLimit, electronics.absSlipRatioLimit);
+        if (electronics.declaredTractionControl || electronics.declaredAbs) {
+            std::fprintf(stderr,
+                         "[electronics] slip limits: tc=%0.3f (declared=%d) abs=%0.3f (declared=%d)\n",
+                         m_tcSlipLimit, electronics.declaredTractionControl ? 1 : 0,
+                         m_absSlipLimit, electronics.declaredAbs ? 1 : 0);
+        }
+    }
     if (CarPhysicsJson::loadForCarDir(carPath, *this)) return;
     loadVehicleParamsFromIni(carPath);
 }
@@ -467,6 +483,13 @@ void VehicleSimulator::loadVehicleParamsFromIni(const std::string& carPath) {
     tryLoad("drivetrain.ini", &VehicleSimulator::loadDrivetrainFromIni);
     tryLoad("aero.ini", &VehicleSimulator::loadAeroFromIni);
     tryLoad("suspension.ini", &VehicleSimulator::loadSuspensionFromIni);
+}
+
+void VehicleSimulator::setElectronicsSlipLimits(float tcLimit, float absLimit) {
+    // A slip ratio is a positive fraction: anything else is not a limit this
+    // model can honour, so the default stays and nothing is invented.
+    if (tcLimit > 0.001f && tcLimit < 0.5f) m_tcSlipLimit = tcLimit;
+    if (absLimit > 0.001f && absLimit < 0.5f) m_absSlipLimit = absLimit;
 }
 
 void VehicleSimulator::loadEngineFromIni(const std::string& path) {
@@ -1007,7 +1030,7 @@ void VehicleSimulator::integrate(double dt) {
                 m_wheelOmega[i] = std::max(m_wheelOmega[i], wMin);
         }
     }
-    if (m_setup.tcLevel > 0 && kappaRearAbs > 0.10f && m_throttle > 0.15f) {
+    if (m_setup.tcLevel > 0 && kappaRearAbs > m_tcSlipLimit && m_throttle > 0.15f) {
         const float cut = std::clamp(0.1f * static_cast<float>(m_setup.tcLevel) * kappaRearAbs, 0.f, 0.9f);
         Tdrive *= (1.f - cut);
     }
@@ -1027,7 +1050,7 @@ void VehicleSimulator::integrate(double dt) {
     if (m_setup.absLevel > 0 && m_brake > 0.25f) {
         float kAbs = 0.25f * (std::fabs(srArr[0]) + std::fabs(srArr[1])
                             + std::fabs(srArr[2]) + std::fabs(srArr[3]));
-        if (kAbs > 0.12f) {
+        if (kAbs > m_absSlipLimit) {
             const float cut = std::clamp(0.12f * static_cast<float>(m_setup.absLevel) * kAbs, 0.f, 0.92f);
             TbrakeTot *= (1.f - cut);
         }

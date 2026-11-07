@@ -38,7 +38,7 @@
   "assist": {
     "tc": 0,
     "abs": 0,
-    "note": "Driver aids applied from the setup at start-up only, 0..12."
+    "note": "Driver aids applied from the setup at start-up only, 0..12. The level gates the aid; where it starts cutting is the car's own electronics.ini SLIP_RATIO_LIMIT for traction control and ABS, read from data.json at load, falling back to 0.10 and 0.12 for a car that declares neither."
   },
   "settings": {
     "entries": [
