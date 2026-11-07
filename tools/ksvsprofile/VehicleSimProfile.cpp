@@ -5,7 +5,10 @@
  * reports PhysicsProfiler section breakdown + wall-clock stats.
  *
  * Usage:
- *   ksvsprofile [--cars N] [--steps S] [--csv path]
+ *   ksvsprofile [--cars N] [--steps S] [--csv path] [--car content/cars/<car>]
+ *
+ * --car loads a real car folder through the same VehicleSimulator::loadVehicleParams
+ * the sim uses, then starts it, so the step cost and the result are the car's own.
  */
 #include "VehicleSimulator.h"
 #include "PhysicsProfiler.h"
@@ -32,6 +35,8 @@ int main(int argc, char** argv)
     int cars = 1;
     int steps = 20000;
     std::string csvPath;
+    std::string carPath;
+    bool flatOut = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -42,12 +47,16 @@ int main(int argc, char** argv)
         if (const char* v = need("--cars")) cars = std::atoi(v);
         else if (const char* v = need("--steps")) steps = std::atoi(v);
         else if (const char* v = need("--csv")) csvPath = v;
+        else if (const char* v = need("--car")) carPath = v;
+        else if (a == "--flat-out") flatOut = true;
         else if (a == "-h" || a == "--help") {
             std::fprintf(stderr,
                 "ksvsprofile — VehicleSimulator full-step benchmark\n"
                 "  --cars N   concurrent vehicles (default 1)\n"
                 "  --steps S  physics steps @ 1 ms (default 20000)\n"
-                "  --csv PATH write wall-clock summary CSV\n");
+                "  --csv PATH write wall-clock summary CSV\n"
+                "  --car DIR  load a real car folder before the run\n"
+                "  --flat-out full throttle, no steering (engine comparison)\n");
             return 0;
         }
     }
@@ -62,10 +71,28 @@ int main(int argc, char** argv)
 
     std::vector<ks::physics::VehicleSimulator> sims(static_cast<size_t>(cars));
     for (auto& s : sims) {
+        // Load first: startSimulation() resets the state, so a car started before
+        // it would be switched off again.
+        if (!carPath.empty()) s.loadVehicleParams(carPath);
         s.startSimulation();
         s.setThrottle(0.55);
         s.setBrake(0.0);
         s.setSteering(0.15);
+    }
+
+    if (!carPath.empty()) {
+        for (auto& s : sims) {
+            s.setIgnition(true);
+            s.pressStarter(0.0);
+        }
+        // Cranking is real time: step a couple of seconds so the numbers below
+        // are a running engine's, not a starter's.
+        for (int i = 0; i < 2000; ++i)
+            for (auto& s : sims) s.updatePhysics(0.001);
+        std::printf("car: %s\n", carPath.c_str());
+        std::printf("  gears=%d finalDrive=%.2f wheelRadius=%.3f running=%s\n",
+                    static_cast<int>(sims[0].gearRatios().size()), sims[0].finalDrive(),
+                    sims[0].wheelRadius(), sims[0].isEngineRunning() ? "yes" : "no");
     }
 
     auto& prof = ks::physics::PhysicsProfiler::instance();
@@ -83,10 +110,11 @@ int main(int argc, char** argv)
     double sink = 0;
 
     for (int i = 0; i < steps; ++i) {
-        // mild input modulation
+        // mild input modulation; --flat-out is the engine comparison: full
+        // throttle, no steering, so the number is the drivetrain's own.
         const float t = static_cast<float>(i) * 0.001f;
-        const double steer = 0.12 * std::sin(t * 1.7);
-        const double throttle = 0.45 + 0.25 * std::sin(t * 0.9);
+        const double steer = flatOut ? 0.0 : 0.12 * std::sin(t * 1.7);
+        const double throttle = flatOut ? 1.0 : 0.45 + 0.25 * std::sin(t * 0.9);
         for (auto& s : sims) {
             s.setSteering(steer);
             s.setThrottle(throttle);
@@ -117,6 +145,11 @@ int main(int argc, char** argv)
     std::printf("  min=%.0f ns  max=%.0f ns\n", minNs, maxNs);
     std::printf("  share of 1 ms frame: %.2f%%\n", pctFrame);
     std::printf("  sink speed=%.2f m/s (DCE guard)\n\n", sims[0].getState().speed);
+    if (!carPath.empty()) {
+        const auto& st = sims[0].getState();
+        std::printf("  car result: speed=%.2f m/s (%.1f km/h) rpm=%.0f gear=%d\n\n",
+                    st.speed, st.speed * 3.6, sims[0].rpm(), sims[0].currentGear());
+    }
 
     // Scale estimate
     for (int n : {1, 4, 8, 16, 32}) {

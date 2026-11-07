@@ -6,6 +6,7 @@
 //   3. prune    - remove the .ini files the documents supersede
 //   4. pack     - rebuild data.acd from the folder as it is now
 //
+//   ks_cartool unpack  <car-dir>
 //   ks_cartool convert <car-dir> [dest-dir]
 //   ks_cartool split   <car-dir>
 //   ks_cartool verify  <car-dir>
@@ -14,9 +15,12 @@
 //   ks_cartool info    <car-dir>
 
 #include "../../src/adapters/assetto_corsa/AcCarManifestConverter.h"
+#include "../../src/engine/FileFormat/AcdReader.h"
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -110,9 +114,54 @@ static int runPack(const fs::path& car) {
     return 0;
 }
 
+// A car whose physics is shipped only inside data.acd has an empty data/ folder.
+// Read the archive and write the records back out as the loose .ini files the
+// converter reads. parseAcd() needs the car folder name (it seeds the key), so
+// the archive must sit in the folder it was packed for.
+static int runUnpack(const fs::path& car) {
+    const fs::path archive = car / "data.acd";
+    std::ifstream in(archive, std::ios::binary);
+    if (!in) {
+        std::printf("unpack failed: no data.acd in %s\n", car.string().c_str());
+        return 1;
+    }
+    const std::string bytes((std::istreambuf_iterator<char>(in)),
+                            std::istreambuf_iterator<char>());
+    const ks::engine::fileformat::AcdArchive parsed =
+        ks::engine::fileformat::parseAcd(bytes, car.filename().string());
+    if (!parsed.ok()) {
+        std::printf("unpack failed: %s\n", parsed.error.c_str());
+        return 1;
+    }
+
+    const fs::path dataDir = car / "data";
+    std::error_code ec;
+    fs::create_directories(dataDir, ec);
+
+    int written = 0;
+    int empty = 0;
+    for (const ks::engine::fileformat::AcdEntry& entry : parsed.files) {
+        if (entry.name.empty() || entry.data.empty()) {
+            ++empty;
+            continue;
+        }
+        std::ofstream out(dataDir / entry.name, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            std::printf("  cannot write %s\n", entry.name.c_str());
+            continue;
+        }
+        out.write(entry.data.data(), static_cast<std::streamsize>(entry.data.size()));
+        ++written;
+    }
+    std::printf("unpack: %d files from %s (%d empty in the archive)\n", written,
+                archive.string().c_str(), empty);
+    return written > 0 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::printf("usage: ks_cartool convert <car-dir> [dest-dir]\n"
+        std::printf("usage: ks_cartool unpack  <car-dir>\n"
+                    "       ks_cartool convert <car-dir> [dest-dir]\n"
                     "       ks_cartool split   <car-dir>\n"
                     "       ks_cartool verify  <car-dir>\n"
                     "       ks_cartool apply   <car-dir>\n"
@@ -128,6 +177,7 @@ int main(int argc, char** argv) {
         printInfo(src);
         return 0;
     }
+    if (command == "unpack") return runUnpack(src);
     if (command == "verify") return runVerify(src);
     if (command == "apply") return runApply(src);
     if (command == "prune") return runPrune(src);

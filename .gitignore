@@ -109,6 +109,9 @@ ks_dist_log.txt
 # See cmake/KsInstallLayout.cmake and docs/ksengine_architecture.md
 /user/
 /content/local/
+# Cars copied from an Assetto Corsa installation are user content, like the
+# installed car folders: they are hundreds of MB each, so they stay local.
+/content/cars/
 NUL.obj
 vc140.pdb
 
