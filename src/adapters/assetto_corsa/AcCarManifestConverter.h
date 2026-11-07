@@ -398,7 +398,11 @@ static void normalizeBrakes(Json& root) {
         Json start = Json::object();
         if (params.contains("STARTER") && params["STARTER"].isObject()) {
             Json starter = Json::object();
+            // AC spells the keys after their section; the short forms are the
+            // spelling a hand-written file may use.
+            take(params["STARTER"], "STARTER_RPM", starter, "RPM");
             take(params["STARTER"], "RPM", starter, "RPM");
+            take(params["STARTER"], "STARTER_CRANK_TIME", starter, "CRANK_TIME");
             take(params["STARTER"], "CRANK_TIME", starter, "CRANK_TIME");
             if (!starter.isEmpty()) start.insert("STARTER", starter);
         }
