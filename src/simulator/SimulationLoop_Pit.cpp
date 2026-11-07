@@ -198,6 +198,20 @@ bool SimulationLoop::loadTracksidePostsFromTrack(const std::string& trackDir) {
     return false;
 }
 
+void SimulationLoop::snapVehicleToPose(ks::physics::VehicleSimulator* veh, const WorldPose& pose) {
+    if (!veh) return;
+    // Pose and velocity only. The garage-exit hold already keeps a parked car
+    // parked, and a one-way setFrozen(true) would have no release here: the only
+    // code that decremented m_snapHoldSec and unfroze lived in a translation
+    // unit no target compiles.
+    auto& st = veh->state();
+    st.position = {pose.x, pose.y, pose.z};
+    st.heading = pose.heading;
+    st.velocity = {};
+    st.angularVelocity = {};
+    st.speed = 0.f;
+}
+
 void SimulationLoop::updateTrackRecovery(float dt) {
 #if HAS_VEHICLE_SIM
     if (!m_vehicle) return;
@@ -220,17 +234,7 @@ void SimulationLoop::updateTrackRecovery(float dt) {
     // Towed: the marshals drop it in its box with the engine still off. That is
     // the point of the tow — the crew can fire it there and nowhere else.
     if (!m_hasPlayerBox) return;
-    // Set the pose here instead of snapVehicleToPose(): that helper lives in a
-    // translation unit this build does not link (same as teleportToPit), so the
-    // call would only surface as an unresolved external.
-    auto& boxed = m_vehicle->state();
-    boxed.position.x = m_playerBox.x;
-    boxed.position.y = m_playerBox.y;
-    boxed.position.z = m_playerBox.z;
-    boxed.heading = m_playerBox.heading;
-    boxed.velocity = {};
-    boxed.angularVelocity = {};
-    boxed.speed = 0.f;
+    snapVehicleToPose(m_vehicle.get(), m_playerBox);
     m_garageExit.forceEnterGarage();
     std::fprintf(stderr,
                  "SimulationLoop: recovery — car towed to the box (%.0f s stopped, engine off)\n",

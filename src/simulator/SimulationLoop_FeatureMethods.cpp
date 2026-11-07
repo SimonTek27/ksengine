@@ -1,3 +1,14 @@
+/**
+ * RETIRED — no target compiles this file.
+ *
+ * cmake/CMakeLists_ksimulator_QtFree.cmake and the server split build
+ * SimulationLoop.cpp / SimulationLoop_Pit.cpp / SimulationLoop_NetSync.cpp
+ * instead. What used to live only here was either ported there (updatePitRepair,
+ * updateGarageExit, snapVehicleToPose) or was never called, and its declaration
+ * is gone from SimulationLoop.h because the linker could never have found it.
+ * Kept for reference only: do not add it to a build without reconciling the two
+ * copies of every function it still carries.
+ */
 #include "SimulationLoop.h"
 #include "ApplySetup.h"
 #include "SetupFile.h"
@@ -100,19 +111,9 @@ void SimulationLoop::configurePitAxis(float originX, float originZ, float headin
     m_pitQueue.setConfig(qc);
 }
 
-void SimulationLoop::snapVehicleToPose(ks::physics::VehicleSimulator* veh, const WorldPose& pose) {
-    if (!veh) return;
-    auto& st = veh->state();
-    st.position.x = finiteOr(pose.x, 0.f);
-    st.position.y = finiteOr(pose.y, 0.f);
-    st.position.z = finiteOr(pose.z, 0.f);
-    st.heading = finiteOr(pose.heading, 0.f);
-    st.velocity = {};
-    st.angularVelocity = {};
-    st.speed = 0.f;
-    m_snapHoldSec = kSnapHoldDuration;
-    veh->setFrozen(true);
-}
+// snapVehicleToPose() lives in SimulationLoop_Pit.cpp, the TU every target
+// compiles. It used to be defined only here, in a file no target builds, so the
+// header promised a function the linker could not find.
 
 bool SimulationLoop::loadGarageFromTrack(const std::string& trackDir) {
     namespace fs = std::filesystem;

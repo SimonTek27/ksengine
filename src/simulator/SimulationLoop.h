@@ -195,14 +195,6 @@ public:
     void start();
     void stop();
     void reset();
-    /**
-     * AC UDP command 'K'/'O' (report AC_RE §3.2): teleport `carIndex` to its
-     * garage box pose with zeroed velocity — the ksengine equivalent of
-     * acs.exe's goToSpawnPosition(car, L"PIT"). Index 0 = player car; other
-     * indices match the multi-car roster (0-based). No-op when the target
-     * car or box is unknown.
-     */
-    void teleportToPit(int carIndex);
     // Fase 1 exit: start a session of the mode chosen in the menu (practice
     // = open laps solo, race = grid vs AI + countdown, time attack = solo).
     // Configures laps/AI/session byte BEFORE start(), which then builds the
@@ -410,15 +402,7 @@ public:
     void spawnMarshalPosts();
     void despawnMarshalPosts();
 
-    void applyDamageEffects();
-    void beginSession(GameSessionMode mode);
-    void configurePitAxis(float originX, float originZ, float headingRad, float lengthM);
-    bool loadGarageFromTrack(const std::string& trackDir);
-    bool loadReplayFile(const std::string& path);
-    void setupDefaultGarageLayout(int boxCount);
     void snapVehicleToPose(ks::physics::VehicleSimulator* veh, const WorldPose& pose);
-    void spawnAiGrid(int count);
-    void updatePitLane(float dt);
 
 private:
     void applyInput();
