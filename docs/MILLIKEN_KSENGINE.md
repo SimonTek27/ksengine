@@ -29,7 +29,7 @@ Il sim di gara resta **time-based** (come VDS), non constrained MMM. Milliken re
 | Concetto | Milliken | ksengine |
 |----------|----------|----------|
 | Slip angle α, slip ratio κ | Forze Fx, Fy vs α, κ, Fz | `KsTireModel` + batch ×4 |
-| Load sensitivity | Fy non lineare in Fz | Coeff cache Fz + INI load sens. |
+| Load sensitivity | Il coefficiente di aderenza **cala** col carico (Ch. 2, 14) | `KsTireModel` scala il picco come `Fz^loadSensExp` su entrambi gli assi: coefficiente 1.24@2kN → 1.11@4kN → 0.98@8kN, quindi il trasferimento di carico costa e LLTD è una leva vera |
 | Camber / inclination | C_γ, thrust | Camber in input batch (semplificato) |
 | Aligning moment Mz | Trail pneumatico | `aligningMoment` → FFB sample |
 | **Friction circle / ellipse** | Limite √(Fx²+Fy²) ≤ μ·Fz (ideale) | Combined-slip path in KsTireModel |
@@ -236,3 +236,4 @@ Assi: preferire convenzioni **SAE vehicle/tire** dove possibile (Ch. 4) per coer
 - **2026-10-06:** G15 brake thermal — disc/pad heat, fade 400–700°C, effectiveTorque per wheel; state.brakeDiscTemp/fade.
 - **2026-10-06:** G16 ride-height into AeroState, engine braking on closed throttle; state aero DF/drag/RH.
 - **2026-10-06:** G17–G18 pressure thermal, pair CLI, pitch; Milliken priority gaps closed.
+- **2026-11-07:** κ proiettato su `V·cos α` (§2.3) nel calcolo dello slip e nell'EDL; load sensitivity applicata al **coefficiente** (prima il carico premiava: 0.64/1.11/1.31 da 2 a 8 kN, cioè nessun costo al trasferimento); picco longitudinale misurato a κ≈0.09, al bordo inferiore della banda 0.10–0.15; sottomisura della ruota portata a 0.5 ms perché la curva ora cade oltre il picco (a 2 ms: 578 inversioni di segno).

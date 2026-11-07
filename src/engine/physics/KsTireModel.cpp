@@ -57,12 +57,20 @@ void KsTireModel::ensureCoeffCache(float Fz, float camberAbs, float mu) const
     const auto& a = m_coefficients;
     const float Fz_kN = Fz * 0.001f;
     const float loadSens = calculateLoadSensitivity(Fz);
+    // Milliken Ch. 2/14: the peak force grows more slowly than the load, so the
+    // grip coefficient falls as load rises. calculateLoadSensitivity returns
+    // (Fz/Fz0)^exp with exp < 1; applying it straight to the force made the
+    // coefficient RISE with load (measured 0.64@2kN, 1.11@4kN, 1.31@8kN), so a
+    // loaded tyre was rewarded and load transfer cost nothing — the opposite of
+    // the balance lever LLTD is supposed to be. Scaling by (Fz/Fz0)^(exp-1)
+    // instead leaves the peak ~ Fz^exp and the coefficient monotone decreasing,
+    // on both axes.
+    const float loadRatio = Fz / std::max(a.nominalLoadN, 500.f);
+    const float loadExp = std::clamp(a.loadSensExp, 0.5f, 1.2f);
+    const float loadSensCoef = std::pow(loadRatio, loadExp - 1.f);
 
     float Dy = (a.a1 * Fz_kN + a.a2) * Fz_kN;
-    // Peak (Dy): plain |quadratic|·mu — matches HEAD PacejkaTireModel. The
-    // extract's loadSens factor and 1.15·mu·Fz floor raised the peak above
-    // the tuned value; not needed once the stiffness below is untampered.
-    Dy = std::fabs(Dy) * mu;
+    Dy = std::fabs(Dy) * mu * loadSensCoef;
     // sin(2*atan(z)) = 2z/(1+z^2) — exact identity, zero trig
     const float z = Fz_kN / (a.a4 > 1e-4f ? a.a4 : 1.82f);
     const float sin2atan = 2.f * z / (1.f + z * z);
@@ -81,16 +89,24 @@ void KsTireModel::ensureCoeffCache(float Fz, float camberAbs, float mu) const
     const float Ey = a.a6 * Fz_kN + a.a7;
 
     float Dx = (a.b1 * Fz_kN + a.b2) * Fz_kN;
-    Dx = std::fabs(Dx) * mu * loadSens;
-    // Floor peak ~ μ Fz (race-tire scale)
-    const float DxFloor = 1.05f * mu * loadSens * Fz;
+    Dx = std::fabs(Dx) * mu * loadSensCoef;
+    // Floor at the friction circle (race-tire scale), carried through the same
+    // load sensitivity so the floor does not undo it at high load.
+    const float DxFloor = 1.05f * mu * loadSensCoef * Fz;
     if (Dx < DxFloor) Dx = DxFloor;
     // exp(-b5*Fz_kN) — cheap series for small arg
     const float expArg = -a.b5 * Fz_kN;
     float expTerm = 1.f + expArg + 0.5f * expArg * expArg;
     if (expArg < -1.f) expTerm = std::exp(expArg);
     float BCD_x = (a.b3 * Fz_kN * Fz_kN + a.b4 * Fz_kN) * expTerm;
-    if (std::fabs(BCD_x) < 10.f * Dx) BCD_x = 10.f * Dx;
+    // The Bx floor is what places the longitudinal peak: Bx = 10 gives it at
+    // about 0.10 slip, the lower edge of Milliken's 0.10-0.15 band (p. 37), and
+    // the measured shoulder in car_electronics_test [tire-peak] confirms it.
+    // Raising it stiffens the curve and the axle stops resolving at a 10 ms
+    // caller step (34 sign flips) — the substep cap is 8, so Bx = 10 is also the
+    // stiffest this wheel is allowed to be. Pinned by the same test.
+    constexpr float kBxFloor = 10.f;
+    if (std::fabs(BCD_x) < kBxFloor * Dx) BCD_x = kBxFloor * Dx;
     float Bx = std::clamp(std::fabs(BCD_x) / (Dx + 1e-3f), 0.1f, 40.0f);
     const float Cx = 1.65f;
     const float Ex = a.b6 * Fz_kN + a.b7;

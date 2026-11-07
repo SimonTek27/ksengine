@@ -1406,8 +1406,13 @@ void VehicleSimulator::updatePhysics(double dt) {
     // solved at the resolution it needs.
     if (!m_running || m_frozen) return;
     if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) return;
-    constexpr double kMaxStep = 0.002;
-    const int n = std::clamp(static_cast<int>(std::ceil(dt / kMaxStep)), 1, 8);
+    // The longitudinal force now falls past its peak (Milliken p. 37), and the
+    // wheel is only resolved below about 1 ms: at 2 ms the rear axle chattered
+    // (578 sign flips in three seconds, 4.1 m/s against 9.8) and at 1.667 ms the
+    // limiter limit-cycled. Solve at 0.5 ms whatever the caller asks for, and
+    // round the count so a coarse caller runs the same sequence as a fine one.
+    constexpr double kMaxStep = 0.0005;
+    const int n = std::clamp(static_cast<int>(std::ceil(dt / kMaxStep - 1e-9)), 1, 32);
     const double h = dt / n;
     for (int i = 0; i < n; ++i) updatePhysicsStep(h);
 }
