@@ -392,5 +392,60 @@ int main() {
         KS_CHECK_NEAR(coarse.speed, fine.speed, 0.05 * fine.speed);
     }
 
+    // --- The aid is a threshold with a gain, not a switch ------------------
+    // A car's SLIP_RATIO_LIMIT is where the aid starts working, not the slip it
+    // holds: below it the tyre is fine and nothing is cut, above it the cut grows
+    // with the excess and the selected level is the gain. Two consequences are
+    // testable — more level never makes a pull faster, and the axle slips less than
+    // it does unaided.
+    {
+        struct AidPull {
+            float speed = 0.f;
+            float meanSlip = 0.f;
+        };
+        auto launchWith = [](int level, float carLimit) {
+            ks::physics::TrackSurface::instance().configure(); // clean rubber
+            ks::physics::VehicleSimulator sim;
+            sim.setFuelL(50.f);
+            sim.setElectronicsSlipLimits(carLimit, 0.12f);
+            sim.setElectronicsPresence(1, -1);
+            ks::physics::VehicleSimulator::SetupParams setup;
+            setup.tcLevel = level;
+            sim.applySetup(setup);
+            sim.startSimulation();
+            sim.setThrottle(1.0);
+            double sum = 0.0;
+            int moving = 0;
+            for (int i = 0; i < 300; ++i) {
+                sim.updatePhysics(0.01);
+                if (sim.getState().speed > 0.5f) {
+                    ++moving;
+                    sum += std::fabs(sim.slipRatio(2));
+                }
+            }
+            AidPull out;
+            out.speed = sim.getState().speed;
+            out.meanSlip = moving ? static_cast<float>(sum / moving) : 0.f;
+            return out;
+        };
+        const AidPull none = launchWith(0, 0.07f);
+        const AidPull low = launchWith(2, 0.07f);
+        const AidPull high = launchWith(10, 0.07f);
+        const AidPull wide = launchWith(10, 0.16f);
+        std::fprintf(stderr,
+                     "[aid] none=%0.3f/%0.3f low=%0.3f/%0.3f high=%0.3f/%0.3f "
+                     "wide=%0.3f/%0.3f (speed/slip)\n",
+                     none.speed, none.meanSlip, low.speed, low.meanSlip, high.speed,
+                     high.meanSlip, wide.speed, wide.meanSlip);
+        KS_CHECK(high.speed <= low.speed + 1e-3f);
+        KS_CHECK(low.speed <= none.speed + 1e-3f);
+        KS_CHECK(low.meanSlip < none.meanSlip);
+        KS_CHECK(high.meanSlip < none.meanSlip);
+        // A limit above the axle's own working slip costs nothing: the aid trims the
+        // peaks and keeps the speed, which is what it is for.
+        KS_CHECK(wide.meanSlip < none.meanSlip);
+        KS_CHECK(wide.speed >= none.speed * 0.99f);
+    }
+
     return ks::test::finish("car_electronics_test");
 }

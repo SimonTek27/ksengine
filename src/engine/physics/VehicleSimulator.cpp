@@ -843,8 +843,10 @@ void VehicleSimulator::integrate(double dt) {
         engineTorque *= 0.3f;
     float driveForceTarget = (engineTorque * gearRatio * static_cast<float>(m_finalDrive))
                              / static_cast<float>(m_wheelRadius);
-    if (tcEnabled() && speed > 3.f && m_throttle > 0.3)
-        driveForceTarget *= (1.f - 0.03f * static_cast<float>(m_setup.tcLevel));
+    // No blanket drive reduction for a selected level: 3% per level cost a metre
+    // per second at level ten whatever the axle was doing, which is a penalty and
+    // not an aid. The slip control below is what traction control does, and a car
+    // whose electronics say PRESENT = 0 has no level at all.
     float brakeForceTarget = static_cast<float>(m_brake) * mass * 12.0f * dmgBrake;
     // Soft ABS: reduce brake force if high slip at high ABS level
     if (absEnabled() && speed > 5.f && m_brake > 0.4)
@@ -1063,7 +1065,14 @@ void VehicleSimulator::integrate(double dt) {
         }
     }
     if (tcEnabled() && kappaRearAbs > m_tcSlipLimit && m_throttle > 0.15f) {
-        const float cut = std::clamp(0.1f * static_cast<float>(m_setup.tcLevel) * kappaRearAbs, 0.f, 0.9f);
+        // The car's SLIP_RATIO_LIMIT is where the aid starts working, not the slip
+        // it holds: the tyre's best longitudinal force is at its own peak, and
+        // holding the axle tighter than that would cost acceleration by
+        // construction. Above the threshold the cut grows gently with the excess,
+        // and the selected level is the gain, so a higher level pulls the axle down
+        // sooner and harder without becoming a switch.
+        const float gain = 0.6f * static_cast<float>(m_setup.tcLevel); // per unit slip
+        const float cut = std::clamp(gain * (kappaRearAbs - m_tcSlipLimit), 0.f, 0.9f);
         Tdrive *= (1.f - cut);
     }
     // The car's own [DATA] FRONT_SHARE splits the torque whenever the cockpit
