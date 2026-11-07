@@ -1,7 +1,7 @@
 // ks_cartool: content pipeline for Assetto Corsa car folders.
 //
 // The flow, in order:
-//   1. convert  - write the seven documents (mandatory rule: every required entry)
+//   1. convert  - write the eight documents (mandatory rule: every required entry)
 //   2. verify   - compare the values with reality, `apply` the accepted fixes
 //   3. prune    - remove the .ini files the documents supersede
 //   4. pack     - rebuild data.acd from the folder as it is now

@@ -22,8 +22,8 @@ namespace assetto_corsa {
 namespace fs = std::filesystem;
 
 // Brings a stock Assetto Corsa car folder (one .ini per section family) to the
-// six documents the content pipeline writes (data/driver/camera/setup/model/
-// sound .json), so a car that is "not ready to be initialised" is converted first
+// eight documents the content pipeline writes (data/driver/camera/setup/model/
+// sound/ai/controls .json), so a car that is "not ready to be initialised" is converted first
 // loaded afterwards.
 //
 // The shape is the one the converted cars carry:
@@ -33,7 +33,8 @@ namespace fs = std::filesystem;
 //     the document its nature belongs to: data.json (physics and metadata),
 //     driver.json (the driver), camera.json (cameras and dash cam),
 //     setup.json (the tunable setup), model.json (the model node table),
-//     sound.json (audio). All six keep the shape;
+//     sound.json (audio), ai.json (the driver aids) and controls.json (how the
+//     input reaches the car). All of them keep the shape;
 //   - car.ini keeps the same rule (stem "car"), except [FUEL] and [FUELTANK]
 //     which feed the root "fuel" object together with fuel_cons.ini.
 //
@@ -90,12 +91,13 @@ public:
     static constexpr const char* kModelDocument = "model.json";
     static constexpr const char* kSoundDocument = "sound.json";
     static constexpr const char* kAiDocument = "ai.json";
+    static constexpr const char* kControlsDocument = "controls.json";
 
-    // The seven documents a ready car folder carries: physics, driver, cameras,
-    // tunable setup, 3D model description, audio, driver aids.
+    // The eight documents a ready car folder carries: physics, driver, cameras,
+    // tunable setup, 3D model description, audio, driver aids, controls.
     static std::vector<std::string> documents() {
-        return {kDataDocument,  kDriverDocument, kCameraDocument, kSetupDocument,
-                kModelDocument, kSoundDocument,  kAiDocument};
+        return {kDataDocument,  kDriverDocument,   kCameraDocument,  kSetupDocument,
+                kModelDocument, kSoundDocument,    kAiDocument,      kControlsDocument};
     }
 
     static fs::path documentPath(const fs::path& carDir, const std::string& name) {
@@ -121,7 +123,8 @@ public:
                fs::exists(documentPath(carDir, kSetupDocument)) &&
                fs::exists(documentPath(carDir, kModelDocument)) &&
                fs::exists(documentPath(carDir, kSoundDocument)) &&
-               fs::exists(documentPath(carDir, kAiDocument));
+               fs::exists(documentPath(carDir, kAiDocument)) &&
+               fs::exists(documentPath(carDir, kControlsDocument));
     }
 
     // True for the "not ready yet" case: no unified manifest, but the AC .ini
@@ -155,6 +158,10 @@ public:
         // Everything the AI drives with, and the per-compound wear table
         // that goes with it.
         if (stem == "ai" || stem == "ai_tyres") return kAiDocument;
+        // The controllers that decide what the input turns into -- anti-roll
+        // bars, brake power, EBB, ERS, front share, turbo -- are the car's
+        // controls, and so is the steering block car.ini carries.
+        if (stem.rfind("ctrl_", 0) == 0) return kControlsDocument;
         return kDataDocument;
     }
 
@@ -538,6 +545,20 @@ static void normalizeBrakes(Json& root) {
             docs[0]["car"].contains("GRAPHICS") && docs[0]["car"]["GRAPHICS"].isEmpty()) {
             docs[0]["car"].remove("GRAPHICS");
         }
+        // The steering and force feedback settings are not physics: they say how
+        // the driver's input reaches the car, so they join the controllers in
+        // the controls document.
+        if (docs[0].contains("car") && docs[0]["car"].isObject() &&
+            docs[0]["car"].contains("CONTROLS") && docs[0]["car"]["CONTROLS"].isObject()) {
+            std::size_t controlsIndex = 0;
+            for (std::size_t i = 0; i < names.size(); ++i) {
+                if (names[i] == kControlsDocument) controlsIndex = i;
+            }
+            Json& controls = docs[controlsIndex];
+            if (!controls.contains("CONTROLS"))
+                controls.insert("CONTROLS", docs[0]["car"]["CONTROLS"]);
+            docs[0]["car"].remove("CONTROLS");
+        }
 // The per-wheel graphical offsets say where the wheels and the suspension
 // legs sit on the model, so the section moves whole into the model document
 // under its own name. Current content writes it in suspensions.ini, older
@@ -660,6 +681,15 @@ for (const char* owner : {"suspensions", "car"}) {
                     Json& graphics = objectAt(objectAt(root, "car"), "GRAPHICS");
                     for (const std::string& entry : doc[key].keys()) {
                         if (!graphics.contains(entry)) graphics.insert(entry, doc[key][entry]);
+                    }
+                    continue;
+                }
+                if (key == "CONTROLS") {
+                    // The steering block goes back inside car, where the routing
+                    // takes it out again.
+                    Json& target = objectAt(objectAt(root, "car"), "CONTROLS");
+                    for (const std::string& entry : doc[key].keys()) {
+                        if (!target.contains(entry)) target.insert(entry, doc[key][entry]);
                     }
                     continue;
                 }
@@ -986,7 +1016,7 @@ for (const char* owner : {"suspensions", "car"}) {
     static Result packAcd(const fs::path& carDir) {
         Result result;
         if (!hasManifest(carDir)) {
-            result.error = "car is not converted: the seven documents are not all there";
+            result.error = "car is not converted: the eight documents are not all there";
             return result;
         }
         // A trailing separator leaves the path without a name, and the name is
@@ -1011,7 +1041,7 @@ for (const char* owner : {"suspensions", "car"}) {
     static Result prune(const fs::path& carDir) {
         Result result;
         if (!hasManifest(carDir)) {
-            result.error = "car is not converted: the seven documents are not all there";
+            result.error = "car is not converted: the eight documents are not all there";
             return result;
         }
         const std::vector<std::string> names = documents();

@@ -249,13 +249,13 @@ int main()
         // produced documents have to go, or needsConversion() sees a ready car
         // and skips the conversion this test is about.
         for (const std::string& doc : {"data.json", "driver.json", "camera.json",
-                                       "setup.json", "model.json", "sound.json", "ai.json"})
+                                       "setup.json", "model.json", "sound.json", "ai.json", "controls.json"})
             fs::remove(convDir / "data" / doc);
         VehicleSimulator c1;
         c1.loadVehicleParams(convDir.string());
-        // Seven documents: physics, driver, cameras, setup, model, sound, ai.
+        // Eight documents: physics, driver, cameras, setup, model, sound, ai, controls.
         for (const std::string& doc : {"data.json", "driver.json", "camera.json",
-                                       "setup.json", "model.json", "sound.json", "ai.json"})
+                                       "setup.json", "model.json", "sound.json", "ai.json", "controls.json"})
             CHECK(fs::exists(convDir / "data" / doc));
         // The rule: entries every car must carry, whatever its type.
         std::ifstream dataIn(convDir / "data" / "data.json", std::ios::binary);
@@ -277,7 +277,7 @@ int main()
         CHECK(dataText.find("\"mirrors\"") != std::string::npos);
         // LODs are part of the model, not of the car data.
         CHECK(modelText.find("\"lods\"") != std::string::npos);
-        CHECK(dataText.find("\"lods\"") == std::string::npos);
+        CHECK(dataText.find("\"lods\"") == std::string::npos);
         // Colliders describe the shape of the model.
         // Wheel and suspension graphical offsets are model coordinates.
         CHECK(modelText.find("\"GRAPHICS_OFFSETS\"") != std::string::npos);
@@ -288,7 +288,7 @@ int main()
         CHECK(dataText.find("\"LAG_HOT\"") != std::string::npos);
         CHECK(modelText.find("\"colliders\"") != std::string::npos);
         CHECK(dataText.find("\"colliders\"") == std::string::npos);
-        // A section that only repeated the format version keeps nothing.
+        // A section that only repeated the format version keeps nothing.
         CHECK(modelText.find("\"VERSION\"") == std::string::npos);
         CHECK(modelText.find("\"MIRROR_POSITION\"") == std::string::npos);
         // The conversion also leaves the verification checklist behind.

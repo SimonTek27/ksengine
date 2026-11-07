@@ -24,9 +24,10 @@ fisica del veicolo (coppia, serbatoio, gomme, aero, sospensioni, freni)
 **non** ha il set completo di documenti e c'è ancora un impianto `.ini` da
 leggere:
 
-- `hasManifest()` è vero solo con **tutti e sette** i documenti
+- `hasManifest()` è vero solo con **tutti e otto** i documenti
   (`data.json`, `driver.json`, `camera.json`, `setup.json`, `model.json`,
-  `sound.json`, `ai.json`). Una cartella con la sola fisica non è «pronta».
+  `sound.json`, `ai.json`,
+  `controls.json`). Una cartella con la sola fisica non è «pronta».
 - La conversione parte se manca il set e trovi `data/car.ini` (o `car.ini`), oppure
   un `data.json`/`physics.json` legacy da spezzare.
 
@@ -35,7 +36,7 @@ resta caricabile anche se un documento manca.
 
 ## 2. `data.json`: il documento della fisica
 
-È il primo dei sette documenti. La struttura è **a sezioni con la grafia delle
+È il primo degli otto documenti. La struttura è **a sezioni con la grafia delle
 ini**: la chiave di primo livello è lo stem del file `.ini` da cui viene il dato,
 e dentro si trovano le sue sezioni originali.
 
