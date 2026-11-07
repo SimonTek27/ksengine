@@ -11,6 +11,7 @@
 #include "KsTest.h"
 
 #include "engine/physics/CarElectronics.h"
+#include "engine/physics/TrackSurface.h"
 #include "engine/physics/VehicleSimulator.h"
 
 #include <algorithm>
@@ -296,6 +297,10 @@ int main() {
             float cutSteps = 0.f;   // steps with the drive cut on the rear axle
         };
         auto pull = [](int tcPresent, int tcLevel) {
+            // The surface keeps the rubber a run deposits, and the grip it adds is
+            // enough to move the next run's speed. Two runs are only comparable
+            // from the same clean track.
+            ks::physics::TrackSurface::instance().configure();
             ks::physics::VehicleSimulator sim;
             sim.setFuelL(50.f);
             sim.setElectronicsPresence(tcPresent, -1);
@@ -341,6 +346,50 @@ int main() {
             "{\n  \"electronics\": { \"ABS\": 1, \"TRACTION_CONTROL\": [] }\n}\n"));
         KS_CHECK(!limits.declaredAbs);
         KS_CHECK(!limits.declaredTractionControl);
+    }
+
+    // --- The step the caller passes must be a stable one -------------------
+    // A wheel and its tyre are stiff: at 10 ms the rear axle changed the sign of
+    // its slip on almost every step and the car stopped accelerating (1.4 m/s
+    // after three seconds). updatePhysics splits the caller's step, so a coarse
+    // caller now gets the fine-step answer instead of a different physics.
+    {
+        struct Launch {
+            float speed = 0.f;
+            int flips = 0;
+        };
+        auto launch = [](float dt) {
+            ks::physics::TrackSurface::instance().configure(); // clean rubber
+            ks::physics::VehicleSimulator sim;
+            sim.setFuelL(50.f);
+            sim.startSimulation();
+            sim.setThrottle(1.0);
+            const int steps = static_cast<int>(3.0f / dt);
+            float prev = 0.f;
+            Launch out;
+            for (int i = 0; i < steps; ++i) {
+                sim.updatePhysics(dt);
+                const float k = sim.slipRatio(2);
+                if (sim.getState().speed > 0.5f) {
+                    if (i > 0 && ((k > 0.02f && prev < -0.02f) ||
+                                  (k < -0.02f && prev > 0.02f)))
+                        ++out.flips;
+                }
+                prev = k;
+            }
+            out.speed = sim.getState().speed;
+            return out;
+        };
+        const Launch coarse = launch(0.01f);
+        const Launch fine = launch(0.002f);
+        std::fprintf(stderr,
+                     "[step] coarse(10ms) speed=%0.3f flips=%d | fine(2ms) speed=%0.3f "
+                     "flips=%d\n",
+                     coarse.speed, coarse.flips, fine.speed, fine.flips);
+        // No sign chatter at either step, and the same answer from both.
+        KS_CHECK(coarse.flips == 0);
+        KS_CHECK(fine.flips == 0);
+        KS_CHECK_NEAR(coarse.speed, fine.speed, 0.05 * fine.speed);
     }
 
     return ks::test::finish("car_electronics_test");

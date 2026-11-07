@@ -848,7 +848,8 @@ void VehicleSimulator::integrate(double dt) {
     float brakeForceTarget = static_cast<float>(m_brake) * mass * 12.0f * dmgBrake;
     // Soft ABS: reduce brake force if high slip at high ABS level
     if (absEnabled() && speed > 5.f && m_brake > 0.4)
-        brakeForceTarget *= (1.f - 0.04f * static_cast<float>(m_setup.absLevel));
+        if (absEnabled())
+            brakeForceTarget *= (1.f - 0.04f * static_cast<float>(m_setup.absLevel));
     // TC: reduce drive when slip high
     // (applied after driveForceTarget)
 
@@ -1369,6 +1370,21 @@ void VehicleSimulator::integrate(double dt) {
 }
 
 void VehicleSimulator::updatePhysics(double dt) {
+    // A wheel and the tyre driving it are stiff: the tyre's torque can reverse the
+    // wheel inside one step. At 10 ms the rear axle chattered (slip changing sign
+    // on almost every step and the car pinned near 1.4 m/s after three seconds);
+    // the same code at 2 ms or below holds ~15% slip and reaches ~9 m/s. Split what
+    // the caller asks for, so callers keep their own timestep while the model is
+    // solved at the resolution it needs.
+    if (!m_running || m_frozen) return;
+    if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) return;
+    constexpr double kMaxStep = 0.002;
+    const int n = std::clamp(static_cast<int>(std::ceil(dt / kMaxStep)), 1, 8);
+    const double h = dt / n;
+    for (int i = 0; i < n; ++i) updatePhysicsStep(h);
+}
+
+void VehicleSimulator::updatePhysicsStep(double dt) {
     if (!m_running || m_frozen) return;
     if (!std::isfinite(dt) || dt <= 0.0 || dt > 0.1) return;
     // Deliberately NOT PROFILE_FRAME/END_FRAME here: the profiler keeps one

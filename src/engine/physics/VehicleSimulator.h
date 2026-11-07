@@ -46,6 +46,10 @@ public:
     bool isFrozen() const { return m_frozen; }
 
     void updatePhysics(double dt);
+    /** One integration step. updatePhysics() splits the caller's dt into steps of
+     *  at most 2 ms, the resolution a wheel and its tyre need to stay stable;
+     *  nothing else should call this. */
+    void updatePhysicsStep(double dt);
 
     void setThrottle(double v);
     void setBrake(double v);
