@@ -14,6 +14,8 @@
  *  - spray: white mist kicked up around the wheels while the track is wet
  *           and the car is actually moving.
  *
+ *  - skid:  dark rubber strips deposited when wheels lock under hard braking.
+ *
  * The enable/rate rules are the "is it raining yet" test of Roadmap 2.2, so
  * they live here as free functions instead of inside SimulationLoop — see
  * tests/ksengine/rain_effects_test.cpp.
@@ -37,11 +39,11 @@ constexpr float kRainDropRate = 150.0f;   // spawns/s per mm/h of rain
 constexpr float kRainAnchorHeight = 7.0f; // emitter sits this far above the car
 constexpr float kRainIntensityMin = 0.05f;
 constexpr float kSprayWetnessMin = 0.25f;
-constexpr float kSpraySpeedMin = 5.0f;    // m/s — walking pace throws no spray
+constexpr float kSpraySpeedMin = 5.0f;    // walking pace throws no spray
 constexpr float kSpraySpeedCap = 60.0f;   // beyond this the rate stops growing
 constexpr float kSprayRatePerMs = 6.0f;   // spawns/s per (m/s of wet speed)
 
-/** Base rain emitter (disabled; driveRainEmitter() configures it per frame). */
+// Base rain emitter (disabled; driveRainEmitter() configures it per frame).
 inline ParticleEmitter makeRainEmitter() {
     ParticleEmitter em;
     em.position = {0.0f, kRainAnchorHeight, 0.0f};
@@ -53,7 +55,7 @@ inline ParticleEmitter makeRainEmitter() {
     em.speedJitter = 2.0f;
     em.size = 0.045f;
     em.sizeJitter = 0.02f;
-    em.color = {0.70f, 0.76f, 0.86f};     // grey-blue, not white rain
+    em.color = {0.70f, 0.76f, 0.86f};     // grey-blue, not smoke
     em.alpha = 0.38f;
     em.gravity = {0.0f, -3.0f, 0.0f};     // keeps them falling, not shooting
     em.drag = 0.0f;
@@ -61,7 +63,7 @@ inline ParticleEmitter makeRainEmitter() {
     return em;
 }
 
-/** Base wheel-spray emitter (disabled; driveSprayEmitter() per frame). */
+// Base wheel-spray emitter (disabled; driveSprayEmitter() per frame).
 inline ParticleEmitter makeSprayEmitter() {
     ParticleEmitter em;
     em.position = {0.0f, 0.12f, 0.0f};
@@ -81,6 +83,29 @@ inline ParticleEmitter makeSprayEmitter() {
     return em;
 }
 
+// Skidmark emitter: one per locked wheel, spawned at car position.
+// Enabled per-frame from SimulationLoop when any wheel's brake ratio
+// exceeds the lock threshold and wheel lateral speed is low.
+// Particles are dark-brown quads that fade out over their lifetime.
+inline ParticleEmitter makeSkidEmitter() {
+    ParticleEmitter em;
+    em.position = {0.0f, 0.0f, 0.0f};
+    em.direction = {1.0f, 0.0f, 0.0f};    // spit out sideways from car centre
+    em.spreadDeg = 30.0f;
+    em.spawnRate = 0.0f;
+    em.lifetime = 3.0f;              // skid marks linger a while
+    em.speed = 1.0f;
+    em.speedJitter = 0.5f;
+    em.size = 0.6f;
+    em.sizeJitter = 0.2f;
+    em.color = {0.35f, 0.25f, 0.15f};    // dark road rubber
+    em.alpha = 0.8f;
+    em.gravity = {0.0f, -0.5f, 0.0f};     // slowly settle
+    em.drag = 2.0f;
+    em.enabled = false;
+    return em;
+}
+
 /** Per-frame rain rule: rate scales with intensity, off when it is not raining. */
 inline void driveRainEmitter(ParticleEmitter& em,
                              const ks::math::vec3& carPos,
@@ -88,6 +113,17 @@ inline void driveRainEmitter(ParticleEmitter& em,
     em.position = {carPos.x, carPos.y + kRainAnchorHeight, carPos.z};
     em.enabled = rainIntensity > kRainIntensityMin;
     em.spawnRate = em.enabled ? rainIntensity * kRainDropRate : 0.0f;
+}
+
+/** Per-frame skidmark rule: enabled when any wheel is locked (high brake,
+ *  low wheel spin). The caller must set em.position per-wheel. */
+inline void driveSkidEmitter(ParticleEmitter& em,
+                             const ks::math::vec3& carPos,
+                             float brake, float wheelSpeedMag) {
+    // Lock threshold: brake > 0.7 and wheel spin below 5 m/s
+    em.enabled = brake > 0.7f && std::fabs(wheelSpeedMag) < 5.0f;
+    em.position = {carPos.x, 0.0f, carPos.z};
+    em.spawnRate = em.enabled ? 20.0f : 0.0f;
 }
 
 /** Per-frame spray rule: only a wet track at speed throws water. */

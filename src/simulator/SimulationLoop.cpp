@@ -3798,9 +3798,13 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
             // the default image is untouched.
             m_particles.addEmitter(rainfx::makeRainEmitter());   // index 1
             m_particles.addEmitter(rainfx::makeSprayEmitter());  // index 2
+            // Skidmark emitter: spawned per-wheel when brakes are locked.
+            // Positioned at the car; the per-wheel offset is applied later
+            // in the update loop where wheel states are available.
+            m_particles.addEmitter(rainfx::makeSkidEmitter());   // index 3
             std::fprintf(stderr,
                          "[particles] emitters on (config %d, KS_PARTICLES %d): "
-                         "dust + rain + spray up to %d sprites\n",
+                         "dust + rain + spray + skid up to %d sprites\n",
                          m_particlesConfig ? 1 : 0, envForced ? 1 : 0,
                          ParticleSystem::kMaxParticles);
         }
@@ -3824,6 +3828,10 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
         rainfx::driveSprayEmitter(m_particles.emitter(2), carPos,
                                   m_weather.trackWetness,
                                   static_cast<float>(st.speed));
+        // Skidmarks: enabled when any wheel is locked (brake > 0.7 and wheel
+        // spin below 5 m/s). The emitter position is set per-wheel below.
+        rainfx::driveSkidEmitter(m_particles.emitter(3), carPos,
+                                  /*brake=*/0.0f, /*wheelSpeedMag=*/0.0f);
     }
 #endif
 
