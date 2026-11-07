@@ -532,17 +532,21 @@ int main() {
         std::fprintf(stderr,
                      "[tire-peak] shoulder99 %0.3f@2kN %0.3f@4kN %0.3f@8kN | "
                      "grip coeff %0.2f %0.2f %0.2f | Fx/peak at k=0.05/0.10/0.20: "
-                     "%0.3f %0.3f %0.3f\n",
+                     "%0.3f %0.3f %0.3f | analytic %0.3f\n",
                      sh2k, sh4k, sh8k,
                      peak2k / 2000.f, peak4k / 4000.f, peak8k / 8000.f,
                      forceAt(4000.f, 0.05f) / peak4k,
                      forceAt(4000.f, 0.10f) / peak4k,
-                     forceAt(4000.f, 0.20f) / peak4k);
-        // Milliken p. 37: the best longitudinal force comes between 0.10 and 0.15
-        // slip ratio, and the tyre is already at its best by 0.10.
-        KS_CHECK(forceAt(4000.f, 0.10f) >= 0.98f * peak4k);
-        KS_CHECK(sh4k >= 0.08f);
-        KS_CHECK(sh4k <= 0.16f);
+                     forceAt(4000.f, 0.20f) / peak4k,
+                     tire.longitudinalPeakSlip(4000.f, 1.f));
+        // Milliken p. 37: the force maximum comes between 0.10 and 0.15 slip
+        // ratio. The solved peak is the honest measure; the 99% shoulder sits
+        // earlier because this curve's top is flat (0.106 against a 0.146 peak).
+        const float peakKappa = tire.longitudinalPeakSlip(4000.f, 1.f);
+        KS_CHECK(peakKappa >= 0.10f);
+        KS_CHECK(peakKappa <= 0.15f);
+        // And the solved peak must be a point the scanned curve really reaches.
+        KS_CHECK(forceAt(4000.f, peakKappa) >= 0.99f * peak4k);
         // Load sensitivity (Ch. 2, 14): the grip coefficient falls as load rises,
         // so extra load must not be a reward and load transfer has a cost.
         KS_CHECK(peak2k / 2000.f > peak4k / 4000.f);

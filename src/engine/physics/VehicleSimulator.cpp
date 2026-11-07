@@ -1054,13 +1054,16 @@ void VehicleSimulator::integrate(double dt) {
     float Tdrive = driveForceTarget * R; // total rear axle drive torque
     const float kappaRear = 0.5f * (srArr[2] + srArr[3]); // signed mean rear
     const float kappaRearAbs = std::fabs(kappaRear);
-    // Soft traction limit near MF peak (~0.08–0.12); aggressive past peak
-    if (kappaRear > 0.08f && m_throttle > 0.02f) {
-        const float cut = std::clamp((kappaRear - 0.08f) / 0.12f, 0.f, 0.98f);
-        Tdrive *= (1.f - cut);
-    }
-    // Clamp ω into peak-κ band when past peak (usable Fx / friction circle)
-    if (m_throttle > 0.05f && kappaRear > 0.15f) {
+    // Where the axle actually gives its best force, from the tyre curve instead of
+    // a literal: the model's peak is at ~0.10 slip (Milliken p. 37) and a fixed
+    // number here would go stale the moment the curve moves.
+    const float rearLoad = 0.5f * (loadRL + loadRR);
+    const float peakK = m_tires.longitudinalPeakSlip(rearLoad, surfaceMu);
+    // No blanket cut here: a car whose electronics declare no traction control
+    // must not have its axle trimmed by a limiter — that is the aid's job, and
+    // cutting at 0.8x the peak cost 19% of a plain launch. What stays is the
+    // runaway guard, because past the peak the force falls.
+    if (m_throttle > 0.05f && kappaRear > 1.10f * peakK) {
         // Cap at the κ=0.15 boundary: ωCap = (Vx + 0.15·denom)/R.
         // The old omegaFree·1.10 was sign-broken: with negative Vx (slide/
         // reverse) it produced a MORE negative cap, slamming ω past the free
@@ -1068,7 +1071,7 @@ void VehicleSimulator::integrate(double dt) {
         // (κ −0.08 ↔ +0.17, Tdrive full ↔ cut, ~300 Hz).
         const float vxFree = omegaFree * std::max(R, 0.1f);
         const float denom  = std::max(std::fabs(vxFree), 2.f);
-        const float wCap   = (vxFree + 0.15f * denom) / std::max(R, 0.1f);
+        const float wCap   = (vxFree + 1.10f * peakK * denom) / std::max(R, 0.1f);
         m_wheelOmega[2] = std::min(m_wheelOmega[2], wCap);
         m_wheelOmega[3] = std::min(m_wheelOmega[3], wCap);
     }

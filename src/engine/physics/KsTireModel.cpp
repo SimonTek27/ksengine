@@ -84,6 +84,18 @@ void KsTireModel::ensureCoeffCache(float Fz, float camberAbs, float mu) const
     // which is the working point the roadmap documents ("current lateral
     // stiffness is below the real one ... physics gap to close with
     // relaxation length").
+    // Milliken Ch. 2: a racing tyre gives its best lateral force at 5-8 deg of
+    // slip angle. The raw coefficients give By ~0.25 — a curve that never peaks
+    // inside any slip angle a car reaches (14 deg was still only 0.3 g), which is
+    // why LLTD, roll steer and compliance could not be felt. The floor is what
+    // puts the cornering stiffness where a tyre's is; the earlier extract used 8
+    // (peak ~19 deg) and the AI spun, so the value comes from the angle a tyre
+    // peaks at, not from a stiffness guess.
+    constexpr float kCy = 1.3f;
+    constexpr float kLateralPeakDeg = 9.f;
+    const float byFloor = std::tan(3.14159265f / (2.f * kCy))
+                        / degToRad(kLateralPeakDeg);
+    if (std::fabs(BCD_y) < byFloor * Dy) BCD_y = byFloor * Dy;
     float By = std::clamp(std::fabs(BCD_y) / (Dy + 1e-3f), 0.1f, 40.0f);
     const float Cy = 1.3f;
     const float Ey = a.a6 * Fz_kN + a.a7;
@@ -99,17 +111,40 @@ void KsTireModel::ensureCoeffCache(float Fz, float camberAbs, float mu) const
     float expTerm = 1.f + expArg + 0.5f * expArg * expArg;
     if (expArg < -1.f) expTerm = std::exp(expArg);
     float BCD_x = (a.b3 * Fz_kN * Fz_kN + a.b4 * Fz_kN) * expTerm;
-    // The Bx floor is what places the longitudinal peak: Bx = 10 gives it at
-    // about 0.10 slip, the lower edge of Milliken's 0.10-0.15 band (p. 37), and
-    // the measured shoulder in car_electronics_test [tire-peak] confirms it.
-    // Raising it stiffens the curve and the axle stops resolving at a 10 ms
-    // caller step (34 sign flips) — the substep cap is 8, so Bx = 10 is also the
-    // stiffest this wheel is allowed to be. Pinned by the same test.
-    constexpr float kBxFloor = 8.f;
+    // The Bx floor is what places the longitudinal peak. Solved from the formula
+    // (longitudinalPeakSlip), Bx = 10 puts the maximum at 0.141 slip, inside
+    // Milliken's 0.10-0.15 band (p. 37). Bx = 8 put it at 0.185, outside the band,
+    // and 13.7 at 0.10 but with a knee so early that the 99% shoulder fell to
+    // 0.062. 10 is also as stiff as the 0.5 ms wheel solver wants. Pinned by
+    // car_electronics_test [tire-peak].
+    constexpr float kBxFloor = 10.f;
     if (std::fabs(BCD_x) < kBxFloor * Dx) BCD_x = kBxFloor * Dx;
     float Bx = std::clamp(std::fabs(BCD_x) / (Dx + 1e-3f), 0.1f, 40.0f);
     const float Cx = 1.65f;
     const float Ex = a.b6 * Fz_kN + a.b7;
+
+    // Slip where this curve actually gives its maximum force. Measured on the
+    // curve (magicFormula), not solved analytically: the fast trig approximations
+    // move the peak several points away from the analytic answer, and a control
+    // that used the analytic one would aim past the optimum it is trying to hold.
+    // Cached with the coefficients, so the search costs nothing per step.
+    {
+        float bestF = 0.f, bestK = 0.10f;
+        for (int i = 1; i <= 40; ++i) {
+            const float k = 0.01f * static_cast<float>(i);
+            const float f = std::fabs(magicFormula(k, Bx, Cx, Dx, Ex));
+            if (f > bestF) { bestF = f; bestK = k; }
+        }
+        float lo = std::max(0.001f, bestK - 0.01f), hi = bestK + 0.01f;
+        for (int i = 0; i < 24; ++i) {
+            const float m1 = lo + (hi - lo) / 3.f;
+            const float m2 = hi - (hi - lo) / 3.f;
+            if (std::fabs(magicFormula(m1, Bx, Cx, Dx, Ex))
+                < std::fabs(magicFormula(m2, Bx, Cx, Dx, Ex))) lo = m1;
+            else hi = m2;
+        }
+        m_cache.peakKappa = 0.5f * (lo + hi);
+    }
 
     m_cache.valid = true;
     m_cache.Fz = Fz;
@@ -283,6 +318,13 @@ float KsTireModel::calculatePeakLateralGrip(float normalForce) const
     s.normalForce = normalForce;
     s.slipAngle = degToRad(8.0f);
     return std::fabs(calculateForces(s).lateralForce);
+}
+
+float KsTireModel::longitudinalPeakSlip(float normalForce, float frictionMu) const
+{
+    const float Fz = std::max(normalForce, 1.0f);
+    ensureCoeffCache(Fz, 0.f, std::max(frictionMu, 0.05f));
+    return std::clamp(m_cache.peakKappa, 0.01f, 0.6f);
 }
 
 float KsTireModel::calculatePeakLongitudinalGrip(float normalForce) const

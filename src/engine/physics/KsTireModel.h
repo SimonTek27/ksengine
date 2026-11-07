@@ -97,6 +97,10 @@ public:
                                                                    int points = 100) const;
     float calculatePeakLateralGrip(float normalForce) const;
     float calculatePeakLongitudinalGrip(float normalForce) const;
+    /** Slip ratio where the longitudinal force peaks, solved from the cached
+     *  curve (Milliken p. 37 puts a real tyre's between 0.10 and 0.15). The
+     *  controls use it instead of a fixed number than can go stale. */
+    float longitudinalPeakSlip(float normalForce, float frictionMu = 1.0f) const;
     float calculateTemperatureEffect(float temp) const;
     float calculatePressureEffect(float pressure) const;
     float calculateWearEffect(float wear) const;
@@ -128,6 +132,7 @@ private:
         float loadSens = 1.f;
         float Dy = 0, By = 10.f, Cy = 1.3f, Ey = 0;
         float Dx = 0, Bx = 10.f, Cx = 1.65f, Ex = 0;
+        float peakKappa = 0.1f; ///< κ of maximum Fx, measured on this curve
     };
 
     void ensureCoeffCache(float Fz, float camberAbs, float mu) const;
