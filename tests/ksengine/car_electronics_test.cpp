@@ -13,6 +13,9 @@
 #include "engine/physics/CarElectronics.h"
 #include "engine/physics/VehicleSimulator.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -279,6 +282,57 @@ int main() {
         KS_CHECK(unknownEdl.edlPresent() == -1);
         KS_CHECK(unknownEdl.edlFitted());
         fs::remove_all(car, ec);
+    }
+
+    // --- The gate changes what the car does, not just what it reports -----
+    // Two identical runs from a standstill at full throttle with a high TC level:
+    // the car that declares the system cuts drive at its slip limit, the car that
+    // declares none does not. Same setup, same steps, one difference.
+    {
+        struct Pull {
+            float speed = 0.f;      // m/s after the run
+            float peakSlip = 0.f;
+            float peakOmega = 0.f;
+            float cutSteps = 0.f;   // steps with the drive cut on the rear axle
+        };
+        auto pull = [](int tcPresent, int tcLevel) {
+            ks::physics::VehicleSimulator sim;
+            sim.setFuelL(50.f);
+            sim.setElectronicsPresence(tcPresent, -1);
+            ks::physics::VehicleSimulator::SetupParams setup;
+            setup.tcLevel = tcLevel;
+            sim.applySetup(setup);
+            sim.startSimulation();
+            sim.setThrottle(1.0);
+            Pull out;
+            for (int i = 0; i < 300; ++i) {
+                sim.updatePhysics(0.01);
+                const float slip = std::max(std::fabs(sim.slipRatio(2)),
+                                            std::fabs(sim.slipRatio(3)));
+                out.peakSlip = std::max(out.peakSlip, slip);
+                out.peakOmega = std::max(out.peakOmega,
+                                         std::max(std::fabs(sim.wheelOmega(2)),
+                                                  std::fabs(sim.wheelOmega(3))));
+                if (slip > 0.2f) out.cutSteps += 1.f;
+            }
+            out.speed = sim.getState().speed;
+            std::fprintf(stderr,
+                         "[tc-behaviour] present=%d level=%d speed=%0.3f "
+                         "peakSlip=%0.3f peakOmega=%0.2f stepsOver02=%0.0f\n",
+                         tcPresent, tcLevel, out.speed, out.peakSlip, out.peakOmega,
+                         out.cutSteps);
+            return out;
+        };
+        const Pull fitted = pull(1, 10);
+        const Pull absent = pull(0, 10);
+        const Pull off = pull(-1, 0);
+        // The invariant the gate exists for: a car that declares no traction
+        // control during the whole run behaves exactly like one driven with the
+        // level at zero — not like one with a level selected and ignored. Same
+        // start, same steps, so the comparison is bit for bit.
+        KS_CHECK_NEAR(absent.speed, off.speed, 1e-6);
+        // And the aid is not a no-op: with the system fitted the run differs.
+        KS_CHECK(std::fabs(fitted.speed - off.speed) > 1e-3);
     }
 
     // --- Blocks that are not objects are ignored, never dereferenced ------
