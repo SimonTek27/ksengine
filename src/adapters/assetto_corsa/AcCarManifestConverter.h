@@ -347,6 +347,26 @@ static void normalizeBrakes(Json& root) {
     if (!brakes.contains("DISCS_COMPONENTS")) brakes.insert("DISCS_COMPONENTS", components);
 }
 
+    // car [FUEL_EXT] carries one thing: the fuel density, which the fuel object
+    // already holds as KG_PER_LITER. The section is not a subject of its own, so
+    // it is folded there and disappears: one value, in the place the fuel model
+    // reads. A car that declares its own density keeps it over the default.
+    static void foldFuelExtension(Json& root) {
+        if (!root.contains("car") || !root["car"].isObject()) return;
+        Json& car = root["car"];
+        if (!car.contains("FUEL_EXT")) return;
+        const Json ext = car["FUEL_EXT"];
+        car.remove("FUEL_EXT");
+        if (!ext.isObject()) return;
+        Json& fuel = objectAt(root, "fuel");
+        for (const std::string& key : ext.keys()) {
+            const std::string name = iequals(key, "KG_PER_LITER") ? std::string("KG_PER_LITER")
+                                                                 : upper(key);
+            if (fuel.contains(name)) fuel.remove(name);
+            fuel.insert(name, ext[key]);
+        }
+    }
+
     static void normalize(Json& root, const fs::path& carDir) {
         normalizeGraphics(root);
         normalizeBrakes(root);
@@ -354,6 +374,7 @@ static void normalizeBrakes(Json& root) {
         projectDamperAndBumpstop(root);
         Json& fuel = objectAt(root, "fuel");
         addTypeDefaults(root, fuel);
+        foldFuelExtension(root);
     }
 
     // Every .ini section repeats a HEADER carrying the format VERSION, and
