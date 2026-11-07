@@ -1008,6 +1008,7 @@ for (const char* owner : {"suspensions", "car"}) {
 
         Json root = Json::object();
         mergeMetadata(carDir, root);
+        carryOverMetadata(carDir, root);
         Json fuel = Json::object();
         for (const fs::path& path : inis) {
             config::IniFile ini;
@@ -1163,22 +1164,110 @@ private:
         return out;
     }
 
+    // A document written by hand or by an older conversion can carry a comma
+    // before its closing brace. The values are still readable, so the comma goes
+    // instead of the whole document.
+    static std::string withoutTrailingCommas(const std::string& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == ',') {
+                std::size_t j = i + 1;
+                while (j < text.size() && std::isspace(static_cast<unsigned char>(text[j]))) ++j;
+                if (j < text.size() && (text[j] == '}' || text[j] == ']')) continue;
+            }
+            out.push_back(text[i]);
+        }
+        return out;
+    }
+
+    // The same repair for a document that was closed twice: everything after the
+    // end of the first object is not part of it.
+    static std::string firstJsonObject(const std::string& text) {
+        int depth = 0;
+        bool inString = false;
+        bool escaped = false;
+        bool started = false;
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            const char c = text[i];
+            if (inString) {
+                if (escaped) escaped = false;
+                else if (c == '\\') escaped = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '{') {
+                ++depth;
+                started = true;
+            } else if (c == '}') {
+                --depth;
+                if (started && depth == 0) return text.substr(0, i + 1);
+            }
+        }
+        return text;
+    }
+
     static void mergeMetadata(const fs::path& carDir, Json& root) {
-        std::ifstream in(carDir / "ui" / "ui_car.json", std::ios::binary);
+        // AC keeps the menu metadata in ui/ui_car.json; some content keeps the
+        // same file at the car root. Both are read, and ui/ wins when the two
+        // disagree because it is the layout AC defines.
+        for (const fs::path& path : {carDir / "ui_car.json", carDir / "ui" / "ui_car.json"}) {
+            std::ifstream in(path, std::ios::binary);
+            if (!in) continue;
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            bool ok = false;
+            std::string error;
+            Json doc = Json::parse(sanitizeControlChars(buffer.str()), &ok, &error);
+            if (!ok || !doc.isObject()) continue;
+            for (auto it = doc.begin(); it != doc.end(); ++it) {
+                // "parent" is AC inheritance, meaningless once the manifest is one
+                // self-contained document.
+                if (iequals(it.key(), "parent")) continue;
+                Json value = it.value();
+                coerceDeep(value);
+                root.insert(it.key(), value);
+            }
+        }
+    }
+
+    // The .ini set never says what the menu shows: name, brand, specs, tags, the
+    // curves the dyno draws. Those come from ui_car.json and from the data
+    // document an earlier conversion wrote. Nothing is invented here: what the
+    // car already says is carried over, so converting from the .ini set again
+    // cannot lose it. Only the metadata keys are taken, never a physics section:
+    // those are what the .ini files are about.
+    static void carryOverMetadata(const fs::path& carDir, Json& root) {
+        std::ifstream in(documentPath(carDir, kDataDocument), std::ios::binary);
         if (!in) return;
         std::ostringstream buffer;
         buffer << in.rdbuf();
         bool ok = false;
         std::string error;
-        Json doc = Json::parse(sanitizeControlChars(buffer.str()), &ok, &error);
+        Json doc = Json::parse(firstJsonObject(withoutTrailingCommas(
+                                   sanitizeControlChars(buffer.str()))), &ok, &error);
         if (!ok || !doc.isObject()) return;
-        for (auto it = doc.begin(); it != doc.end(); ++it) {
-            // "parent" is AC inheritance, meaningless once the manifest is one
-            // self-contained document.
-            if (iequals(it.key(), "parent")) continue;
-            Json value = it.value();
+        static const char* kMetadata[] = {"name",  "brand",     "class",      "year",
+                                          "tags",  "description", "author",   "email",
+                                          "url",   "version",   "specs",      "powerCurve",
+                                          "torqueCurve", "country", "colors"};
+        for (const char* key : kMetadata) {
+            if (!doc.contains(key)) continue;
+            bool present = false;
+            for (const std::string& existing : root.keys()) {
+                if (iequals(existing, key)) {
+                    present = true;
+                    break;
+                }
+            }
+            if (present) continue;
+            Json value = doc[key];
             coerceDeep(value);
-            root.insert(it.key(), value);
+            root.insert(key, value);
         }
     }
 
