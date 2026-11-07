@@ -57,6 +57,33 @@ inline std::string trimText(const std::string& text) {
     return text.substr(begin, end - begin);
 }
 
+/** Content is sometimes written in a single-byte code page, and a byte that is
+ *  not valid UTF-8 cannot go into a JSON document. Such a byte becomes '?'; the
+ *  .ini keeps the original text anyway. */
+inline std::string utf8Safe(const std::string& text) {
+    std::string out;
+    out.reserve(text.size());
+    for (std::size_t i = 0; i < text.size();) {
+        const unsigned char lead = static_cast<unsigned char>(text[i]);
+        std::size_t length = 0;
+        if (lead < 0x80) length = 1;
+        else if ((lead & 0xE0) == 0xC0) length = 2;
+        else if ((lead & 0xF0) == 0xE0) length = 3;
+        else if ((lead & 0xF8) == 0xF0) length = 4;
+        bool valid = length > 0 && i + length <= text.size();
+        for (std::size_t k = 1; valid && k < length; ++k)
+            if ((static_cast<unsigned char>(text[i + k]) & 0xC0) != 0x80) valid = false;
+        if (!valid) {
+            out.push_back('?');
+            ++i;
+            continue;
+        }
+        out.append(text, i, length);
+        i += length;
+    }
+    return out;
+}
+
 inline std::string unquoteText(const std::string& text) {
     if (text.size() >= 2 && ((text.front() == '"' && text.back() == '"') ||
                              (text.front() == '\'' && text.back() == '\'')))
@@ -162,14 +189,19 @@ inline bool readFile(const fs::path& file, Parsed& parsed) {
         const std::string trimmed = trimText(line);
         if (trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#') continue;
         if (trimmed.front() == '[' && trimmed.back() == ']') {
-            group = trimText(trimmed.substr(1, trimmed.size() - 2));
+            group = utf8Safe(trimText(trimmed.substr(1, trimmed.size() - 2)));
             current = addSection(parsed, group);
             continue;
         }
         const std::size_t separator = trimmed.find_first_of("=:");
         if (separator == std::string::npos || group.empty()) continue;
-        const std::string key = trimText(trimmed.substr(0, separator));
-        const std::string value = unquoteText(trimText(trimmed.substr(separator + 1)));
+        const std::string key = utf8Safe(trimText(trimmed.substr(0, separator)));
+        std::string value = unquoteText(trimText(trimmed.substr(separator + 1)));
+        // Content explains its values after them ("0.1  ; how much ..."): the
+        // comment is not the value, and it is where the code-page bytes live.
+        const std::size_t comment = value.find(';');
+        if (comment != std::string::npos) value = trimText(value.substr(0, comment));
+        value = utf8Safe(value);
         if (key.empty()) continue;
 
         Section& section = parsed.sections[current];

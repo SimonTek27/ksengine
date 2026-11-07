@@ -1225,6 +1225,52 @@ for (const char* owner : {"suspensions", "car"}) {
         return result;
     }
 
+    /** Fold the car-wide overrides into documents that are already written.
+     *  Nothing is re-routed: a folder that has been converted and pruned holds
+     *  its data in the documents, and rebuilding them from the data root would
+     *  move what belongs to model.json and driver.json into the physics one. */
+    static Result foldOverrides(const fs::path& carDir) {
+        Result result;
+        if (!hasManifest(carDir)) {
+            result.error = "car is not converted: the eight documents are not all there";
+            return result;
+        }
+        const auto readDoc = [&](const char* name, Json& out) {
+            std::ifstream in(documentPath(carDir, name), std::ios::binary);
+            if (!in) return false;
+            std::ostringstream buffer;
+            buffer << in.rdbuf();
+            bool ok = false;
+            std::string error;
+            out = Json::parse(buffer.str(), &ok, &error);
+            return ok && out.isObject();
+        };
+        Json model;
+        Json driver;
+        if (!readDoc(kModelDocument, model) || !readDoc(kDriverDocument, driver)) {
+            result.error = "cannot read the model or driver document";
+            return result;
+        }
+        if (mergeOverrides(carDir, model, driver) > 0) {
+            const auto writeDoc = [&](const char* name, const Json& doc) {
+                std::ofstream file(documentPath(carDir, name), std::ios::binary | std::ios::trunc);
+                if (!file) return false;
+                file << doc.dump(true);
+                file.put(static_cast<char>(10));
+                file.close();
+                return static_cast<bool>(file);
+            };
+            if (!writeDoc(kModelDocument, model) || !writeDoc(kDriverDocument, driver)) {
+                result.error = "cannot write the model or driver document";
+                return result;
+            }
+            result.documents = 2;
+        }
+        writeSkinOverrides(carDir);
+        result.converted = true;
+        return result;
+    }
+
     static Result convert(const fs::path& carDir) {
         Result result;
         if (carDir.empty() || !fs::exists(carDir)) {
@@ -1240,7 +1286,10 @@ for (const char* owner : {"suspensions", "car"}) {
         }
         if (inis.empty()) {
             // Nothing to convert from, but the legacy data document may be
-            // there: complete the folder by splitting it.
+            // there: complete the folder by splitting it. A folder that is
+            // already converted has nothing to split: only its overrides can
+            // still change, and those are folded into the documents as they are.
+            if (hasManifest(carDir)) return foldOverrides(carDir);
             return split(carDir);
         }
         std::sort(inis.begin(), inis.end());
