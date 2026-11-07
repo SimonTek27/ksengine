@@ -11,6 +11,7 @@
 #include "KsTest.h"
 
 #include "engine/physics/CarElectronics.h"
+#include "engine/physics/KsTireModel.h"
 #include "engine/physics/TrackSurface.h"
 #include "engine/physics/VehicleSimulator.h"
 
@@ -445,6 +446,69 @@ int main() {
         // peaks and keeps the speed, which is what it is for.
         KS_CHECK(wide.meanSlip < none.meanSlip);
         KS_CHECK(wide.speed >= none.speed * 0.99f);
+    }
+
+    // --- κ uses the speed under the wheel, V·cos α --------------------------
+    // Milliken §2.3 (p. 37-39): at slip angle α the road speed the tyre sees
+    // along its own plane is V·cos α, and the practical definition (Pacejka's
+    // κx) divides by that projection. The V-only form folded the lateral
+    // velocity into the longitudinal slip, so a cornering wheel was reported
+    // with the wrong slip and the aids acted on it.
+    {
+        using ks::physics::VehicleSimulator;
+        const float V = 10.f;
+        const float deg = 0.017453292f;
+        const float a40 = 40.f * deg;
+        const float vLong = V * std::cos(a40);
+        const float straight = VehicleSimulator::slipRatioFromWheel(11.f, V, 0.f);
+        const float spinning = VehicleSimulator::slipRatioFromWheel(11.f, V, a40);
+        const float braking = VehicleSimulator::slipRatioFromWheel(7.f, V, a40);
+        const float bare = VehicleSimulator::slipRatioFromWheel(vLong, V, a40);
+        std::fprintf(stderr,
+                     "[kappa-cos] straight=%0.4f spinning=%0.4f (V-only %0.4f) "
+                     "braking=%0.4f (V-only %0.4f) free=%0.5f\n",
+                     straight, spinning, 0.1f, braking, -0.3f, bare);
+        // Straight ahead the two definitions coincide.
+        KS_CHECK_NEAR(straight, 0.1f, 1e-5f);
+        // A spinning wheel in a corner carries more slip than V alone showed.
+        KS_CHECK_NEAR(spinning, (11.f - vLong) / vLong, 1e-5f);
+        KS_CHECK(spinning > straight + 0.1f);
+        // A braking one carries less.
+        KS_CHECK_NEAR(braking, (7.f - vLong) / vLong, 1e-5f);
+        KS_CHECK(braking > -0.2f);
+        // Rolling along its own plane is no slip at all.
+        KS_CHECK_NEAR(bare, 0.f, 1e-6f);
+    }
+
+    // --- Where our tyre peaks, against Milliken's measured band -------------
+    // "the forces rise rapidly to a maximum which usually occurs in the range of
+    // 0.10 to 0.15 slip ratio, after which the forces fall off" (p. 37). The
+    // peak is a constraint on the aids as much as a property of the tyre: a
+    // SLIP_RATIO_LIMIT above it would have the aid holding a falling branch.
+    {
+        ks::physics::KsTireModel tire;
+        auto scanPeak = [&](float fz) {
+            float bestK = 0.f, bestF = 0.f;
+            for (int i = 1; i <= 600; ++i) {
+                const float k = 0.001f * static_cast<float>(i);
+                ks::physics::KsTireModel::TireState s;
+                s.normalForce = fz;
+                s.slipRatio = k;
+                const float f = std::fabs(tire.calculateLongitudinalForce(s));
+                if (f > bestF) { bestF = f; bestK = k; }
+            }
+            return std::pair<float, float>(bestK, bestF);
+        };
+        const auto at4k = scanPeak(4000.f);
+        const auto at2k = scanPeak(2000.f);
+        const auto at8k = scanPeak(8000.f);
+        std::fprintf(stderr,
+                     "[tire-peak] kappa=%0.3f Fx=%0.0f N; grip coeff %0.2f@2kN "
+                     "%0.2f@4kN %0.2f@8kN\n",
+                     at4k.first, at4k.second,
+                     at2k.second / 2000.f, at4k.second / 4000.f, at8k.second / 8000.f);
+        KS_CHECK(at4k.first >= 0.10f);
+        KS_CHECK(at4k.first <= 0.15f);
     }
 
     return ks::test::finish("car_electronics_test");

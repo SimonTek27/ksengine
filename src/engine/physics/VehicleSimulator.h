@@ -212,6 +212,9 @@ public:
     float slipRatio(int i) const {
         return (i >= 0 && i < 4) ? m_slipRatio[static_cast<size_t>(i)] : 0.f;
     }
+    /** κ from wheel rim speed and body speed, projected by the wheel's slip angle.
+     *  Milliken §2.3 / Pacejka practical: κ = (ωR − V·cos α) / max(|V·cos α|, v_min). */
+    static float slipRatioFromWheel(float wheelSpeedMps, float vxBody, float slipAngleRad);
     /** Milliken/SAE handling metrics (updated each integrate). */
     float sideslipBeta() const { return m_beta; }
     float understeerGradientDegG() const { return m_ugDegG; }

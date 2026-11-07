@@ -26,6 +26,17 @@ VehicleSimulator::VehicleSimulator() {
     m_aero.setConfig(ac);
 }
 
+float VehicleSimulator::slipRatioFromWheel(float wheelSpeedMps, float vxBody, float slipAngleRad)
+{
+    // Milliken §2.3, p. 37-39: at slip angle α the road speed under the wheel
+    // along the tyre's own plane is V·cos α, and the practical definition
+    // (Pacejka's κx) uses that projection. Dividing by V alone folds the lateral
+    // velocity into the longitudinal slip and understates it in a corner.
+    const float vLong = vxBody * std::max(std::cos(slipAngleRad), 0.35f);
+    const float denom = std::max(std::fabs(vLong), 2.0f);
+    return std::clamp((wheelSpeedMps - vLong) / denom, -1.0f, 1.0f);
+}
+
 void VehicleSimulator::startSimulation() { m_running = true; }
 void VehicleSimulator::stopSimulation() { m_running = false; }
 
@@ -899,8 +910,13 @@ void VehicleSimulator::integrate(double dt) {
         return static_cast<float>(m_state.tyrePressure[i]) * 14.5f;
     };
 
-    // --- Physical slip ratio κ (Milliken / SAE practical) ---
-    // κ = (ωR − Vx) / max(|ωR|, |Vx|, v_min) — stable near rest
+    // --- Physical slip ratio κ (Milliken Ch. 2, §2.3) ---
+    // κ = (ωR − V·cos α) / max(|V·cos α|, v_min)
+    // Milliken p. 37-39: at slip angle α the road speed under the wheel along
+    // the tyre's own plane is V·cos α, and the practical definition (Pacejka)
+    // uses that projection. Dividing by V alone folds the lateral velocity into
+    // the longitudinal slip, so a wheel in a corner reports less slip than it
+    // carries and the aids act on the wrong number.
     const float R = static_cast<float>(m_wheelRadius);
     const float Iw = std::max(0.5f, m_wheelInertia);
     float vxBody = speed;
@@ -909,16 +925,17 @@ void VehicleSimulator::integrate(double dt) {
                + m_state.velocity.z * std::cos(m_state.heading);
     }
     const float omegaFree = vxBody / std::max(R, 0.1f);
+    const float saW[4] = { saFL, saFR, saRL, saRR };
+    float vLong[4];
     for (int i = 0; i < 4; ++i) {
+        // cos α floor 0.35: past ~70 deg the tyre slides sideways and κ is moot.
+        vLong[i] = vxBody * std::max(std::cos(saW[i]), 0.35f);
         if (std::fabs(m_wheelOmega[i]) < 0.05f && speed > 0.3f)
-            m_wheelOmega[i] = omegaFree;
+            m_wheelOmega[i] = vLong[i] / std::max(R, 0.1f);
     }
     float srArr[4];
     for (int i = 0; i < 4; ++i) {
-        const float vWh = m_wheelOmega[i] * R;
-        // Pacejka/SAE practical: κ = (ωR − Vx) / |Vx| (traction > 0, braking < 0)
-        const float denom = std::max(std::fabs(vxBody), 2.0f);
-        srArr[i] = std::clamp((vWh - vxBody) / denom, -1.0f, 1.0f);
+        srArr[i] = slipRatioFromWheel(m_wheelOmega[i] * R, vxBody, saW[i]);
         m_slipRatio[i] = srArr[i];
     }
 
@@ -958,7 +975,6 @@ void VehicleSimulator::integrate(double dt) {
         fRL.lateralForce, fRR.lateralForce
     };
     const float FzW[4] = { loadFL, loadFR, loadRL, loadRR };
-    const float saW[4] = { saFL, saFR, saRL, saRR };
     // G5: friction-circle usage |F| / (μ Fz)
     for (int i = 0; i < 4; ++i) {
         m_tireFx[i] = Fx[i];
@@ -1144,7 +1160,10 @@ void VehicleSimulator::integrate(double dt) {
         const float deadZone = onPower ? m_edlDeadZonePower : m_edlDeadZoneCoast;
         const float torque = onPower ? m_edlBrakeTorquePower : m_edlBrakeTorqueCoast;
         for (int i = 2; i < 4; ++i) {
-            const float spin = (std::fabs(m_wheelOmega[i]) * R / std::max(speed, 0.5f)) - 1.f;
+            // Same V·cos α projection as κ: a rear wheel in a corner is not
+            // spinning just because the car is yawing.
+            const float spin = (std::fabs(m_wheelOmega[i]) * R
+                                / std::max(std::fabs(vLong[i]), 0.5f)) - 1.f;
             const float excess = spin - maxSpin - deadZone;
             if (excess > 0.f) edlBrake[i] = torque * std::clamp(excess / 0.5f, 0.f, 1.f);
         }
