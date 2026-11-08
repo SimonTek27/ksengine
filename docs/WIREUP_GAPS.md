@@ -49,7 +49,10 @@ Piano operativo gate: [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md).
   Lato codice il converter non puo' piu' produrne uno rotto: ogni documento
   viene riletto col parser del runtime prima della scrittura
   (`AcCarManifestConverter::encodeJsonDocument`) e un dump che non si
-  rilegge fa fallire la conversione senza scrivere nulla.
+  rilegge fa fallire la conversione senza scrivere nulla. A runtime un
+  manifest illeggibile non e' piu' silenzioso: `readAcManifest()` stampa
+  `[data] manifest is not valid JSON: <file> (<errore>)` una volta per
+  manifest e conta i casi in `CarPhysicsJson::manifestProblems()`.
 - **Converter contenuto AC**: `AcCarManifestConverter`
   (`src/adapters/assetto_corsa/AcCarManifestConverter.h`) porta una
   cartella `.ini` stock ai sei documenti `data/data.json`, `driver.json`,

@@ -113,10 +113,20 @@ std::string CarPhysicsJson::resolveAcManifestPath(const std::string& carDir) {
     return std::string();
 }
 
-bool CarPhysicsJson::loadAcFuelCapacity(const std::string& carDir, double& litres,
-                                        std::string* error) {
-    const std::string path = resolveAcManifestPath(carDir);
-    if (path.empty()) return false;
+namespace {
+
+// Manifests reported as unreadable. A converted car whose data/data.json does
+// not parse used to fall back to the vehicle defaults without a word: the tank,
+// the brake profile, the start sequence and the clutch each quietly became
+// "whatever the model ships with", and a car that drove wrong looked like a car
+// whose content simply said nothing. The file is still never guessed at, but it
+// is now reported, once per manifest, because the four readers open the same
+// one and must not print the same line four times.
+int g_manifestProblems = 0;
+
+bool readAcManifest(const std::string& carDir, Json& root, std::string* error) {
+    const std::string path = CarPhysicsJson::resolveAcManifestPath(carDir);
+    if (path.empty()) return false; // no manifest: the .ini set is the source
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         if (error) *error = "data.json: cannot open " + path;
@@ -126,13 +136,36 @@ bool CarPhysicsJson::loadAcFuelCapacity(const std::string& carDir, double& litre
     ss << in.rdbuf();
     bool ok = false;
     std::string parseError;
-    const Json root = Json::parse(ss.str(), &ok, &parseError);
-    if (!ok || !root.isObject()) {
-        // A broken manifest is reported, never guessed at: the caller keeps
-        // the vehicle default and the .ini fallback still decides.
-        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
-        return false;
+    root = Json::parse(ss.str(), &ok, &parseError);
+    if (ok && root.isObject()) return true;
+    if (parseError.empty()) parseError = "not a JSON object";
+    static std::string reported;
+    if (reported != path) {
+        reported = path;
+        ++g_manifestProblems;
+        std::fprintf(stderr,
+                     "[data] manifest is not valid JSON: %s (%s); the car keeps the "
+                     "defaults for what it declares\n",
+                     path.c_str(), parseError.c_str());
     }
+    if (error) *error = "data.json: invalid JSON (" + parseError + ")";
+    return false;
+}
+
+} // namespace
+
+int CarPhysicsJson::manifestProblems() {
+    return g_manifestProblems;
+}
+
+bool CarPhysicsJson::loadAcFuelCapacity(const std::string& carDir, double& litres,
+                                        std::string* error) {
+    const std::string path = resolveAcManifestPath(carDir);
+    if (path.empty()) return false;
+    // A broken manifest is reported by the shared reader, never guessed at: the
+    // caller keeps the vehicle default and the .ini fallback still decides.
+    Json root;
+    if (!readAcManifest(carDir, root, error)) return false;
     const Json& fuel = root["fuel"];
     if (!fuel.isObject()) return false;
     bool has = false;
@@ -155,22 +188,8 @@ bool CarPhysicsJson::loadAcBrakeTemps(const std::string& carDir, AcBrakeTemps& f
                                       AcBrakeTemps& rear, std::string* error) {
     front = AcBrakeTemps{};
     rear = AcBrakeTemps{};
-    const std::string path = resolveAcManifestPath(carDir);
-    if (path.empty()) return false;
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        if (error) *error = "data.json: cannot open " + path;
-        return false;
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    bool ok = false;
-    std::string parseError;
-    const Json root = Json::parse(ss.str(), &ok, &parseError);
-    if (!ok || !root.isObject()) {
-        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
-        return false;
-    }
+    Json root;
+    if (!readAcManifest(carDir, root, error)) return false;
     const Json& brakes = root["brakes"];
     if (!brakes.isObject()) return false;
     const auto read = [](const Json& obj, AcBrakeTemps& out) {
@@ -263,22 +282,8 @@ static double engineIniMinimum(const std::string& carDir) {
 bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
                                  std::string* error) {
     out = CarStartConfig{};
-    const std::string path = resolveAcManifestPath(carDir);
-    if (path.empty()) return false;
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        if (error) *error = "data.json: cannot open " + path;
-        return false;
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    bool ok = false;
-    std::string parseError;
-    const Json root = Json::parse(ss.str(), &ok, &parseError);
-    if (!ok || !root.isObject()) {
-        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
-        return false;
-    }
+    Json root;
+    if (!readAcManifest(carDir, root, error)) return false;
     const Json& start = root["start"];
     if (!start.isObject()) return false;
     // The type decides which hardware cranks the engine: the car declares it,
@@ -351,22 +356,8 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
 bool CarPhysicsJson::loadAcClutch(const std::string& carDir, CarClutchConfig& out,
                                   std::string* error) {
     out = CarClutchConfig{};
-    const std::string path = resolveAcManifestPath(carDir);
-    if (path.empty()) return false;
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        if (error) *error = "data.json: cannot open " + path;
-        return false;
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    bool ok = false;
-    std::string parseError;
-    const Json root = Json::parse(ss.str(), &ok, &parseError);
-    if (!ok || !root.isObject()) {
-        if (error) *error = "data.json: invalid JSON (" + parseError + ")";
-        return false;
-    }
+    Json root;
+    if (!readAcManifest(carDir, root, error)) return false;
     const Json& drivetrain = root["drivetrain"];
     if (!drivetrain.isObject()) return false;
     bool has = false;

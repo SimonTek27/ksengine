@@ -9,6 +9,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Un `data/data.json` illeggibile viene segnalato, non assorbito in silenzio**:
+  una cartella gia` convertita con il manifest corrotto lasciava il serbatoio,
+  il profilo freni, la sequenza di avvio e la frizione ai default del modello,
+  e l'auto sembrava semplicemente "una che non dichiara nulla". I quattro
+  lettori del manifest (`loadAcFuelCapacity`, `loadAcBrakeTemps`,
+  `loadAcStart`, `loadAcClutch`) passano ora da `readAcManifest()`, che stampa
+  una riga `[data] manifest is not valid JSON: <file> (<errore>)` **una volta
+  per manifest** (non quattro) e incrementa `CarPhysicsJson::manifestProblems()`.
+  Il file resta ignorato, mai indovinato; `test_physics_ini` copre sia il
+  manifest valido (0 segnalazioni) sia quello rotto (una).
 - **Fixture del car di test: rigenerabile da solo, con guardia esplicita**:
   `tools/make_reference_content.ps1 -CarOnly` scrive solo
   `content/cars/refcar/baked` (che `.gitignore` esclude) senza toccare il bake

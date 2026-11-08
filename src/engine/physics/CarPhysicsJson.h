@@ -132,6 +132,14 @@ public:
     static std::string resolveAcManifestPath(const std::string& carDir);
 
     /**
+     * Manifests found present but unreadable, reported once each on stderr.
+     * A converted car with a corrupt data/data.json keeps the vehicle defaults
+     * for what the manifest declares (tank, brakes, start, clutch); this count
+     * is how a test proves that fallback is announced instead of silent.
+     */
+    static int manifestProblems();
+
+    /**
      * Tank size (litres) from the manifest's "fuel" section. "FUEL" is the
      * current load, never the capacity, so only MAX_FUEL (and the
      * physics.json spellings) count. false when absent or unreadable.

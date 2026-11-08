@@ -7,6 +7,7 @@
 #include "engine/physics/EngineModel.h"
 #include "engine/physics/PacejkaTireModel.h"
 #include "engine/physics/VehicleSimulator.h"
+#include "engine/physics/CarPhysicsJson.h"
 #include "adapters/assetto_corsa/AcCarManifestConverter.h"
 #include "engine/FileFormat/AcdReader.h"
 
@@ -206,6 +207,8 @@ int main()
         VehicleSimulator j1;
         j1.loadVehicleParamsFromIni(jsonDir.string());
         CHECK(near(j1.fuelTankCapacityL(), 90.0, 1e-4));
+        // A manifest that reads is not reported.
+        CHECK(ks::physics::CarPhysicsJson::manifestProblems() == 0);
 
         // "FUEL" is the current load, not the tank.
         writeFile(jsonDir / "data" / "data.json", "{\"fuel\":{\"FUEL\":50}}");
@@ -213,11 +216,14 @@ int main()
         j2.loadVehicleParamsFromIni(jsonDir.string());
         CHECK(near(j2.fuelTankCapacityL(), 150.0, 1e-4));
 
-        // A broken manifest is ignored, not guessed at.
+        // A broken manifest is ignored, not guessed at -- and it is announced:
+        // one report per manifest, however many readers open it.
+        const int brokenBefore = ks::physics::CarPhysicsJson::manifestProblems();
         writeFile(jsonDir / "data" / "data.json", "{\"fuel\":{\"MAX_FUEL\":90}");
         VehicleSimulator j3;
         j3.loadVehicleParamsFromIni(jsonDir.string());
         CHECK(near(j3.fuelTankCapacityL(), 150.0, 1e-4));
+        CHECK(ks::physics::CarPhysicsJson::manifestProblems() == brokenBefore + 1);
 
         // A folder that still ships only the .ini set is not ready to be
         // initialised: loadVehicleParams converts it first (writes
