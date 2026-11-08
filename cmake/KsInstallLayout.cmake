@@ -49,6 +49,12 @@ set(KS_LAYOUT_ENGINE_CONFIG "${CMAKE_SOURCE_DIR}/system/cfg/ksengine.json")
 # The Qt-free runtime reads them through src/engine/Config/Locale.h.
 set(KS_LAYOUT_I18N "${CMAKE_SOURCE_DIR}/system/i18n")
 
+# Post-processing filter presets: system/ppfilters/*.json, the ids KS_PPFILTER
+# names (src/engine/assets/Paths.h). The .lut strips next to them travel too:
+# a preset is a colour transform plus its cube, and half of one is a different
+# image.
+set(KS_LAYOUT_PPFILTERS "${CMAKE_SOURCE_DIR}/system/ppfilters")
+
 # ---------------------------------------------------------------------------
 # Build-tree staging.
 # ---------------------------------------------------------------------------
@@ -82,6 +88,15 @@ function(ks_stage_install_layout _target)
 			COMMAND ${CMAKE_COMMAND} -E copy_directory
 				"${KS_LAYOUT_I18N}" "$<TARGET_FILE_DIR:${_target}>/system/i18n"
 			COMMENT "Staging system/i18n/ next to $<TARGET_FILE_NAME:${_target}>"
+			VERBATIM)
+	endif()
+
+	# system/ppfilters/ — post-processing presets and their .lut strips.
+	if(EXISTS "${KS_LAYOUT_PPFILTERS}")
+		add_custom_command(TARGET ${_target} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory
+				"${KS_LAYOUT_PPFILTERS}" "$<TARGET_FILE_DIR:${_target}>/system/ppfilters"
+			COMMENT "Staging system/ppfilters/ next to $<TARGET_FILE_NAME:${_target}>"
 			VERBATIM)
 	endif()
 
@@ -162,6 +177,11 @@ function(ks_install_layout)
 	# --- system/i18n/ ------------------------------------------------------
 	if(EXISTS "${KS_LAYOUT_I18N}")
 		install(DIRECTORY "${KS_LAYOUT_I18N}" DESTINATION system)
+	endif()
+
+	# --- system/ppfilters/ -------------------------------------------------
+	if(EXISTS "${KS_LAYOUT_PPFILTERS}")
+		install(DIRECTORY "${KS_LAYOUT_PPFILTERS}" DESTINATION system)
 	endif()
 
 	# --- system/shaders/ ---------------------------------------------------
