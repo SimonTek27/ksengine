@@ -94,7 +94,7 @@ ctest -R track_layout_test --output-on-failure
 
 ## Suggested order
 
-1. Finish **3.3** remaining (SimulationLoop wire, AI line on switch, menu picker).
+1. ~~Finish **3.3** remaining (SimulationLoop wire, AI line on switch, menu picker)~~ — **chiuso**: wire, linea AI e picker sono su `master` dal 2026-11-06; restano solo i gate umani di [CHECKLIST.md](CHECKLIST.md).
 2. Start **3.1 data campaign** when real tyre logs exist.
 3. **3.4** driver swap after human box gate G3.
 4. Defer 3.5–3.8 until Windows soak is routine.
