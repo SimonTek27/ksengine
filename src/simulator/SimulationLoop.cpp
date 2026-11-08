@@ -2829,16 +2829,28 @@ void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
         // instead of blanking it (this is the stability guarantee), and
         // print how to bake a .kn5 when there is one to bake.
         namespace fs = std::filesystem;
+        bool foundKn5 = false;
         if (fs::is_directory(trackDir)) {
             std::error_code ec;
             for (const auto& e : fs::directory_iterator(trackDir, ec))
                 if (e.path().extension() == ".kn5") {
+                    foundKn5 = true;
                     std::fprintf(stderr,
                                  "[scene] track has .kn5 but no bake; run: "
                                  "kn5baker \"%s\" <out>/baked\n",
                                  e.path().string().c_str());
                     break;
                 }
+        }
+        if (!foundKn5) {
+            // Neither geometry nor a bake. A data-only track (ai/ + data/) is
+            // legitimate and the previous scene stays on screen on purpose,
+            // but saying so beats leaving an unchanged view to be diagnosed:
+            // the track's own .kn5 is the missing half.
+            std::fprintf(stderr,
+                         "[scene] %s has no .kn5 and no baked cache: nothing to load, "
+                         "the current scene stays on screen\n",
+                         trackDir.c_str());
         }
         return;
     }
