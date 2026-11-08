@@ -201,6 +201,15 @@ endif()
 # renders a known quad and reads back the swapchain pixels. Compiles the
 # simulator renderer TUs directly (track_loader_test pattern) + the ui TUs
 # NativeRenderer::drawUi() links against. Skipped when no Vulkan SDK.
+#
+# KS_REQUIRE_REFERENCE_CAR turns the reference-car section from "skipped when
+# the fixture is absent" into a failure. That fixture lives in content/cars,
+# which is gitignored and was dropped from the repo on purpose (40a07be), so a
+# clean checkout cannot have it: OFF keeps a clean run green, ON is how a
+# machine expected to hold the fixture makes the pixel pins non-optional.
+# Generate it with: tools/make_reference_content.ps1 -CarOnly
+option(KS_REQUIRE_REFERENCE_CAR
+    "Fail test_renderer when the reference car bake is absent" OFF)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
    EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/NativeRenderer.cpp")
     find_package(Vulkan QUIET)
@@ -225,6 +234,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_renderer.cpp" AND
             KS_TEST_SHADER_DIR="${CMAKE_BINARY_DIR}/shaders"
             KS_TEST_REFERENCE_BAKE="${_ks_ref_bake}"
             KS_TEST_REFERENCE_CAR="${_ks_ref_car}")
+        if(KS_REQUIRE_REFERENCE_CAR)
+            target_compile_definitions(test_renderer PRIVATE
+                KS_TEST_REQUIRE_REFERENCE_CAR=1)
+        endif()
         target_link_libraries(test_renderer PRIVATE ksengine ${Vulkan_LIBRARIES})
         if(WIN32)
             target_link_libraries(test_renderer PRIVATE user32 gdi32)

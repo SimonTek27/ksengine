@@ -1150,11 +1150,13 @@ int main()
     //     Since 40a07be that fixture is gone from the repo on purpose ("a
     //     fixture nobody drives") and content/cars is gitignored, so a clean
     //     checkout cannot have it. The section therefore runs only where
-    //     tools/make_reference_content.ps1 wrote it, and says so loudly when it
-    //     has not: failing on content that is not there, or passing without
-    //     running the pins, would both be wrong. The rest of the harness still
-    //     covers manifest -> materials -> texture dir -> pixels via
-    //     content/baked.
+    //     tools/make_reference_content.ps1 -CarOnly wrote it, and says so
+    //     loudly when it has not: failing on content that is not there, or
+    //     passing without running the pins, would both be wrong. The rest of
+    //     the harness still covers manifest -> materials -> texture dir ->
+    //     pixels via content/baked. A build with -DKS_REQUIRE_REFERENCE_CAR=ON
+    //     promises the fixture is present, so there a missing bake FAILS
+    //     instead of skipping: the pins cannot disappear silently.
     ks::sim::MaterialCache carMaterials;
     const std::string refCar = KS_TEST_REFERENCE_CAR;
     const bool carBakePresent =
@@ -1162,8 +1164,15 @@ int main()
     if (!carBakePresent) {
         std::printf("test_renderer: (f) SKIP - no reference car bake at %s "
                     "(dropped in 40a07be; run tools/make_reference_content.ps1 "
-                    "for the loadMeshFromFile pixel pins)\n",
+                    "-CarOnly for the loadMeshFromFile pixel pins)\n",
                     refCar.c_str());
+#if defined(KS_TEST_REQUIRE_REFERENCE_CAR) && KS_TEST_REQUIRE_REFERENCE_CAR
+        // This build declared that the fixture is part of its environment, so
+        // its absence is a failure, not a reason to stay green without the
+        // pins that were supposed to run here.
+        KS_CHECK(carBakePresent &&
+                 "reference car bake missing: run tools/make_reference_content.ps1 -CarOnly");
+#endif
     }
     const bool carHasMaterials =
         carBakePresent && carMaterials.load(refCar + "/materials.txt");
