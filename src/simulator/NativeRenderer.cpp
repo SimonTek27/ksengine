@@ -1449,7 +1449,7 @@ bool NativeRenderer::createFrameDescriptorResources() {
 
     VkDescriptorSetLayoutCreateInfo dslCi{};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 6;
+    dslCi.bindingCount = 5;
     dslCi.pBindings = bindings;
     VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_frameSetLayout);
     if (res != VK_SUCCESS) {
