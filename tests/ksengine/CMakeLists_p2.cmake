@@ -441,3 +441,15 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/CheckNoValidationErrors.cmake")
             -P "${CMAKE_SOURCE_DIR}/cmake/CheckNoValidationErrors.cmake")
     set_tests_properties(validation_errors_test PROPERTIES TIMEOUT 120)
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/replay_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ReplayRecorder.cpp")
+    add_executable(replay_test
+        replay_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ReplayRecorder.cpp")
+    target_include_directories(replay_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(replay_test PRIVATE ksengine)
+    add_test(NAME replay_test COMMAND replay_test)
+endif()

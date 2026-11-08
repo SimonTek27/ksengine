@@ -167,10 +167,42 @@ private:
             return;
         }
         if (cmd.verb == "REPLAY" && !a.empty()) {
-            if (a[0] == "LOAD" && a.size() >= 2)
-                control.sendLine(loadReplay(a[1]) ? "OK REPLAY" : "ERR REPLAY");
-            else if (a[0] == "PLAY") { replay.startPlayback(); control.sendLine("OK PLAY"); }
-            else if (a[0] == "STOP") { replay.stopPlayback(); control.sendLine("OK STOP"); }
+            // GAP_MATRIX P0.5: load/play/stop plus the scrub and status a
+            // replay viewer needs. Playback drives the car through the loop,
+            // which polls isPlaying() every physics step.
+            std::string sub = a[0];
+            for (char& c : sub) c = (char)toupper((unsigned char)c);
+            if (sub == "LOAD" && a.size() >= 2)
+                control.sendLine(loadReplay(a[1])
+                                     ? "OK REPLAY " + std::to_string(replay.frameCount())
+                                     : std::string("ERR REPLAY"));
+            else if (sub == "PLAY") {
+                replay.startPlayback();
+                control.sendLine(replay.isPlaying() ? "OK PLAY" : "ERR PLAY");
+            } else if (sub == "STOP") {
+                replay.stopPlayback();
+                control.sendLine("OK STOP");
+            } else if (sub == "SEEK" && a.size() >= 2) {
+                replay.seekTo(std::strtof(a[1].c_str(), nullptr));
+                control.sendLine("OK SEEK " + std::to_string(replay.playbackTime()));
+            } else if (sub == "SPEED" && a.size() >= 2) {
+                replay.setPlaybackSpeed(std::strtof(a[1].c_str(), nullptr));
+                control.sendLine("OK SPEED");
+            } else if (sub == "STATUS") {
+                control.sendLine("REPLAY frames=" + std::to_string(replay.frameCount()) +
+                                 " time=" + std::to_string(replay.playbackTime()) +
+                                 " duration=" + std::to_string(replay.duration()) +
+                                 " playing=" + std::to_string(replay.isPlaying() ? 1 : 0) +
+                                 " recording=" + std::to_string(replay.isRecording() ? 1 : 0));
+            } else if (sub == "RECORD") {
+                replay.startRecording();
+                control.sendLine("OK RECORD");
+            } else if (sub == "SAVE" && a.size() >= 2) {
+                replay.stopRecording();
+                control.sendLine(replay.saveReplay(a[1]) ? "OK SAVE" : "ERR SAVE");
+            } else {
+                control.sendLine("ERR REPLAY");
+            }
             return;
         }
         if (cmd.verb == "RESULT") {

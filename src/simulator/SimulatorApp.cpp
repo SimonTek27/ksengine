@@ -1143,8 +1143,18 @@ static void initSimulation() {
     uiMenu->onNationalityInputRequested = []() {
         printf("Nationality picker requested\n");
     };
-    uiMenu->onLoadReplayRequested = []() {
-        printf("Load replay: not implemented yet.\n");
+    // GAP_MATRIX P0.5: the REPLAY page lists the recordings on disk and plays
+    // the chosen one; RECORD starts/stops a session recording, which the loop
+    // names and saves under replay/.
+    uiMenu->replayChoices = [sim = g_simulation.get()]() { return sim->replayChoices(); };
+    uiMenu->onReplayFileChosen = [sim = g_simulation.get()](const std::string& path) {
+        if (!sim->startReplayPlayback(path))
+            printf("Replay load failed: %s\n", path.c_str());
+    };
+    uiMenu->replayRecordingState = [sim = g_simulation.get()]() { return sim->replayRecording(); };
+    uiMenu->onRecordReplayRequested = [sim = g_simulation.get()]() {
+        const std::string saved = sim->toggleReplayRecording();
+        if (!saved.empty()) printf("Replay saved: %s\n", saved.c_str());
     };
     // Roadmap 1.3: RESULTS renders the live standings as menu rows.
     uiMenu->onShowResultsRequested = []() {

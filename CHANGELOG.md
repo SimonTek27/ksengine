@@ -9,6 +9,22 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Replay: registrazione e playback (GAP_MATRIX P0.5)**: `ReplayRecorder`
+  aveva caricamento, salvataggio e accessori di playback, ma `updatePlayback()`,
+  `seekTo()`, `seekProgress()` e `isFinished()` erano **dichiarati e mai
+  definiti**: nessuno poteva avanzare la testina e la classe non linkava appena
+  usata. Ora il clock è implementato (interpolazione per tempo, velocità
+  0..8x, fine registrazione con callback una sola volta) e il caricamento
+  rifiuta un file troncato invece di riempire il vettore con i byte del
+  header (`ReplayRecorder` controlla la dimensione del file contro il conteggio
+  dichiarato). Il loop guida l'auto dal replay (`updateReplayPlayback`):
+  posizione, rotazione, velocità, marcia e comandi vengono dal frame, quindi
+  input e passo fisico sono saltati per quello step e la camera segue senza
+  modifiche. Il menu REPLAY elenca i `.ksrep` trovati in `replay/` (con la riga
+  RECORD che avvia/ferma la registrazione, salvata come
+  `replay/session_NNN.ksrep`), la HUD mostra `REPLAY t / durata`, e la control
+  API espone `REPLAY LOAD/PLAY/STOP/SEEK/SPEED/STATUS/RECORD/SAVE`. `replay_test`
+  copre playhead, seek, callback di fine e file troncato.
 - **Finestra box in gara (`pitLaneOpen`)**: `updateGarageExit()` passava
   `pitLaneOpen = true` cablato, quindi il limite di corsia e il blocco di
   uscita dal box valevano anche sotto countdown e a gara finita. La regola ora

@@ -261,6 +261,12 @@ public:
     std::function<void()> onReturnToBoxRequested;
     std::function<void()> onLoadReplayRequested;
     std::function<void()> onRecordReplayRequested;
+    // GAP_MATRIX P0.5: the REPLAY page lists what the loop found on disk as
+    // (file name, path) and hands the path back; the menu never parses a file
+    // and never learns where recordings live beyond what it is given.
+    std::function<std::vector<std::pair<std::string, std::string>>()> replayChoices;
+    std::function<void(const std::string&)> onReplayFileChosen;
+    std::function<bool()> replayRecordingState;
     std::function<void(const std::string&)> onCarChosen;
     // Bodywork paint picked on the CARS page (rgb 0..1).
     std::function<void(float, float, float)> onPaintChosen;

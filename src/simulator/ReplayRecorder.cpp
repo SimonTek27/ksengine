@@ -74,24 +74,44 @@ bool ReplayRecorder::loadReplay(const std::string& filePath)
         return false;
     }
 
+    // The declared frame count is only a claim until the file is long enough to
+    // hold the frames: a truncated download or a killed writer used to resize
+    // the vector to the header's number and fill it with whatever fread left
+    // behind. Size the file first and trust the bytes, not the header.
+    constexpr long kHeaderBytes = 12;
+    const std::size_t kFrameBytes = sizeof(float) + sizeof(vec3) * 2 + sizeof(float) * 2 +
+                                    sizeof(int) + sizeof(float) * 3;
+    std::fseek(f, 0, SEEK_END);
+    const long fileBytes = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+
     uint32_t magic, version;
-    fread(&magic, 4, 1, f);
-    if (magic != REPLAY_MAGIC) {
+    if (std::fread(&magic, sizeof(magic), 1, f) != 1 || magic != REPLAY_MAGIC) {
         printf("ReplayRecorder: Invalid magic number\n");
         fclose(f);
         return false;
     }
 
-    fread(&version, 4, 1, f);
-    if (version != REPLAY_VERSION) {
+    if (std::fread(&version, sizeof(version), 1, f) != 1 || version != REPLAY_VERSION) {
         printf("ReplayRecorder: Unsupported version: %u\n", version);
         fclose(f);
         return false;
     }
 
-    uint32_t frameCount;
-    fread(&frameCount, 4, 1, f);
-    m_frames.resize(frameCount);
+    uint32_t frameCount = 0;
+    if (std::fread(&frameCount, sizeof(frameCount), 1, f) != 1) {
+        printf("ReplayRecorder: Truncated header: %s\n", filePath.c_str());
+        fclose(f);
+        return false;
+    }
+    if (fileBytes < kHeaderBytes ||
+        static_cast<std::size_t>(fileBytes - kHeaderBytes) != kFrameBytes * frameCount) {
+        printf("ReplayRecorder: Truncated replay: %s declares %u frames, file holds %ld bytes\n",
+               filePath.c_str(), frameCount, fileBytes);
+        fclose(f);
+        return false;
+    }
+    m_frames.assign(frameCount, ReplayFrame{});
 
     for (uint32_t i = 0; i < frameCount; ++i) {
         auto& f2 = m_frames[i];
@@ -107,6 +127,8 @@ bool ReplayRecorder::loadReplay(const std::string& filePath)
     }
 
     fclose(f);
+    m_playing = false;
+    m_playbackTime = 0;
     printf("ReplayRecorder: Loaded %u frames from %s\n", frameCount, filePath.c_str());
     return true;
 }
@@ -152,7 +174,6 @@ void ReplayRecorder::startPlayback()
     }
     m_playing = true;
     m_playbackTime = 0;
-    m_playbackIdx = 0;
     printf("ReplayRecorder: Playback started\n");
     if (onPlaybackStarted) onPlaybackStarted();
 }
@@ -168,13 +189,12 @@ void ReplayRecorder::stopPlayback()
 ReplayFrame ReplayRecorder::getPlaybackFrame() const
 {
     ReplayFrame result;
-    if (m_frames.empty() || !m_playing) return result;
+    // Deliberately not gated on m_playing: a paused player still shows the
+    // frame under the new playhead after a seek.
+    if (m_frames.empty()) return result;
 
-    float time = m_playbackTime;
-    int idx = m_playbackIdx;
-    while (idx < (int)m_frames.size() - 1 && m_frames[idx + 1].time <= time) {
-        idx++;
-    }
+    const float time = m_frames.front().time + m_playbackTime;
+    const int idx = indexForTime(time);
 
     if (idx >= (int)m_frames.size() - 1) {
         return m_frames.back();
@@ -209,6 +229,43 @@ float ReplayRecorder::playbackProgress() const
 {
     float dur = duration();
     return (dur > 0) ? (m_playbackTime / dur) : 0;
+}
+
+int ReplayRecorder::indexForTime(float time) const
+{
+    if (m_frames.size() < 2) return 0;
+    const auto it = std::upper_bound(m_frames.begin(), m_frames.end(), time,
+        [](float t, const ReplayFrame& fr) { return t < fr.time; });
+    const int idx = static_cast<int>(it - m_frames.begin()) - 1;
+    return std::clamp(idx, 0, static_cast<int>(m_frames.size()) - 1);
+}
+
+void ReplayRecorder::updatePlayback(float dt)
+{
+    if (!m_playing || m_frames.empty()) return;
+    if (dt > 0.0f) m_playbackTime += dt * m_playbackSpeed;
+    const float dur = duration();
+    if (m_playbackTime < dur) return;
+    m_playbackTime = dur;
+    m_playing = false;
+    printf("ReplayRecorder: Playback finished\n");
+    if (onPlaybackFinished) onPlaybackFinished();
+}
+
+void ReplayRecorder::seekTo(float timeSec)
+{
+    m_playbackTime = std::clamp(timeSec, 0.0f, duration());
+}
+
+void ReplayRecorder::seekProgress(float t01)
+{
+    seekTo(std::clamp(t01, 0.0f, 1.0f) * duration());
+}
+
+bool ReplayRecorder::isFinished() const
+{
+    if (m_frames.empty()) return true;
+    return m_playbackTime >= duration() - 0.0001f;
 }
 
 void ReplayRecorder::interpolateFrames(float time, ReplayFrame& out) const

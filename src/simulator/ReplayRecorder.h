@@ -47,15 +47,24 @@ public:
     void setPlaybackSpeed(float speed) { m_playbackSpeed = std::clamp(speed, 0.f, 8.f); }
     bool isPlaying() const { return m_playing; }
 
+    /** Seek inside the recording (0..duration). Seeking alone does not start
+     *  or stop playback: a paused player can be scrubbed and its frame read. */
     void seekTo(float timeSec);
     void seekProgress(float t01);
+    /** Advance the playhead by dt seconds of wall clock, scaled by
+     *  playbackSpeed. Stops itself and fires onPlaybackFinished once when the
+     *  recording runs out. No-op while not playing. */
     void updatePlayback(float dt);
+    /** True at (or past) the end of the recording, or when it is empty. */
     bool isFinished() const;
 
+    /** The interpolated frame at the current playhead. Also answers while
+     *  paused, so a seek can be inspected on screen before resuming. */
     ReplayFrame getPlaybackFrame() const;
     const std::vector<ReplayFrame>& frames() const { return m_frames; }
 
     int frameCount() const { return static_cast<int>(m_frames.size()); }
+    bool hasFrames() const { return !m_frames.empty(); }
     float duration() const;
     float playbackTime() const { return m_playbackTime; }
     float playbackProgress() const;
@@ -68,6 +77,9 @@ public:
 
 private:
     void interpolateFrames(float time, ReplayFrame& out) const;
+    /** Index of the last frame at or before `time` (absolute file time).
+     *  Frames are append-only, so their times are non-decreasing. */
+    int indexForTime(float time) const;
 
     bool m_recording = false;
     std::chrono::steady_clock::time_point m_recordStart;
@@ -76,9 +88,9 @@ private:
     int m_qualityLevel = 3;
 
     bool m_playing = false;
+    /** Playhead relative to the first frame's timestamp (0..duration). */
     float m_playbackTime = 0;
     float m_playbackSpeed = 1.0f;
-    int m_playbackIdx = 0;
 };
 
 } // namespace ks::sim

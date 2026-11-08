@@ -2463,6 +2463,11 @@ void SimulationLoop::syncUiFromVehicle() {
         // A layout the host announced but this copy lacks outranks the pit
         // labels: it is the reason this car is on a different track length.
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", m_layoutNotice.c_str());
+    } else if (m_features.replay.isPlaying()) {
+        // A replay is not a drive: say so, and where in the recording we are.
+        std::snprintf(s.statusText, sizeof(s.statusText), "REPLAY %.1f / %.1f s",
+                      static_cast<double>(m_features.replay.playbackTime()),
+                      static_cast<double>(m_features.replay.duration()));
     } else if (stranded)
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", recoveryLine);
     else if (pitServiceBusy())
@@ -3228,6 +3233,108 @@ void SimulationLoop::cycleUpgradeRow(int row) {
 
 // Multiplayer (roadmap 3.1). All three bodies are no-ops unless the build
 // carries HAS_KSNET and the transport is actually running.
+// --- GAP_MATRIX P0.5: replay record / playback ----------------------------
+// ReplayRecorder is pure data: frames, playhead, clock. The four entry points
+// below are what makes it a feature — the loop names and saves the files,
+// drives the car from the playhead while it runs, and lists what is on disk.
+
+bool SimulationLoop::updateReplayPlayback(float dt) {
+    ReplayRecorder& rec = m_features.replay;
+    if (!rec.isPlaying()) return false;
+    rec.updatePlayback(dt);
+    if (!rec.isPlaying()) return false; // the recording ran out on this step
+    const ReplayFrame f = rec.getPlaybackFrame();
+#if HAS_VEHICLE_SIM
+    if (m_vehicle) {
+        ks::physics::SimulationState& s = m_vehicle->state();
+        s.position = {f.position.x, f.position.y, f.position.z};
+        s.rotation = {f.rotation.x, f.rotation.y, f.rotation.z};
+        s.heading = f.rotation.y; // same axis the net sync writes
+        // Velocity is not in the file: the pose is authoritative, and a stale
+        // speed would drag the camera and the damage model along with it.
+        s.velocity = {0.0f, 0.0f, 0.0f};
+        s.speed = f.speed;
+        s.rpm = f.rpm;
+        s.gear = f.gear;
+        s.throttle = f.throttle;
+        s.brake = f.brake;
+        s.steering = f.steering;
+    }
+#endif
+    return true;
+}
+
+void SimulationLoop::recordReplayStep() {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle || !m_features.replay.isRecording()) return;
+    if (m_features.replay.isPlaying()) return; // never record a replay into itself
+    const auto& s = m_vehicle->getState();
+    m_features.replay.recordFrame(s, static_cast<float>(s.throttle),
+                                  static_cast<float>(s.brake),
+                                  static_cast<float>(s.steering));
+#endif
+}
+
+bool SimulationLoop::startReplayPlayback(const std::string& path) {
+    ReplayRecorder& rec = m_features.replay;
+    if (rec.isRecording()) toggleReplayRecording(); // the file is the new truth
+    if (!rec.loadReplay(path)) return false;
+    rec.startPlayback();
+    m_ui.menu().setVisible(false);
+    printf("Replay: playing %s (%d frames, %.1f s)\n", path.c_str(), rec.frameCount(),
+           static_cast<double>(rec.duration()));
+    return true;
+}
+
+void SimulationLoop::stopReplayPlayback() { m_features.replay.stopPlayback(); }
+
+std::vector<std::string> SimulationLoop::replayFiles() const {
+    namespace fs = std::filesystem;
+    std::vector<std::string> found;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator("replay", ec)) {
+        if (ec) break;
+        std::error_code typeEc;
+        if (entry.is_regular_file(typeEc) && entry.path().extension() == ".ksrep")
+            found.push_back(entry.path().string());
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
+std::vector<std::pair<std::string, std::string>> SimulationLoop::replayChoices() const {
+    namespace fs = std::filesystem;
+    std::vector<std::pair<std::string, std::string>> rows;
+    for (const auto& file : replayFiles())
+        rows.emplace_back(fs::path(file).filename().string(), file);
+    return rows;
+}
+
+std::string SimulationLoop::toggleReplayRecording() {
+    ReplayRecorder& rec = m_features.replay;
+    if (!rec.isRecording()) {
+        if (rec.isPlaying()) rec.stopPlayback();
+        rec.startRecording();
+        m_ui.chat().addLine("Recording started");
+        return {};
+    }
+    rec.stopRecording();
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::create_directories("replay", ec);
+    for (int n = 1; n < 1000; ++n) {
+        char name[64];
+        std::snprintf(name, sizeof(name), "replay/session_%03d.ksrep", n);
+        if (fs::exists(name, ec)) continue;
+        if (!rec.saveReplay(name)) return {};
+        printf("Replay: saved %s (%d frames, %.1f s)\n", name, rec.frameCount(),
+               static_cast<double>(rec.duration()));
+        m_ui.chat().addLine(std::string("Replay saved: ") + name);
+        return name;
+    }
+    return {};
+}
+
 void SimulationLoop::broadcastLocalCarState() {
 #if HAS_KSNET
     if (!m_network || !m_network->isHosting() || !m_multiCar) return;
@@ -3399,18 +3506,27 @@ void SimulationLoop::tick() {
     {
         PROFILE_SECTION("physics");
         while (!paused && m_simAccumulator >= m_physicsDt) {
-            applyInput();
-            // Roadmap 2.7: garage exit / pit entry runs before the physics step
-            // so its hold, snap and pit limiter win over the raw driver input
-            // for this step (updatePitRepair runs after it, on the same phase).
-            updateGarageExit(static_cast<float>(m_physicsDt));
+            // Replay playback owns the car while it runs: the recorded pose and
+            // controls are authoritative, so the driver's input, the garage
+            // hold and the physics step are skipped for this one step.
+            const bool replayDrives = updateReplayPlayback(static_cast<float>(m_physicsDt));
+            if (!replayDrives) {
+                applyInput();
+                // Roadmap 2.7: garage exit / pit entry runs before the physics step
+                // so its hold, snap and pit limiter win over the raw driver input
+                // for this step (updatePitRepair runs after it, on the same phase).
+                updateGarageExit(static_cast<float>(m_physicsDt));
 #if HAS_VEHICLE_SIM
-            if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
+                if (m_vehicle) m_vehicle->updatePhysics(m_physicsDt);
 #endif
-            // Roadmap 2.7: box service at the physics rate, so the control hold
-            // (PitLaneRepair::holdCar) wins over the driver's next input instead
-            // of being overwritten by applyInput() in the same step.
-            updatePitRepair(static_cast<float>(m_physicsDt));
+                // Roadmap 2.7: box service at the physics rate, so the control hold
+                // (PitLaneRepair::holdCar) wins over the driver's next input instead
+                // of being overwritten by applyInput() in the same step.
+                updatePitRepair(static_cast<float>(m_physicsDt));
+            }
+            // A running recording samples the same clock, never while a replay
+            // is driving (the replay is the truth for that step).
+            recordReplayStep();
             // Trackside marshals watch the same field on the same clock: an
             // incident raised by this step is flagged before the next frame.
             updateTracksidePosts(static_cast<float>(m_physicsDt));

@@ -30,6 +30,7 @@ di fase richiedono anche il test manuale indicato.
 | Multiplayer LAN e lobby | ✅ | `ksnet`, sync, lobby; secure-connect, reconnect client e flag chiave/token sull'host headless chiusi in 3.2 (evidence `test_multiplayer` + `ks_server_smoke`). |
 | Vertical slice menu, binding e telemetria | ✅ | Selezione auto/pista, sessioni, HUD. |
 | Pipeline contenuti auto AC (`ks_cartool`) | 🟡 | `convert`/`verify`/`apply`/`prune`/`pack` (commit `a617f7c1`, 2026-10-30), vedi [WIREUP_GAPS.md](WIREUP_GAPS.md); il converter rilegge ogni documento col parser del runtime prima di scriverlo, e i 13 `data/data.json` installati sono JSON valido (serbatoio reale da `MAX_FUEL`). |
+| Replay (registrazione e playback) | ✅ | `ReplayRecorder` con clock, seek e velocità; il loop guida l'auto dal frame (`updateReplayPlayback`), menu REPLAY con i `.ksrep` di `replay/`, HUD `REPLAY t / durata`, control API `REPLAY *`; evidence `replay_test`. |
 | UX racing (box/team/upgrade) | 🟡 | Codice 2.7–2.10 cablato; gate umani aperti (vedi GATE_PLAN_WINDOWS). |
 | Accettazione 2C | 🟡 | **2.11**, **2.12** e **2.14** chiusi 2026-10-14; restano gate umani G1–G3. |
 | Fase 3 — Pro depth | 🟡 | Avviata 2026-10-20; 3.2 chiusa, 3.3 in corso. Dettaglio: [PHASE3_PLAN.md](PHASE3_PLAN.md). |

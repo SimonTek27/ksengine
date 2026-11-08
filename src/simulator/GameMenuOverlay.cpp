@@ -464,9 +464,31 @@ void GameMenuOverlay::buildPitStrategyMenu()
 void GameMenuOverlay::buildReplayMenu()
 {
     m_items.clear();
-    m_items.push_back({ "LOAD", "Open a saved session",
-        [this]() { if (onLoadReplayRequested) onLoadReplayRequested(); },
-        false, true, "download" });
+    // GAP_MATRIX P0.5: this page used to hold a LOAD row with nothing behind
+    // it. It now lists the recordings the loop found under replay/ and hands
+    // the chosen path back, plus the record toggle the loop owns.
+    int listed = 0;
+    if (replayChoices) {
+        for (const auto& entry : replayChoices()) {
+            const std::string label = entry.first;
+            const std::string path = entry.second;
+            m_items.push_back({ label, "Play this recording",
+                [this, path]() {
+                    if (onReplayFileChosen) onReplayFileChosen(path);
+                    goBack();
+                }, false, true, "download" });
+            ++listed;
+        }
+    }
+    if (listed == 0)
+        m_items.push_back({ "NO REPLAYS", "Record a session first", nullptr, true });
+    const bool recording = replayRecordingState && replayRecordingState();
+    m_items.push_back({ recording ? "STOP RECORDING" : "RECORD",
+        recording ? "Stop and save to replay/" : "Record this session to replay/",
+        [this]() {
+            if (onRecordReplayRequested) onRecordReplayRequested();
+            m_menuDirty = true; // the label flips with the recorder state
+        }, false, true, "drive" });
     m_items.push_back({ "BACK", "Return", [this]() { goBack(); }, false, true, "back" });
 }
 

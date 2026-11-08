@@ -230,6 +230,22 @@ public:
     // Starts discovery + the external control API and wires the FeatureHub
     // callbacks back into this loop (see SimulationLoop.cpp).
     void startFeatureServices(bool hostAnnounce = false);
+    // Replay (GAP_MATRIX P0.5): record the session to replay/<name>.ksrep and
+    // play it back. While a recording plays it owns the car (see
+    // updateReplayPlayback): the recorded pose and controls are authoritative,
+    // so the driver's input and the physics step are skipped instead of
+    // fighting them. The camera is unchanged — it already follows the car.
+    bool startReplayPlayback(const std::string& path);
+    void stopReplayPlayback();
+    bool replayPlaying() const { return m_features.replay.isPlaying(); }
+    bool replayRecording() const { return m_features.replay.isRecording(); }
+    /** Recordings found in replay/ (.ksrep), sorted by path. */
+    std::vector<std::string> replayFiles() const;
+    /** (file name, path) pairs for the REPLAY menu page. */
+    std::vector<std::pair<std::string, std::string>> replayChoices() const;
+    /** Starts recording, or stops and saves the current one. Returns the file
+     *  written by a stop, empty otherwise. */
+    std::string toggleReplayRecording();
 
     // Roadmap 2.7: pit strategy + explicit box-service request. The plan
     // itself queues nothing (see PitStrategyBridge.h): requestPitService is
@@ -406,6 +422,11 @@ public:
 
 private:
     void applyInput();
+    /** Feeds one physics step from the playhead. Returns true when the replay
+     *  drove the car this step, so the caller skips input and physics. */
+    bool updateReplayPlayback(float dt);
+    /** Samples the running recording at the physics rate (no-op otherwise). */
+    void recordReplayStep();
     void render(float dt = 1.0f / 60.0f);
     void updateCamera(float dt);
     void updateAndDrawParticles(float dt);
@@ -614,6 +635,9 @@ private:
     bool m_requestLeaveGarage = false;
     bool m_requestReturnBox = false;
     std::string m_garageStatus;
+    // Replay: the recorder owns its clock and playhead, so the loop keeps no
+    // replay state of its own — only the question "who drives the car this
+    // step", which m_features.replay.isPlaying() answers.
 
     // Roadmap 2.7 — multi-car pit-lane order (PitLaneQueue.h): with one car
     // on track nothing ever blocks, so the behaviour is unchanged; with a
