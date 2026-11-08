@@ -67,6 +67,22 @@ foreach(_rel ${_required})
     endif()
 endforeach()
 
+# A preset is a colour transform plus its .lut strip: when the source ships a
+# strip, the tree must carry both halves. Names are matched, not contents, so a
+# preset that loses its cube (or a strip that loses its preset) is caught here
+# rather than showing up as a different image.
+if(DEFINED SRC AND EXISTS "${SRC}/system/ppfilters")
+    file(GLOB _luts RELATIVE "${SRC}/system/ppfilters" "${SRC}/system/ppfilters/*.lut")
+    foreach(_lut ${_luts})
+        get_filename_component(_stem "${_lut}" NAME_WE)
+        foreach(_need "${_stem}.json" "${_lut}")
+            if(NOT EXISTS "${ROOT}/system/ppfilters/${_need}")
+                list(APPEND _missing "system/ppfilters/${_need}")
+            endif()
+        endforeach()
+    endforeach()
+endif()
+
 if(_missing)
     string(REPLACE ";" ", " _list "${_missing}")
     message(FATAL_ERROR "layout incomplete in ${ROOT}: missing ${_list}")
