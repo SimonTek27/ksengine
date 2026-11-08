@@ -389,12 +389,12 @@ void testDx10() {
 
     // An unsupported DXGI id must be reported, never silently decoded.
     DdsSpec bad = spec;
-    bad.dx10 = {98, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
-                1, 0, 0, 0, 0, 0, 0, 0}; // DXGI_FORMAT_BC7_UNORM
+    bad.dx10 = {95, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0,
+                1, 0, 0, 0, 0, 0, 0, 0}; // DXGI_FORMAT_BC6H_UF16
     const auto bad_bytes = buildDds(bad);
     const DdsInfo bad_info = readDdsInfo(asString(bad_bytes));
     KS_CHECK(!bad_info.ok());
-    KS_CHECK(bad_info.error.find("98") != std::string::npos);
+    KS_CHECK(bad_info.error.find("95") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +452,97 @@ void testMipChainReadsMip0() {
     KS_CHECK(decodeDds(asString(bytes)).ok());
 }
 
+// ---------------------------------------------------------------------------
+// BC7: a mode 6 block written by hand, so every decoded value is expected
+// ---------------------------------------------------------------------------
+
+// Packs fields the way BC7 does: from the low bit upwards, straddling bytes.
+struct BitWriter {
+    std::vector<std::uint8_t> bytes;
+    std::uint32_t bit = 0;
+
+    void write(std::uint32_t value, int count) {
+        for (int i = 0; i < count; ++i) {
+            if (bit / 8 >= bytes.size()) bytes.push_back(0);
+            if ((value >> i) & 1u)
+                bytes[bit / 8] |= static_cast<std::uint8_t>(1u << (bit % 8));
+            ++bit;
+        }
+    }
+};
+
+void testBc7Mode6() {
+    DdsSpec spec;
+    spec.width = 4;
+    spec.height = 4;
+    spec.header_flags |= kLinearSize;
+    spec.pitch_or_linear = 16;
+    spec.pf_flags = kFourCcFlag;
+    spec.fourcc = fourCc('D', 'X', '1', '0');
+    // DDS_HEADER_DXT10: DXGI_FORMAT 98 (BC7_UNORM), 3D dimension TEXTURE2D,
+    // no misc flags, one array slice, no alpha mode.
+    putU32(spec.dx10, 98);
+    putU32(spec.dx10, 3);
+    putU32(spec.dx10, 0);
+    putU32(spec.dx10, 1);
+    putU32(spec.dx10, 0);
+
+    // Mode 6: seven mode bits, then component-major endpoints (endpoint 0 =
+    // black, endpoint 1 = 127 with a parity bit, i.e. 255), two parity bits,
+    // then sixteen 4-bit indices whose first one is stored in 3 bits.
+    BitWriter block;
+    block.write(1u << 6, 7);
+    for (int c = 0; c < 4; ++c) {
+        block.write(0, 7);
+        block.write(127, 7);
+    }
+    block.write(0, 1); // endpoint 0 parity
+    block.write(1, 1); // endpoint 1 parity
+    block.write(0, 3); // texel 0 index (the fix-up one)
+    for (int i = 1; i < 16; ++i) block.write((i % 2) ? 15u : 0u, 4);
+    KS_CHECK(block.bytes.size() == 16);
+    spec.pixels = block.bytes;
+
+    const auto bytes = buildDds(spec);
+    const DdsInfo info = readDdsInfo(asString(bytes));
+    KS_CHECK(info.ok());
+    KS_CHECK(info.format == DdsFormat::bc7);
+    KS_CHECK(info.compressed());
+
+    const DdsImage image = decodeDds(asString(bytes));
+    KS_CHECK(image.ok());
+    if (image.rgba.size() == 64) {
+        // Index 0 selects endpoint 0, whose alpha is 0 too.
+        const std::uint8_t* p0 = pixel(image, 0, 0);
+        if (p0) {
+            KS_CHECK(p0[0] == 0);
+            KS_CHECK(p0[1] == 0);
+            KS_CHECK(p0[2] == 0);
+            KS_CHECK(p0[3] == 0);
+        }
+        // Index 15 is the far endpoint: white, opaque.
+        const std::uint8_t* p1 = pixel(image, 1, 0);
+        if (p1) {
+            KS_CHECK(p1[0] == 255);
+            KS_CHECK(p1[1] == 255);
+            KS_CHECK(p1[2] == 255);
+            KS_CHECK(p1[3] == 255);
+        }
+        const std::uint8_t* p12 = pixel(image, 0, 3);
+        if (p12) KS_CHECK(p12[0] == 0 && p12[3] == 0);
+        const std::uint8_t* p15 = pixel(image, 3, 3);
+        if (p15) KS_CHECK(p15[0] == 255 && p15[3] == 255);
+    }
+
+    // A BC7 header with a payload too short to hold its block is rejected, not
+    // decoded from whatever happens to follow the header.
+    DdsSpec truncated = spec;
+    truncated.drop_payload_bytes = 8;
+    const DdsImage bad = decodeDds(asString(buildDds(truncated)));
+    KS_CHECK(!bad.ok());
+    KS_CHECK(bad.rgba.empty());
+}
+
 void testRejection() { 
     // Wrong magic.
     const std::string not_dds = "this is not a dds file at all, honestly";
@@ -507,6 +598,7 @@ int main() {
     testDx10();
     testLuminance();
     testMipChainReadsMip0();
+    testBc7Mode6();
     testRejection();
     return KS_TEST_RESULT("dds_test");
 }

@@ -173,6 +173,384 @@ std::uint32_t readPixelAt(const std::uint8_t* base, std::size_t offset,
     }
 }
 
+// ---------------------------------------------------------------------------
+// BC7 (DXGI_FORMAT_BC7_UNORM / _SRGB, 98/99): 16 bytes per 4x4 block, eight
+// modes that differ in endpoint precision, partitioning and index layout.
+//
+// The partition, anchor and weight tables are the BPTC specification ones; the
+// per-mode field order below follows Richard Geldreich's bc7decomp (public
+// domain / MIT), because the fields are not read in one common order across
+// modes and hand-rolling that order is how decoders quietly swap colour planes.
+constexpr std::uint8_t kBc7Partition2[64][16] = {
+    {0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1},
+    {0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1},
+    {0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1},
+    {0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 1},
+    {0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1},
+    {0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1},
+    {0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1},
+    {0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1, 1},
+    {0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0},
+    {0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0},
+    {0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0},
+    {0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 1},
+    {0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0},
+    {0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0, 0},
+    {0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0},
+    {0, 0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 0, 0},
+    {0, 0, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0},
+    {0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+    {0, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0},
+    {0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0},
+    {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1},
+    {0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1},
+    {0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0},
+    {0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0},
+    {0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0},
+    {0, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0},
+    {0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1},
+    {0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1, 0, 1},
+    {0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0},
+    {0, 0, 0, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 0, 0, 0},
+    {0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1, 0, 0},
+    {0, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0},
+    {0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0},
+    {0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1},
+    {0, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1},
+    {0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0},
+    {0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0},
+    {0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0},
+    {0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0},
+    {0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 0, 0},
+    {0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1},
+    {0, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1},
+    {0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0},
+    {0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 0},
+    {0, 1, 1, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1},
+    {0, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 1},
+    {0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1},
+    {0, 0, 0, 1, 1, 0, 0, 0, 1, 1, 1, 0, 0, 1, 1, 1},
+    {0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1},
+    {0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
+    {0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0},
+    {0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1},
+};
+
+constexpr std::uint8_t kBc7Partition3[64][16] = {
+    {0, 0, 1, 1, 0, 0, 1, 1, 0, 2, 2, 1, 2, 2, 2, 2},
+    {0, 0, 0, 1, 0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 2, 1},
+    {0, 0, 0, 0, 2, 0, 0, 1, 2, 2, 1, 1, 2, 2, 1, 1},
+    {0, 2, 2, 2, 0, 0, 2, 2, 0, 0, 1, 1, 0, 1, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 1, 1, 2, 2},
+    {0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 2, 2, 0, 0, 2, 2},
+    {0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1},
+    {0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1},
+    {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2},
+    {0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2},
+    {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2},
+    {0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2},
+    {0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2},
+    {0, 1, 2, 2, 0, 1, 2, 2, 0, 1, 2, 2, 0, 1, 2, 2},
+    {0, 0, 1, 1, 0, 1, 1, 2, 1, 1, 2, 2, 1, 2, 2, 2},
+    {0, 0, 1, 1, 2, 0, 0, 1, 2, 2, 0, 0, 2, 2, 2, 0},
+    {0, 0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 2, 1, 1, 2, 2},
+    {0, 1, 1, 1, 0, 0, 1, 1, 2, 0, 0, 1, 2, 2, 0, 0},
+    {0, 0, 0, 0, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2},
+    {0, 0, 2, 2, 0, 0, 2, 2, 0, 0, 2, 2, 1, 1, 1, 1},
+    {0, 1, 1, 1, 0, 1, 1, 1, 0, 2, 2, 2, 0, 2, 2, 2},
+    {0, 0, 0, 1, 0, 0, 0, 1, 2, 2, 2, 1, 2, 2, 2, 1},
+    {0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 2, 2, 0, 1, 2, 2},
+    {0, 0, 0, 0, 1, 1, 0, 0, 2, 2, 1, 0, 2, 2, 1, 0},
+    {0, 1, 2, 2, 0, 1, 2, 2, 0, 0, 1, 1, 0, 0, 0, 0},
+    {0, 0, 1, 2, 0, 0, 1, 2, 1, 1, 2, 2, 2, 2, 2, 2},
+    {0, 1, 1, 0, 1, 2, 2, 1, 1, 2, 2, 1, 0, 1, 1, 0},
+    {0, 0, 0, 0, 0, 1, 1, 0, 1, 2, 2, 1, 1, 2, 2, 1},
+    {0, 0, 2, 2, 1, 1, 0, 2, 1, 1, 0, 2, 0, 0, 2, 2},
+    {0, 1, 1, 0, 0, 1, 1, 0, 2, 0, 0, 2, 2, 2, 2, 2},
+    {0, 0, 1, 1, 0, 1, 2, 2, 0, 1, 2, 2, 0, 0, 1, 1},
+    {0, 0, 0, 0, 2, 0, 0, 0, 2, 2, 1, 1, 2, 2, 2, 1},
+    {0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 2, 2, 1, 2, 2, 2},
+    {0, 2, 2, 2, 0, 0, 2, 2, 0, 0, 1, 2, 0, 0, 1, 1},
+    {0, 0, 1, 1, 0, 0, 1, 2, 0, 0, 2, 2, 0, 2, 2, 2},
+    {0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0, 0, 1, 2, 0},
+    {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 0},
+    {0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0},
+    {0, 1, 2, 0, 2, 0, 1, 2, 1, 2, 0, 1, 0, 1, 2, 0},
+    {0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2, 0, 0, 1, 1},
+    {0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 0, 0, 0, 0, 1, 1},
+    {0, 1, 0, 1, 0, 1, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2},
+    {0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 2, 1, 2, 1, 2, 1},
+    {0, 0, 2, 2, 1, 1, 2, 2, 0, 0, 2, 2, 1, 1, 2, 2},
+    {0, 0, 2, 2, 0, 0, 1, 1, 0, 0, 2, 2, 0, 0, 1, 1},
+    {0, 2, 2, 0, 1, 2, 2, 1, 0, 2, 2, 0, 1, 2, 2, 1},
+    {0, 1, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 0, 1, 0, 1},
+    {0, 0, 0, 0, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1, 2, 1},
+    {0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 2, 2, 2, 2},
+    {0, 2, 2, 2, 0, 1, 1, 1, 0, 2, 2, 2, 0, 1, 1, 1},
+    {0, 0, 0, 2, 1, 1, 1, 2, 0, 0, 0, 2, 1, 1, 1, 2},
+    {0, 0, 0, 0, 2, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1, 2},
+    {0, 2, 2, 2, 0, 1, 1, 1, 0, 1, 1, 1, 0, 2, 2, 2},
+    {0, 0, 0, 2, 1, 1, 1, 2, 1, 1, 1, 2, 0, 0, 0, 2},
+    {0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 2, 2, 2, 2},
+    {0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 2, 2, 1, 1, 2},
+    {0, 1, 1, 0, 0, 1, 1, 0, 2, 2, 2, 2, 2, 2, 2, 2},
+    {0, 0, 2, 2, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 2, 2},
+    {0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2, 0, 0, 2, 2},
+    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 2},
+    {0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 1},
+    {0, 2, 2, 2, 1, 2, 2, 2, 0, 2, 2, 2, 1, 2, 2, 2},
+    {0, 1, 0, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2},
+    {0, 1, 1, 1, 2, 0, 1, 1, 2, 2, 0, 1, 2, 2, 2, 0},
+};
+
+// Texel whose index is stored one bit short (the "fix-up" index) per
+// partition set: texel 0 always is, plus one per non-zero subset.
+constexpr std::uint8_t kBc7AnchorSecond[64] = {
+    15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15,
+    15, 2, 8, 2, 2, 8, 8, 15, 2, 8, 2, 2, 8, 8, 2, 2,
+    15, 15, 6, 8, 2, 8, 15, 15, 2, 8, 2, 2, 2, 15, 15, 6,
+    6, 2, 6, 8, 15, 15, 2, 2, 15, 15, 15, 15, 15, 2, 2, 15,
+};
+
+constexpr std::uint8_t kBc7AnchorThird1[64] = {
+    3, 3, 15, 15, 8, 3, 15, 15, 8, 8, 6, 6, 6, 5, 3, 3,
+    3, 3, 8, 15, 3, 3, 6, 10, 5, 8, 8, 6, 8, 5, 15, 15,
+    8, 15, 3, 5, 6, 10, 8, 15, 15, 3, 15, 5, 15, 15, 15, 15,
+    3, 15, 5, 5, 5, 8, 5, 10, 5, 10, 8, 13, 15, 12, 3, 3,
+};
+
+constexpr std::uint8_t kBc7AnchorThird2[64] = {
+    15, 8, 8, 3, 15, 15, 3, 8, 15, 15, 15, 15, 15, 15, 15, 8,
+    15, 8, 15, 3, 15, 8, 15, 8, 3, 15, 6, 10, 15, 15, 10, 8,
+    15, 3, 15, 10, 10, 8, 9, 10, 6, 15, 8, 15, 3, 6, 6, 8,
+    15, 3, 15, 15, 15, 15, 15, 15, 15, 15, 15, 15, 3, 15, 15, 8,
+};
+
+constexpr std::uint8_t kBc7Weights2[4] = {0, 21, 43, 64};
+constexpr std::uint8_t kBc7Weights3[8] = {0, 9, 18, 27, 37, 46, 55, 64};
+constexpr std::uint8_t kBc7Weights4[16] = {0,  4,  9,  13, 17, 21, 26, 30,
+                                           34, 38, 43, 47, 51, 55, 60, 64};
+
+// Little-endian bit cursor: BC7 packs each field starting at the low bit of the
+// block and continuing upwards, so a field can straddle a byte boundary.
+struct Bc7Bits {
+    const std::uint8_t* bytes;
+    std::uint32_t offset = 0;
+
+    std::uint32_t read(std::uint32_t count) {
+        std::uint32_t value = 0;
+        for (std::uint32_t done = 0; done < count;) {
+            const std::uint32_t inByte = offset & 7u;
+            const std::uint32_t take = std::min(count - done, 8u - inByte);
+            value |= ((bytes[offset >> 3] >> inByte) & ((1u << take) - 1u)) << done;
+            done += take;
+            offset += take;
+        }
+        return value;
+    }
+};
+
+// BPTC's "unquantize": fold in the parity bit when the mode has one, then
+// stretch the value to 8 bits by replicating its most significant bits.
+std::uint32_t bc7Expand(std::uint32_t value, std::uint32_t bits, int pbit) {
+    if (pbit >= 0) {
+        value = (value << 1) | static_cast<std::uint32_t>(pbit);
+        ++bits;
+    }
+    const std::uint32_t shifted = value << (8 - bits);
+    return (shifted | (shifted >> bits)) & 0xFFu;
+}
+
+std::uint8_t bc7Interpolate(std::uint32_t low, std::uint32_t high,
+                            const std::uint8_t* weights, std::uint32_t index) {
+    const std::uint32_t w = weights[index];
+    return static_cast<std::uint8_t>((low * (64 - w) + high * w + 32) >> 6);
+}
+
+// Modes 0/2 (three subsets) and 1/3/7 (two subsets) share one layout: the
+// partition, then every endpoint component-major, the parity bits, the indices.
+bool bc7DecodePartitioned(std::uint32_t mode, const std::uint8_t* block,
+                          std::uint8_t out[16][4]) {
+    const bool three = (mode == 0 || mode == 2);
+    const std::uint32_t subsets = three ? 3u : 2u;
+    const std::uint32_t endpointCount = subsets * 2u;
+    const std::uint32_t comps = (mode == 7) ? 4u : 3u;
+    const std::uint32_t weightBits = (mode == 0 || mode == 1) ? 3u : 2u;
+    const std::uint32_t endpointBits =
+        (mode == 0) ? 4u : (mode == 1) ? 6u : (mode == 2) ? 5u : (mode == 3) ? 7u : 5u;
+    const std::uint32_t pbitCount =
+        (mode == 1) ? 2u : (mode == 0) ? 6u : (mode == 3 || mode == 7) ? 4u : 0u;
+
+    Bc7Bits bits{block};
+    if (bits.read(mode + 1) != (1u << mode)) return false;
+    const std::uint32_t partition = bits.read(mode == 0 ? 4u : 6u);
+
+    std::uint32_t endpoints[6][4] = {};
+    for (std::uint32_t c = 0; c < comps; ++c)
+        for (std::uint32_t e = 0; e < endpointCount; ++e)
+            endpoints[e][c] = bits.read(endpointBits);
+
+    std::uint32_t pbits[6] = {0, 0, 0, 0, 0, 0};
+    for (std::uint32_t p = 0; p < pbitCount; ++p) pbits[p] = bits.read(1);
+
+    std::uint32_t index[16] = {};
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        bool anchor = i == 0;
+        if (three) {
+            anchor = anchor || i == kBc7AnchorThird1[partition] ||
+                     i == kBc7AnchorThird2[partition];
+        } else {
+            anchor = anchor || i == kBc7AnchorSecond[partition];
+        }
+        index[i] = bits.read(anchor ? weightBits - 1u : weightBits);
+    }
+
+    for (std::uint32_t e = 0; e < endpointCount; ++e) {
+        // Mode 1 shares one parity bit per subset, the rest per endpoint.
+        const int pbit = pbitCount == 0
+                             ? -1
+                             : (mode == 1 ? static_cast<int>(pbits[e >> 1])
+                                          : static_cast<int>(pbits[e]));
+        for (std::uint32_t c = 0; c < 4; ++c) {
+            endpoints[e][c] = c < comps ? bc7Expand(endpoints[e][c], endpointBits, pbit)
+                                        : 255u;
+        }
+    }
+
+    const std::uint8_t* weights = weightBits == 3 ? kBc7Weights3 : kBc7Weights2;
+    const std::uint32_t weightCount = 1u << weightBits;
+    std::uint8_t palette[3][8][4];
+    for (std::uint32_t s = 0; s < subsets; ++s)
+        for (std::uint32_t w = 0; w < weightCount; ++w)
+            for (std::uint32_t c = 0; c < 4; ++c)
+                palette[s][w][c] = bc7Interpolate(endpoints[s * 2][c],
+                                                  endpoints[s * 2 + 1][c], weights, w);
+
+    const std::uint8_t* table = three ? &kBc7Partition3[0][0] : &kBc7Partition2[0][0];
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        const std::uint32_t subset = table[partition * 16u + i];
+        for (std::uint32_t c = 0; c < 4; ++c) out[i][c] = palette[subset][index[i]][c];
+    }
+    return true;
+}
+
+// Modes 4/5 (one subset, dual plane): colour and alpha carry separate index
+// sets, and the index-selection bit says which set drives which.
+bool bc7DecodeDualPlane(std::uint32_t mode, const std::uint8_t* block,
+                        std::uint8_t out[16][4]) {
+    const std::uint32_t colourBits = (mode == 4) ? 5u : 7u;
+    const std::uint32_t alphaEndpointBits = (mode == 4) ? 6u : 8u;
+    const std::uint32_t weightBits = 2u;
+    const std::uint32_t alphaWeightBits = (mode == 4) ? 3u : 2u;
+
+    Bc7Bits bits{block};
+    if (bits.read(mode + 1) != (1u << mode)) return false;
+    const std::uint32_t rotation = bits.read(2);
+    const std::uint32_t indexMode = (mode == 4) ? bits.read(1) : 0u;
+
+    std::uint32_t endpoints[2][4] = {};
+    for (std::uint32_t c = 0; c < 4; ++c)
+        for (std::uint32_t e = 0; e < 2; ++e)
+            endpoints[e][c] = bits.read(c == 3 ? alphaEndpointBits : colourBits);
+
+    // The shorter set is always stored first; which plane it drives is what the
+    // index-selection bit decides.
+    std::uint32_t colourIndex[16] = {};
+    std::uint32_t alphaIndex[16] = {};
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        const std::uint32_t v = bits.read(i == 0 ? weightBits - 1u : weightBits);
+        (indexMode ? alphaIndex : colourIndex)[i] = v;
+    }
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        const std::uint32_t v =
+            bits.read(i == 0 ? alphaWeightBits - 1u : alphaWeightBits);
+        (indexMode ? colourIndex : alphaIndex)[i] = v;
+    }
+
+    for (std::uint32_t e = 0; e < 2; ++e) {
+        for (std::uint32_t c = 0; c < 3; ++c)
+            endpoints[e][c] = bc7Expand(endpoints[e][c], colourBits, -1);
+        endpoints[e][3] = bc7Expand(endpoints[e][3], alphaEndpointBits, -1);
+    }
+
+    std::uint8_t palette[8][4] = {};
+    for (std::uint32_t w = 0; w < (1u << weightBits); ++w)
+        for (std::uint32_t c = 0; c < 3; ++c)
+            palette[w][c] = bc7Interpolate(endpoints[0][c], endpoints[1][c],
+                                           kBc7Weights2, w);
+    for (std::uint32_t w = 0; w < (1u << alphaWeightBits); ++w)
+        palette[w][3] = bc7Interpolate(endpoints[0][3], endpoints[1][3],
+                                       alphaWeightBits == 3 ? kBc7Weights3
+                                                            : kBc7Weights2,
+                                       w);
+
+    for (std::uint32_t i = 0; i < 16; ++i) {
+        for (std::uint32_t c = 0; c < 4; ++c) out[i][c] = palette[colourIndex[i]][c];
+        out[i][3] = palette[alphaIndex[i]][3];
+        // A rotation makes one component scalar and frees the alpha slot for it.
+        if (rotation >= 1) std::swap(out[i][3], out[i][rotation - 1]);
+    }
+    return true;
+}
+
+// Mode 6: one subset, 7-bit components, one parity bit per endpoint, 4-bit
+// indices. Stored component-major like the partitioned modes.
+bool bc7DecodeSingle(const std::uint8_t* block, std::uint8_t out[16][4]) {
+    Bc7Bits bits{block};
+    if (bits.read(7) != (1u << 6)) return false;
+
+    std::uint32_t endpoints[2][4] = {};
+    for (std::uint32_t c = 0; c < 4; ++c)
+        for (std::uint32_t e = 0; e < 2; ++e)
+            endpoints[e][c] = bits.read(7);
+
+    const int pbit[2] = {static_cast<int>(bits.read(1)),
+                         static_cast<int>(bits.read(1))};
+
+    std::uint32_t index[16] = {};
+    for (std::uint32_t i = 0; i < 16; ++i)
+        index[i] = bits.read(i == 0 ? 3u : 4u);
+
+    std::uint8_t palette[16][4];
+    for (std::uint32_t w = 0; w < 16; ++w)
+        for (std::uint32_t c = 0; c < 4; ++c)
+            palette[w][c] = bc7Interpolate(bc7Expand(endpoints[0][c], 7, pbit[0]),
+                                           bc7Expand(endpoints[1][c], 7, pbit[1]),
+                                           kBc7Weights4, w);
+
+    for (std::uint32_t i = 0; i < 16; ++i)
+        for (std::uint32_t c = 0; c < 4; ++c) out[i][c] = palette[index[i]][c];
+    return true;
+}
+
+// Mode 8 and the "10011"/"10111"/... patterns are reserved: they report false
+// so the caller can write opaque black instead of uninitialised memory.
+bool decodeBc7Block(const std::uint8_t* block, std::uint8_t out[16][4]) {
+    for (std::uint32_t mode = 0; mode < 8; ++mode) {
+        if ((block[0] & (1u << mode)) == 0) continue;
+        switch (mode) {
+        case 0: case 2: return bc7DecodePartitioned(mode, block, out);
+        case 1: case 3: case 7: return bc7DecodePartitioned(mode, block, out);
+        case 4: case 5: return bc7DecodeDualPlane(mode, block, out);
+        case 6: return bc7DecodeSingle(block, out);
+        default: break;
+        }
+    }
+    return false;
+}
+
 struct PixelFormat {
     std::uint32_t flags = 0;
     std::uint32_t fourcc = 0;
@@ -308,6 +686,7 @@ DdsFormat resolveFormat(Header& header, std::string_view bytes,
         case 71: case 72: return DdsFormat::bc1; // BC1_UNORM[_SRGB]
         case 74: case 75: return DdsFormat::bc2; // BC2_UNORM[_SRGB]
         case 77: case 78: return DdsFormat::bc3; // BC3_UNORM[_SRGB]
+        case 98: case 99: return DdsFormat::bc7; // BC7_UNORM[_SRGB]
         case 87: case 91:                        // B8G8R8A8[_SRGB]
             header.format.bit_count = 32;
             header.format.red = 0x00FF0000u;
@@ -324,7 +703,7 @@ DdsFormat resolveFormat(Header& header, std::string_view bytes,
             return DdsFormat::raw;
         default:
             error = "unsupported DX10 DXGI_FORMAT " + std::to_string(dxgi) +
-                    " (only BC1/BC2/BC3 and 8-bit RGBA/BGRA decode)";
+                    " (only BC1/BC2/BC3/BC7 and 8-bit RGBA/BGRA decode)";
             return DdsFormat::unknown;
         }
     }
@@ -361,7 +740,7 @@ std::size_t bytesNeeded(const Header& header, DdsFormat format) {
     if (format == DdsFormat::bc1 || format == DdsFormat::bc2) {
         return 8u * ((header.width + 3) / 4) * ((header.height + 3) / 4);
     }
-    if (format == DdsFormat::bc3) {
+    if (format == DdsFormat::bc3 || format == DdsFormat::bc7) {
         return 16u * ((header.width + 3) / 4) * ((header.height + 3) / 4);
     }
     return rowBytes(header) * header.height;
@@ -375,6 +754,7 @@ const char* ddsFormatName(DdsFormat format) {
     case DdsFormat::bc1: return "BC1/DXT1";
     case DdsFormat::bc2: return "BC2/DXT3";
     case DdsFormat::bc3: return "BC3/DXT5";
+    case DdsFormat::bc7: return "BC7";
     case DdsFormat::raw: return "uncompressed (mask-driven)";
     case DdsFormat::luminance: return "uncompressed luminance";
     case DdsFormat::unknown: break;
@@ -473,6 +853,32 @@ DdsImage decodeDds(std::string_view bytes) {
             image.rgba[i * 4 + 1] = encode(floats[i * 4 + 1]);
             image.rgba[i * 4 + 2] = encode(floats[i * 4 + 2]);
             image.rgba[i * 4 + 3] = 255;
+        }
+        return image;
+    }
+
+    if (format == DdsFormat::bc7) {
+        std::uint8_t pixels[16][4];
+        std::size_t cursor = 0;
+        for (int by = 0; by < (height + 3) / 4; ++by) {
+            for (int bx = 0; bx < (width + 3) / 4; ++bx) {
+                // A reserved/corrupt block decodes to opaque black: visible in
+                // the capture, never uninitialised memory on screen.
+                if (!decodeBc7Block(data + cursor, pixels)) {
+                    for (auto& pixel : pixels) {
+                        pixel[0] = pixel[1] = pixel[2] = 0;
+                        pixel[3] = 255;
+                    }
+                }
+                cursor += 16;
+                for (int i = 0; i < 16; ++i) {
+                    const int x = bx * 4 + (i & 3);
+                    const int y = by * 4 + (i >> 2);
+                    if (x >= width || y >= height) continue;
+                    std::uint8_t* dst = pixelAt(image.rgba, width, x, y);
+                    for (int c = 0; c < 4; ++c) dst[c] = pixels[i][c];
+                }
+            }
         }
         return image;
     }

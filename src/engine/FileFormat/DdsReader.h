@@ -19,15 +19,17 @@
 //
 // Decoded to mip 0 as top-down RGBA8. Supported:
 //   - FourCC BC1/"DXT1", BC2/"DXT3", BC3/"DXT5"
+//   - DX10 BC7 (all eight modes), which modern content uses for car and track
+//     bodies: it arrives as DXGI_FORMAT 98/99, never as a FourCC tag
 //   - uncompressed 8/16/24/32-bit with R/G/B/A bit masks (covers A8R8G8B8,
 //     A8B8G8R8, X8R8G8B8, RGB8, L8/luminance, A8L8)
 //   - DX10 header for BC1/BC2/BC3 + R8G8B8A8/B8G8R8A8 (best effort; the
 //     format enum is small and anything else reports the id in `error`)
 //
 // Deliberately rejected (clear message, never silent corruption): BC4/BC5/
-// BC6H/BC7 and any format whose payload size doesn't fit the buffer. Real
-// content uses DXT1/DXT5 almost exclusively (BC7 appears only in newer mods,
-// which `ContentRepair` already flags as unusual).
+// BC6H and any format whose payload size doesn't fit the buffer. DXT1/DXT5
+// still dominate, but BC7 is what Content Manager writes for upscaled
+// textures, and a car whose body albedo is BC7 has no material without it.
 
 #include <cstdint>
 #include <string>
@@ -48,6 +50,7 @@ enum class DdsFormat {
     bc1,
     bc2,
     bc3,
+    bc7,        // DX10 only: DXGI_FORMAT_BC7_UNORM / _SRGB
     raw,        // mask-driven RGB(A), 8/16/24/32 bits per pixel
     luminance,  // 8-bit grayscale (DDPF_LUMINANCE), alpha if a mask says so
     // 4 x IEEE float per pixel, written by tools as the D3DFMT code 116 in the
@@ -70,7 +73,7 @@ struct DdsInfo {
     bool ok() const { return error.empty(); }
     bool compressed() const {
         return format == DdsFormat::bc1 || format == DdsFormat::bc2 ||
-               format == DdsFormat::bc3;
+               format == DdsFormat::bc3 || format == DdsFormat::bc7;
     }
     bool dx10() const { return fourcc == dx10FourCc(); }
 
