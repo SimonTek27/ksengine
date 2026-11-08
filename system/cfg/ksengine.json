@@ -56,7 +56,7 @@
     "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, mirrors with mirrorResolution, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
     "saturation": 1.0,
     "contrast": 1.0,
-    "resolution": "1920x1080",
+    "resolution": "auto",
     "resolutions": [
       "1920x1080",
       "1600x900",

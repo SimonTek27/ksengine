@@ -132,18 +132,37 @@ public:
     static constexpr const char* kTonemapNames[kTonemapCount] = {
         "NONE", "REINHARD", "ACES", "UNCHARTED2", "FILMIC"};
 
+    // Entry 0 is the display mode the app read from the system (see
+    // seedSystemResolution()); entries 1..2 are the sizing steps below it. A
+    // build that never seeds keeps the historical defaults, which is what the
+    // headless menu tests see — the list is therefore a runtime table, not a
+    // compile-time constant, but its shape (three entries) is unchanged.
     static constexpr int kResolutionCount = 3;
-    static constexpr int kResolutionWidths[kResolutionCount] = {1920, 1600, 1280};
-    static constexpr int kResolutionHeights[kResolutionCount] = {1080, 900, 720};
+    struct ResolutionList {
+        int widths[kResolutionCount];
+        int heights[kResolutionCount];
+    };
+    static ResolutionList& resolutionList() {
+        static ResolutionList list{{1920, 1600, 1280}, {1080, 900, 720}};
+        return list;
+    }
+    /** Replace entry 0 with the monitor mode, so the menu never offers a size
+     *  the system does not have as its "current" resolution. */
+    static void seedSystemResolution(int width, int height) {
+        if (width <= 0 || height <= 0) return;
+        ResolutionList& list = resolutionList();
+        list.widths[0] = width;
+        list.heights[0] = height;
+    }
     static int resolutionWidth(int index) {
         const int i = index < 0 ? 0
                                 : (index >= kResolutionCount ? kResolutionCount - 1 : index);
-        return kResolutionWidths[i];
+        return resolutionList().widths[i];
     }
     static int resolutionHeight(int index) {
         const int i = index < 0 ? 0
                                 : (index >= kResolutionCount ? kResolutionCount - 1 : index);
-        return kResolutionHeights[i];
+        return resolutionList().heights[i];
     }
     static int resolutionIndexFor(int width, int height);
 

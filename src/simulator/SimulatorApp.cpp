@@ -330,7 +330,13 @@ static void handleKeyDown(int vk) {
                          SWP_FRAMECHANGED);
         } else {
             SetWindowLongW(g_hWnd, GWL_STYLE, style | WS_OVERLAPPEDWINDOW);
-            SetWindowPos(g_hWnd, nullptr, 100, 100, 1920, 1080,
+            // Leaving fullscreen restores the mode of the monitor this window
+            // is on, not a literal; SWP_NOSIZE keeps the size it already had.
+            MONITORINFO restore = { sizeof(restore) };
+            GetMonitorInfoW(MonitorFromWindow(g_hWnd, MONITOR_DEFAULTTONEAREST), &restore);
+            SetWindowPos(g_hWnd, nullptr, 100, 100,
+                         restore.rcMonitor.right - restore.rcMonitor.left,
+                         restore.rcMonitor.bottom - restore.rcMonitor.top,
                          SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
         }
         break;
@@ -433,6 +439,42 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
     return DefWindowProcW(hWnd, msg, wParam, lParam);
 }
 
+// The window starts at the display mode the system reports, not at a guess:
+// a 1920x1080 literal upscales on a 4K panel and does not fit a 1366x768
+// laptop. EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS) is the mode the desktop
+// is actually running; GetSystemMetrics covers the cases where that call comes
+// back empty. The 1920x1080 last resort only fires when the OS reports no
+// screen at all (headless session), and says so on stderr.
+static void queryDesktopResolution(int& width, int& height) {
+    width = GetSystemMetrics(SM_CXSCREEN);
+    height = GetSystemMetrics(SM_CYSCREEN);
+    DEVMODEW mode = {};
+    mode.dmSize = sizeof(mode);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) &&
+        mode.dmPelsWidth > 0 && mode.dmPelsHeight > 0) {
+        width = static_cast<int>(mode.dmPelsWidth);
+        height = static_cast<int>(mode.dmPelsHeight);
+    }
+    if (width <= 0 || height <= 0) {
+        fprintf(stderr, "[INIT] display: the system reported no resolution, "
+                        "falling back to 1920x1080\n");
+        width = 1920;
+        height = 1080;
+    }
+}
+
+// The part of that mode a *framed* window can occupy: a window sized to the
+// whole mode hangs its border off the screen. Still read from the system (the
+// monitor's work area), just the part a window can actually use.
+static void queryWindowWorkArea(int& width, int& height) {
+    queryDesktopResolution(width, height);
+    MONITORINFO info = { sizeof(info) };
+    if (GetMonitorInfoW(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY), &info)) {
+        width = static_cast<int>(info.rcWork.right - info.rcWork.left);
+        height = static_cast<int>(info.rcWork.bottom - info.rcWork.top);
+    }
+}
+
 static void initWindow() {
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(wc);
@@ -443,9 +485,21 @@ static void initWindow() {
     wc.lpszClassName = WINDOW_CLASS;
     RegisterClassExW(&wc);
 
+    int windowW = 0, windowH = 0;
+    queryDesktopResolution(windowW, windowH);
+    // The menu's first entry is that same mode, so "current resolution" in the
+    // options page is what the monitor is running, not a constant.
+    ks::sim::GameMenuOverlay::seedSystemResolution(windowW, windowH);
+    printf("[INIT] Display: system mode %dx%d\n", windowW, windowH);
+
+    int clientW = 0, clientH = 0;
+    queryWindowWorkArea(clientW, clientH);
+    RECT framed{0, 0, clientW, clientH};
+    AdjustWindowRect(&framed, WS_OVERLAPPEDWINDOW, FALSE);
     g_hWnd = CreateWindowExW(0, WINDOW_CLASS, L"KinetiKa Simulator",
                              WS_OVERLAPPEDWINDOW,
-                             CW_USEDEFAULT, CW_USEDEFAULT, 1920, 1080,
+                             CW_USEDEFAULT, CW_USEDEFAULT,
+                             framed.right - framed.left, framed.bottom - framed.top,
                              nullptr, nullptr, g_hInstance, nullptr);
     ShowWindow(g_hWnd, SW_SHOW);
     UpdateWindow(g_hWnd);
@@ -1180,6 +1234,13 @@ static void initSimulation() {
         if (std::sscanf(resolution.c_str(), "%dx%d", &width, &height) != 2) {
             width = 0;
             height = 0;
+        }
+        if (width <= 0 || height <= 0) {
+            // No usable video.resolution in the config ("auto" included): the
+            // window takes the monitor's work area, so it opens fitted to the
+            // screen instead of a guessed 1920x1080. An explicit config value
+            // still wins over it.
+            queryWindowWorkArea(width, height);
         }
         if (auto* renderer = g_simulation->renderer()) {
             if (exposure > 0.0) renderer->setExposure(static_cast<float>(exposure));

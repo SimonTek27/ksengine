@@ -9,6 +9,21 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Fixture del car di test: rigenerabile da solo, con guardia esplicita**:
+  `tools/make_reference_content.ps1 -CarOnly` scrive solo
+  `content/cars/refcar/baked` (che `.gitignore` esclude) senza toccare il bake
+  tracciato `content/baked` — prima ogni rigenerazione riscriveva entrambi.
+  `test_renderer` salta la sezione (f) con un messaggio quando il fixture
+  manca; con `-DKS_REQUIRE_REFERENCE_CAR=ON` in configurazione quella sezione
+  **fallisce** invece di saltare, cosi` i pin pixel non possono sparire in
+  silenzio su una macchina che dichiara di avere il fixture.
+- **Risoluzione iniziale dal sistema**: la finestra di `ksim` non nasce piu` a
+  1920x1080 cablati. `EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS)` (con
+  `GetSystemMetrics` come fallback) fornisce il mode del monitor, usato per la
+  finestra, per il ripristino da fullscreen e come prima voce della lista
+  risoluzioni del menu. Il default di installazione `video.resolution` passa
+  da "1920x1080" a "auto": un valore non numerico eredita il mode di sistema
+  invece di cablarlo, e un valore esplicito continua a vincere.
 - **Gate 2.12 - soak di stabilita` 1 h green**: run windowed di 1 ora (9 auto,
   renderer Vulkan reale, meteo, danni, telemetria) con **0 recovery NaN**
   (enabler `[nan]` sopra), 121 461 frame profili, 32,2 M step di fisica

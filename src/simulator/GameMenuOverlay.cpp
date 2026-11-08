@@ -507,8 +507,10 @@ int GameMenuOverlay::resolutionIndexFor(int width, int height)
     int best = 0;
     int bestDelta = 1 << 30;
     for (int i = 0; i < kResolutionCount; ++i) {
-        const int delta = std::abs(kResolutionWidths[i] - width) +
-                          std::abs(kResolutionHeights[i] - height);
+        // Through the accessors, not the old constant arrays: entry 0 is
+        // whatever the app seeded from the system's display mode.
+        const int delta = std::abs(resolutionWidth(i) - width) +
+                          std::abs(resolutionHeight(i) - height);
         if (delta < bestDelta) { bestDelta = delta; best = i; }
     }
     return best;

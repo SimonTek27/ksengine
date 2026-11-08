@@ -150,6 +150,21 @@ cmake --build build -j
 - `HAS_KSNET` is on when the in-tree `ksnet` target exists (default).
 - Qt-free checks: `tools/check_no_qt.ps1` / Qt-free CMake preset.
 
+### Test del renderer — fixture del car
+
+`content/cars/refcar` è escluso da git (l'auto che spedisce vive nella libreria
+dell'utente), quindi un checkout pulito non ce l'ha. Il fixture si rigenera da
+solo, senza toccare il bake tracciato `content/baked`:
+
+```bash
+powershell -File tools/make_reference_content.ps1 -CarOnly
+```
+
+Senza fixture `test_renderer` salta la sezione del car con un messaggio
+esplicito. Per rendere quella copertura obbligatoria su una macchina che ha il
+fixture, configura con `-DKS_REQUIRE_REFERENCE_CAR=ON`: li` l'assenza del
+fixture è un fallimento, non uno skip.
+
 ```bash
 cmake --preset default
 cmake --build --preset default
