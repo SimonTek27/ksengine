@@ -13,6 +13,9 @@ void RaceSessionManager::configure(const RaceConfig& config)
     m_active = false;
     m_paused = false;
     setFlag(RaceFlag::None);
+    // A new session starts with the lane under the session rule, not a
+    // director's order left over from the previous one.
+    m_pitLaneClosedByDirector = false;
     m_sessionTime = 0;
     m_remainingTime = 0;
     m_lapStartTime = 0;

@@ -9,6 +9,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Finestra box in gara (`pitLaneOpen`)**: `updateGarageExit()` passava
+  `pitLaneOpen = true` cablato, quindi il limite di corsia e il blocco di
+  uscita dal box valevano anche sotto countdown e a gara finita. La regola ora
+  vive in `RaceSessionManager::pitLaneOpen()`: in gara la corsia è chiusa
+  durante il countdown e dopo la scacchiera, aperta su verde, giallo e safety
+  car; practice/qualify/hotlap restano sempre aperte. Il direttore di gara ha
+  `closePitLane()`/`openPitLane()` e `configure()` azzera l'ordine. Entrambe le
+  TU del loop (client `ksim` e `SimulatorServer`) leggono lo stesso getter, con
+  corsia aperta quando nessuna sessione è attiva. `test_race_flags` copre gara,
+  ordine direzionale e practice.
 - **Un `data/data.json` illeggibile viene segnalato, non assorbito in silenzio**:
   una cartella gia` convertita con il manifest corrotto lasciava il serbatoio,
   il profilo freni, la sequenza di avvio e la frizione ai default del modello,

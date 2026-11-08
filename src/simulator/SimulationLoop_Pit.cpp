@@ -81,9 +81,12 @@ void SimulationLoop::updateGarageExit(float dt) {
     in.posY = static_cast<float>(st.position.y);
     in.posZ = static_cast<float>(st.position.z);
     in.heading = st.heading;
-    // TODO(2.7 follow-up): a real race pit window — RaceSessionManager owns
-    // it; for now the lane is always open, which matches Practice/Qualify.
-    in.pitLaneOpen = true;
+    // The pit window belongs to the session (roadmap 2.7 follow-up): a
+    // practice/qualify/hotlap session keeps the lane open, a race closes it
+    // during the countdown and after the checkered flag, and the race director
+    // can close it on demand. With no session running there is no window to
+    // obey, so the lane stays open.
+    in.pitLaneOpen = !m_raceSession.isActive() || m_raceSession.pitLaneOpen();
     static constexpr uint8_t kQualifying = 1;  // SESSION_QUALIFYING
     static constexpr uint8_t kRace = 2;        // SESSION_RACE
     static constexpr uint8_t kCountdown = 1;   // PHASE_COUNTDOWN

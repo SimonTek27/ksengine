@@ -275,7 +275,7 @@ void SimulationLoop::updateGarageExit(float dt) {
     in.posY = static_cast<float>(st.position.y);
     in.posZ = static_cast<float>(st.position.z);
     in.heading = static_cast<float>(st.heading);
-    in.pitLaneOpen = true;
+    in.pitLaneOpen = !m_raceSession.isActive() || m_raceSession.pitLaneOpen();
     const bool queueBlock = m_pitQueue.shouldBlockGarageExit(kPlayerCarId);
     const bool contactBlock = m_pitCollision.isInContact(kPlayerCarId) &&
         (m_garageExit.phase() == GarageExitPhase::BoxClear ||

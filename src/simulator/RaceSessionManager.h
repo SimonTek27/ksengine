@@ -133,6 +133,25 @@ public:
     /** AI speed limiter implied by the flag: yellow 0.6, SC 0.5, else 1.0. */
     float aiSpeedFactor() const;
 
+    /**
+     * Roadmap 2.7 follow-up — the pit window, one rule for the garage-exit
+     * machine and the box service. A practice / qualifying / hotlap session
+     * keeps the lane open from the first green; a race closes it during the
+     * countdown and after the checkered flag, when leaving the box would put a
+     * car on a track that is no longer racing. The race director can close it
+     * on demand (safety car, blocked lane) with closePitLane(); openPitLane()
+     * hands the lane back to the session rule.
+     */
+    bool pitLaneOpen() const {
+        if (m_pitLaneClosedByDirector) return false;
+        if (m_config.sessionType != RaceConfig::SessionType::Race) return true;
+        if (!m_active || m_countingDown) return false;
+        return m_flag != RaceFlag::Checkered;
+    }
+    void closePitLane() { m_pitLaneClosedByDirector = true; }
+    void openPitLane() { m_pitLaneClosedByDirector = false; }
+    bool pitLaneClosedByDirector() const { return m_pitLaneClosedByDirector; }
+
     void addPenalty(int carIndex, Penalty::Type type, float value, const std::string& reason);
     void servePenalty(int carIndex);
     const std::vector<Penalty>& pendingPenalties() const { return m_pendingPenalties; }
@@ -166,6 +185,7 @@ private:
     bool m_active = false;
     bool m_paused = false;
     RaceFlag m_flag = RaceFlag::None;
+    bool m_pitLaneClosedByDirector = false;
 
     float m_sessionTime = 0;
     float m_remainingTime = 0;

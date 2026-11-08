@@ -60,6 +60,51 @@ int main()
     CHECK(rsm.flag() == RaceFlag::Checkered);
     CHECK(near(rsm.aiSpeedFactor(), 1.0f));
 
+    // --- roadmap 2.7 follow-up: the race pit window ---
+    // A race keeps the lane closed until the green (configure() leaves the
+    // session inactive) and reopens it for green, yellow and safety car.
+    RaceSessionManager pw;
+    pw.configure(RaceConfig{});
+    CHECK(!pw.pitLaneOpen());
+    pw.startSession();
+    CHECK(pw.pitLaneOpen());
+    pw.startCountdown(0.5f);
+    CHECK(!pw.pitLaneOpen());
+    for (int i = 0; i < 50 && pw.isCountingDown(); ++i) pw.update(st, 0.05f);
+    CHECK(pw.pitLaneOpen());
+    pw.setFlag(RaceFlag::Yellow);
+    CHECK(pw.pitLaneOpen());
+    pw.setFlag(RaceFlag::SafetyCar);
+    CHECK(pw.pitLaneOpen());
+    pw.endSession();
+    CHECK(!pw.pitLaneOpen());
+
+    // The director can close an otherwise open lane, and configure() clears the
+    // order instead of carrying it into the next session.
+    RaceSessionManager dir;
+    dir.configure(RaceConfig{});
+    dir.startSession();
+    CHECK(dir.pitLaneOpen());
+    dir.closePitLane();
+    CHECK(!dir.pitLaneOpen());
+    CHECK(dir.pitLaneClosedByDirector());
+    dir.configure(RaceConfig{});
+    CHECK(!dir.pitLaneClosedByDirector());
+    CHECK(!dir.pitLaneOpen()); // new session: green not shown yet
+
+    // Practice owns no window: the lane stays open before, during and after it.
+    RaceConfig practiceCfg;
+    practiceCfg.sessionType = RaceConfig::SessionType::Practice;
+    RaceSessionManager practice;
+    practice.configure(practiceCfg);
+    CHECK(practice.pitLaneOpen());
+    practice.startSession();
+    CHECK(practice.pitLaneOpen());
+    practice.setFlag(RaceFlag::Yellow);
+    CHECK(practice.pitLaneOpen());
+    practice.endSession();
+    CHECK(practice.pitLaneOpen());
+
     // --- AC shared-memory flag channel mapping (AC_FLAG_TYPE) ---
     CHECK(ks::ac::ksRaceFlagToAcFlag(0) == 0); // None      -> AC_NO_FLAG
     CHECK(ks::ac::ksRaceFlagToAcFlag(1) == 0); // Green     -> AC_NO_FLAG
