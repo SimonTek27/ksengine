@@ -85,6 +85,19 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Fixed
+- **Il converter non puo` piu` scrivere un documento JSON malformato**:
+  `AcCarManifestConverter::writeDocuments` scriveva ogni documento con
+  `dump()` e si fidava dell'output, quindi un routing difettoso avrebbe
+  prodotto un `data.json` illeggibile che il runtime scarta in silenzio
+  (serbatoio, freni e sospensioni al default). Ora ogni documento viene
+  codificato, **riletto col parser del runtime** (`encodeJsonDocument`) e
+  solo dopo scritto su disco (`writeJsonDocument`, usato anche dalla
+  checklist `verify.json`, da `apply` e da `foldOverrides`); tutti i
+  documenti sono verificati prima di aprire il primo file, cosi` una
+  conversione difettosa fallisce senza lasciare una cartella a meta`.
+  Lo stesso vale per il contenuto: `test_physics_ini` rilegge gli otto
+  documenti prodotti e rifiuta uno split il cui `data.json` ha una virgola
+  in coda (nessun documento scritto).
 - **Texture BC7 non decodificate: la carrozzeria restava senza livrea**:
   l'albedo delle vetture reali arriva come `DXGI_FORMAT 98` (BC7), che
   `DdsReader` rifiutava per scelta dichiarata, e il materiale cadeva sul

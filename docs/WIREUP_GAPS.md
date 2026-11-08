@@ -43,11 +43,13 @@ Piano operativo gate: [GATE_PLAN_WINDOWS.md](GATE_PLAN_WINDOWS.md).
   `.ini`, ha un solo `data/data.json` con `"fuel": { "MAX_FUEL": 90 }`.
   `CarPhysicsJson::loadAcFuelCapacity` lo legge prima degli ini; `FUEL`
   resta il carico attuale e non viene mai preso come capacita'.
-  Aperto lato contenuto: `data/data.json` e'
-  JSON non valido (643 `{` contro 644 `}`, radice chiusa a riga 297,
-  sezioni `BASIC`/`GRAPHICS`/`PIT_STOP` finite in radice e `"car"`
-  vuoto), quindi il tank resta il default finche' il converter non lo
-  rigenera.
+  Chiuso: il `data.json` che non si parsava (virgola in coda, riga 430 di
+  `asr_1991_mclaren_mp4-6`) e' stato riparato e i 13 `data/data.json`
+  installati ora sono JSON valido, quindi il tank arriva da `MAX_FUEL`.
+  Lato codice il converter non puo' piu' produrne uno rotto: ogni documento
+  viene riletto col parser del runtime prima della scrittura
+  (`AcCarManifestConverter::encodeJsonDocument`) e un dump che non si
+  rilegge fa fallire la conversione senza scrivere nulla.
 - **Converter contenuto AC**: `AcCarManifestConverter`
   (`src/adapters/assetto_corsa/AcCarManifestConverter.h`) porta una
   cartella `.ini` stock ai sei documenti `data/data.json`, `driver.json`,

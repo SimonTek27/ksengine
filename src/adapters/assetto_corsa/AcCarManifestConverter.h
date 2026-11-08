@@ -686,6 +686,52 @@ static void normalizeBrakes(Json& root) {
         }
     }
 
+    // A document is dumped with the writer and read back with the parser the
+    // runtime uses before it reaches the disk. Text that does not parse is a
+    // defect in the routing, not content to ship: refusing here is what keeps
+    // a malformed data.json from ever being produced.
+    static bool encodeJsonDocument(const Json& doc, std::string& text, std::string& error) {
+        text = doc.dump(true);
+        text.push_back(static_cast<char>(10));
+        bool ok = false;
+        std::string parseError;
+        const Json back = Json::parse(text, &ok, &parseError);
+        if (!ok) {
+            error = parseError.empty() ? std::string("does not parse") : parseError;
+            return false;
+        }
+        if (!back.isObject()) {
+            error = "is not a JSON object";
+            return false;
+        }
+        return true;
+    }
+
+    // The same read-back, then the write: the two steps live together so no
+    // caller can write a document that was never verified.
+    static bool writeJsonDocument(const fs::path& out, const Json& doc, std::string& error) {
+        std::string text;
+        std::string parseError;
+        if (!encodeJsonDocument(doc, text, parseError)) {
+            error = "produced invalid JSON for `" + out.filename().string() + "`: " + parseError;
+            return false;
+        }
+        std::error_code ec;
+        fs::create_directories(out.parent_path(), ec);
+        std::ofstream file(out, std::ios::binary | std::ios::trunc);
+        if (!file) {
+            error = "cannot write " + out.string();
+            return false;
+        }
+        file << text;
+        file.close();
+        if (!file) {
+            error = "write failed for " + out.string();
+            return false;
+        }
+        return true;
+    }
+
     // Writes the six documents from an assembled root object; the same routing
     // serves the .ini conversion and the legacy split.
     static bool writeDocuments(const fs::path& carDir, const Json& root, Result& result) {
@@ -815,6 +861,16 @@ for (const char* owner : {"suspensions", "car"}) {
             mergeOverrides(carDir, docs[modelIndex], docs[driverIndex]);
             writeSkinOverrides(carDir);
         }
+        // Every document is encoded and read back before the first file is
+        // opened, so a defect fails the conversion with no half-written folder.
+        std::vector<std::string> texts(names.size());
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            std::string parseError;
+            if (!encodeJsonDocument(docs[i], texts[i], parseError)) {
+                result.error = "produced invalid JSON for `" + names[i] + "`: " + parseError;
+                return false;
+            }
+        }
         for (std::size_t i = 0; i < names.size(); ++i) {
             const fs::path out = documentPath(carDir, names[i]);
             fs::create_directories(out.parent_path(), ec);
@@ -823,8 +879,7 @@ for (const char* owner : {"suspensions", "car"}) {
                 result.error = "cannot write " + out.string();
                 return false;
             }
-            file << docs[i].dump(true);
-            file.put(static_cast<char>(10));
+            file << texts[i];
             file.close();
             if (!file) {
                 result.error = "write failed for " + out.string();
@@ -1086,20 +1141,7 @@ for (const char* owner : {"suspensions", "car"}) {
         doc.insert("coverage", coverage);
         doc.insert("claims", claims);
 
-        std::error_code ec;
-        fs::create_directories(out.parent_path(), ec);
-        std::ofstream file(out, std::ios::binary | std::ios::trunc);
-        if (!file) {
-            result.error = "cannot write " + out.string();
-            return result;
-        }
-        file << doc.dump(true);
-        file.put(static_cast<char>(10));
-        file.close();
-        if (!file) {
-            result.error = "write failed for " + out.string();
-            return result;
-        }
+        if (!writeJsonDocument(out, doc, result.error)) return result;
         result.verified = true;
         return result;
     }
@@ -1188,18 +1230,7 @@ for (const char* owner : {"suspensions", "car"}) {
             return result;
         }
 
-        std::ofstream file(dataPath, std::ios::binary | std::ios::trunc);
-        if (!file) {
-            result.error = "cannot write " + dataPath.string();
-            return result;
-        }
-        file << data.dump(true);
-        file.put(static_cast<char>(10));
-        file.close();
-        if (!file) {
-            result.error = "write failed for " + dataPath.string();
-            return result;
-        }
+        if (!writeJsonDocument(dataPath, data, result.error)) return result;
         const Result audit = verify(carDir);
         result.claims = audit.claims;
         result.checked = audit.checked;
@@ -1318,17 +1349,9 @@ for (const char* owner : {"suspensions", "car"}) {
         }
         if (mergeOverrides(carDir, model, driver) > 0) {
             const auto writeDoc = [&](const char* name, const Json& doc) {
-                std::ofstream file(documentPath(carDir, name), std::ios::binary | std::ios::trunc);
-                if (!file) return false;
-                file << doc.dump(true);
-                file.put(static_cast<char>(10));
-                file.close();
-                return static_cast<bool>(file);
+                return writeJsonDocument(documentPath(carDir, name), doc, result.error);
             };
-            if (!writeDoc(kModelDocument, model) || !writeDoc(kDriverDocument, driver)) {
-                result.error = "cannot write the model or driver document";
-                return result;
-            }
+            if (!writeDoc(kModelDocument, model) || !writeDoc(kDriverDocument, driver)) return result;
             result.documents = 2;
         }
         writeSkinOverrides(carDir);

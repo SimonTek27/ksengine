@@ -257,6 +257,20 @@ int main()
         for (const std::string& doc : {"data.json", "driver.json", "camera.json",
                                        "setup.json", "model.json", "sound.json", "ai.json", "controls.json"})
             CHECK(fs::exists(convDir / "data" / doc));
+        // Every document the pipeline writes reads back with the parser the
+        // runtime uses: the write seam verifies each dump before it lands, so a
+        // malformed manifest is never produced.
+        for (const std::string& doc : {"data.json", "driver.json", "camera.json",
+                                       "setup.json", "model.json", "sound.json", "ai.json", "controls.json"}) {
+            std::ifstream in(convDir / "data" / doc, std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(in)),
+                                   std::istreambuf_iterator<char>());
+            bool parsedOk = false;
+            std::string parseError;
+            const ks::Json parsed = ks::Json::parse(text, &parsedOk, &parseError);
+            CHECK(parsedOk);
+            CHECK(parsed.isObject());
+        }
         // The rule: entries every car must carry, whatever its type.
         std::ifstream dataIn(convDir / "data" / "data.json", std::ios::binary);
         const std::string dataText((std::istreambuf_iterator<char>(dataIn)),
@@ -310,6 +324,22 @@ int main()
         CHECK(archive.ok());
         CHECK(archive.find("data.json") != nullptr);
         CHECK(archive.find("suspensions.ini") != nullptr);
+    }
+
+    // --- a data document that does not parse is refused, not rewritten -----
+    {
+        const fs::path brokenDir = dir / "car_broken_manifest";
+        fs::create_directories(brokenDir / "data");
+        // A trailing comma is what a hand edit leaves behind. The split has to
+        // fail and write nothing, instead of routing a half-read root into the
+        // eight documents.
+        writeFile(brokenDir / "data" / "data.json",
+                  "{\"fuel\":{\"MAX_FUEL\":90,},\"car\":{}}\n");
+        const auto refused = ks::assetto_corsa::AcCarManifestConverter::split(brokenDir);
+        CHECK(!refused.converted);
+        CHECK(refused.error.find("invalid data document") != std::string::npos);
+        CHECK(!fs::exists(brokenDir / "data" / "model.json"));
+        CHECK(!fs::exists(brokenDir / "data" / "verify.json"));
     }
 
     // --- roadmap 2.7 follow-up: real tank capacity + fitted tyres ----------
