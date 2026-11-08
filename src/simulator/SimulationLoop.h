@@ -239,6 +239,14 @@ public:
     void stopReplayPlayback();
     bool replayPlaying() const { return m_features.replay.isPlaying(); }
     bool replayRecording() const { return m_features.replay.isRecording(); }
+    /** True while a loaded recording is what the car is showing. */
+    bool replayLoaded() const { return m_features.replay.isLoaded(); }
+    void pauseReplayPlayback();
+    void resumeReplayPlayback();
+    /** Scrub relative to the playhead, clamped to the recording. */
+    void seekReplayBy(float deltaSec);
+    void setReplaySpeed(float speed);
+    float replaySpeed() const { return m_features.replay.playbackSpeed(); }
     /** Recordings found in replay/ (.ksrep), sorted by path. */
     std::vector<std::string> replayFiles() const;
     /** (file name, path) pairs for the REPLAY menu page. */

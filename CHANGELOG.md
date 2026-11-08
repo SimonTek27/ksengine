@@ -24,7 +24,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   RECORD che avvia/ferma la registrazione, salvata come
   `replay/session_NNN.ksrep`), la HUD mostra `REPLAY t / durata`, e la control
   API espone `REPLAY LOAD/PLAY/STOP/SEEK/SPEED/STATUS/RECORD/SAVE`. `replay_test`
-  copre playhead, seek, callback di fine e file troncato.
+  copre playhead, pausa/ripresa, seek, callback di fine e file troncato. Da
+  tastiera: **F6** avvia/ferma la registrazione, **F7** mette in pausa e
+  riprende (dal punto raggiunto, non da capo), **,** e **.** spostano la
+  testina di due secondi e **-**/**=** cambiano la velocità di riproduzione; la
+  riga HUD mostra `(paused)` o il moltiplicatore quando non è 1x, e i tasti
+  restano inerti finché non c'è un file caricato.
 - **Finestra box in gara (`pitLaneOpen`)**: `updateGarageExit()` passava
   `pitLaneOpen = true` cablato, quindi il limite di corsia e il blocco di
   uscita dal box valevano anche sotto countdown e a gara finita. La regola ora

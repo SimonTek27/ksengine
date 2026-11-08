@@ -20,6 +20,7 @@ ReplayRecorder::~ReplayRecorder()
 void ReplayRecorder::startRecording()
 {
     m_frames.clear();
+    m_loaded = false; // the frames in hand are now this recording, not a file
     m_recording = true;
     m_recordStart = std::chrono::steady_clock::now();
     printf("ReplayRecorder: Recording started\n");
@@ -131,6 +132,7 @@ bool ReplayRecorder::loadReplay(const std::string& filePath)
     fclose(f);
     m_playing = false;
     m_playbackTime = 0;
+    m_loaded = !m_frames.empty();
     printf("ReplayRecorder: Loaded %u frames from %s\n", frameCount, filePath.c_str());
     return true;
 }
@@ -195,6 +197,22 @@ void ReplayRecorder::stopPlayback()
     m_playbackTime = 0;
     printf("ReplayRecorder: Playback stopped\n");
     if (onPlaybackStopped) onPlaybackStopped();
+}
+
+void ReplayRecorder::pausePlayback()
+{
+    if (!m_playing) return;
+    m_playing = false; // no onPlaybackStopped: pausing is not stopping
+    printf("ReplayRecorder: Playback paused at %.2f s\n", static_cast<double>(m_playbackTime));
+}
+
+void ReplayRecorder::resumePlayback()
+{
+    if (m_playing || !m_loaded) return;
+    if (isFinished()) m_playbackTime = 0; // play at the end means play again
+    m_playing = true;
+    printf("ReplayRecorder: Playback resumed\n");
+    if (onPlaybackStarted) onPlaybackStarted();
 }
 
 ReplayFrame ReplayRecorder::getPlaybackFrame() const

@@ -122,6 +122,26 @@ int main() {
     rec.stopPlayback();
     CHECK(!rec.isPlaying());
 
+    // Pause keeps the playhead; resume continues from it, and resuming at the
+    // end restarts the recording instead of sitting on the last frame.
+    rec.startPlayback();
+    rec.updatePlayback(0.5f);
+    rec.pausePlayback();
+    CHECK(!rec.isPlaying());
+    rec.updatePlayback(1.0f); // paused: the clock must not move
+    CHECK_NEAR(rec.playbackTime(), 0.5f, 1e-4f);
+    rec.resumePlayback();
+    CHECK(rec.isPlaying());
+    rec.updatePlayback(0.25f);
+    CHECK_NEAR(rec.playbackTime(), 0.75f, 1e-4f);
+    rec.pausePlayback();
+    rec.seekTo(2.0f);
+    CHECK(rec.isFinished());
+    rec.resumePlayback(); // play at the end means play again
+    CHECK(rec.isPlaying());
+    CHECK_NEAR(rec.playbackTime(), 0.0f, 1e-4f);
+    rec.stopPlayback();
+
     // Round trip: what was loaded is what a save writes.
     CHECK(rec.saveReplay(copyPath));
     ks::sim::ReplayRecorder copyRec;
@@ -142,7 +162,6 @@ int main() {
     CHECK(writeReplay(brokenPath, 5, 2)); // header claims 5, file holds 2
     CHECK(!copyRec.loadReplay(brokenPath));
     CHECK(copyRec.frameCount() == 3);
-
     // An empty recording is valid but cannot play.
     CHECK(writeReplay(emptyPath, 0, 0));
     ks::sim::ReplayRecorder emptyRec;
@@ -151,6 +170,15 @@ int main() {
     CHECK(emptyRec.isFinished());
     emptyRec.startPlayback();
     CHECK(!emptyRec.isPlaying());
+
+    // Only a loaded file counts as "replay mode": a recording in progress is
+    // not a replay being watched (checked last, because starting a recording
+    // throws the loaded frames away by design).
+    CHECK(copyRec.isLoaded());
+    copyRec.startRecording();
+    CHECK(!copyRec.isLoaded());
+    CHECK(copyRec.frameCount() == 0);
+    copyRec.stopRecording();
 
     drop(path);
     drop(copyPath);

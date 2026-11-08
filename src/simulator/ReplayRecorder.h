@@ -44,7 +44,12 @@ public:
     bool saveReplay(const std::string& filePath);
     void startPlayback();
     void stopPlayback();
+    /** Pause keeps the playhead where it is; resume continues from it (and
+     *  restarts from the top when the playhead sits at the end). */
+    void pausePlayback();
+    void resumePlayback();
     void setPlaybackSpeed(float speed) { m_playbackSpeed = std::clamp(speed, 0.f, 8.f); }
+    float playbackSpeed() const { return m_playbackSpeed; }
     bool isPlaying() const { return m_playing; }
 
     /** Seek inside the recording (0..duration). Seeking alone does not start
@@ -65,6 +70,10 @@ public:
 
     int frameCount() const { return static_cast<int>(m_frames.size()); }
     bool hasFrames() const { return !m_frames.empty(); }
+    /** True when the frames in hand came from a file (or a finished download)
+     *  rather than from the recording that is running right now: it is what
+     *  tells the HUD and the keys that a replay is the thing being shown. */
+    bool isLoaded() const { return m_loaded; }
     float duration() const;
     float playbackTime() const { return m_playbackTime; }
     float playbackProgress() const;
@@ -88,6 +97,7 @@ private:
     int m_qualityLevel = 3;
 
     bool m_playing = false;
+    bool m_loaded = false;
     /** Playhead relative to the first frame's timestamp (0..duration). */
     float m_playbackTime = 0;
     float m_playbackSpeed = 1.0f;

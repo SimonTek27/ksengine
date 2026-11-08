@@ -318,6 +318,38 @@ static void handleKeyDown(int vk) {
         if (shift) { g_simulation->stop(); printf("Stopped.\n"); }
         else       { g_simulation->start(); printf("Driving started!\n"); }
         break;
+    // GAP_MATRIX P0.5 — replay keys. F6 records, F7 pauses/resumes, ',' and
+    // '.' scrub by two seconds and '-'/'=' change the playback speed; the HUD
+    // line already reports where the playhead is. All of them are no-ops until
+    // a recording has been loaded, so they never shadow a driving key.
+    case VK_F6: {
+        const std::string saved = g_simulation->toggleReplayRecording();
+        if (!saved.empty()) printf("Replay saved: %s\n", saved.c_str());
+        break;
+    }
+    case VK_F7:
+        if (g_simulation->replayPlaying()) {
+            g_simulation->pauseReplayPlayback();
+            printf("Replay paused.\n");
+        } else if (g_simulation->replayLoaded()) {
+            g_simulation->resumeReplayPlayback();
+            printf("Replay resumed.\n");
+        }
+        break;
+    case VK_OEM_COMMA:
+        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(-2.0f);
+        break;
+    case VK_OEM_PERIOD:
+        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(2.0f);
+        break;
+    case VK_OEM_MINUS:
+        if (g_simulation->replayLoaded())
+            g_simulation->setReplaySpeed(g_simulation->replaySpeed() - 0.5f);
+        break;
+    case VK_OEM_PLUS:
+        if (g_simulation->replayLoaded())
+            g_simulation->setReplaySpeed(g_simulation->replaySpeed() + 0.5f);
+        break;
     case VK_F11: {
         DWORD style = GetWindowLongW(g_hWnd, GWL_STYLE);
         if (style & WS_OVERLAPPEDWINDOW) {

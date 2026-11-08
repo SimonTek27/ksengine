@@ -2463,11 +2463,23 @@ void SimulationLoop::syncUiFromVehicle() {
         // A layout the host announced but this copy lacks outranks the pit
         // labels: it is the reason this car is on a different track length.
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", m_layoutNotice.c_str());
-    } else if (m_features.replay.isPlaying()) {
-        // A replay is not a drive: say so, and where in the recording we are.
-        std::snprintf(s.statusText, sizeof(s.statusText), "REPLAY %.1f / %.1f s",
-                      static_cast<double>(m_features.replay.playbackTime()),
-                      static_cast<double>(m_features.replay.duration()));
+    } else if (m_features.replay.isLoaded()) {
+        // A replay is not a drive: say so, where in the recording we are, and
+        // whether it is paused or running at an unusual speed.
+        const ReplayRecorder& rec = m_features.replay;
+        if (!rec.isPlaying())
+            std::snprintf(s.statusText, sizeof(s.statusText), "REPLAY %.1f / %.1f s (paused)",
+                          static_cast<double>(rec.playbackTime()),
+                          static_cast<double>(rec.duration()));
+        else if (rec.playbackSpeed() < 0.99f || rec.playbackSpeed() > 1.01f)
+            std::snprintf(s.statusText, sizeof(s.statusText), "REPLAY %.1f / %.1f s  %.1fx",
+                          static_cast<double>(rec.playbackTime()),
+                          static_cast<double>(rec.duration()),
+                          static_cast<double>(rec.playbackSpeed()));
+        else
+            std::snprintf(s.statusText, sizeof(s.statusText), "REPLAY %.1f / %.1f s",
+                          static_cast<double>(rec.playbackTime()),
+                          static_cast<double>(rec.duration()));
     } else if (stranded)
         std::snprintf(s.statusText, sizeof(s.statusText), "%s", recoveryLine);
     else if (pitServiceBusy())
@@ -3287,6 +3299,21 @@ bool SimulationLoop::startReplayPlayback(const std::string& path) {
 }
 
 void SimulationLoop::stopReplayPlayback() { m_features.replay.stopPlayback(); }
+
+void SimulationLoop::pauseReplayPlayback() { m_features.replay.pausePlayback(); }
+
+void SimulationLoop::resumeReplayPlayback() { m_features.replay.resumePlayback(); }
+
+void SimulationLoop::seekReplayBy(float deltaSec) {
+    ReplayRecorder& rec = m_features.replay;
+    if (!rec.isLoaded()) return;
+    rec.seekTo(rec.playbackTime() + deltaSec);
+}
+
+void SimulationLoop::setReplaySpeed(float speed) {
+    m_features.replay.setPlaybackSpeed(speed);
+    printf("Replay: speed %.2fx\n", static_cast<double>(m_features.replay.playbackSpeed()));
+}
 
 std::vector<std::string> SimulationLoop::replayFiles() const {
     namespace fs = std::filesystem;
