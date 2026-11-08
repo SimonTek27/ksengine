@@ -395,6 +395,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/overrides_test.cpp" AND
     set_tests_properties(overrides_test PROPERTIES TIMEOUT 60)
 endif()
 
+# Staged layout guard: the layout commented at the top of
+# cmake/KsInstallLayout.cmake promises directories the runtime reads relative to
+# the executable (user/, system/ppfilters, system/shaders, ...). A folder the
+# staging forgot used to surface only as a warning at start-up (system/ppfilters
+# did exactly that), so the promise is checked against the real staging here.
+if(TARGET SimulatorApp)
+    add_test(NAME staged_layout_test
+             COMMAND ${CMAKE_COMMAND}
+                     -DROOT=$<TARGET_FILE_DIR:SimulatorApp>
+                     -P "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/CheckStagedLayout.cmake")
+    set_tests_properties(staged_layout_test PROPERTIES TIMEOUT 30)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_preset_test.cpp")
     # Material preset table (engine/Graphics/MaterialPresets.h): header only,
     # so the test needs nothing but the include path.
