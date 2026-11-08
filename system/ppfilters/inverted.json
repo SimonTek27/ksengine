@@ -1,0 +1,112 @@
+{
+  "schema": "ksengine.ppfilter/1",
+  "name": "Inverted",
+  "description": "Photo negative: the display-referred image is inverted per channel.",
+  "category": "stylised",
+  "autoExposure": {
+    "enabled": true,
+    "delay": 0.0,
+    "min": 0.0,
+    "max": 1.49,
+    "target": 0.2,
+    "meteringWidth": 100.0,
+    "meteringHeight": 100.0,
+    "meteringOffsetX": 0.0,
+    "meteringOffsetY": 0.0,
+    "influencedByGlare": true
+  },
+  "toneMapping": {
+    "hdr": true,
+    "exposure": 0.72,
+    "gamma": 1.36,
+    "function": 2,
+    "mappingFactor": 33.38,
+    "scaleWidth": 1.0,
+    "scaleHeight": 1.0,
+    "offsetX": 0.0,
+    "offsetY": 0.0
+  },
+  "depthOfField": {
+    "enabled": true,
+    "quality": 5,
+    "apertureFNumber": 3.3,
+    "imageSensorHeight": 0.29,
+    "baseFOV": 90.0,
+    "adaptiveApertureFactor": 0.55,
+    "apertureParameter": 3.0,
+    "apertureFrontLevels": 4,
+    "apertureBackLevels": 4,
+    "backgroundMaskThreshold": 0.11,
+    "edgeQuality": 4,
+    "apertureShape": 1
+  },
+  "chromaticAberration": {
+    "enabled": false,
+    "samples": 5,
+    "lateralDispersion": [
+      0.005,
+      0.005
+    ],
+    "uniformDispersion": [
+      0.0005,
+      0.0005
+    ]
+  },
+  "vignetting": {
+    "strength": 1e-06,
+    "fovDependence": 0.0
+  },
+  "glare": {
+    "enabled": true,
+    "quality": 5,
+    "ghost": false,
+    "afterImage": false,
+    "precision": 0,
+    "anamorphic": false,
+    "luminance": 2.0,
+    "shape": 12,
+    "blur": true,
+    "threshold": 3.2,
+    "brightPass": true
+  },
+  "godRays": {
+    "enabled": true,
+    "useSunLight": true,
+    "diffractionRing": 0.1,
+    "diffractionRingRadius": 3.0,
+    "diffractionRingAttenuation": 0.1,
+    "diffractionRingOuterColor": [
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "color": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "length": 7.0,
+    "glareRatio": 0.015,
+    "angleAttenuation": 8.0
+  },
+  "colorGrading": {
+    "hue": 0.0,
+    "saturation": 1.0,
+    "brightness": 1.01,
+    "contrast": 1.0,
+    "sepia": 0.0,
+    "colorTemp": 6500,
+    "whiteBalance": 6500
+  },
+  "colorLut": {
+    "enabled": true,
+    "strength": 1.0,
+    "file": "inverted.lut"
+  },
+  "display": {
+    "exposure": 0.72,
+    "tonemapMode": 2
+  }
+}
