@@ -24,6 +24,8 @@
     "video.vsync",
     "video.frameLimit",
     "video.anisotropicFiltering",
+    "video.mirrors",
+    "video.mirrorResolution",
     "video.particles",
     "video.headPhysics",
     "video.shadowMapSize",
@@ -51,7 +53,7 @@
     "note": "The three entries of the SETTINGS screen: every image option lives in the video page, the volumes in audio, the bindings in controls."
   },
   "video": {
-    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
+    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, mirrors with mirrorResolution, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
     "saturation": 1.0,
     "contrast": 1.0,
     "resolution": "1920x1080",
@@ -81,7 +83,8 @@
     "anisotropicFiltering": 8,
     "shadowMapSize": 2048,
     "shadowCascades": 3,
-    "mirrorResolution": "128x512",
+    "mirrors": false,
+    "mirrorResolution": "512x128",
     "particles": true,
     "ssgi": false,
     "ssgiRadius": 0.05,
@@ -119,8 +122,9 @@
       },
       {
         "feature": "mirrors",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "mirrors, mirrorResolution",
+        "note": "video.mirrors turns on a rear-view tile rendered to its own colour+depth target every frame with the real forward draw list (the AC virtual mirror idea), and the tile draws inside whichever colour pass writes the swapchain — skipped on an HDR10 backbuffer, where its un-encoded SDR values would glow against the PQ image. video.mirrorResolution is the tile size, forced landscape ('512x128' here). Stage 2 would sample the tile from the mirror-mesh glass instead of a screen quad, add per-view culling and side tiles. KS_MIRROR overrides the enable for a test run."
       },
       {
         "feature": "shadowMap",

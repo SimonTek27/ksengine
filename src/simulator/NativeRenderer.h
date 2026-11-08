@@ -42,6 +42,7 @@
 #include <set>
 #include <unordered_map>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include "MathTypes.h"
 #include "engine/Math/Frustum.h"
@@ -381,6 +382,22 @@ public:
     // HDR values through this signal.
     void setBrakeGlow(float g) { m_brakeGlow = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g); }
     float brakeGlow() const { return m_brakeGlow; }
+
+    // --- Mirrors, stage 1: one real-time rear view, rendered to its own
+    // target every frame with the same forward draw list, and shown as a
+    // screen overlay the way AC's own "virtual mirror" tile is (the mirror
+    // meshes' own glass sampling is the follow-up). The target builds
+    // lazily on the first enabled frame, so a session that never turns it
+    // on pays nothing.
+    void setVirtualMirror(bool enabled) { m_mirrorEnabled = enabled; }
+    bool virtualMirror() const { return m_mirrorEnabled; }
+    /** Target size for the next (re)build, clamped 64..1024 and forced
+     *  landscape (the rear view is wider than it is tall); 0/0 keeps the
+     *  built-in default. Applied where video.mirrorResolution says. */
+    void setMirrorResolution(uint32_t width, uint32_t height) {
+        m_mirrorWantedW = width;
+        m_mirrorWantedH = height;
+    }
     void setTonemapMode(int mode) { m_tonemapMode = mode; }
     /** The curve in use: the settings page reads it back instead of guessing. */
     int tonemapMode() const { return m_tonemapMode; }
@@ -671,6 +688,46 @@ private:
     bool createFrameDescriptorResources();
     bool createDummyShadowTexture();
     void writeFrameDescriptorSet(VkImageView shadowView, VkSampler shadowSampler);
+
+    // --- Mirrors (stage 1): target + overlay, all lazily built ---
+    bool ensureMirrorResources();
+    void destroyMirrorResources();
+    // drawList re-records the queued instance list from any camera —
+    // endFrame() passes its local recordDrawList lambda down here; the
+    // mirror scene pass is its only other caller.
+    void recordMirrorScene(const std::function<void(const mat4&, const mat4&)>& drawList);
+    void destroyMirrorOverlay();
+    // Draws the rear-view tile inside the open colour pass (forward main or
+    // deferred display). Pipeline is built per pass (formats differ).
+    bool recordMirrorOverlay(VkRenderPass pass);
+    VkImage m_mirrorImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorView = VK_NULL_HANDLE;
+    VkImage m_mirrorDepthImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorDepthMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorDepthView = VK_NULL_HANDLE;
+    VkRenderPass m_mirrorRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_mirrorFramebuffer = VK_NULL_HANDLE;
+    VkSampler m_mirrorSampler = VK_NULL_HANDLE;
+    VkBuffer m_mirrorUBO = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorUBOMemory = VK_NULL_HANDLE;
+    void* m_mirrorUBOMapped = nullptr;
+    VkDescriptorSet m_mirrorFrameSet = VK_NULL_HANDLE;
+    bool m_mirrorEnabled = false;
+    uint32_t m_mirrorWantedW = 0, m_mirrorWantedH = 0;
+    uint32_t m_mirrorW = 0, m_mirrorH = 0;   // live target extent
+    bool m_mirrorFailed = false;
+    // Overlay half: layout/set shared by both pass pipelines.
+    VkPipelineLayout m_mirrorOverlayLayout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_mirrorOverlaySetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_mirrorOverlayPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_mirrorOverlaySet = VK_NULL_HANDLE;
+    VkShaderModule m_mirrorOverlayVert = VK_NULL_HANDLE;
+    VkShaderModule m_mirrorOverlayFrag = VK_NULL_HANDLE;
+    VkPipeline m_mirrorOverlayForward = VK_NULL_HANDLE;    // built vs m_renderPass
+    VkPipeline m_mirrorOverlayDisplay = VK_NULL_HANDLE;    // built vs display pass
+    VkFormat m_mirrorOverlayDisplayFormat = VK_FORMAT_UNDEFINED;
+    bool m_mirrorOverlayFailed = false;
 
     // --- Deferred path (opt-in, setDeferred / setTaa) ---
     bool ensureDeferredResources();

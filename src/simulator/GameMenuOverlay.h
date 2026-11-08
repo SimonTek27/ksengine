@@ -156,6 +156,7 @@ public:
         int tonemap = 2;
         bool ssao = false;
         bool ssr = false;
+        bool mirror = false;
         float masterVolume = 1.f;
     };
 

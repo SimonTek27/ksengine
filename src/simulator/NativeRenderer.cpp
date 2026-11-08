@@ -326,6 +326,10 @@ void NativeRenderer::destroySwapChain() {
     // image), and its readback buffer must not outlive the frame that was
     // about to consume it.
     destroyOcclusionResources();
+    // The mirror target follows the swapchain colour format, and the overlay
+    // pipeline is built against the passes that die here — drop both, the
+    // next enabled frame rebuilds them lazily.
+    destroyMirrorResources();
     // Same reasoning for the screenshot buffer (size follows the extent).
     destroyScreenshotResources();
     for (auto fb : m_swapChainFramebuffers) if (fb) vkDestroyFramebuffer(m_device, fb, nullptr);
@@ -1551,6 +1555,633 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
 }
 
 // ---------------------------------------------------------------------------
+// Mirrors, stage 1 — one real-time rear view + the screen tile.
+// The scene pass runs the plain forward pipeline with the mirror camera; the
+// overlay is a tiny textured quad inside whichever colour pass writes the
+// swapchain (forward main, or the deferred display pass).
+// ---------------------------------------------------------------------------
+
+bool NativeRenderer::ensureMirrorResources() {
+    if (m_mirrorImage) return true;
+    if (m_mirrorFailed) return false;
+
+    // Orientation/size: video.mirrorResolution as a landscape tile (the rear
+    // window is wider than it is tall), clamped to something the file can
+    // honestly render at; 512x128 is the built-in default.
+    uint32_t w = m_mirrorWantedW, h = m_mirrorWantedH;
+    if (h > w) std::swap(w, h);
+    if (w == 0) {
+        w = 512;
+        h = 128;
+    }
+    w = std::clamp(w, 64u, 1024u);
+    h = std::clamp(h, 32u, 1024u);
+    m_mirrorW = w;
+    m_mirrorH = h;
+
+    // Colour target: the same family the swapchain uses, so the overlay
+    // samples back exactly the values a forward pass would have landed on
+    // the backbuffer. HDR10 surfaces fall back to the 8-bit UNORM format —
+    // the tile is skipped there anyway.
+    const VkFormat colorFormat =
+        (m_swapChainFormat == VK_FORMAT_B8G8R8A8_SRGB) ? VK_FORMAT_B8G8R8A8_SRGB
+                                                       : VK_FORMAT_B8G8R8A8_UNORM;
+    if (!createSampledTarget(m_physicalDevice, m_device, w, h, colorFormat,
+                             m_mirrorImage, m_mirrorMemory, m_mirrorView)) {
+        fprintf(stderr, "[NativeRenderer] mirror: color target failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    // Depth: the scene has to depth-sort too — same format the main pass
+    // uses, private image so the main depth's layout stays its own.
+    VkImageCreateInfo dCi{};
+    dCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    dCi.imageType = VK_IMAGE_TYPE_2D;
+    dCi.format = VK_FORMAT_D32_SFLOAT;
+    dCi.extent = {w, h, 1};
+    dCi.mipLevels = 1;
+    dCi.arrayLayers = 1;
+    dCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+    dCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    dCi.samples = VK_SAMPLE_COUNT_1_BIT;
+    dCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(m_device, &dCi, nullptr, &m_mirrorDepthImage) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: depth target failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+    VkMemoryRequirements dMr;
+    vkGetImageMemoryRequirements(m_device, m_mirrorDepthImage, &dMr);
+    VkMemoryAllocateInfo dAi{};
+    dAi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    dAi.allocationSize = dMr.size;
+    dAi.memoryTypeIndex = findMemoryType(m_physicalDevice, dMr.memoryTypeBits,
+                                         VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(m_device, &dAi, nullptr, &m_mirrorDepthMemory) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: depth memory failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+    vkBindImageMemory(m_device, m_mirrorDepthImage, m_mirrorDepthMemory, 0);
+    VkImageViewCreateInfo dVi{};
+    dVi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    dVi.image = m_mirrorDepthImage;
+    dVi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    dVi.format = VK_FORMAT_D32_SFLOAT;
+    dVi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    dVi.subresourceRange.levelCount = 1;
+    dVi.subresourceRange.layerCount = 1;
+    if (vkCreateImageView(m_device, &dVi, nullptr, &m_mirrorDepthView) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: depth view failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    // Render pass: identical attachments to the main one, except the colour
+    // image is handed out readable (SHADER_READ_ONLY) instead of presentable,
+    // with an external dependency so the overlay's fragment reads see the
+    // completed colour writes without extra barriers in the frame.
+    VkAttachmentDescription colorAtt{};
+    colorAtt.format = colorFormat;
+    colorAtt.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAtt.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAtt.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentDescription depthAtt{};
+    depthAtt.format = VK_FORMAT_D32_SFLOAT;
+    depthAtt.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // tile depth dies here
+    depthAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAtt.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAtt.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription atts[2] = {colorAtt, depthAtt};
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef;
+
+    VkSubpassDependency deps[2]{};
+    // What brought the (imaginary) previous content out: mirror of the main
+    // pass' own dependency, so layout transitions between passes stay honest.
+    deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    deps[0].dstSubpass = 0;
+    deps[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    deps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                           VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    deps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    // What leaves this pass: the finished colour writes must be visible to
+    // every later fragment read — the overlay tile samples the image in the
+    // colour pass three lines down this command buffer.
+    deps[1].srcSubpass = 0;
+    deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    deps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    deps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    deps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    VkRenderPassCreateInfo rpCi{};
+    rpCi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpCi.attachmentCount = 2;
+    rpCi.pAttachments = atts;
+    rpCi.subpassCount = 1;
+    rpCi.pSubpasses = &subpass;
+    rpCi.dependencyCount = 2;
+    rpCi.pDependencies = deps;
+    if (vkCreateRenderPass(m_device, &rpCi, nullptr, &m_mirrorRenderPass) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: render pass failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    VkImageView fbAtts[2] = {m_mirrorView, m_mirrorDepthView};
+    VkFramebufferCreateInfo fbCi{};
+    fbCi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fbCi.renderPass = m_mirrorRenderPass;
+    fbCi.attachmentCount = 2;
+    fbCi.pAttachments = fbAtts;
+    fbCi.width = w;
+    fbCi.height = h;
+    fbCi.layers = 1;
+    if (vkCreateFramebuffer(m_device, &fbCi, nullptr, &m_mirrorFramebuffer) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: framebuffer failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    // Sampling back out of the colour target: linear, clamp, no mips.
+    VkSamplerCreateInfo sCi{};
+    sCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    sCi.magFilter = VK_FILTER_LINEAR;
+    sCi.minFilter = VK_FILTER_LINEAR;
+    sCi.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    if (vkCreateSampler(m_device, &sCi, nullptr, &m_mirrorSampler) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: sampler failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    // Frame UBO + set: same block layout the scene shaders read, one buffer
+    // of its own so the main frame copy is never rewritten between passes.
+    if (!createBuffer(m_physicalDevice, m_device, sizeof(FrameDataUBO),
+                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      m_mirrorUBO, m_mirrorUBOMemory)) {
+        fprintf(stderr, "[NativeRenderer] mirror: UBO failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+    if (vkMapMemory(m_device, m_mirrorUBOMemory, 0, sizeof(FrameDataUBO), 0, &m_mirrorUBOMapped) !=
+        VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: UBO map failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    VkDescriptorPoolSize mirrorPool[2]{};
+    mirrorPool[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    mirrorPool[0].descriptorCount = 1;   // the frame UBO set
+    mirrorPool[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    mirrorPool[1].descriptorCount = 5;   // shadow array + IBL trio + the overlay tile
+    VkDescriptorPoolCreateInfo mpCi{};
+    mpCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    mpCi.maxSets = 2; // the mirror frame set + the overlay tile set
+    mpCi.poolSizeCount = 2;
+    mpCi.pPoolSizes = mirrorPool;
+    if (vkCreateDescriptorPool(m_device, &mpCi, nullptr, &m_mirrorOverlayPool) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: descriptor pool failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+    VkDescriptorSetAllocateInfo mAi{};
+    mAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    mAi.descriptorPool = m_mirrorOverlayPool;
+    mAi.descriptorSetCount = 1;
+    mAi.pSetLayouts = &m_frameSetLayout;
+    if (vkAllocateDescriptorSets(m_device, &mAi, &m_mirrorFrameSet) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] mirror: frame set failed\n");
+        m_mirrorFailed = true;
+        return false;
+    }
+
+    printf("[NativeRenderer] mirror: rear view target %ux%u built\n", w, h);
+    return true;
+}
+
+void NativeRenderer::destroyMirrorResources() {
+    if (!m_device) return;
+    if (m_mirrorUBOMapped) vkUnmapMemory(m_device, m_mirrorUBOMemory);
+    if (m_mirrorUBO) vkDestroyBuffer(m_device, m_mirrorUBO, nullptr);
+    if (m_mirrorUBOMemory) vkFreeMemory(m_device, m_mirrorUBOMemory, nullptr);
+    m_mirrorUBOMapped = nullptr;
+    m_mirrorUBO = VK_NULL_HANDLE;
+    m_mirrorUBOMemory = VK_NULL_HANDLE;
+    destroyMirrorOverlay();
+    if (m_mirrorFrameSet != VK_NULL_HANDLE) {
+        // The private pool owns it; the pool free clears every set.
+        m_mirrorFrameSet = VK_NULL_HANDLE;
+    }
+    if (m_mirrorSampler) vkDestroySampler(m_device, m_mirrorSampler, nullptr);
+    if (m_mirrorFramebuffer) vkDestroyFramebuffer(m_device, m_mirrorFramebuffer, nullptr);
+    if (m_mirrorRenderPass) vkDestroyRenderPass(m_device, m_mirrorRenderPass, nullptr);
+    if (m_mirrorDepthView) vkDestroyImageView(m_device, m_mirrorDepthView, nullptr);
+    if (m_mirrorDepthImage) vkDestroyImage(m_device, m_mirrorDepthImage, nullptr);
+    if (m_mirrorDepthMemory) vkFreeMemory(m_device, m_mirrorDepthMemory, nullptr);
+    if (m_mirrorView) vkDestroyImageView(m_device, m_mirrorView, nullptr);
+    if (m_mirrorImage) vkDestroyImage(m_device, m_mirrorImage, nullptr);
+    if (m_mirrorMemory) vkFreeMemory(m_device, m_mirrorMemory, nullptr);
+    if (m_mirrorOverlayPool) vkDestroyDescriptorPool(m_device, m_mirrorOverlayPool, nullptr);
+    m_mirrorSampler = VK_NULL_HANDLE;
+    m_mirrorFramebuffer = VK_NULL_HANDLE;
+    m_mirrorRenderPass = VK_NULL_HANDLE;
+    m_mirrorDepthView = VK_NULL_HANDLE;
+    m_mirrorDepthImage = VK_NULL_HANDLE;
+    m_mirrorDepthMemory = VK_NULL_HANDLE;
+    m_mirrorView = VK_NULL_HANDLE;
+    m_mirrorImage = VK_NULL_HANDLE;
+    m_mirrorMemory = VK_NULL_HANDLE;
+    m_mirrorOverlayPool = VK_NULL_HANDLE;
+}
+
+// The mirror frame data the scene pass reads: same member-driven fill the
+// main pass does in endFrame(), but every camera-dependent number comes from
+// the tile camera and the TAA feedback is zero (the tile is not a history
+// slot and never reprojects).
+void NativeRenderer::recordMirrorScene(
+    const std::function<void(const mat4&, const mat4&)>& drawList) {
+    // One real image, one writer: rewriting the UBO is the cheap part; only
+    // the camera changes from here.
+    // Camera: same eye, half a lap further around the head. The flip is a
+    // 180-degree yaw about the view frame's own up axis composed AFTER the
+    // view matrix — it works with a rolled/pitched cockpit camera too, and
+    // being a rotation it keeps right-handedness, so the culling state the
+    // pipelines were built with never changes.
+    mat4 yaw180; // identity
+    yaw180(0, 0) = -1.0f;
+    yaw180(2, 2) = -1.0f;
+    const mat4 mirrorView = yaw180 * m_view;
+    // Focal length: the vertical focal from the main projection is kept, the
+    // horizontal one rescales to this tile's aspect — wider tile, wider view.
+    mat4 mirrorProj = m_proj;
+    mirrorProj(0, 0) = m_proj(1, 1) * static_cast<float>(m_mirrorH) /
+                       static_cast<float>(m_mirrorW);
+
+    FrameDataUBO frameData{};
+    frameData.sunDirection[0] = m_sun.direction.x;
+    frameData.sunDirection[1] = m_sun.direction.y;
+    frameData.sunDirection[2] = m_sun.direction.z;
+    frameData.sunColor[0] = m_sun.color.x;
+    frameData.sunColor[1] = m_sun.color.y;
+    frameData.sunColor[2] = m_sun.color.z;
+    frameData.sunColor[3] = m_sun.intensity;
+    frameData.cameraPos[0] = m_camPosWS.x;
+    frameData.cameraPos[1] = m_camPosWS.y;
+    frameData.cameraPos[2] = m_camPosWS.z;
+    const mat4 mirrorViewProj = mirrorProj * mirrorView;
+    std::memcpy(frameData.viewProj, mirrorViewProj.data(), sizeof(float) * 16);
+    std::memcpy(frameData.prevViewProj, mirrorViewProj.data(), sizeof(float) * 16);
+    frameData.taaParams[0] = 0.0f; // never a history, never reprojected
+    frameData.fogColor[0] = m_fogColor.x;
+    frameData.fogColor[1] = m_fogColor.y;
+    frameData.fogColor[2] = m_fogColor.z;
+    frameData.fogColor[3] = 1.0f;
+    frameData.fogParams[0] = m_fogDensity;
+    frameData.fogParams[1] = m_fogHeightFalloff;
+    frameData.fogParams[2] = 0.0f;
+    frameData.fogParams[3] = 0.9f;
+    frameData.aoParams[0] = m_ssaoRadius;
+    frameData.aoParams[1] = m_ssaoBias;
+    frameData.aoParams[2] = m_ssaoIntensity;
+    frameData.aoParams[3] = 0.0f; // the forward shader ignores it anyway
+    frameData.ssrParams[0] = m_ssrMaxDistance;
+    frameData.ssrParams[1] = m_ssrIntensity;
+    frameData.ssrParams[2] = m_ssrRoughnessThreshold;
+    frameData.ssrParams[3] = 0.0f;
+    frameData.ssgiParams[0] = m_ssgiRadius;
+    frameData.ssgiParams[1] = m_ssgiIntensity;
+    frameData.ssgiParams[2] = 0.0f;
+    frameData.ssgiParams[3] = 0.0f;
+    frameData.motionBlurParams[0] = m_mbStrength;
+    frameData.motionBlurParams[1] = static_cast<float>(m_mbSamples);
+    frameData.motionBlurParams[2] = m_mbMaxLength;
+    frameData.motionBlurParams[3] = 0.0f;
+    frameData.iblParams[0] = (m_iblWanted && m_iblReady) ? 1.0f : 0.0f;
+    frameData.iblParams[1] = static_cast<float>(ibl::kPrefilterMips - 1);
+    frameData.brakeGlow[0] = m_brakeGlow;
+
+    // Cascades: the same array the main pass binds (shadows are sun-space,
+    // not camera-space, so the tile reads the same map).
+    VkImageView shadowView = m_dummyShadowView;
+    VkSampler shadowSampler = m_dummyShadowSampler;
+    if (m_shadowMap && m_shadowMap->isInitialized()) {
+        const int liveCascades = m_shadowMap->cascadeCount();
+        for (int c = 0; c < liveCascades && c < 3; ++c) {
+            std::memcpy(frameData.cascadeViewProj[c],
+                        m_shadowMap->cascade(c).viewProj.data(), sizeof(float) * 16);
+            frameData.cascadeSplits[c] = m_shadowMap->cascade(c).splitDepth;
+        }
+        frameData.cascadeSplits[3] = static_cast<float>(liveCascades);
+        shadowView = m_shadowMap->arrayView();
+        shadowSampler = m_shadowMap->sampler();
+    }
+
+    {
+        VkDescriptorBufferInfo bufInfo{};
+        bufInfo.buffer = m_mirrorUBO;
+        bufInfo.range = sizeof(FrameDataUBO);
+        VkDescriptorImageInfo imgInfo{};
+        imgInfo.sampler = shadowSampler;
+        imgInfo.imageView = shadowView;
+        imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorImageInfo iblInfo[3]{};
+        for (int i = 0; i < 3; ++i) {
+            iblInfo[i].sampler = m_iblViews[i]
+                                     ? ((i == 2) ? m_iblLutSampler : m_iblEnvSampler)
+                                     : m_dummyShadowSampler;
+            iblInfo[i].imageView = m_iblViews[i] ? m_iblViews[i] : m_dummyShadowView;
+            iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        }
+        VkWriteDescriptorSet writes[5]{};
+        for (int i = 0; i < 5; ++i) {
+            writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[i].dstSet = m_mirrorFrameSet;
+            writes[i].dstBinding = uint32_t(i);
+            writes[i].descriptorCount = 1;
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        }
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[0].pBufferInfo = &bufInfo;
+        writes[1].pImageInfo = &imgInfo;
+        writes[2].pImageInfo = &iblInfo[0];
+        writes[3].pImageInfo = &iblInfo[1];
+        writes[4].pImageInfo = &iblInfo[2];
+        vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+    }
+    std::memcpy(m_mirrorUBOMapped, &frameData, sizeof(FrameDataUBO));
+
+    // Draw. The list is replayed as the main camera left it — the main
+    // camera's frustum culling already picked what this eye can see behind
+    // it (a bookkeeping-only approximation; the rear view sees the same
+    // scene, just mirrored), and per-view culling of the tile is stage 2.
+    VkClearValue mClears[2];
+    mClears[0].color = {{m_fogColor.x, m_fogColor.y, m_fogColor.z, 1.0f}};
+    mClears[1].depthStencil = {1.0f, 0};
+    VkRenderPassBeginInfo mBegin{};
+    mBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    mBegin.renderPass = m_mirrorRenderPass;
+    mBegin.framebuffer = m_mirrorFramebuffer;
+    mBegin.renderArea.extent = VkExtent2D{m_mirrorW, m_mirrorH};
+    mBegin.clearValueCount = 2;
+    mBegin.pClearValues = mClears;
+    vkCmdBeginRenderPass(m_commandBuffer, &mBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport mVp{0, 0, float(m_mirrorW), float(m_mirrorH), 0.0f, 1.0f};
+    VkRect2D mSc{{0, 0}, {m_mirrorW, m_mirrorH}};
+    vkCmdSetViewport(m_commandBuffer, 0, 1, &mVp);
+    vkCmdSetScissor(m_commandBuffer, 0, 1, &mSc);
+    vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+    vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
+                            0, 1, &m_mirrorFrameSet, 0, nullptr);
+    if (drawList) drawList(mirrorView, mirrorProj);
+    vkCmdEndRenderPass(m_commandBuffer);
+}
+
+// The tile: one textured quad, recorded inside whichever open colour pass
+// writes the swapchain. rect is NDC, params x = horizontal flip (a mirror
+// really does swap left and right), y = the glass dim, z/w spare.
+void NativeRenderer::destroyMirrorOverlay() {
+    if (!m_device) return;
+    if (m_mirrorOverlayVert) vkDestroyShaderModule(m_device, m_mirrorOverlayVert, nullptr);
+    if (m_mirrorOverlayFrag) vkDestroyShaderModule(m_device, m_mirrorOverlayFrag, nullptr);
+    if (m_mirrorOverlayForward) vkDestroyPipeline(m_device, m_mirrorOverlayForward, nullptr);
+    if (m_mirrorOverlayDisplay) vkDestroyPipeline(m_device, m_mirrorOverlayDisplay, nullptr);
+    if (m_mirrorOverlayLayout) vkDestroyPipelineLayout(m_device, m_mirrorOverlayLayout, nullptr);
+    if (m_mirrorOverlaySetLayout)
+        vkDestroyDescriptorSetLayout(m_device, m_mirrorOverlaySetLayout, nullptr);
+    m_mirrorOverlayVert = VK_NULL_HANDLE;
+    m_mirrorOverlayFrag = VK_NULL_HANDLE;
+    m_mirrorOverlayForward = VK_NULL_HANDLE;
+    m_mirrorOverlayDisplay = VK_NULL_HANDLE;
+    m_mirrorOverlayLayout = VK_NULL_HANDLE;
+    m_mirrorOverlaySetLayout = VK_NULL_HANDLE;
+}
+
+bool NativeRenderer::recordMirrorOverlay(VkRenderPass pass) {
+    if (!m_mirrorImage || pass == VK_NULL_HANDLE) return false;
+    if (m_mirrorOverlayFailed) return false;
+
+    // Layout + set: built once, shared by both pass pipelines.
+    if (!m_mirrorOverlaySetLayout) {
+        VkDescriptorSetLayoutBinding b{};
+        b.binding = 0;
+        b.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        b.descriptorCount = 1;
+        b.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo dslCi{};
+        dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        dslCi.bindingCount = 1;
+        dslCi.pBindings = &b;
+        if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_mirrorOverlaySetLayout) !=
+            VK_SUCCESS) {
+            m_mirrorOverlayFailed = true;
+            return false;
+        }
+    }
+    if (!m_mirrorOverlayLayout) {
+        struct MirrorOverlayPC {
+            float rect[4];     // NDC x0, y0, x1, y1
+            float params[4];   // x = flip X, y = glass dim, z = flip Y, w spare
+        };
+        static_assert(sizeof(MirrorOverlayPC) == 32, "mirror overlay push block");
+        VkPushConstantRange pcRange{};
+        pcRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        pcRange.offset = 0;
+        pcRange.size = sizeof(MirrorOverlayPC);
+        VkPipelineLayoutCreateInfo plCi{};
+        plCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        plCi.setLayoutCount = 1;
+        plCi.pSetLayouts = &m_mirrorOverlaySetLayout;
+        plCi.pushConstantRangeCount = 1;
+        plCi.pPushConstantRanges = &pcRange;
+        if (vkCreatePipelineLayout(m_device, &plCi, nullptr, &m_mirrorOverlayLayout) !=
+            VK_SUCCESS) {
+            m_mirrorOverlayFailed = true;
+            return false;
+        }
+    }
+    if (!m_mirrorOverlaySet) {
+        VkDescriptorImageInfo img{};
+        img.sampler = m_mirrorSampler;
+        img.imageView = m_mirrorView;
+        img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkDescriptorSetAllocateInfo ai{};
+        ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        ai.descriptorPool = m_mirrorOverlayPool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &m_mirrorOverlaySetLayout;
+        if (vkAllocateDescriptorSets(m_device, &ai, &m_mirrorOverlaySet) != VK_SUCCESS) {
+            m_mirrorOverlayFailed = true;
+            return false;
+        }
+        VkWriteDescriptorSet w{};
+        w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        w.dstSet = m_mirrorOverlaySet;
+        w.dstBinding = 0;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w.pImageInfo = &img;
+        vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
+    }
+
+    // Shader modules: loaded once, from the same .spv directory every other
+    // pipeline uses.
+    if (!m_mirrorOverlayVert || !m_mirrorOverlayFrag) {
+        m_mirrorOverlayVert =
+            createShaderModule(m_device, readFile(m_shaderDir + "/mirror_overlay.vert.spv"));
+        m_mirrorOverlayFrag =
+            createShaderModule(m_device, readFile(m_shaderDir + "/mirror_overlay.frag.spv"));
+        if (!m_mirrorOverlayVert || !m_mirrorOverlayFrag) {
+            fprintf(stderr, "[NativeRenderer] mirror: overlay shaders not compiled "
+                            "(mirror_overlay.{vert,frag}.spv)\n");
+            m_mirrorOverlayFailed = true;
+            return false;
+        }
+    }
+
+    // One pipeline per destination render pass (their colour formats differ),
+    // matching the VulkanUiPipeline scheme: build vs the pass actually asked
+    // for, remember which one exists. A swapchain recreation invalidates the
+    // display pass object but not the forward one; the resource reset circular
+    // routes through destroyMirrorResources(), reached on format change.
+    const bool displayPass = (pass == m_displayRenderPass && m_displayRenderPass != VK_NULL_HANDLE);
+    VkPipeline& slot = displayPass ? m_mirrorOverlayDisplay : m_mirrorOverlayForward;
+    if (!slot) {
+        // Layout conflict guard: both pipelines share the shaders; only the
+        // render pass differs.
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = m_mirrorOverlayVert;
+        stages[0].pName = "main";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = m_mirrorOverlayFrag;
+        stages[1].pName = "main";
+        VkPipelineVertexInputStateCreateInfo vi{};
+        vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        VkPipelineInputAssemblyStateCreateInfo ia{};
+        ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+        VkPipelineViewportStateCreateInfo vpCi{};
+        vpCi.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        vpCi.viewportCount = 1;
+        vpCi.scissorCount = 1; // dynamic
+        VkPipelineRasterizationStateCreateInfo rs{};
+        rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rs.polygonMode = VK_POLYGON_MODE_FILL;
+        rs.cullMode = VK_CULL_MODE_NONE;
+        rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rs.lineWidth = 1.0f;
+        VkPipelineMultisampleStateCreateInfo ms{};
+        ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        VkPipelineDepthStencilStateCreateInfo ds{};
+        ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        ds.depthTestEnable = VK_FALSE;
+        ds.depthWriteEnable = VK_FALSE;
+        VkPipelineColorBlendAttachmentState cbAtt{};
+        cbAtt.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        VkPipelineColorBlendStateCreateInfo cb{};
+        cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        cb.attachmentCount = 1;
+        cb.pAttachments = &cbAtt;
+        VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dyn{};
+        dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dyn.dynamicStateCount = 2;
+        dyn.pDynamicStates = dynStates;
+        VkGraphicsPipelineCreateInfo gpCi{};
+        gpCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        gpCi.stageCount = 2;
+        gpCi.pStages = stages;
+        gpCi.pVertexInputState = &vi;
+        gpCi.pInputAssemblyState = &ia;
+        gpCi.pViewportState = &vpCi;
+        gpCi.pRasterizationState = &rs;
+        gpCi.pMultisampleState = &ms;
+        gpCi.pDepthStencilState = &ds;
+        gpCi.pColorBlendState = &cb;
+        gpCi.pDynamicState = &dyn;
+        gpCi.layout = m_mirrorOverlayLayout;
+        gpCi.renderPass = pass;
+        gpCi.subpass = 0;
+        if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &gpCi, nullptr, &slot) !=
+            VK_SUCCESS) {
+            fprintf(stderr, "[NativeRenderer] mirror: overlay pipeline build failed\n");
+            m_mirrorOverlayFailed = true;
+            return false;
+        }
+    }
+
+    // Quad: a third of the screen wide, kept to the tile's aspect, pinned to
+    // the top edge the way the real mirror sits on the windscreen.
+    const float scaleW = 0.34f;
+    const float swapW = static_cast<float>(m_swapChainExtent.width);
+    const float swapH = static_cast<float>(m_swapChainExtent.height);
+    float tileH = swapH;
+    if (m_mirrorW > 0 && m_mirrorH > 0 && swapW > 0 && swapH > 0) {
+        const float aspect = static_cast<float>(m_mirrorH) / static_cast<float>(m_mirrorW);
+        tileH = swapW * scaleW * aspect;
+        if (tileH > swapH * 0.35f) tileH = swapH * 0.35f; // never a billboard
+    }
+    const float halfW = swapW * scaleW * 0.5f;
+    const float halfH = tileH * 0.5f;
+    const float margin = swapH * 0.03f;
+    struct MirrorOverlayPC {
+        float rect[4];
+        float params[4];
+    } pc{};
+    // Vulkan NDC has +Y down; the mirror tile pinning above mid-screen means
+    // minY more negative than -1 plus a margin from the top edge.
+    const float ndcHalfW = halfW / swapW;
+    const float ndcHalfH = halfH / swapH;
+    const float ndcTop = -1.0f + (margin + halfH) / swapH * 2.0f;
+    pc.rect[0] = -ndcHalfW;
+    pc.rect[1] = ndcTop - ndcHalfH;
+    pc.rect[2] = ndcHalfW;
+    pc.rect[3] = ndcTop;
+    pc.params[0] = 1.0f;  // flip X: rear-view mirrors really do swap sides
+    pc.params[1] = 0.92f; // glass dim, so the tile reads as glass not a window
+    pc.params[2] = 0.0f;
+    pc.params[3] = 0.0f;
+
+    vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, slot);
+    vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_mirrorOverlayLayout, 0, 1, &m_mirrorOverlaySet, 0, nullptr);
+    vkCmdPushConstants(m_commandBuffer, m_mirrorOverlayLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                       0, sizeof(pc), &pc);
+    vkCmdDraw(m_commandBuffer, 4, 1, 0, 0);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Descriptor set 1 — per-mesh material (Roadmap 2.3).
 // ---------------------------------------------------------------------------
 
@@ -2493,7 +3124,10 @@ void NativeRenderer::endFrame() {
     // m_mainDrawList, not m_drawList: the shadow cascades above keep drawing
     // occluded objects (they may still cast visible shadows), the camera
     // passes must not.
-    auto recordDrawList = [&]() {
+    // The camera goes in as arguments now: the mirror pass re-records the
+    // same list from its own rear view (same pipeline, own set 0), and the
+    // main passes pass the main camera through.
+    auto recordDrawList = [&](const mat4& view, const mat4& proj) {
         static bool s_recordDebug = getenv("KS_RECORD_DEBUG") != nullptr;
         const bool canBlend = !deferred; // the GBuffer pass has no blending
         auto drawOne = [&](const QueuedDraw& draw) {
@@ -2523,7 +3157,7 @@ void NativeRenderer::endFrame() {
 
             struct { mat4 model; mat4 mvp; } pc;
             pc.model = draw.model;
-            pc.mvp = projRender * m_view * draw.model;
+            pc.mvp = proj * view * draw.model;
             if (s_recordDebug) {
                 std::fprintf(stderr,
                              "[draw] %s verts=%zu idx=%zu mvp=(%.3f %.3f %.3f %.3f)\n",
@@ -2565,7 +3199,7 @@ void NativeRenderer::endFrame() {
             }
             std::sort(seeThrough.begin(), seeThrough.end(),
                       [&](const QueuedDraw* a, const QueuedDraw* b) {
-                          return (m_view * a->model)(3, 2) < (m_view * b->model)(3, 2);
+                          return (view * a->model)(3, 2) < (view * b->model)(3, 2);
                       });
             vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               m_transparentPipeline);
@@ -2573,6 +3207,14 @@ void NativeRenderer::endFrame() {
             vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
         }
     };
+
+    // ---- Mirrors, stage 1: the scene from behind, straight into the mirror
+    // target. Runs with the plain forward pipeline whatever the main branch
+    // below does, so the tile carries the same lighting the main view has
+    // without ever writing the gbuffers the deferred passes are about to
+    // read. The overlay tile samples it later in this same buffer.
+    if (m_mirrorEnabled && ensureMirrorResources())
+        recordMirrorScene(recordDrawList);
 
     VkViewport vp{0, 0, float(m_swapChainExtent.width), float(m_swapChainExtent.height), 0.0f, 1.0f};
     VkRect2D scissor{{0, 0}, m_swapChainExtent};
@@ -2599,7 +3241,7 @@ void NativeRenderer::endFrame() {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gbufferPipeline);
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
-        recordDrawList();
+        recordDrawList(m_view, projRender);
         // Roadmap P1: sprite quads into the same GBuffer, so the lighting
         // pass below lights them exactly like geometry (they carry a
         // camera-facing normal and a real world position).
@@ -2862,6 +3504,11 @@ void NativeRenderer::endFrame() {
                                sizeof(t), &t);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
             recordUiOverlay(m_displayRenderPass, m_commandBuffer);
+            // The tile is the same encoded-SDR quad on both branches; on an
+            // HDR10 backbuffer the display pass has already written PQ, so an
+            // un-encoded overlay would glow against it — skip instead.
+            if (m_mirrorEnabled && !m_hdrOutput)
+                recordMirrorOverlay(m_displayRenderPass);
             vkCmdEndRenderPass(m_commandBuffer);
 
             // DOF — depth reads are done: hand the image back to whatever the
@@ -2917,12 +3564,14 @@ void NativeRenderer::endFrame() {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
-        recordDrawList();
+        recordDrawList(m_view, projRender);
         // Roadmap P1: sprite quads, alpha blended over whatever the pass has
         // drawn so far (their own pipeline owns no descriptor set, so this
         // only rebinds pipeline + push constants).
         recordParticles(projRender * m_view, deferred);
         recordUiOverlay(m_renderPass, m_commandBuffer);
+        if (m_mirrorEnabled)
+            recordMirrorOverlay(m_renderPass);
         vkCmdEndRenderPass(m_commandBuffer);
     }
     // MainPass marker: Shadow -> MainPass is the geometry/display cost on
@@ -3058,6 +3707,7 @@ void NativeRenderer::shutdown() {
     destroyParticlePipelines();
     destroyParticleBuffer();
     m_particleVerts.clear();
+    destroyMirrorResources();
 
     // TextureRuntime owns images allocated from this device and records
     // uploads through this command pool, so it must die before either handle.

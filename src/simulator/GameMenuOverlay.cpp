@@ -603,6 +603,8 @@ void GameMenuOverlay::buildOptionsMenu()
               "Ambient occlusion, deferred pass only");
     toggleRow("SSR", &MenuOptions::ssr,
               "Screen-space reflections, deferred pass only");
+    toggleRow("MIRROR", &MenuOptions::mirror,
+              "Real-time rear view tile (video.mirrors)");
     toggleRow("MOTION BLUR", &MenuOptions::motionBlur,
               "Resolve-pass blur while the camera moves");
 

@@ -990,7 +990,7 @@ static void initSimulation() {
               "saturation", "contrast",
               "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
-              "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
+              "mirrors", "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
             {"singleplayer", {"modes", "note", "sources", "defaults"}},
         };
         for (const std::string& file :
@@ -1228,6 +1228,27 @@ static void initSimulation() {
             renderer->setAnisotropicFiltering(anisotropy);
             g_simulation->setFrameLimit(frameLimit);
             g_simulation->setParticlesEnabled(particles);
+            // Mirrors, stage 1: the rear-view tile. The bool comes from
+            // video.mirrors, the tile size from the pair video.mirrorResolution
+            // has always documented ("128x512"), landscape forced; either one
+            // can be overridden with KS_MIRROR for a quick test run.
+            const int mirrorConfig = videoConfig.boolAt("mirrors", false) ? 1 : 0;
+            int mirrorW = 0, mirrorH = 0;
+            const std::string mirrorRes = videoConfig.stringAt("mirrorResolution");
+            if (std::sscanf(mirrorRes.c_str(), "%dx%d", &mirrorW, &mirrorH) != 2) {
+                mirrorW = 0;
+                mirrorH = 0;
+            }
+            int mirrorState = mirrorConfig;
+            if (const char* env = std::getenv("KS_MIRROR"); env && *env)
+                mirrorState = std::atoi(env) != 0 ? 1 : 0;
+            if (mirrorW > 0 && mirrorH > 0)
+                renderer->setMirrorResolution(static_cast<uint32_t>(mirrorW),
+                                              static_cast<uint32_t>(mirrorH));
+            renderer->setVirtualMirror(mirrorState != 0);
+            printf("[INIT] Mirrors: %s (tile %s)\n",
+                   mirrorState != 0 ? "on" : "off",
+                   mirrorW > 0 ? mirrorRes.c_str() : "default 512x128");
             if (width > 0 && height > 0 && g_hWnd) {
                 const uint32_t currentW = renderer->extent().width;
                 const uint32_t currentH = renderer->extent().height;
@@ -1261,6 +1282,7 @@ static void initSimulation() {
             options.tonemap = renderer->tonemapMode();
             options.ssao = renderer->isSsao();
             options.ssr = renderer->isSsr();
+            options.mirror = renderer->virtualMirror();
         }
         if (auto* audio = g_simulation->audio())
             options.masterVolume = audio->masterVolume();
@@ -1301,15 +1323,16 @@ static void initSimulation() {
             renderer->setTonemapMode(options.tonemap);
             renderer->setSsao(options.ssao);
             renderer->setSsr(options.ssr);
+            renderer->setVirtualMirror(options.mirror);
             renderer->setMotionBlur(options.motionBlur);
             if (options.motionBlur) renderer->setDeferred(true); // resolve pass only
             renderer->setVsync(options.vsync);
         }
         if (auto* audio = g_simulation->audio())
             audio->setMasterVolume(options.masterVolume);
-        printf("[MENU] video: vsync %d, motion blur %d, ssao %d, ssr %d, exposure %.2f, tonemap %s, volume %.0f\n",
+        printf("[MENU] video: vsync %d, motion blur %d, ssao %d, ssr %d, mirror %d, exposure %.2f, tonemap %s, volume %.0f\n",
                options.vsync ? 1 : 0, options.motionBlur ? 1 : 0,
-               options.ssao ? 1 : 0, options.ssr ? 1 : 0,
+               options.ssao ? 1 : 0, options.ssr ? 1 : 0, options.mirror ? 1 : 0,
                static_cast<double>(
                    ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
                ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
