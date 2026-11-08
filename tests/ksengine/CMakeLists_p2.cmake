@@ -418,3 +418,13 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_preset_test.cpp")
     add_test(NAME material_preset_test COMMAND material_preset_test)
     set_tests_properties(material_preset_test PROPERTIES TIMEOUT 60)
 endif()
+
+# Vulkan validation: a bounded simulator run must log no VUID. The check is a
+# CMake script, like staged_layout_test, so no shell is involved.
+if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/CheckNoValidationErrors.cmake")
+    add_test(NAME validation_errors_test
+        COMMAND ${CMAKE_COMMAND}
+            -DROOT=$<TARGET_FILE_DIR:SimulatorApp>
+            -P "${CMAKE_SOURCE_DIR}/cmake/CheckNoValidationErrors.cmake")
+    set_tests_properties(validation_errors_test PROPERTIES TIMEOUT 120)
+endif()
