@@ -312,6 +312,47 @@ int main() {
     }
 
     // ---------------------------------------------------------------------
+    // RESOLUTION names the window's real client size: matching entry 0 (the
+    // monitor mode) is not the same as being that size — under a 2560x1440
+    // mode the window's work area is 2560x1392, and the row has to say so.
+    // ---------------------------------------------------------------------
+    {
+        GameMenuOverlay menu;
+        menu.openScreen(MenuState::Settings);
+        const int videoRow = rowOf(menu, "VIDEO");
+        KS_CHECK(videoRow >= 0);
+        menu.setSelectedIndex(videoRow);
+        menu.activateSelection();
+        KS_CHECK(menu.state() == MenuState::Options);
+
+        const auto label = [&menu]() -> std::string {
+            for (const auto& item : menu.items())
+                if (item.text.rfind("RESOLUTION", 0) == 0) return item.text;
+            return std::string();
+        };
+        const auto rowAt = [&menu](const char* prefix) {
+            for (int i = 0; i < static_cast<int>(menu.items().size()); ++i)
+                if (menu.items()[i].text.rfind(prefix, 0) == 0) return i;
+            return -1;
+        };
+
+        // No renderer behind the menu: fall back to the selected entry.
+        KS_CHECK(label().find("1920x1080") != std::string::npos);
+
+        // A renderer that reports 2560x1392 must be what the row prints, even
+        // though that size matches the 2560x1440 entry below it.
+        ks::sim::GameMenuOverlay::MenuOptions sized = menu.options();
+        sized.windowWidth = 2560;
+        sized.windowHeight = 1392;
+        menu.setOptions(sized);
+        // Any row that applies the options rebuilds every label in place.
+        menu.setSelectedIndex(rowAt("VSYNC"));
+        menu.activateSelection();
+        KS_CHECK(label().find("2560x1392") != std::string::npos);
+        KS_CHECK(label().find("2560x1440") == std::string::npos);
+    }
+
+    // ---------------------------------------------------------------------
     // The hub: arrows walk the row, ENTER opens the section, ESC offers to
     // leave, hovering a tile selects it.
     // ---------------------------------------------------------------------

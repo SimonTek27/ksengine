@@ -573,16 +573,25 @@ void GameMenuOverlay::buildOptionsMenu()
         }, false, true, "settings" });
     };
 
-    std::snprintf(label, sizeof(label), "RESOLUTION  %dx%d",
-                  resolutionWidth(o.resolutionIndex),
-                  resolutionHeight(o.resolutionIndex));
+    // The window's own client size, when the app knows it: on a 2560x1440 panel
+    // the work area (what the window really is) is 2560x1392, so printing the
+    // monitor mode here would name a size the window does not have.
+    const int shownWidth =
+        o.windowWidth > 0 ? o.windowWidth : resolutionWidth(o.resolutionIndex);
+    const int shownHeight =
+        o.windowHeight > 0 ? o.windowHeight : resolutionHeight(o.resolutionIndex);
+    std::snprintf(label, sizeof(label), "RESOLUTION  %dx%d", shownWidth, shownHeight);
     m_items.push_back({ label, "Window size; fullscreen follows the monitor",
         [this]() {
             m_options.resolutionIndex =
                 (m_options.resolutionIndex + 1) % kResolutionCount;
-            if (onResolutionRequested)
-                onResolutionRequested(resolutionWidth(m_options.resolutionIndex),
-                                      resolutionHeight(m_options.resolutionIndex));
+            const int wantW = resolutionWidth(m_options.resolutionIndex);
+            const int wantH = resolutionHeight(m_options.resolutionIndex);
+            if (onResolutionRequested) onResolutionRequested(wantW, wantH);
+            // Until the app reads the new extent back, the row shows what was
+            // just asked for; the next refresh replaces it with the real one.
+            m_options.windowWidth = wantW;
+            m_options.windowHeight = wantH;
             applyOptions();
         }, false, true, "settings" });
 

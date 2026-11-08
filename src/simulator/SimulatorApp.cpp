@@ -1336,6 +1336,9 @@ static void initSimulation() {
             options.resolutionIndex = ks::sim::GameMenuOverlay::resolutionIndexFor(
                 static_cast<int>(renderer->extent().width),
                 static_cast<int>(renderer->extent().height));
+            // The row shows this, not the entry: the window's real client size.
+            options.windowWidth = static_cast<int>(renderer->extent().width);
+            options.windowHeight = static_cast<int>(renderer->extent().height);
             options.vsync = renderer->vsync();
             options.motionBlur = renderer->isMotionBlur();
             options.exposureIndex =
@@ -1357,8 +1360,12 @@ static void initSimulation() {
         readOptions(options);
         g_simulation->ui().menu().setOptions(options);
         printf("[INIT] Video seeded: %dx%d, fullscreen %d, vsync %d, motion blur %d, exposure %.2f, tonemap %s, ssao %d, ssr %d, volume %.0f\n",
-               ks::sim::GameMenuOverlay::resolutionWidth(options.resolutionIndex),
-               ks::sim::GameMenuOverlay::resolutionHeight(options.resolutionIndex),
+               options.windowWidth > 0
+                   ? options.windowWidth
+                   : ks::sim::GameMenuOverlay::resolutionWidth(options.resolutionIndex),
+               options.windowHeight > 0
+                   ? options.windowHeight
+                   : ks::sim::GameMenuOverlay::resolutionHeight(options.resolutionIndex),
                options.fullscreen ? 1 : 0, options.vsync ? 1 : 0,
                options.motionBlur ? 1 : 0,
                static_cast<double>(

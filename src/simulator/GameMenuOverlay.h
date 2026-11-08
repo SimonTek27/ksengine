@@ -168,6 +168,11 @@ public:
 
     struct MenuOptions {
         int resolutionIndex = 0;
+        // Client size the renderer really has, in pixels. 0 means "not known"
+        // — a headless menu or a test — and the RESOLUTION row then falls back
+        // to the size of the selected entry.
+        int windowWidth = 0;
+        int windowHeight = 0;
         bool fullscreen = false;
         bool vsync = true;
         bool motionBlur = false;
