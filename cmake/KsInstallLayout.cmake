@@ -193,6 +193,20 @@ function(ks_install_layout)
 	# --- user/ -------------------------------------------------------------
 	# Holds only data the installed copy writes itself, so ship it empty.
 	install(CODE "file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/user\")")
+
+	# --- self-check --------------------------------------------------------
+	# The tree above is a promise the runtime leans on (every path is resolved
+	# relative to the executable), and a missing entry only shows up as a
+	# warning at start-up. Check what the install actually produced, with the
+	# same list the build-tree staging test uses. Runs last, so user/ exists.
+	install(CODE "
+		execute_process(COMMAND \"${CMAKE_COMMAND}\" -DROOT=\${CMAKE_INSTALL_PREFIX}
+			-P \"${CMAKE_SOURCE_DIR}/cmake/CheckStagedLayout.cmake\"
+			RESULT_VARIABLE _ks_layout_result)
+		if(NOT _ks_layout_result EQUAL 0)
+			message(FATAL_ERROR \"installed layout is incomplete (see the missing entries above)\")
+		endif()
+	")
 endfunction()
 
 # ---------------------------------------------------------------------------

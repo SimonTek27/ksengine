@@ -34,4 +34,4 @@ if(_missing)
     message(FATAL_ERROR "staging layout incomplete in ${ROOT}: missing ${_list}")
 endif()
 
-message(STATUS "staging layout complete in ${ROOT}")
+message(STATUS "layout complete in ${ROOT}")
