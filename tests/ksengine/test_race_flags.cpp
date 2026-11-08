@@ -4,6 +4,7 @@
  * Qt-free: compiles the simulator TUs directly (track_loader_test pattern).
  */
 #include "RaceSessionManager.h"
+#include "GarageExit.h"
 #include "MultiCarManager.h"
 #include "adapters/assetto_corsa/AcSharedMemory.h"
 
@@ -104,6 +105,18 @@ int main()
     CHECK(practice.pitLaneOpen());
     practice.endSession();
     CHECK(practice.pitLaneOpen());
+
+    // --- the HUD line the window produces (GarageExitController::statusLabel) ---
+    // Held in the box with the lane closed: the reason is visible before the
+    // driver asks to leave. Rolling down an open lane keeps its own label.
+    CHECK(GarageExitController::statusLabel(GarageExitPhase::InGarage, false, "IN GARAGE") ==
+          "PIT CLOSED");
+    CHECK(GarageExitController::statusLabel(GarageExitPhase::InGarage, true, "IN GARAGE") ==
+          "IN GARAGE");
+    CHECK(GarageExitController::statusLabel(GarageExitPhase::PitLane, false, "PIT LANE") ==
+          "PIT LANE");
+    CHECK(GarageExitController::statusLabel(GarageExitPhase::OnTrack, false, "ON TRACK") ==
+          "ON TRACK");
 
     // --- AC shared-memory flag channel mapping (AC_FLAG_TYPE) ---
     CHECK(ks::ac::ksRaceFlagToAcFlag(0) == 0); // None      -> AC_NO_FLAG

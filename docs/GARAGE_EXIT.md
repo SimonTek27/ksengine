@@ -12,7 +12,10 @@
 > durante il countdown e dopo la bandiera a scacchi, aperta su verde, giallo e
 > safety car; practice/qualify/hotlap la tengono sempre aperta. Il direttore di
 > gara può chiuderla (`closePitLane()`) e `openPitLane()` la restituisce alla
-> regola della sessione; un nuovo `configure()` azzera l'ordine.
+> regola della sessione; un nuovo `configure()` azzera l'ordine. La riga di
+> stato della HUD dice `PIT CLOSED` già mentre l'auto è tenuta in box
+> (`GarageExitController::statusLabel`), non solo dopo un LEAVE GARAGE
+> rifiutato.
 
 ## State machine
 

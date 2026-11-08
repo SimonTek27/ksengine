@@ -191,6 +191,19 @@ public:
         return out;
     }
 
+    /** The line the HUD shows for a state.
+     *
+     *  A closed lane outranks the parked label: "IN GARAGE" tells the driver
+     *  where the car is, "PIT CLOSED" tells him why LEAVE GARAGE would be
+     *  refused, and he should learn that before pressing the key, not after.
+     *  Any other phase keeps its own label — a car already rolling down the
+     *  lane is not "closed", it is on it. */
+    static std::string statusLabel(GarageExitPhase phase, bool pitLaneOpen,
+                                   const std::string& label) {
+        if (!pitLaneOpen && phase == GarageExitPhase::InGarage) return "PIT CLOSED";
+        return label;
+    }
+
     static const char* phaseLabel(GarageExitPhase p, GarageBlockReason b = GarageBlockReason::None) {
         if (p == GarageExitPhase::Blocked) {
             switch (b) {

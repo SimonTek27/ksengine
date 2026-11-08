@@ -17,8 +17,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   car; practice/qualify/hotlap restano sempre aperte. Il direttore di gara ha
   `closePitLane()`/`openPitLane()` e `configure()` azzera l'ordine. Entrambe le
   TU del loop (client `ksim` e `SimulatorServer`) leggono lo stesso getter, con
-  corsia aperta quando nessuna sessione è attiva. `test_race_flags` copre gara,
-  ordine direzionale e practice.
+  corsia aperta quando nessuna sessione è attiva. La riga di stato della HUD
+  dice `PIT CLOSED` già mentre l'auto è tenuta in box
+  (`GarageExitController::statusLabel`), quindi il motivo si vede prima di
+  premere LEAVE GARAGE e non solo come rifiuto. `test_race_flags` copre gara,
+  ordine direzionale, practice e la riga di stato.
 - **Un `data/data.json` illeggibile viene segnalato, non assorbito in silenzio**:
   una cartella gia` convertita con il manifest corrotto lasciava il serbatoio,
   il profilo freni, la sequenza di avvio e la frizione ai default del modello,

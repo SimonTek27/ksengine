@@ -172,7 +172,11 @@ void SimulationLoop::updateGarageExit(float dt) {
         std::fprintf(stderr, "SimulationLoop: garage %s -> %s\n",
                      GarageExitController::phaseLabel(before),
                      GarageExitController::phaseLabel(out.phase));
-    m_garageStatus = out.statusText;
+    // A closed pit lane is announced while the car is still held in its box,
+    // not only when LEAVE GARAGE is refused: the HUD line already has room for
+    // the reason, and the driver should not have to press the key to learn it.
+    m_garageStatus = GarageExitController::statusLabel(out.phase, in.pitLaneOpen,
+                                                       out.statusText);
 #else
     (void)dt;
 #endif
