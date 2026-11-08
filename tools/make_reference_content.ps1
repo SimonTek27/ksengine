@@ -34,14 +34,17 @@
 #              fallback path stays covered. Brief P3 appends an optional
 #              6th clear-coat cell (only "coated" uses it here).
 #
-# Idempotent: wipes the two output trees before writing. BinaryWriter is
-# little-endian on every platform PowerShell runs on (ECMA-334), which is
-# exactly what the C++ readers assume.
+# Idempotent: wipes the output tree(s) it is about to write. -CarOnly skips
+# content/baked entirely, which is what a test run needs: that tree is tracked
+# in git, while content/cars is ignored, so rebuilding the car fixture must not
+# touch the committed bake.
 #
-# Usage:  powershell -File tools/make_reference_content.ps1
+# Usage:  powershell -File tools/make_reference_content.ps1             # both trees
+#         powershell -File tools/make_reference_content.ps1 -CarOnly    # car only
 
 param(
-    [string]$ContentRoot = (Join-Path $PSScriptRoot "..\content")
+    [string]$ContentRoot = (Join-Path $PSScriptRoot "..\content"),
+    [switch]$CarOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -154,8 +157,9 @@ function Add-QuadMinusZ([System.Collections.ArrayList]$Faces, [float]$Z, [float]
 
 # --- track scene ------------------------------------------------------------
 
-$track = Join-Path $ContentRoot "baked"
-if (Test-Path $track) { Remove-Item -Recurse -Force $track }
+function Write-TrackScene {
+    $track = Join-Path $ContentRoot "baked"
+    if (Test-Path $track) { Remove-Item -Recurse -Force $track }
 
 Write-Lines (Join-Path $track "manifest.txt") @(
     "plain", "sign", "smooth", "rough", "coated", "metal", "lodable",
@@ -234,10 +238,12 @@ foreach ($q in @(
 $ground = [System.Collections.ArrayList]::new()
 Add-Face $ground @(-20.0, 0.0, -20.0) @(0.0, 0.0, 40.0) @(40.0, 0.0, 0.0) @(0.0, 1.0, 0.0)
 Write-Nms2 (Join-Path $track "ground.nmsh") $ground 0.0 $noWindow
+}
 
 # --- reference car ----------------------------------------------------------
 
-$carRoot = Join-Path $ContentRoot "cars/refcar"
+function Write-ReferenceCar {
+    $carRoot = Join-Path $ContentRoot "cars/refcar"
 if (Test-Path $carRoot) { Remove-Item -Recurse -Force $carRoot }
 $car = Join-Path $carRoot "baked"
 
@@ -260,9 +266,20 @@ Add-Face $body @($x0, $y0, $z0) @(($x1-$x0), 0.0, 0.0) @(0.0, 0.0, ($z1-$z0)) @(
 Add-Face $body @($x0, $y0, $z1) @(($x1-$x0), 0.0, 0.0) @(0.0, ($y1-$y0), 0.0) @(0.0, 0.0, 1.0)
 Add-Face $body @($x0, $y0, $z0) @(0.0, ($y1-$y0), 0.0) @(($x1-$x0), 0.0, 0.0) @(0.0, 0.0, -1.0)
 Write-Nms2 (Join-Path $car "body.nmsh") $body 0.0 1000.0
+}
+
+# --- dispatch ---------------------------------------------------------------
+
+$written = @()
+if (-not $CarOnly) {
+    Write-TrackScene
+    $written += (Join-Path $ContentRoot "baked")
+}
+Write-ReferenceCar
+$written += (Join-Path $ContentRoot "cars/refcar/baked")
 
 Write-Host "reference content written under $ContentRoot"
-foreach ($root in @((Join-Path $ContentRoot "baked"), $car)) {
+foreach ($root in $written) {
     Get-ChildItem -Recurse -File $root | ForEach-Object {
         "  {0,8}  {1}" -f $_.Length, $_.FullName.Substring((Resolve-Path $ContentRoot).Path.Length + 1)
     }
