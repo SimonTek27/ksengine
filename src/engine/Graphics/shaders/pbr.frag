@@ -21,6 +21,7 @@ layout(set = 1, binding = 0) uniform MaterialUBO {
     int useNormalTexture;
     int useOcclusionTexture;
     int useEmissiveTexture;
+    float brakeDiscGlow;   // 0 = off, 1 = full glow (set per-draw for BrakeDisc)
     vec3 padding2;
 } material;
 
@@ -118,6 +119,13 @@ vec3 getEmissive() {
     vec3 em = material.emissiveFactor;
     if (material.useEmissiveTexture > 0) {
         em *= texture(emissiveMap, fragTexCoord).rgb;
+    }
+    // Brake disc glow: if brakeDiscGlow > 0, add a warm glow proportional
+    // to the glow factor. The CPU side sets this only for BrakeDisc materials.
+    if (material.brakeDiscGlow > 0.01f) {
+        float g = material.brakeDiscGlow;
+        // Warm orange glow, intensity proportional to the set factor
+        em += vec3(g * 0.8f, g * 0.5f, g * 0.2f) * material.emissiveFactor.a;
     }
     return em;
 }
