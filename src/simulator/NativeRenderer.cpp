@@ -6500,7 +6500,11 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     // always written so the set is complete whether or not DOF is enabled;
     // pc.dofEnabled alone gates the shader's reads.
     VkDescriptorImageInfo depthInfo{};
-    depthInfo.sampler = m_hizSampler;
+    // HiZ builds its sampler with its images, lazily: until then the display
+    // set still needs one that exists, or the write hands the driver a null
+    // sampler (an access violation inside vkUpdateDescriptorSets, not a quiet
+    // black frame). DOF is gated by pc.dofEnabled, so this one is never read.
+    depthInfo.sampler = m_hizSampler ? m_hizSampler : m_hdrSampler;
     depthInfo.imageView = depthView;
     depthInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
