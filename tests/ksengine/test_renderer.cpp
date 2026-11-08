@@ -1145,15 +1145,32 @@ int main()
     }
 
     // (f) Reference car bake: the loadMeshFromFile() call shape
-    //     SimulationLoop::ensureCarVisual() now makes (materials.txt row +
+    //     SimulationLoop::ensureCarVisual() makes (materials.txt row +
     //     textureDir) — green paint on the -z face, authored [0..1000] window.
+    //     Since 40a07be that fixture is gone from the repo on purpose ("a
+    //     fixture nobody drives") and content/cars is gitignored, so a clean
+    //     checkout cannot have it. The section therefore runs only where
+    //     tools/make_reference_content.ps1 wrote it, and says so loudly when it
+    //     has not: failing on content that is not there, or passing without
+    //     running the pins, would both be wrong. The rest of the harness still
+    //     covers manifest -> materials -> texture dir -> pixels via
+    //     content/baked.
     ks::sim::MaterialCache carMaterials;
     const std::string refCar = KS_TEST_REFERENCE_CAR;
-    const bool carHasMaterials = carMaterials.load(refCar + "/materials.txt");
-    KS_CHECK(carHasMaterials);
+    const bool carBakePresent =
+        std::filesystem::exists(std::filesystem::path(refCar) / "materials.txt");
+    if (!carBakePresent) {
+        std::printf("test_renderer: (f) SKIP - no reference car bake at %s "
+                    "(dropped in 40a07be; run tools/make_reference_content.ps1 "
+                    "for the loadMeshFromFile pixel pins)\n",
+                    refCar.c_str());
+    }
+    const bool carHasMaterials =
+        carBakePresent && carMaterials.load(refCar + "/materials.txt");
+    if (carBakePresent) KS_CHECK(carHasMaterials);
     const ks::sim::MeshMaterial* carMaterial =
         carHasMaterials ? carMaterials.find("body") : nullptr;
-    KS_CHECK(carMaterial != nullptr);
+    if (carBakePresent) KS_CHECK(carMaterial != nullptr);
     if (carMaterial) {
         KS_CHECK(renderer.loadMeshFromFile("car_body", refCar + "/body.nmsh",
                                            carMaterial, refCar + "/textures"));
