@@ -476,25 +476,11 @@ bool appendDataPayload(const ClientServerConfig& cfg, Conn& c, std::vector<uint8
     std::vector<std::vector<uint8_t>> blobs;
     size_t used = 1 /*frameCount*/ + ackBlockSize;
 
-    // Unreliable frames first (freshness), then reliable first-sends/retransmits.
-    for (int ch = 0; ch < cfg.numChannels && static_cast<int>(blobs.size()) < kMaxFramesPerPacket; ++ch) {
-        if (isReliable(cfg, ch)) continue;
-        auto& ob = c.outbox[ch];
-        while (!ob.empty() && static_cast<int>(blobs.size()) < kMaxFramesPerPacket) {
-            const Frame& f = ob.front();
-            const size_t frameLen = 1 + 1 + 2 + f.payload.size();
-            if (used + frameLen > kPacketBudget) break;
-            std::vector<uint8_t> blob;
-            blob.reserve(frameLen);
-            put8(blob, f.channel);
-            put8(blob, f.msgType);
-            put16(blob, static_cast<uint16_t>(f.payload.size()));
-            putBytes(blob, f.payload.data(), f.payload.size());
-            used += frameLen;
-            blobs.push_back(std::move(blob));
-            ob.pop_front();
-        }
-    }
+    // Reliable first-sends/retransmits go first. An unreliable flood (car state
+    // at 5+ Hz) previously consumed the whole packet budget, so the reliable
+    // loop below always broke on the first frame and reliable messages (damage,
+    // setup, chat, penalties) were starved for as long as state kept flowing.
+    // Unreliable frames use whatever budget is left and are refreshed next tick.
     for (int ch = 0; ch < cfg.numChannels && static_cast<int>(blobs.size()) < kMaxFramesPerPacket; ++ch) {
         if (!isReliable(cfg, ch)) continue;
         auto& rs = c.reliable[ch];
@@ -521,6 +507,25 @@ bool appendDataPayload(const ClientServerConfig& cfg, Conn& c, std::vector<uint8
             ++p.sends;
             ++c.reliableAttempts;
             if (p.sends > 1) ++c.retransmissions;
+        }
+    }
+    // Unreliable frames fill the remaining budget.
+    for (int ch = 0; ch < cfg.numChannels && static_cast<int>(blobs.size()) < kMaxFramesPerPacket; ++ch) {
+        if (isReliable(cfg, ch)) continue;
+        auto& ob = c.outbox[ch];
+        while (!ob.empty() && static_cast<int>(blobs.size()) < kMaxFramesPerPacket) {
+            const Frame& f = ob.front();
+            const size_t frameLen = 1 + 1 + 2 + f.payload.size();
+            if (used + frameLen > kPacketBudget) break;
+            std::vector<uint8_t> blob;
+            blob.reserve(frameLen);
+            put8(blob, f.channel);
+            put8(blob, f.msgType);
+            put16(blob, static_cast<uint16_t>(f.payload.size()));
+            putBytes(blob, f.payload.data(), f.payload.size());
+            used += frameLen;
+            blobs.push_back(std::move(blob));
+            ob.pop_front();
         }
     }
 

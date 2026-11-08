@@ -140,7 +140,7 @@ m_network->setInterpolationDelay(0.10); // seconds behind latest snapshot
 
 | Item | Notes |
 |------|-------|
-| `MSG_CAR_DAMAGE` / `MSG_CAR_SETUP` on wire | Enum present, handlers TBD |
+| `MSG_CAR_DAMAGE` / `MSG_CAR_SETUP` on wire | ✅ 2026-11-08: il client riceve entrambi (test `test_multiplayer` campo per campo); il danno viene applicato all'auto mappata da `applyRemoteCarDamage`. Il setup viaggia ma non viene applicato perché un'auto remota è guidata dallo stato dell'host, non dalla propria fisica |
 | Client prediction + reconciliation | Own car only |
 | Wire encryption / token auth | LAN `InsecureConnect` today |
 | Multiplayer UI widget | Discovery exists; dedicated UI optional |

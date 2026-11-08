@@ -188,6 +188,62 @@ int main()
     check(stateCar == 42 && std::fabs(stateX - 12.5f) < 0.1f,
           "car state payload survives serialization");
 
+    // --- 5b. damage and setup snapshots ------------------------------------
+    // The loop applies the damage to the mapped car (applyRemoteCarDamage);
+    // here the transport half is pinned: what the host broadcasts arrives field
+    // for field, which is what the loop then hands to the vehicle.
+    bool dmgSeen = false;
+    net::CarDamageMessage gotDmg{};
+    guest.onCarDamageReceived = [&](const net::CarDamageMessage& m) {
+        gotDmg = m;
+        dmgSeen = true;
+    };
+    net::CarDamageMessage dmgOut{};
+    dmgOut.carId = 7u;
+    dmgOut.overall = 0.42f;
+    dmgOut.engineHealth = 0.7f;
+    dmgOut.powerMul = 0.8f;
+    dmgOut.downforceMul = 0.9f;
+    dmgOut.flags = 1u; // engine failed
+    // Re-broadcast while waiting: CanSendMessage() reports false while a
+    // reliable packet is still in flight, and the loop's publisher repeats at
+    // ~5 Hz, so a single send here could legitimately be dropped.
+    check(spin([&] {
+              host.broadcastCarDamage(dmgOut);
+              return dmgSeen;
+          }, 5.0),
+          "host broadcasts MSG_CAR_DAMAGE and the guest receives it");
+    check(gotDmg.carId == 7u, "damage snapshot carries the car id");
+    check(std::fabs(gotDmg.overall - 0.42f) < 1e-4f,
+          "damage snapshot carries the overall damage");
+    check(std::fabs(gotDmg.engineHealth - 0.7f) < 1e-4f,
+          "damage snapshot carries the engine health");
+    check(std::fabs(gotDmg.downforceMul - 0.9f) < 1e-4f,
+          "damage snapshot carries the aero multiplier");
+    check((gotDmg.flags & 1u) != 0, "damage snapshot carries the failure flags");
+
+    bool setupSeen = false;
+    net::CarSetupMessage gotSetup{};
+    guest.onCarSetupReceived = [&](const net::CarSetupMessage& m) {
+        gotSetup = m;
+        setupSeen = true;
+    };
+    net::CarSetupMessage setupOut{};
+    setupOut.carId = 9u;
+    setupOut.brakeBias = 0.58f;
+    setupOut.rearWingAngle = 4.5f;
+    setupOut.fuel = 32.0f;
+    setupOut.absLevel = 3;
+    check(spin([&] {
+              host.broadcastCarSetup(setupOut);
+              return setupSeen;
+          }, 5.0),
+          "host broadcasts MSG_CAR_SETUP and the guest receives it");
+    check(gotSetup.carId == 9u && std::fabs(gotSetup.brakeBias - 0.58f) < 1e-4f &&
+              std::fabs(gotSetup.rearWingAngle - 4.5f) < 1e-4f &&
+              std::fabs(gotSetup.fuel - 32.0f) < 1e-4f && gotSetup.absLevel == 3,
+          "setup snapshot survives serialization");
+
     // --- 6. clean disconnect ----------------------------------------------
     guest.disconnectFromServer();
     check(spin([&] { return guestLeft; }, 5.0),

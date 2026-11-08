@@ -227,6 +227,12 @@ public:
     int GetType() const { return m_type; }
     void setType(int type) { m_type = type; }
 
+    // The body copy used by callers is `*freshFromFactory = source`: identity
+    // belongs to the sender's factory instance, so assignment must keep the
+    // target's type. Copying it from the source (which callers usually build
+    // without setType, leaving -1) made the receiver drop the frame.
+    Message& operator=(const Message&) { return *this; }
+
     virtual bool Serialize(ReadStream& stream) = 0;
     virtual bool Serialize(WriteStream& stream) = 0;
 

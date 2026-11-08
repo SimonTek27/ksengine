@@ -23,6 +23,7 @@
 #include "engine/Graphics/ParticleSystem.h"
 #include "RaceSessionManager.h"
 #include "FeatureHub.h"
+#include "NetworkConfig.h" // net::CarDamageMessage handled by applyRemoteCarDamage
 #include "CarStateSync.h"
 #include "CarStateSyncBridge.h"
 #include "TeamSessionBridge.h" // roadmap 2.8: team.ini roster -> session field
@@ -468,6 +469,13 @@ private:
     std::vector<ks::ecs::Entity> m_carVisualEntities;
     void broadcastLocalCarState();
     void handleRemoteCarState(uint32_t carId, const net::CarStateData& state);
+#if HAS_KSNET
+    /** Host damage snapshot for a car in `m_remoteCarIds` (ignored for our own
+     *  id, which the local physics owns). The type lives in the transport
+     *  header, which this header does not pull in, so the declaration is
+     *  guarded with the rest of the network wiring. */
+    void applyRemoteCarDamage(const net::CarDamageMessage& msg);
+#endif
     void ensureScenePipeline();
     void syncUiFromVehicle();
     void publishSharedMemory();

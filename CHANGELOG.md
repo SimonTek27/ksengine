@@ -9,6 +9,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Danni in multiplayer: il client li applica (GAP_MATRIX P1.10)**: l'host
+  pubblicava `MSG_CAR_DAMAGE` a ~5 Hz e il client lo riceveva, ma nessuno
+  consumava `onCarDamageReceived`, quindi nel client l'auto dell'altro
+  giocatore restava sempre integra. Ora il loop mappa `carId` → auto e applica
+  lo snapshot con `applyCarDamageMessage`, ignorando il proprio id (la fisica
+  locale è l'autorità). `test_multiplayer` copre danno e setup host→guest campo
+  per campo; il setup viaggia ma non viene applicato, perché un'auto remota è
+  guidata dallo stato dell'host. Perché i due messaggi non arrivavano mai:
+  `Message` copiava il proprio `m_type` nella copy-assignment, così `*msg = src`
+  azzerava il tipo (restava -1) e il ricevente scartava il frame in
+  `factory->Create()`; in più i frame unreliable (car state) saturavano il budget
+  del pacchetto prima di quelli reliable, affamando damage/setup/chat/penalty.
 - **Replay: registrazione e playback (GAP_MATRIX P0.5)**: `ReplayRecorder`
   aveva caricamento, salvataggio e accessori di playback, ma `updatePlayback()`,
   `seekTo()`, `seekProgress()` e `isFinished()` erano **dichiarati e mai

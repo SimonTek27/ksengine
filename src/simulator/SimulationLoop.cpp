@@ -216,6 +216,12 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
     m_network->onRemoteCarStateReceived = [this](uint32_t carId, const net::CarStateData& state) {
         handleRemoteCarState(carId, state);
     };
+    // GAP_MATRIX P1.10: the host publishes its damage ~5 Hz. The client used to
+    // drop the snapshot on the floor, so the other player's car always looked
+    // intact here; it now lands on the car the id maps to.
+    m_network->onCarDamageReceived = [this](const net::CarDamageMessage& msg) {
+        applyRemoteCarDamage(msg);
+    };
     m_network->onChatMessageReceived = [this](uint32_t, const std::string& from,
                                               const std::string& message) {
         m_ui.chat().addLine(from + ": " + message);
@@ -3393,6 +3399,20 @@ void SimulationLoop::broadcastLocalCarState() {
     }
 #endif
 }
+
+#if HAS_KSNET
+void SimulationLoop::applyRemoteCarDamage(const net::CarDamageMessage& msg) {
+    if (!m_multiCar) return;
+    // The host's own car is simulated by the host: a snapshot travelling back
+    // to its author would let the network overwrite the physics that made it.
+    if (msg.carId == m_ownNetCarId) return;
+    const auto it = m_remoteCarIds.find(msg.carId);
+    if (it == m_remoteCarIds.end()) return; // spawn message still in flight
+    CarEntry* car = m_multiCar->getCar(it->second);
+    if (!car || !car->vehicle) return;
+    applyCarDamageMessage(car->vehicle->damage(), msg);
+}
+#endif
 
 void SimulationLoop::handleRemoteCarState(uint32_t carId, const net::CarStateData& state) {
 #if HAS_KSNET
