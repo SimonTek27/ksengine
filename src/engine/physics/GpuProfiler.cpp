@@ -161,15 +161,27 @@ void GpuProfiler::beginFrame(VkCommandBuffer cmd) {
     const int slot = m_frameIndex;
     resolveFrame(slot);
 
-    vkResetQueryPool(m_device, m_pools[static_cast<size_t>(slot)], 0, kQueriesPerFrame);
+    if (!cmd) {
+        // Nothing will stamp this slot: leaving it marked used would make the
+        // next resolveFrame() read a query set that was never reset or written.
+        m_slotUsed[static_cast<size_t>(slot)] = false;
+        return;
+    }
+
+    // Reset from inside the command buffer, not with vkResetQueryPool(): the
+    // host-side reset is core Vulkan 1.2 (or VK_KHR_host_query_reset), and this
+    // app creates a VK_API_VERSION_1_0 instance and device without enabling
+    // that extension. Calling the 1.2 entry point there is undefined, and it
+    // is what killed the first frame (status 139, fault in nvoglv64) whenever
+    // the validation layer was loaded. vkCmdResetQueryPool is core 1.0 and
+    // records ahead of the timestamps below, so the order holds.
+    vkCmdResetQueryPool(cmd, m_pools[static_cast<size_t>(slot)], 0, kQueriesPerFrame);
     m_slotUsed[static_cast<size_t>(slot)] = true;
 
     // First timestamp
-    if (cmd) {
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                            m_pools[static_cast<size_t>(slot)],
-                            static_cast<uint32_t>(Pass::FrameBegin));
-    }
+    vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                        m_pools[static_cast<size_t>(slot)],
+                        static_cast<uint32_t>(Pass::FrameBegin));
 #endif
 }
 

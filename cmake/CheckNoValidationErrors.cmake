@@ -54,4 +54,13 @@ if(vuidCount GREATER 0)
         "the simulator logged ${vuidCount} distinct Vulkan validation error(s):\n  ${printed}")
 endif()
 
+# A run that never reached a frame says nothing about the API usage it would
+# have done: it used to pass with "0 frame report(s)" while the process was
+# dying inside the first frame. Treat that as a failure of the check itself.
+if(frameCount LESS 1)
+    message(FATAL_ERROR
+        "the run produced no frame report (process result: ${runResult}) — the simulator "
+        "did not reach a frame, so this check proves nothing about its Vulkan usage")
+endif()
+
 message(STATUS "no Vulkan validation errors (${frameCount} frame report(s), run result: ${runResult})")

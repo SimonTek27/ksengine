@@ -5425,6 +5425,53 @@ bool NativeRenderer::ensureDeferredResources() {
             }
         }
 
+        // Same rule as the history slots above: the lighting set names this
+        // target on every frame, while the SSGI chain writes it only when SSGI
+        // is on. Left UNDEFINED, the descriptor's declared SHADER_READ_ONLY
+        // layout stops being true the moment the chain is skipped, and the
+        // layer reports it on the lighting draw (VUID-vkCmdDraw-None-09600).
+        // The chain's own render pass keeps initialLayout UNDEFINED — that is
+        // a discard, so it stays legal once this has run.
+        {
+            VkCommandBufferAllocateInfo cbAi{};
+            cbAi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+            cbAi.commandPool = m_commandPool;
+            cbAi.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+            cbAi.commandBufferCount = 1;
+            VkCommandBuffer cb = VK_NULL_HANDLE;
+            if (vkAllocateCommandBuffers(m_device, &cbAi, &cb) != VK_SUCCESS) { destroyDeferredResources(); return false; }
+
+            VkCommandBufferBeginInfo begin{};
+            begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+            vkBeginCommandBuffer(cb, &begin);
+            for (int i = 0; i < 2; ++i) {
+                VkImageMemoryBarrier barrier{};
+                barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+                barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barrier.image = m_ssgiImages[i];
+                barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                barrier.subresourceRange.levelCount = 1;
+                barrier.subresourceRange.layerCount = 1;
+                barrier.srcAccessMask = 0;
+                barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+                vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                     0, 0, nullptr, 0, nullptr, 1, &barrier);
+            }
+            vkEndCommandBuffer(cb);
+
+            VkSubmitInfo submit{};
+            submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+            submit.commandBufferCount = 1;
+            submit.pCommandBuffers = &cb;
+            vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+            vkQueueWaitIdle(m_graphicsQueue);
+            vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
+        }
+
         // Linear: the gather is half resolution, so both the blur taps and the
         // lighting pass fetch are free to interpolate between texels.
         VkSamplerCreateInfo sCi{};
