@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 
 namespace ks::sim {
 
@@ -135,6 +137,15 @@ bool ReplayRecorder::loadReplay(const std::string& filePath)
 
 bool ReplayRecorder::saveReplay(const std::string& filePath)
 {
+    // The caller names the file, not the folder. A control-API SAVE into
+    // replay/ used to fail on a clean install because only the menu's toggle
+    // created that directory first; creating the parent here keeps every
+    // writer (menu, control API, tools) working under one rule.
+    {
+        std::error_code ec;
+        const std::filesystem::path parent = std::filesystem::path(filePath).parent_path();
+        if (!parent.empty()) std::filesystem::create_directories(parent, ec);
+    }
     FILE* f = fopen(filePath.c_str(), "wb");
     if (!f) {
         printf("ReplayRecorder: Cannot write to file: %s\n", filePath.c_str());

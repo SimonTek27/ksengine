@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 
 static int g_fails = 0;
@@ -127,6 +128,15 @@ int main() {
     CHECK(copyRec.loadReplay(copyPath));
     CHECK(copyRec.frameCount() == rec.frameCount());
     CHECK_NEAR(copyRec.duration(), rec.duration(), 1e-5f);
+
+    // Saving creates the folder it needs: on a clean install nothing has made
+    // replay/ yet, and the control API must still be able to save there.
+    const std::string nested = "replay_test_missing/sub/run.ksrep";
+    CHECK(rec.saveReplay(nested));
+    ks::sim::ReplayRecorder nestedRec;
+    CHECK(nestedRec.loadReplay(nested));
+    CHECK(nestedRec.frameCount() == rec.frameCount());
+    std::filesystem::remove_all("replay_test_missing");
 
     // A truncated file is refused, and the frames already loaded survive.
     CHECK(writeReplay(brokenPath, 5, 2)); // header claims 5, file holds 2
