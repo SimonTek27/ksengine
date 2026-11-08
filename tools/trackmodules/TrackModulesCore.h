@@ -75,6 +75,13 @@ struct AnchorInfo {
     double center[3] = {0.0, 0.0, 0.0};
 };
 
+// The marshal mesh every generated track instances: the high-detail
+// marshall_A_HI_010 that ships inside the Vallelunga asset. Pulled out once
+// with `kn5baker --only marshall_A_HI_010 <track.kn5> objects3d/marshal`, so a
+// generated track needs no marshal geometry of its own and never falls back to
+// the low-detail twin (marshall_A_LOW_010, 168 triangles).
+inline constexpr const char* kMarshalMeshName = "marshall_A_HI_010";
+
 // Trackside marshal post: the asset places two per corner side (entry and
 // exit), i.e. four per corner. The simulator drives them at runtime
 // (simulator/TracksidePosts.h), which is why only the pose is stored here.
@@ -82,6 +89,7 @@ struct PostInfo {
     int corner = 0;       // 1-based corner number, in lap order
     std::string side;     // "left" | "right"
     double station = 0.0; // metres from the start line
+    std::string mesh = kMarshalMeshName; // mesh instanced for this post
     double center[3] = {0.0, 0.0, 0.0};
 };
 

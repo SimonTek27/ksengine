@@ -2006,7 +2006,8 @@ std::string toJson(const Report& report, std::size_t max_nodes)
     for (std::size_t i = 0; i < report.marshal_posts.size(); ++i) {
         const PostInfo& p = report.marshal_posts[i];
         out << (i ? ", " : "") << "{\"corner\": " << p.corner << ", \"side\": \"" << p.side
-            << "\", \"station\": " << p.station << ", \"center\": [" << p.center[0]
+            << "\", \"station\": " << p.station << ", \"mesh\": \"" << p.mesh
+            << "\", \"center\": [" << p.center[0]
             << ", " << p.center[1] << ", " << p.center[2] << "]}";
     }
     out << "],\n";
