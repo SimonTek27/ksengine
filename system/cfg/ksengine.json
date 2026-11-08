@@ -29,7 +29,9 @@
     "video.shadowMapSize",
     "video.shadowCascades",
     "singleplayer.modes",
-    "singleplayer.defaults"
+    "singleplayer.defaults",
+    "video.saturation",
+    "video.contrast"
   ],
   "physics": {
     "fixedDt": 0.008333333333333333,
@@ -49,7 +51,9 @@
     "note": "The three entries of the SETTINGS screen: every image option lives in the video page, the volumes in audio, the bindings in controls."
   },
   "video": {
-    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, particles, headPhysics, shadowMapSize and shadowCascades. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
+    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
+    "saturation": 1.0,
+    "contrast": 1.0,
     "resolution": "1920x1080",
     "resolutions": [
       "1920x1080",
@@ -170,8 +174,9 @@
       },
       {
         "feature": "skidmarks",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "skid marks (particles)",
+        "note": "One emitter per wheel, parked at the wheel's position (car frame: half wheelbase fore/aft, half track across, oriented with the travel direction). Lock test: brake input past 0.7 with the wheel's rim speed (wheelOmega * radius) under 5 m/s - the same numbers the physics integrates."
       },
       {
         "feature": "tyreVisuals",
@@ -558,7 +563,7 @@
         "feature": "brakeGlow",
         "status": "partial",
         "landsAs": "brake glow",
-        "note": "Discs glow with temperature from the brake thermal model. The car's own [BRAKEDISC_FX] sections scale it: GLOW_MULT multiplies the value and ACTIVE = 0 turns it off, both read from the model document at car load; there is still no glow texture or spark set."
+        "note": "Discs glow with temperature from the brake thermal model. The car's own [BRAKEDISC_FX] sections scale it: GLOW_MULT multiplies the value and ACTIVE = 0 turns it off, both read from the model document at car load. Sparks: one emitter per wheel backs the glow - a disc past 600 C shedding under near-lock braking at road speed throws white-hot crumbs, rate scaled by how far past that anchor the disc is (RainEffects.h, same particle set as the skid marks)."
       },
       {
         "feature": "walkMode",

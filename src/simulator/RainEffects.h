@@ -14,7 +14,12 @@
  *  - spray: white mist kicked up around the wheels while the track is wet
  *           and the car is actually moving.
  *
- *  - skid:  dark rubber strips deposited when wheels lock under hard braking.
+ *  - skid:  dark rubber strips deposited when wheels lock under hard braking,
+ *           one emitter per wheel (FL..RR), positioned from the car frame;
+ *
+ *  - spark: white-hot crumbs shed by a brake disc that is hot enough to glow,
+ *           under the same anchors that feed the glow (BRAKEDISC_FX gate,
+ *           400..800 °C scale) plus a braking and speed floor.
  *
  * The enable/rate rules are the "is it raining yet" test of Roadmap 2.2, so
  * they live here as free functions instead of inside SimulationLoop — see
@@ -124,6 +129,54 @@ inline void driveSkidEmitter(ParticleEmitter& em,
     em.enabled = brake > 0.7f && std::fabs(wheelSpeedMag) < 5.0f;
     em.position = {carPos.x, 0.0f, carPos.z};
     em.spawnRate = em.enabled ? 20.0f : 0.0f;
+}
+
+// Spark emitter brackets: a disc turns red just past 600 °C (the same scale
+// the physics brake-fade uses), and only near-lock braking at real road speed
+// throws material. Rate is proportional to how far past the anchor the disc
+// is, so a glowing-but-cool disc sheds nothing.
+constexpr float kSparkTempMin = 600.0f;   // °C: below this, no sparks at all
+constexpr float kSparkTempCap = 900.0f;   // °C: full rate
+constexpr float kSparkBrakeMin = 0.85f;   // only near-lock braking sheds
+constexpr float kSparkSpeedMin = 15.0f;   // m/s of road speed to throw against
+constexpr float kSparkRateMax = 60.0f;    // spawns/s at full heat, per wheel
+constexpr float kSparkDiscHeight = 0.25f; // above the road: the disc plane
+
+// Base disc-spark emitter (disabled; driveSparkEmitter() configures it per
+// frame). Tiny, bright, short-lived: a hot crumb falls back to the road with
+// plain gravity, no drag to fake a stream.
+inline ParticleEmitter makeSparkEmitter() {
+    ParticleEmitter em;
+    em.position = {0.0f, kSparkDiscHeight, 0.0f};
+    em.direction = {0.0f, 1.0f, 0.0f};      // thrown up in a shallow arc
+    em.spreadDeg = 30.0f;
+    em.spawnRate = 0.0f;
+    em.lifetime = 0.45f;
+    em.speed = 5.0f;
+    em.speedJitter = 3.5f;
+    em.size = 0.06f;
+    em.sizeJitter = 0.04f;
+    em.color = {1.0f, 0.65f, 0.25f};        // white-hot orange
+    em.alpha = 0.9f;
+    em.gravity = {0.0f, -9.8f, 0.0f};
+    em.drag = 0.0f;
+    em.enabled = false;
+    return em;
+}
+
+/** Per-frame spark rule: on only past all three gates (gate brake, disc
+ *  temperature, road speed), rate scaled by the disc temperature. */
+inline void driveSparkEmitter(ParticleEmitter& em,
+                              const ks::math::vec3& discPos,
+                              float brake, float discTempC, float speedMps) {
+    const float heat = std::min(
+        std::max((discTempC - kSparkTempMin) / (kSparkTempCap - kSparkTempMin),
+                 0.0f), 1.0f);
+    em.enabled = brake > kSparkBrakeMin && discTempC > kSparkTempMin &&
+                 speedMps > kSparkSpeedMin;
+    em.position = {discPos.x, std::max(discPos.y, 0.0f) + kSparkDiscHeight,
+                   discPos.z};
+    em.spawnRate = em.enabled ? heat * kSparkRateMax : 0.0f;
 }
 
 /** Per-frame spray rule: only a wet track at speed throws water. */

@@ -3798,13 +3798,19 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
             // the default image is untouched.
             m_particles.addEmitter(rainfx::makeRainEmitter());   // index 1
             m_particles.addEmitter(rainfx::makeSprayEmitter());  // index 2
-            // Skidmark emitter: spawned per-wheel when brakes are locked.
-            // Positioned at the car; the per-wheel offset is applied later
-            // in the update loop where wheel states are available.
-            m_particles.addEmitter(rainfx::makeSkidEmitter());   // index 3
+            // Skidmark emitters: one per wheel FL..RR (previously a single
+            // car-centre emitter that was never driven: the update call
+            // below now feeds the real brake input and per-wheel rim
+            // speed, with the emitter parked at the wheel's position).
+            for (int w = 0; w < 4; ++w)
+                m_particles.addEmitter(rainfx::makeSkidEmitter());  // index 4 + w
+            // Brake-disc sparks: one per wheel, driven from the same disc
+            // temperatures that feed the glow (setBrakeGlow above).
+            for (int w = 0; w < 4; ++w)
+                m_particles.addEmitter(rainfx::makeSparkEmitter()); // index 8 + w
             std::fprintf(stderr,
                          "[particles] emitters on (config %d, KS_PARTICLES %d): "
-                         "dust + rain + spray + skid up to %d sprites\n",
+                         "dust + rain + spray + 4 skid + 4 spark up to %d sprites\n",
                          m_particlesConfig ? 1 : 0, envForced ? 1 : 0,
                          ParticleSystem::kMaxParticles);
         }
@@ -3828,10 +3834,43 @@ void SimulationLoop::updateAndDrawParticles(float dt) {
         rainfx::driveSprayEmitter(m_particles.emitter(2), carPos,
                                   m_weather.trackWetness,
                                   static_cast<float>(st.speed));
-        // Skidmarks: enabled when any wheel is locked (brake > 0.7 and wheel
-        // spin below 5 m/s). The emitter position is set per-wheel below.
-        rainfx::driveSkidEmitter(m_particles.emitter(3), carPos,
-                                  /*brake=*/0.0f, /*wheelSpeedMag=*/0.0f);
+        // Skidmarks, one emitter per wheel: the wheel frame is the car's
+        // travel direction, offsets are half the wheelbase fore/aft and
+        // half the track across (FL=+fwd+lat, FR=+fwd-lat, RL=-fwd+lat,
+        // RR=-fwd-lat). Velocity sets the frame, not heading: it is the
+        // direction the wheels actually roll toward, whatever convention
+        // the mesh yaw uses, and nothing fires at a standstill anyway.
+        // The lock test is the per-wheel rim speed (spin * radius) — this
+        // replaces the call that passed brake=0/wheelSpeed=0 hardcoded and
+        // so never enabled the emitter.
+        const float vxz2 = st.velocity.x * st.velocity.x +
+                           st.velocity.z * st.velocity.z;
+        float fx = 0.f, fz = -1.f;
+        if (vxz2 > 0.25f) {
+            const float inv = 1.0f / std::sqrt(vxz2);
+            fx = st.velocity.x * inv;
+            fz = st.velocity.z * inv;
+        }
+        const float rx = -fz, rz = fx; // right = forward x up
+        const float hb = static_cast<float>(m_vehicle->wheelBase()) * 0.5f;
+        const float ht = static_cast<float>(m_vehicle->trackWidth()) * 0.5f;
+        static constexpr float kFwdSign[4] = {1.f, 1.f, -1.f, -1.f};
+        static constexpr float kLatSign[4] = {1.f, -1.f, 1.f, -1.f};
+        const float roadSpeed = std::fabs(st.speed);
+        for (int w = 0; w < 4; ++w) {
+            const ks::math::vec3 wheelPos{
+                carPos.x + fx * kFwdSign[w] * hb + rx * kLatSign[w] * ht,
+                carPos.y,
+                carPos.z + fz * kFwdSign[w] * hb + rz * kLatSign[w] * ht};
+            const float rim = std::fabs(m_vehicle->wheelOmega(w) *
+                                        m_vehicle->wheelRadius());
+            rainfx::driveSkidEmitter(m_particles.emitter(4 + w), wheelPos,
+                                     st.brake, rim);
+            // Sparks off the disc, from the same temperature the glow uses.
+            rainfx::driveSparkEmitter(m_particles.emitter(8 + w), wheelPos,
+                                      st.brake, m_vehicle->brakes().discTemp(w),
+                                      roadSpeed);
+        }
     }
 #endif
 

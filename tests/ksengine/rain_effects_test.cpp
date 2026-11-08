@@ -13,14 +13,19 @@
 #include "RainEffects.h"
 #include "engine/Graphics/ParticleSystem.h"
 
+#include <cmath>
 #include <cstdio>
 
 using ks::engine::graphics::ParticleEmitter;
 using ks::engine::graphics::ParticleSystem;
 using ks::math::vec3;
 using ks::sim::rainfx::driveRainEmitter;
+using ks::sim::rainfx::driveSkidEmitter;
+using ks::sim::rainfx::driveSparkEmitter;
 using ks::sim::rainfx::driveSprayEmitter;
 using ks::sim::rainfx::makeRainEmitter;
+using ks::sim::rainfx::makeSkidEmitter;
+using ks::sim::rainfx::makeSparkEmitter;
 using ks::sim::rainfx::makeSprayEmitter;
 
 int main() {
@@ -54,6 +59,36 @@ int main() {
     KS_CHECK(spray.spawnRate > modest);
     KS_CHECK(spray.spawnRate <= ks::sim::rainfx::kSpraySpeedCap
                                 * ks::sim::rainfx::kSprayRatePerMs + 1e-3f);
+
+    // --- Skid rule --------------------------------------------------------
+    ParticleEmitter skid = makeSkidEmitter();
+    KS_CHECK(!skid.enabled);
+    driveSkidEmitter(skid, car, 0.0f, 0.0f);          // no brake input
+    KS_CHECK(!skid.enabled && skid.spawnRate == 0.0f);
+    driveSkidEmitter(skid, car, 0.9f, 8.0f);          // braking, wheels rolling
+    KS_CHECK(!skid.enabled);                          // 8 m/s of spin = not locked
+    driveSkidEmitter(skid, car, 0.9f, 0.5f);          // braking, locked
+    KS_CHECK(skid.enabled && skid.spawnRate > 0.0f);
+    KS_CHECK(skid.position.x == car.x && skid.position.z == car.z);
+
+    // --- Spark rule -------------------------------------------------------
+    ParticleEmitter spark = makeSparkEmitter();
+    KS_CHECK(!spark.enabled);
+    driveSparkEmitter(spark, car, 1.0f, 700.0f, 40.0f);   // hot disc, parked
+    KS_CHECK(spark.enabled);
+    const float hotRate = spark.spawnRate;
+    driveSparkEmitter(spark, car, 0.3f, 700.0f, 40.0f);   // easy braking
+    KS_CHECK(!spark.enabled && spark.spawnRate == 0.0f);
+    driveSparkEmitter(spark, car, 1.0f, 400.0f, 40.0f);   // cold disc
+    KS_CHECK(!spark.enabled);
+    driveSparkEmitter(spark, car, 1.0f, 700.0f, 3.0f);    // crawling
+    KS_CHECK(!spark.enabled);
+    driveSparkEmitter(spark, car, 1.0f, 610.0f, 40.0f);   // just past the anchor
+    KS_CHECK(spark.enabled && spark.spawnRate > 0.0f && spark.spawnRate < hotRate);
+    driveSparkEmitter(spark, car, 1.0f, 1200.0f, 40.0f);  // capped at full heat
+    KS_CHECK(std::fabs(spark.spawnRate - ks::sim::rainfx::kSparkRateMax) < 1e-4f);
+    KS_CHECK(spark.position.y ==
+             car.y + ks::sim::rainfx::kSparkDiscHeight);
 
     // --- ParticleSystem integration --------------------------------------
     ParticleSystem ps;
