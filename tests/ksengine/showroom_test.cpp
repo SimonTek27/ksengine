@@ -114,16 +114,19 @@ int main() {
         fs::remove_all(room);
     }
     {
-        // A format the build cannot decode still loads, and says why: the
-        // showroom opens silent instead of refusing to start.
+        // mp3 is decoded through Media Foundation once at load time, so the
+        // track is reported as playable and nothing is warned about. The old
+        // "a format this build cannot decode still loads, and says why"
+        // contract moved to ogg, which still has no path into the mixer (the
+        // block below).
         const fs::path room = makeRoom("mp3", kMinimal);
         touch(room / "music_00.mp3");
         const ShowroomConfig cfg = ks::sim::loadShowroom(room.string());
         KS_CHECK(cfg.valid);
         KS_CHECK(cfg.music.format == ShowroomAudioFormat::Mp3);
-        KS_CHECK(!cfg.music.playable());
-        KS_CHECK(cfg.music.silenceReason() != nullptr);
-        KS_CHECK(cfg.warnings.size() == 1);
+        KS_CHECK(cfg.music.playable());
+        KS_CHECK(cfg.music.silenceReason() == nullptr);
+        KS_CHECK(cfg.warnings.empty());
         fs::remove_all(room);
     }
     {
