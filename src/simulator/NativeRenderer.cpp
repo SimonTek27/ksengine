@@ -1568,14 +1568,8 @@ bool NativeRenderer::ensureMirrorResources() {
     // Orientation/size: video.mirrorResolution as a landscape tile (the rear
     // window is wider than it is tall), clamped to something the file can
     // honestly render at; 512x128 is the built-in default.
-    uint32_t w = m_mirrorWantedW, h = m_mirrorWantedH;
-    if (h > w) std::swap(w, h);
-    if (w == 0) {
-        w = 512;
-        h = 128;
-    }
-    w = std::clamp(w, 64u, 1024u);
-    h = std::clamp(h, 32u, 1024u);
+    uint32_t w, h;
+    resolvedMirrorSize(w, h);
     m_mirrorW = w;
     m_mirrorH = h;
 
@@ -1783,6 +1777,20 @@ bool NativeRenderer::ensureMirrorResources() {
     return true;
 }
 
+// One function answers "how big is the tile" for both the target build and
+// the per-view frustum, so a mesh tested at queue time is tested against the
+// extent the scene pass will actually rasterize into.
+void NativeRenderer::resolvedMirrorSize(uint32_t& width, uint32_t& height) const {
+    uint32_t w = m_mirrorWantedW, h = m_mirrorWantedH;
+    if (h > w) std::swap(w, h); // landscape, always
+    if (w == 0) {
+        w = 512;
+        h = 128;
+    }
+    width = std::clamp(w, 64u, 1024u);
+    height = std::clamp(h, 32u, 1024u);
+}
+
 void NativeRenderer::destroyMirrorResources() {
     if (!m_device) return;
     if (m_mirrorUBOMapped) vkUnmapMemory(m_device, m_mirrorUBOMemory);
@@ -1823,23 +1831,19 @@ void NativeRenderer::destroyMirrorResources() {
 // the tile camera and the TAA feedback is zero (the tile is not a history
 // slot and never reprojects).
 void NativeRenderer::recordMirrorScene(
-    const std::function<void(const mat4&, const mat4&)>& drawList) {
+    const std::function<void(const std::vector<QueuedDraw>&, const mat4&, const mat4&)>&
+        drawList) {
     // One real image, one writer: rewriting the UBO is the cheap part; only
     // the camera changes from here.
-    // Camera: same eye, half a lap further around the head. The flip is a
-    // 180-degree yaw about the view frame's own up axis composed AFTER the
-    // view matrix — it works with a rolled/pitched cockpit camera too, and
-    // being a rotation it keeps right-handedness, so the culling state the
-    // pipelines were built with never changes.
-    mat4 yaw180; // identity
-    yaw180(0, 0) = -1.0f;
-    yaw180(2, 2) = -1.0f;
-    const mat4 mirrorView = yaw180 * m_view;
-    // Focal length: the vertical focal from the main projection is kept, the
-    // horizontal one rescales to this tile's aspect — wider tile, wider view.
-    mat4 mirrorProj = m_proj;
-    mirrorProj(0, 0) = m_proj(1, 1) * static_cast<float>(m_mirrorH) /
-                       static_cast<float>(m_mirrorW);
+    // Camera: built in beginFrame() from this frame's matrices — yaw-180 about
+    // the view's own up axis (works with a rolled/pitched cockpit camera too,
+    // and being a rotation it keeps right-handedness, so the culling state the
+    // pipelines were built with never changes), vertical focal kept and the
+    // horizontal rescaled to the tile aspect. Rendering from the cached pair is
+    // what makes the tile draw exactly the list drawMesh() tested for it.
+    const mat4& mirrorView = m_mirrorViewFrame;
+    const mat4& mirrorProj = m_mirrorProjFrame;
+    m_stats.mirrorDrawn = static_cast<uint32_t>(m_mirrorList.size());
 
     FrameDataUBO frameData{};
     frameData.sunDirection[0] = m_sun.direction.x;
@@ -1934,10 +1938,8 @@ void NativeRenderer::recordMirrorScene(
     }
     std::memcpy(m_mirrorUBOMapped, &frameData, sizeof(FrameDataUBO));
 
-    // Draw. The list is replayed as the main camera left it — the main
-    // camera's frustum culling already picked what this eye can see behind
-    // it (a bookkeeping-only approximation; the rear view sees the same
-    // scene, just mirrored), and per-view culling of the tile is stage 2.
+    // Draw. Only what this eye's own frustum kept (stage 2): the tile is a
+    // separate camera, so the main camera's decisions have no say here.
     VkClearValue mClears[2];
     mClears[0].color = {{m_fogColor.x, m_fogColor.y, m_fogColor.z, 1.0f}};
     mClears[1].depthStencil = {1.0f, 0};
@@ -1957,7 +1959,7 @@ void NativeRenderer::recordMirrorScene(
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                             0, 1, &m_mirrorFrameSet, 0, nullptr);
-    if (drawList) drawList(mirrorView, mirrorProj);
+    if (drawList) drawList(m_mirrorList, mirrorView, mirrorProj);
     vkCmdEndRenderPass(m_commandBuffer);
 }
 
@@ -2838,12 +2840,39 @@ bool NativeRenderer::beginFrame() {
 
     m_drawList.clear();
     m_mainDrawList.clear();
+    m_mirrorList.clear();
     m_stats = FrameStats{};
     // Culling runs in drawMesh(), which is called *between* beginFrame() and
     // endFrame(), so the frustum has to be rebuilt here — after setCamera()
     // has had its say for this frame and before anything is queued.
     if (m_frustumCulling && m_cameraValid)
         m_frustum = ks::math::Frustum::fromViewProj(asMath(m_proj * m_view));
+    // The mirror eye gets its own frustum for the same reason: the tile
+    // needs to queue what is visible from *its* view, and the matrices are
+    // cached here too so recordMirrorScene() renders exactly what was
+    // tested (a same-frame recomputation could only miss for no reason).
+    // The flip is the yaw-180 camera from recordMirrorScene(): pure
+    // rotation, so the eye position - and with it every LOD-window
+    // distance - is shared with the main camera.
+    m_mirrorFrameValid = false;
+    if (m_mirrorEnabled && m_cameraValid) {
+        mat4 yaw180; // identity with the x and z axes negated
+        yaw180(0, 0) = -1.0f;
+        yaw180(2, 2) = -1.0f;
+        m_mirrorViewFrame = yaw180 * m_view;
+        // Straight from resolvedMirrorSize() rather than the built target's
+        // cached extent: same function ensureMirrorResources() uses, so a
+        // resolution change mid-session cannot leave the frustum testing one
+        // aspect while the pass rasterizes another.
+        uint32_t mirrorW, mirrorH;
+        resolvedMirrorSize(mirrorW, mirrorH);
+        m_mirrorProjFrame = m_proj; // keep the vertical focal, rescale wide
+        m_mirrorProjFrame(0, 0) = m_proj(1, 1) * static_cast<float>(mirrorH) /
+                                   static_cast<float>(mirrorW);
+        m_mirrorFrustum = ks::math::Frustum::fromViewProj(
+            asMath(m_mirrorProjFrame * m_mirrorViewFrame));
+        m_mirrorFrameValid = true;
+    }
     if (m_frustumCulling && m_cameraValid && getenv("KS_CULL_DEBUG") != nullptr) {
         static bool s_planes = false;
             if (!s_planes) {
@@ -2881,13 +2910,18 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
     // keep the exact pre-2.4 path.
     const bool hasLodWindow = ks::scene::hasAuthoredWindow(it->second.lod);
 
-    if (m_cameraValid && it->second.hasBounds &&
-        (m_frustumCulling || occlTest || hasLodWindow)) {
-        ks::math::vec3 wmin, wmax;
+    // One bounds transform serves both eyes: the authored LOD window measures
+    // eye distance and the mirror eye is the same point (pure yaw-180), so the
+    // two tests can never disagree about it.
+    const bool haveBounds = m_cameraValid && it->second.hasBounds;
+    ks::math::vec3 wmin, wmax;
+    if (haveBounds)
         ks::math::Frustum::transformBounds(asMath(modelMatrix),
                                            asMath(it->second.boundsMin),
                                            asMath(it->second.boundsMax), wmin, wmax);
-        if (hasLodWindow) {
+
+    {
+        if (haveBounds && hasLodWindow) {
             // Nearest-point distance: a mesh you are standing inside never
             // reads as "far" no matter how large its bounds are.
             const float dist =
@@ -2904,7 +2938,15 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
                 return;
             }
         }
-        if (m_frustumCulling && !m_frustum.intersects(wmin, wmax)) {
+        // The tile's list is decided before any main-eye rejection below: what
+        // the main camera has behind it is exactly what the mirror is for. No
+        // bounds means no honest test, so the instance goes in and the depth
+        // buffer sorts it out.
+        if (m_mirrorEnabled && m_mirrorFrameValid &&
+            (!haveBounds || m_mirrorFrustum.intersects(wmin, wmax)))
+            m_mirrorList.push_back({name, modelMatrix});
+
+        if (m_frustumCulling && haveBounds && !m_frustum.intersects(wmin, wmax)) {
             ++m_stats.culled;
             static bool s_cullDebug = getenv("KS_CULL_DEBUG") != nullptr;
             if (s_cullDebug && m_stats.culled <= 8) {
@@ -2920,7 +2962,9 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
         // Projected with m_prevViewProj — the same matrices the grid in
         // m_occlGrid was rendered with, so screen rect and depths line up
         // exactly (see the m_occlR22/m_occlR23 note in the header).
-        if (occlTest &&
+        // Main eye only: the depth grid was built with m_prevViewProj, so it
+        // says nothing about the tile — the mirror list above already has it.
+        if (haveBounds && occlTest &&
             ks::math::occlusion::aabbOccluded(asMath(m_prevViewProj), wmin, wmax,
                                               m_occlGrid.data(), m_occlGridW, m_occlGridH,
                                               m_occlFullW, m_occlFullH, kOcclusionMarginMeters)) {
@@ -3121,13 +3165,13 @@ void NativeRenderer::endFrame() {
     // passes: both bind m_pipelineLayout (set0 = FrameData + shadow array,
     // set1 = per-mesh material, push constants = model + mvp), so only the
     // pipeline object differs.
-    // m_mainDrawList, not m_drawList: the shadow cascades above keep drawing
-    // occluded objects (they may still cast visible shadows), the camera
-    // passes must not.
-    // The camera goes in as arguments now: the mirror pass re-records the
-    // same list from its own rear view (same pipeline, own set 0), and the
-    // main passes pass the main camera through.
-    auto recordDrawList = [&](const mat4& view, const mat4& proj) {
+    // List and camera are arguments now: the main passes hand in
+    // m_mainDrawList (not m_drawList — the shadow cascades above keep drawing
+    // occluded objects, which may still cast visible shadows, while a camera
+    // pass must not) and the main camera; the mirror pass hands in its own
+    // per-eye list and its rear camera, same pipeline and its own set 0.
+    auto recordDrawList = [&](const std::vector<QueuedDraw>& list, const mat4& view,
+                              const mat4& proj) {
         static bool s_recordDebug = getenv("KS_RECORD_DEBUG") != nullptr;
         const bool canBlend = !deferred; // the GBuffer pass has no blending
         auto drawOne = [&](const QueuedDraw& draw) {
@@ -3179,7 +3223,7 @@ void NativeRenderer::endFrame() {
         };
 
         // Opaque first: everything that owns the pixel it covers.
-        for (const auto& draw : m_mainDrawList) {
+        for (const auto& draw : list) {
             auto it = m_meshes.find(draw.meshName);
             if (it == m_meshes.end()) continue;
             if (it->second.blended && canBlend) continue;
@@ -3192,7 +3236,7 @@ void NativeRenderer::endFrame() {
         // need; per-triangle sorting is not worth it for kn5 glass.
         std::vector<const QueuedDraw*> seeThrough;
         if (canBlend && m_transparentPipeline != VK_NULL_HANDLE) {
-            for (const auto& draw : m_mainDrawList) {
+            for (const auto& draw : list) {
                 auto it = m_meshes.find(draw.meshName);
                 if (it == m_meshes.end() || !it->second.blended) continue;
                 seeThrough.push_back(&draw);
@@ -3213,7 +3257,10 @@ void NativeRenderer::endFrame() {
     // below does, so the tile carries the same lighting the main view has
     // without ever writing the gbuffers the deferred passes are about to
     // read. The overlay tile samples it later in this same buffer.
-    if (m_mirrorEnabled && ensureMirrorResources())
+    // No valid frame pair means beginFrame() had no camera to build one from;
+    // rendering from last frame's matrices would be a lie, so skip the tile
+    // rather than show something stale.
+    if (m_mirrorEnabled && m_mirrorFrameValid && ensureMirrorResources())
         recordMirrorScene(recordDrawList);
 
     VkViewport vp{0, 0, float(m_swapChainExtent.width), float(m_swapChainExtent.height), 0.0f, 1.0f};
@@ -3241,7 +3288,7 @@ void NativeRenderer::endFrame() {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gbufferPipeline);
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
-        recordDrawList(m_view, projRender);
+        recordDrawList(m_mainDrawList, m_view, projRender);
         // Roadmap P1: sprite quads into the same GBuffer, so the lighting
         // pass below lights them exactly like geometry (they carry a
         // camera-facing normal and a real world position).
@@ -3564,7 +3611,7 @@ void NativeRenderer::endFrame() {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
-        recordDrawList(m_view, projRender);
+        recordDrawList(m_mainDrawList, m_view, projRender);
         // Roadmap P1: sprite quads, alpha blended over whatever the pass has
         // drawn so far (their own pipeline owns no descriptor set, so this
         // only rebinds pipeline + push constants).

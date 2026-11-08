@@ -267,6 +267,9 @@ public:
         uint32_t drawn = 0;
         uint32_t culled = 0;
         uint32_t occluded = 0;
+        // The mirror tile is its own eye (stage 2): the size of the list the
+        // rear-view scene pass actually replayed last frame.
+        uint32_t mirrorDrawn = 0;
     };
     void setFrustumCulling(bool enabled) { m_frustumCulling = enabled; }
     bool frustumCulling() const { return m_frustumCulling; }
@@ -692,14 +695,21 @@ private:
     // --- Mirrors (stage 1): target + overlay, all lazily built ---
     bool ensureMirrorResources();
     void destroyMirrorResources();
-    // drawList re-records the queued instance list from any camera —
-    // endFrame() passes its local recordDrawList lambda down here; the
-    // mirror scene pass is its only other caller.
-    void recordMirrorScene(const std::function<void(const mat4&, const mat4&)>& drawList);
     void destroyMirrorOverlay();
     // Draws the rear-view tile inside the open colour pass (forward main or
     // deferred display). Pipeline is built per pass (formats differ).
     bool recordMirrorOverlay(VkRenderPass pass);
+    // video.mirrorResolution straightened out: landscape enforced, clamped,
+    // defaults filled in — the single source of truth for the tile size, so
+    // the frustum tested at queue time matches the target that gets built.
+    void resolvedMirrorSize(uint32_t& width, uint32_t& height) const;
+    // The tile's camera + frustum, built in beginFrame() next to the main
+    // one so drawMesh() can test both eyes; recordMirrorScene() renders
+    // from exactly these, never a recomputation.
+    mat4 m_mirrorViewFrame;
+    mat4 m_mirrorProjFrame;
+    ks::math::Frustum m_mirrorFrustum;
+    bool m_mirrorFrameValid = false;
     VkImage m_mirrorImage = VK_NULL_HANDLE;
     VkDeviceMemory m_mirrorMemory = VK_NULL_HANDLE;
     VkImageView m_mirrorView = VK_NULL_HANDLE;
@@ -906,6 +916,13 @@ private:
     std::vector<std::string> m_staticSceneMeshNames;
 
     struct QueuedDraw { std::string meshName; mat4 model; };
+    // drawList replays one of the queued lists from the camera it is given —
+    // endFrame() passes its local recordDrawList lambda down here and the
+    // mirror scene pass is its only other caller. Declared next to QueuedDraw
+    // because the signature needs it complete.
+    void recordMirrorScene(
+        const std::function<void(const std::vector<QueuedDraw>&, const mat4&,
+                                 const mat4&)>& drawList);
     // Everything that survived the frustum test: the shadow cascades render
     // this list (an object hidden from the camera can still cast a visible
     // shadow) ...
@@ -913,6 +930,10 @@ private:
     // ... while the camera passes render this one, which additionally
     // excludes what the previous-frame depth grid says is occluded.
     std::vector<QueuedDraw> m_mainDrawList;
+    // and the rear-view tile renders this one: its own frustum picks what
+    // its eye can see, including meshes the main camera turned its back on
+    // (both lists can hold the same instance, a wall to the side says).
+    std::vector<QueuedDraw> m_mirrorList;
 
     mat4 m_view;
     mat4 m_proj;
