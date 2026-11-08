@@ -85,6 +85,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Fixed
+- **Texture BC7 non decodificate: la carrozzeria restava senza livrea**:
+  l'albedo delle vetture reali arriva come `DXGI_FORMAT 98` (BC7), che
+  `DdsReader` rifiutava per scelta dichiarata, e il materiale cadeva sul
+  colore neutro senza alcun avviso a schermo. Ora il reader decodifica BC7 in
+  tutti e otto i modi (tabelle di partizione, ancore e pesi, piu` l'ordine dei
+  campi specifico di ogni modo) per i formati 98 e 99; un blocco riservato o
+  corrotto diventa nero opaco invece di memoria non inizializzata.
+  `dds_test` copre un blocco mode 6 costruito a mano e il payload troncato;
+  BC4/BC5/BC6H restano rifiutati e il caso "DXGI sconosciuto" del test usa ora
+  BC6H (95). Provato in `E:\ksimulator`: 5 formati rifiutati prima, 0 dopo,
+  con la livrea visibile nella cattura.
 - **Wiring profiler E9 - 3 difetti trovati dal run del gate 2.14** (numeri
   del report prima del fix: contai 50592 "frame" in 45 s mischiando tick e
   step auto):
