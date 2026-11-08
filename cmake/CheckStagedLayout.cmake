@@ -1,9 +1,18 @@
-# Verifies that the build-tree staging holds everything the layout commented at
-# the top of KsInstallLayout.cmake promises.
+# Verifies that a tree (build-tree staging or an installed prefix) holds
+# everything the layout commented at the top of KsInstallLayout.cmake promises.
 #
-# Runs as a CTest next to the other binaries: a folder the runtime needs but the
-# staging forgot (system/ppfilters, once) then fails the suite instead of showing
-# up as a warning at start-up. ROOT is the directory holding ksim.exe.
+# Runs as a CTest next to the other binaries and again at the end of
+# `cmake --install`, so a folder the runtime needs but the layout forgot
+# (system/ppfilters, once) fails a check instead of showing up as a warning at
+# start-up.
+#
+#   ROOT  directory that should hold the layout (next to ksim.exe)
+#   SRC   repository root; when given, engine/assets/Paths.h is read to make sure
+#         every system/ directory the runtime names is covered by the list below
+#
+# The list is the documentation, but Paths.h is the code: a new path there that
+# is not listed here fails the check, which is the direction that actually
+# catches mistakes.
 
 if(NOT DEFINED ROOT)
     message(FATAL_ERROR "CheckStagedLayout.cmake: pass -DROOT=<dir next to ksim.exe>")
@@ -22,6 +31,35 @@ set(_required
     "system/ppfilters"
     "system/shaders")
 
+# --- the runtime's own list ------------------------------------------------
+if(DEFINED SRC AND EXISTS "${SRC}/engine/assets/Paths.h")
+    file(READ "${SRC}/engine/assets/Paths.h" _paths_header)
+    # Literal directories only: Paths.h builds file names by concatenation, so
+    # the directories are the "system/..." strings it returns.
+    string(REGEX MATCHALL "\"system/[A-Za-z0-9_]+\"" _named "${_paths_header}")
+    set(_unlisted "")
+    foreach(_lit ${_named})
+        string(REGEX REPLACE "^\"|\"$" "" _dir "${_lit}")
+        set(_covered FALSE)
+        foreach(_rel ${_required})
+            if(_rel STREQUAL _dir OR _rel MATCHES "^${_dir}/")
+                set(_covered TRUE)
+            endif()
+        endforeach()
+        if(NOT _covered)
+            list(APPEND _unlisted "${_dir}")
+        endif()
+    endforeach()
+    if(_unlisted)
+        list(REMOVE_DUPLICATES _unlisted)
+        string(REPLACE ";" ", " _list "${_unlisted}")
+        message(FATAL_ERROR
+            "engine/assets/Paths.h resolves ${_list}, but the layout list in "
+            "cmake/CheckStagedLayout.cmake does not cover it")
+    endif()
+endif()
+
+# --- what the tree actually holds ------------------------------------------
 set(_missing "")
 foreach(_rel ${_required})
     if(NOT EXISTS "${ROOT}/${_rel}")
@@ -31,7 +69,7 @@ endforeach()
 
 if(_missing)
     string(REPLACE ";" ", " _list "${_missing}")
-    message(FATAL_ERROR "staging layout incomplete in ${ROOT}: missing ${_list}")
+    message(FATAL_ERROR "layout incomplete in ${ROOT}: missing ${_list}")
 endif()
 
 message(STATUS "layout complete in ${ROOT}")

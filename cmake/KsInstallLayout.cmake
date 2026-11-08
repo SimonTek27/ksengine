@@ -201,6 +201,7 @@ function(ks_install_layout)
 	# same list the build-tree staging test uses. Runs last, so user/ exists.
 	install(CODE "
 		execute_process(COMMAND \"${CMAKE_COMMAND}\" -DROOT=\${CMAKE_INSTALL_PREFIX}
+			-DSRC=\"${CMAKE_SOURCE_DIR}\"
 			-P \"${CMAKE_SOURCE_DIR}/cmake/CheckStagedLayout.cmake\"
 			RESULT_VARIABLE _ks_layout_result)
 		if(NOT _ks_layout_result EQUAL 0)

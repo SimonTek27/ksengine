@@ -404,6 +404,7 @@ if(TARGET SimulatorApp)
     add_test(NAME staged_layout_test
              COMMAND ${CMAKE_COMMAND}
                      -DROOT=$<TARGET_FILE_DIR:SimulatorApp>
+                     -DSRC=${CMAKE_SOURCE_DIR}
                      -P "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/CheckStagedLayout.cmake")
     set_tests_properties(staged_layout_test PROPERTIES TIMEOUT 30)
 endif()
