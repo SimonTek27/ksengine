@@ -275,6 +275,11 @@ bool VehicleSimulator::startEngine(double speedMs) {
     // on its electric motor can do it on the move.
     if (!m_start.restartsWhileMoving() && speedMs >= 1.0) return false;
     if (m_state.fuel <= 0.f || m_damage.isEngineFailed()) return false;
+    // A press while the starter is already turning the engine does not restart
+    // the sequence: the garage phase fires every tick, and a timer reset per
+    // frame would hold the crank at its start speed past every catch and
+    // timeout, leaving a car that never runs and a box that never opens.
+    if (m_runState == EngineRunState::Cranking) return true;
     m_runState = EngineRunState::Cranking;
     m_crankTimer = 0.0;
     m_rpmFromWheels = false;

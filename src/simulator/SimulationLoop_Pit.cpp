@@ -60,11 +60,16 @@ void SimulationLoop::updateGarageExit(float dt) {
     if (m_garageExit.phase() == GarageExitPhase::EngineStart) {
         // The garage exit is the box, so this is where the team fires a car
         // that declares a crew start. A car with a key keeps cranking itself.
-        m_vehicle->setIgnition(true);
-        if (m_vehicle->engineStartConfig().startedByCrew)
-            m_vehicle->pressStarterByCrew(static_cast<double>(st.speed));
-        else
-            m_vehicle->pressStarter(static_cast<double>(st.speed));
+        // The press fires only a dead engine: the same press at a standstill is
+        // the kill, and firing per tick would catch and kill the engine in a
+        // loop the phase can never leave.
+        if (!m_vehicle->isEngineRunning()) {
+            m_vehicle->setIgnition(true);
+            if (m_vehicle->engineStartConfig().startedByCrew)
+                m_vehicle->pressStarterByCrew(static_cast<double>(st.speed));
+            else
+                m_vehicle->pressStarter(static_cast<double>(st.speed));
+        }
     }
     in.engineRunning = m_vehicle->isEngineRunning();
     in.ignitionOn = m_vehicle->ignitionOn();

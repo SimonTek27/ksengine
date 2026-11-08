@@ -8,7 +8,12 @@
 
 #include "KsTest.h"
 
+#include "engine/physics/CarPhysicsJson.h"
 #include "engine/physics/VehicleSimulator.h"
+
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 namespace ph = ks::physics;
 using RunState = ph::VehicleSimulator::EngineRunState;
@@ -32,6 +37,12 @@ ph::CarStartConfig declaredStart(ph::CarStartConfig::Type type) {
 
 void run(ph::VehicleSimulator& v, int steps) {
     for (int i = 0; i < steps; ++i) v.updatePhysics(0.01);
+}
+
+void writeFile(const std::filesystem::path& p, const std::string& content) {
+    std::filesystem::create_directories(p.parent_path());
+    std::ofstream out(p, std::ios::trunc);
+    out << content;
 }
 
 } // namespace
@@ -221,6 +232,79 @@ int main() {
         KS_CHECK(v.pressStarter(0.0));        // the kill is still the driver's
         KS_CHECK(!v.isEngineRunning());
         KS_CHECK(v.rpm() == 0.0);
+    }
+
+    // The garage exit fires the starter every step while the box waits for the
+    // engine. A press while the crank is already turning must leave the
+    // sequence alone: resetting the timer per call held the crank at its start
+    // speed forever, so the engine never caught and the box never let the car
+    // out. Covers both the crew's repeated fire and the driver's key.
+    {
+        ph::CarStartConfig c = declaredStart(ph::CarStartConfig::Type::Petrol);
+        c.startedByCrew = true;
+        ph::VehicleSimulator v;
+        v.setFuelL(50.f);
+        v.setEngineStartConfig(c);
+        v.setIgnition(true);
+        v.startSimulation();
+        v.setCrewStarterAvailable(true);
+        for (int i = 0; i < 100; ++i) { // 1.0 s of the garage firing per step
+            // The garage fires only a dead engine: pressing one that is running
+            // is the kill, is at a standstill, and would loop catch and off.
+            if (!v.isEngineRunning()) KS_CHECK(v.pressStarterByCrew(0.0));
+            v.updatePhysics(0.01);
+        }
+        KS_CHECK(v.engineRunState() == RunState::Running);
+        KS_CHECK(v.rpm() >= 1800.0);
+    }
+    {
+        ph::VehicleSimulator v;
+        v.setFuelL(50.f);
+        v.setEngineStartConfig(declaredStart(ph::CarStartConfig::Type::Petrol));
+        v.setIgnition(true);
+        v.startSimulation();
+        for (int i = 0; i < 100; ++i) { // the key held in the same blind spot
+            // Same order the driver's path reads: press only what is not
+            // running, or the standstill kill undoes the start it just made.
+            if (!v.isEngineRunning()) KS_CHECK(v.pressStarter(0.0));
+            v.updatePhysics(0.01);
+        }
+        KS_CHECK(v.engineRunState() == RunState::Running);
+        KS_CHECK(v.rpm() >= 1800.0);
+    }
+
+    // The manifest's start block may leave the idle out. The car's own engine
+    // declaration is the number then: the manifest's "engine" block wins (the
+    // copy the conversion made of engine.ini MINIMUM), the engine.ini the
+    // folder still ships comes next, and only with neither source does the
+    // model's standalone idle apply.
+    {
+        const std::filesystem::path dir = std::filesystem::temp_directory_path() /
+                                          "ks_test_engine_start";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        // The converted manifest: the same file the converter writes back.
+        writeFile(dir / "data" / "data.json",
+                  "{ \"start\": { \"TYPE\": \"PETROL\", \"BY\": \"DRIVER\" },\n"
+                  "  \"engine\": { \"ENGINE_DATA\": { \"MINIMUM\": 1050 } } }");
+        ph::CarStartConfig c1;
+        KS_CHECK(ph::CarPhysicsJson::loadAcStart(dir.string(), c1));
+        KS_CHECK(c1.declared);
+        KS_CHECK(c1.idleRpm == 1050.0);
+        // A folder that declares the block but ships the idle as engine.ini.
+        writeFile(dir / "data" / "data.json",
+                  "{ \"start\": { \"TYPE\": \"PETROL\", \"BY\": \"DRIVER\" } }");
+        writeFile(dir / "data" / "engine.ini",
+                  "[ENGINE_DATA]\nMINIMUM=1200\nPOWER=300\n");
+        ph::CarStartConfig c2;
+        KS_CHECK(ph::CarPhysicsJson::loadAcStart(dir.string(), c2));
+        KS_CHECK(c2.idleRpm == 1200.0);
+        // Neither source: the model's 900 idle is what is left to fall back on.
+        writeFile(dir / "data" / "engine.ini", "[ENGINE_DATA]\nPOWER=300\n");
+        ph::CarStartConfig c3;
+        KS_CHECK(ph::CarPhysicsJson::loadAcStart(dir.string(), c3));
+        KS_CHECK(c3.idleRpm == 900.0);
+        std::filesystem::remove_all(dir, ec);
     }
 
     return ks::test::finish("engine_start_test");

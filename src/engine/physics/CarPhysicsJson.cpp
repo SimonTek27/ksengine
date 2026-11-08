@@ -220,6 +220,46 @@ bool CarPhysicsJson::loadAcBrakeTempsForCarDir(const std::string& carDir, Vehicl
     return true;
 }
 
+/**
+ * engine.ini [ENGINE_DATA] MINIMUM: the idle the car itself keeps at rest.
+ * Older engine.ini spellings kept the same numbers in a [DATA] block.
+ */
+static double engineIniMinimum(const std::string& carDir) {
+    for (const char* rel : {"data/engine.ini", "engine.ini"}) {
+        std::ifstream in(fs::path(carDir) / rel, std::ios::binary);
+        if (!in) continue;
+        std::string line, section;
+        while (std::getline(in, line)) {
+            const std::size_t first = line.find_first_not_of(" \t\r\n");
+            if (first == std::string::npos) continue;
+            const std::size_t last = line.find_last_not_of(" \t\r\n");
+            const std::string s = line.substr(first, last - first + 1);
+            if (s.empty() || s.front() == ';') continue;
+            if (s.front() == '[') {
+                const std::size_t close = s.find(']');
+                section = close != std::string::npos ? s.substr(1, close - 1) : std::string();
+                for (char& c : section)
+                    if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+                continue;
+            }
+            if (section != "engine_data" && section != "data") continue;
+            const std::size_t eq = s.find('=');
+            if (eq == std::string::npos) continue;
+            std::string key = s.substr(0, eq);
+            for (char& c : key)
+                if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            if (key != "minimum") continue;
+            try {
+                const double d = std::stod(s.substr(eq + 1));
+                if (d > 0.0) return d;
+            } catch (...) {
+                return 0.0;
+            }
+        }
+    }
+    return 0.0;
+}
+
 bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
                                  std::string* error) {
     out = CarStartConfig{};
@@ -250,6 +290,7 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
              : type == "TURBO"  ? CarStartConfig::Type::Turbo
                                 : CarStartConfig::Type::Petrol;
     bool has = false;
+    bool idleDeclared = false;
     double v = 0.0;
     const Json& starter = start["STARTER"];
     if (starter.isObject()) {
@@ -257,7 +298,10 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
         if (takeNum(starter, {"CRANK_TIME", "STARTER_CRANK_TIME"}, has, v) && v > 0.0)
             out.crankTime = v;
     }
-    if (takeNum(start, {"IDLE_RPM"}, has, v) && v > 0.0) out.idleRpm = v;
+    if (takeNum(start, {"IDLE_RPM"}, has, v) && v > 0.0) {
+        out.idleRpm = v;
+        idleDeclared = true;
+    }
     if (takeNum(start, {"MINIMUM_RPM"}, has, v) && v > 0.0) out.minimumRpm = v;
     if (takeNum(start, {"PITSTOP_RPM"}, has, v) && v > 0.0) out.pitstopRpm = v;
     const Json& antistall = start["ANTISTALL"];
@@ -275,6 +319,30 @@ bool CarPhysicsJson::loadAcStart(const std::string& carDir, CarStartConfig& out,
         for (char& c : by)
             if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         out.startedByCrew = (by == "crew");
+    }
+    // A block that leaves the idle out still owes the number the car itself
+    // holds at rest: the manifest's own "engine" block (ENGINE_DATA, or DATA
+    // as an older conversion spelled it) carries the engine.ini MINIMUM the
+    // conversion copied, and stock folders still ship the .ini itself. The
+    // model's standalone default comes last.
+    if (!idleDeclared) {
+        const Json& engine = root["engine"];
+        if (engine.isObject()) {
+            for (const char* sectionName : {"ENGINE_DATA", "DATA"}) {
+                const Json& section = engine[sectionName];
+                if (!section.isObject()) continue;
+                const Json& minimum = section["MINIMUM"];
+                if (minimum.isDouble() && minimum.toDouble() > 0.0) {
+                    out.idleRpm = minimum.toDouble();
+                    idleDeclared = true;
+                    break;
+                }
+            }
+        }
+        if (!idleDeclared) {
+            const double minimum = engineIniMinimum(carDir);
+            if (minimum > 0.0) out.idleRpm = minimum;
+        }
     }
     out.declared = true;
     return true;
