@@ -270,6 +270,8 @@ public:
         // The mirror tile is its own eye (stage 2): the size of the list the
         // rear-view scene pass actually replayed last frame.
         uint32_t mirrorDrawn = 0;
+        // ... and how many the tile's own grid rejected before its list.
+        uint32_t mirrorOccluded = 0;
     };
     void setFrustumCulling(bool enabled) { m_frustumCulling = enabled; }
     bool frustumCulling() const { return m_frustumCulling; }
@@ -756,7 +758,27 @@ private:
     // destroyOcclusionResources() tears it all down with the swapchain.
     bool ensureOcclusionResources();
     void destroyOcclusionResources();
-    void recordOcclusionPass(VkImage depthImage, VkImageView depthView);
+    // What the grid pass needs to know about the eye it is pooling for: the
+    // target, the descriptor set naming that eye's depth image, and the
+    // readback the copy lands in. Pass, pipeline, layout, sampler and pool are
+    // shared by both eyes.
+    struct OcclTarget {
+        VkImage image = VK_NULL_HANDLE;
+        VkFramebuffer framebuffer = VK_NULL_HANDLE;
+        VkDescriptorSet set = VK_NULL_HANDLE;
+        VkBuffer readback = VK_NULL_HANDLE;
+        int gridW = 0;
+        int gridH = 0;
+        bool* pending = nullptr;   // set once the copy is recorded
+    };
+    void recordOcclusionPass(VkImage depthImage, VkImageView depthView,
+                             const OcclTarget& target);
+    // The rear-view tile is a separate eye: the main grid's tiles describe a
+    // screen mapping it cannot use, so it gets its own grid, target and
+    // readback. Independent of the main one — a failure here only costs the
+    // tile its occlusion test.
+    bool ensureMirrorOcclusionResources();
+    void destroyMirrorOcclusionResources();
 
     static constexpr int kGBufferCount = 3;
     static constexpr int kHistoryCount = 2;
@@ -985,6 +1007,28 @@ private:
     VkBuffer m_occlReadback = VK_NULL_HANDLE;
     VkDeviceMemory m_occlReadbackMemory = VK_NULL_HANDLE;
     void* m_occlReadbackMapped = nullptr;
+
+    // Mirror-eye grid: same pass and pipeline as the main one, its own target,
+    // descriptor set and readback (a 512x128 tile needs 4 KB). Consumed the
+    // same way — copied at the end of a frame, linearised in beginFrame(),
+    // tested with the mirror eye's previous view-projection.
+    bool m_mirrorOcclReady = false;
+    bool m_mirrorOcclFailed = false;      // sticky: build failed, tile stops testing
+    bool m_mirrorOcclPending = false;
+    bool m_mirrorOcclGridValid = false;
+    int m_mirrorOcclGridW = 0;
+    int m_mirrorOcclGridH = 0;
+    std::vector<float> m_mirrorOcclGrid;
+    mat4 m_prevMirrorViewProj;
+    bool m_prevMirrorViewProjValid = false;
+    VkImage m_mirrorOcclImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorOcclMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorOcclView = VK_NULL_HANDLE;
+    VkFramebuffer m_mirrorOcclFramebuffer = VK_NULL_HANDLE;
+    VkDescriptorSet m_mirrorOcclSet = VK_NULL_HANDLE;
+    VkBuffer m_mirrorOcclReadback = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorOcclReadbackMemory = VK_NULL_HANDLE;
+    void* m_mirrorOcclReadbackMapped = nullptr;
 
     // --- Particles (roadmap P1): sprite pipelines + a host-visible quad
     // buffer rewritten every frame. Built lazily on the first frame that

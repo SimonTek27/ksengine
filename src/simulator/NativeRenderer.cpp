@@ -1650,7 +1650,9 @@ bool NativeRenderer::ensureMirrorResources() {
     depthAtt.format = VK_FORMAT_D32_SFLOAT;
     depthAtt.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // tile depth dies here
+    // STORE, not DONT_CARE: the tile's own occlusion grid pools this depth
+    // right after the pass, so the contents have to survive it.
+    depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAtt.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     depthAtt.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAtt.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1792,6 +1794,9 @@ void NativeRenderer::resolvedMirrorSize(uint32_t& width, uint32_t& height) const
 }
 
 void NativeRenderer::destroyMirrorResources() {
+    // The tile's occlusion grid pools the depth this function is about to
+    // destroy, so its target goes with it.
+    destroyMirrorOcclusionResources();
     if (!m_device) return;
     if (m_mirrorUBOMapped) vkUnmapMemory(m_device, m_mirrorUBOMemory);
     if (m_mirrorUBO) vkDestroyBuffer(m_device, m_mirrorUBO, nullptr);
@@ -2832,6 +2837,22 @@ bool NativeRenderer::beginFrame() {
             m_occlGridValid = true;
         }
     }
+    // Same handshake for the tile's grid. r22/r23 are shared on purpose: the
+    // mirror projection differs from the main one only in row 0 (the aspect
+    // rescale), and linearisation reads rows 2/3.
+    if (m_mirrorOcclPending) {
+        m_mirrorOcclPending = false;
+        const size_t count = static_cast<size_t>(m_mirrorOcclGridW) *
+                             static_cast<size_t>(m_mirrorOcclGridH);
+        if (m_mirrorOcclReadbackMapped && count > 0) {
+            const float* src = static_cast<const float*>(m_mirrorOcclReadbackMapped);
+            m_mirrorOcclGrid.resize(count);
+            for (size_t i = 0; i < count; ++i)
+                m_mirrorOcclGrid[i] =
+                    ks::math::occlusion::linearizeDepth(src[i], m_occlR22, m_occlR23);
+            m_mirrorOcclGridValid = true;
+        }
+    }
 
     VkResult acquireResult = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX,
                                                    m_imageAvailable, VK_NULL_HANDLE, &m_currentImageIndex);
@@ -2943,8 +2964,22 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
         // bounds means no honest test, so the instance goes in and the depth
         // buffer sorts it out.
         if (m_mirrorEnabled && m_mirrorFrameValid &&
-            (!haveBounds || m_mirrorFrustum.intersects(wmin, wmax)))
-            m_mirrorList.push_back({name, modelMatrix});
+            (!haveBounds || m_mirrorFrustum.intersects(wmin, wmax))) {
+            // Its own grid, never the main one: same eye position, but a
+            // completely different screen mapping, so a main-grid tile says
+            // nothing about this view.
+            const bool mirrorOccl =
+                haveBounds && m_occlusionCulling && m_mirrorOcclGridValid &&
+                m_prevMirrorViewProjValid && !m_mirrorOcclGrid.empty() &&
+                ks::math::occlusion::aabbOccluded(
+                    asMath(m_prevMirrorViewProj), wmin, wmax, m_mirrorOcclGrid.data(),
+                    m_mirrorOcclGridW, m_mirrorOcclGridH, static_cast<int>(m_mirrorW),
+                    static_cast<int>(m_mirrorH), kOcclusionMarginMeters);
+            if (mirrorOccl)
+                ++m_stats.mirrorOccluded;
+            else
+                m_mirrorList.push_back({name, modelMatrix});
+        }
 
         if (m_frustumCulling && haveBounds && !m_frustum.intersects(wmin, wmax)) {
             ++m_stats.culled;
@@ -3262,6 +3297,25 @@ void NativeRenderer::endFrame() {
     // rather than show something stale.
     if (m_mirrorEnabled && m_mirrorFrameValid && ensureMirrorResources())
         recordMirrorScene(recordDrawList);
+
+    // ---- Mirror occlusion grid: the tile's depth is in the attachment layout
+    // the shared grid pass expects (recordMirrorScene() just ended, and its
+    // depth finalLayout is exactly that), so the same downsample runs here
+    // into the tile's own target. The copy is consumed by the next
+    // beginFrame(), exactly like the main one.
+    if (m_mirrorEnabled && m_mirrorFrameValid && m_occlusionCulling &&
+        !m_occlusionFailed && m_mirrorDepthImage && m_mirrorDepthView &&
+        ensureMirrorOcclusionResources()) {
+        OcclTarget mirrorTarget;
+        mirrorTarget.image = m_mirrorOcclImage;
+        mirrorTarget.framebuffer = m_mirrorOcclFramebuffer;
+        mirrorTarget.set = m_mirrorOcclSet;
+        mirrorTarget.readback = m_mirrorOcclReadback;
+        mirrorTarget.gridW = m_mirrorOcclGridW;
+        mirrorTarget.gridH = m_mirrorOcclGridH;
+        mirrorTarget.pending = &m_mirrorOcclPending;
+        recordOcclusionPass(m_mirrorDepthImage, m_mirrorDepthView, mirrorTarget);
+    }
 
     VkViewport vp{0, 0, float(m_swapChainExtent.width), float(m_swapChainExtent.height), 0.0f, 1.0f};
     VkRect2D scissor{{0, 0}, m_swapChainExtent};
@@ -3639,8 +3693,17 @@ void NativeRenderer::endFrame() {
     if (m_occlusionCulling && !m_occlusionFailed && ensureOcclusionResources()) {
         VkImage depthImage = deferred ? m_gbufferDepthImage : m_depthImage;
         VkImageView depthView = deferred ? m_gbufferDepthView : m_depthView;
-        if (depthImage && depthView)
-            recordOcclusionPass(depthImage, depthView);
+        if (depthImage && depthView) {
+            OcclTarget mainTarget;
+            mainTarget.image = m_hizImage;
+            mainTarget.framebuffer = m_hizFramebuffer;
+            mainTarget.set = m_hizSet;
+            mainTarget.readback = m_occlReadback;
+            mainTarget.gridW = m_occlGridW;
+            mainTarget.gridH = m_occlGridH;
+            mainTarget.pending = &m_occlPending;
+            recordOcclusionPass(depthImage, depthView, mainTarget);
+        }
     }
 
     // One-shot color readback (requestScreenshot()): the backbuffer is in
@@ -3659,6 +3722,10 @@ void NativeRenderer::endFrame() {
     }
     m_prevViewProj = viewProjUnjit;
     m_prevViewProjValid = true;
+    // Same handshake for the tile: the grid copied above was rasterised with
+    // this frame's mirror matrices, so next frame's test projects with them.
+    m_prevMirrorViewProj = m_mirrorProjFrame * m_mirrorViewFrame;
+    m_prevMirrorViewProjValid = m_mirrorFrameValid;
     // Depth parameters of the projection that rendered the grid just copied
     // (jitter only touches rows 0/1, so m_proj's row 2 is jitter-free). The
     // next beginFrame() pairs these with m_prevViewProj when linearising.
@@ -4030,10 +4097,10 @@ bool NativeRenderer::ensureOcclusionResources() {
         dslCi.pBindings = &binding;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_hizSetLayout) != VK_SUCCESS) return fail();
 
-        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        poolCi.maxSets = 1;
+        poolCi.maxSets = 2;   // one descriptor set per eye
         poolCi.poolSizeCount = 1;
         poolCi.pPoolSizes = &poolSize;
         if (vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_hizPool) != VK_SUCCESS) return fail();
@@ -4175,6 +4242,10 @@ bool NativeRenderer::ensureOcclusionResources() {
 }
 
 void NativeRenderer::destroyOcclusionResources() {
+    // The tile's grid shares this pass, pipeline and descriptor pool, so it
+    // goes first: keeping its handle across a pool rebuild would leave a
+    // dangling descriptor set behind.
+    destroyMirrorOcclusionResources();
     if (!m_device) return;
 
     if (m_hizPipeline) { vkDestroyPipeline(m_device, m_hizPipeline, nullptr); m_hizPipeline = VK_NULL_HANDLE; }
@@ -4209,7 +4280,170 @@ void NativeRenderer::destroyOcclusionResources() {
     m_occlGridValid = false;
 }
 
-void NativeRenderer::recordOcclusionPass(VkImage depthImage, VkImageView depthView) {
+// The tile's grid: the shared pass and pipeline write into a target sized for
+// the tile's own depth buffer (64x16 tiles at the default 512x128), and the
+// readback is 4 KB. Built after the mirror target exists, self-disabling on
+// any failure without touching the main grid.
+bool NativeRenderer::ensureMirrorOcclusionResources() {
+    if (m_mirrorOcclReady) return true;
+    if (m_mirrorOcclFailed) return false;
+    if (!m_device || !m_mirrorDepthImage || m_mirrorW == 0 || m_mirrorH == 0) return false;
+    // Nothing to draw into a second target without the shared pass, pipeline
+    // and set layout; if those are unavailable the main grid already said so.
+    if (!ensureOcclusionResources()) return false;
+
+    m_mirrorOcclGridW = (static_cast<int>(m_mirrorW) + ks::math::occlusion::kTileSize - 1) /
+                        ks::math::occlusion::kTileSize;
+    m_mirrorOcclGridH = (static_cast<int>(m_mirrorH) + ks::math::occlusion::kTileSize - 1) /
+                        ks::math::occlusion::kTileSize;
+    m_mirrorOcclGridValid = false; // the old grid no longer matches this depth
+
+    auto fail = [&]() {
+        destroyMirrorOcclusionResources();
+        m_mirrorOcclFailed = true;
+        return false;
+    };
+
+    {
+        VkImageCreateInfo ci{};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.format = VK_FORMAT_R32_SFLOAT;
+        ci.extent = {static_cast<uint32_t>(m_mirrorOcclGridW),
+                     static_cast<uint32_t>(m_mirrorOcclGridH), 1};
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(m_device, &ci, nullptr, &m_mirrorOcclImage) != VK_SUCCESS) return fail();
+
+        VkMemoryRequirements mr{};
+        vkGetImageMemoryRequirements(m_device, m_mirrorOcclImage, &mr);
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = findMemoryType(m_physicalDevice, mr.memoryTypeBits,
+                                             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (vkAllocateMemory(m_device, &mai, nullptr, &m_mirrorOcclMemory) != VK_SUCCESS)
+            return fail();
+        vkBindImageMemory(m_device, m_mirrorOcclImage, m_mirrorOcclMemory, 0);
+
+        VkImageViewCreateInfo vCi{};
+        vCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vCi.image = m_mirrorOcclImage;
+        vCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vCi.format = VK_FORMAT_R32_SFLOAT;
+        vCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vCi.subresourceRange.levelCount = 1;
+        vCi.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(m_device, &vCi, nullptr, &m_mirrorOcclView) != VK_SUCCESS)
+            return fail();
+    }
+
+    {
+        VkImageView att = m_mirrorOcclView;
+        VkFramebufferCreateInfo fb{};
+        fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb.renderPass = m_hizRenderPass; // shared: R32F, TRANSFER_SRC at the end
+        fb.attachmentCount = 1;
+        fb.pAttachments = &att;
+        fb.width = static_cast<uint32_t>(m_mirrorOcclGridW);
+        fb.height = static_cast<uint32_t>(m_mirrorOcclGridH);
+        fb.layers = 1;
+        if (vkCreateFramebuffer(m_device, &fb, nullptr, &m_mirrorOcclFramebuffer) != VK_SUCCESS)
+            return fail();
+    }
+
+    {
+        VkDescriptorSetAllocateInfo dsAi{};
+        dsAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        dsAi.descriptorPool = m_hizPool;   // sized for two sets
+        dsAi.descriptorSetCount = 1;
+        dsAi.pSetLayouts = &m_hizSetLayout;
+        if (vkAllocateDescriptorSets(m_device, &dsAi, &m_mirrorOcclSet) != VK_SUCCESS)
+            return fail();
+    }
+
+    {
+        const VkDeviceSize size = static_cast<VkDeviceSize>(m_mirrorOcclGridW) *
+                                  static_cast<VkDeviceSize>(m_mirrorOcclGridH) * sizeof(float);
+        VkBufferCreateInfo bCi{};
+        bCi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bCi.size = size;
+        bCi.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bCi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        if (vkCreateBuffer(m_device, &bCi, nullptr, &m_mirrorOcclReadback) != VK_SUCCESS)
+            return fail();
+
+        VkMemoryRequirements mr{};
+        vkGetBufferMemoryRequirements(m_device, m_mirrorOcclReadback, &mr);
+        uint32_t typeIndex = 0;
+        if (!findMemoryTypeStrict(m_physicalDevice, mr.memoryTypeBits,
+                                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                                  typeIndex))
+            return fail();
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = typeIndex;
+        if (vkAllocateMemory(m_device, &mai, nullptr, &m_mirrorOcclReadbackMemory) != VK_SUCCESS)
+            return fail();
+        vkBindBufferMemory(m_device, m_mirrorOcclReadback, m_mirrorOcclReadbackMemory, 0);
+        if (vkMapMemory(m_device, m_mirrorOcclReadbackMemory, 0, size, 0,
+                        &m_mirrorOcclReadbackMapped) != VK_SUCCESS)
+            return fail();
+    }
+
+    m_mirrorOcclReady = true;
+    fprintf(stderr, "[NativeRenderer] mirror occlusion grid %dx%d tiles @ %ux%u depth\n",
+            m_mirrorOcclGridW, m_mirrorOcclGridH, m_mirrorW, m_mirrorH);
+    return true;
+}
+
+void NativeRenderer::destroyMirrorOcclusionResources() {
+    if (m_device) {
+        if (m_mirrorOcclFramebuffer) {
+            vkDestroyFramebuffer(m_device, m_mirrorOcclFramebuffer, nullptr);
+            m_mirrorOcclFramebuffer = VK_NULL_HANDLE;
+        }
+        if (m_mirrorOcclView) {
+            vkDestroyImageView(m_device, m_mirrorOcclView, nullptr);
+            m_mirrorOcclView = VK_NULL_HANDLE;
+        }
+        if (m_mirrorOcclImage) {
+            vkDestroyImage(m_device, m_mirrorOcclImage, nullptr);
+            m_mirrorOcclImage = VK_NULL_HANDLE;
+        }
+        if (m_mirrorOcclMemory) {
+            vkFreeMemory(m_device, m_mirrorOcclMemory, nullptr);
+            m_mirrorOcclMemory = VK_NULL_HANDLE;
+        }
+        if (m_mirrorOcclReadbackMapped) {
+            vkUnmapMemory(m_device, m_mirrorOcclReadbackMemory);
+            m_mirrorOcclReadbackMapped = nullptr;
+        }
+        if (m_mirrorOcclReadback) {
+            vkDestroyBuffer(m_device, m_mirrorOcclReadback, nullptr);
+            m_mirrorOcclReadback = VK_NULL_HANDLE;
+        }
+        if (m_mirrorOcclReadbackMemory) {
+            vkFreeMemory(m_device, m_mirrorOcclReadbackMemory, nullptr);
+            m_mirrorOcclReadbackMemory = VK_NULL_HANDLE;
+        }
+    }
+    // Freed with the pool, but the handle must not outlive it.
+    m_mirrorOcclSet = VK_NULL_HANDLE;
+    m_mirrorOcclReady = false;
+    m_mirrorOcclPending = false;
+    m_mirrorOcclGridValid = false;
+}
+
+void NativeRenderer::recordOcclusionPass(VkImage depthImage, VkImageView depthView,
+                                         const OcclTarget& target) {
     // ---- 1. Geometry depth writes -> shader reads. The render pass above
     // left the image in DEPTH_STENCIL_ATTACHMENT_OPTIMAL with its writes
     // made available by the pass's final-layout transition. ----

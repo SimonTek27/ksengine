@@ -2550,9 +2550,9 @@ void SimulationLoop::render(float dt) {
             const auto& st = m_vulkanRenderer->lastFrameStats();
             std::fprintf(stderr,
                          "[render] %.1f fps submitted=%u drawn=%u culled=%u occluded=%u "
-                         "mirror=%u\n",
+                         "mirror=%u mirrorOccl=%u\n",
                          s_frame / elapsedReport, st.submitted, st.drawn, st.culled, st.occluded,
-                         st.mirrorDrawn);
+                         st.mirrorDrawn, st.mirrorOccluded);
             // E9 / gate 2.14: the GPU half of the same frame, only when the
             // queue actually produced timestamps (0 is "no data", printed as
             // such rather than as a frame time).
