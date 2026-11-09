@@ -1208,6 +1208,30 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 v.a = 1.f;
             }
             nm.indices = m.indices;
+            // Diagnostic (KS_MESH_BOUNDS): where a mesh actually landed in
+            // the scene. Geometry that is loaded but never seen can then be
+            // told apart from geometry that was never loaded at all.
+            if (std::getenv("KS_MESH_BOUNDS") != nullptr) {
+                float lo[3] = {1e9f, 1e9f, 1e9f};
+                float hi[3] = {-1e9f, -1e9f, -1e9f};
+                for (const NativeVertex& v : nm.vertices) {
+                    const float p[3] = {v.px, v.py, v.pz};
+                    for (int k = 0; k < 3; ++k) {
+                        lo[k] = std::min(lo[k], p[k]);
+                        hi[k] = std::max(hi[k], p[k]);
+                    }
+                }
+                std::string matName = "?";
+                if (m.material_id >= 0 &&
+                    m.material_id < static_cast<std::int32_t>(parsed.file.materials.size()))
+                    matName = parsed.file.materials[static_cast<std::size_t>(m.material_id)].name;
+                std::fprintf(stderr,
+                             "[bounds] %-28s mesh=%-20s min=(%.2f %.2f %.2f) max=(%.2f %.2f %.2f)\n",
+                             matName.c_str(), m.name.c_str(), static_cast<double>(lo[0]),
+                             static_cast<double>(lo[1]), static_cast<double>(lo[2]),
+                             static_cast<double>(hi[0]), static_cast<double>(hi[1]),
+                             static_cast<double>(hi[2]));
+            }
             // A room read as a closed shell is a backdrop: it receives light and
             // shadows but casts none, or the shell would shade everything inside it.
             nm.castShadow = !faceInside;
@@ -1433,6 +1457,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     // keeps its texture alpha and lets the fresnel term decide.
                     nm.opacity = pane ? (presetGlass ? 0.30f : 1.0f) : 1.0f;
                     nm.glassiness = pane ? 1.0f : 0.0f;
+                    // Diagnostic (KS_MATERIAL_DEBUG): a pane that never got the
+                    // glass treatment is the difference between "the cabin is
+                    // black" and "a lit card sits in front of the cabin".
+                    if (debugMaterials)
+                        std::fprintf(stderr, "[glass] %-24s pane=%d opacity=%.2f\n",
+                                     material.name.c_str(), pane ? 1 : 0,
+                                     static_cast<double>(nm.opacity));
                     nm.castShadow = false; // a pane casts no useful shadow
                     ++seeThrough;
                 }

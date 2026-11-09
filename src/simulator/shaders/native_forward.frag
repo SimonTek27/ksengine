@@ -282,13 +282,20 @@ void main() {
     float glass = clamp(material.glassiness, 0.0, 1.0);
     vec3 surface = lit;
     if (glass > 0.001) {
-        vec3 reflection = ambient * (0.30 + 0.70 * fresnel) + specular * (0.5 + fresnel);
+        // A pane reflects about 4% head-on and everything at grazing. The flat
+        // 0.30 of ambient this used to add turned a side window into a solid
+        // sky-coloured card and hid the cabin behind it even when looking
+        // straight through, so the reflection now follows Fresnel alone.
+        float reflectance = 0.04 + 0.96 * fresnel;
+        vec3 reflection = ambient * reflectance + specular * (0.5 + fresnel);
         surface = mix(lit, reflection + albedo * 0.05, glass);
     }
-    // The authored alpha, the pane's own opacity, and Fresnel so the edge of a
-    // windscreen goes opaque while you look straight through the middle.
-    float alpha = clamp(albedoSample.a * material.opacity * (1.0 + 2.5 * fresnel * glass),
-                        0.0, 1.0);
+    // The pane's coverage is what the file authored: the texture's own alpha
+    // times the material opacity. A Fresnel multiplier on top of it reached
+    // ~0.53 on a side window seen at a grazing angle, which is why the sky
+    // reflection painted over the cabin instead of floating on it. Fresnel
+    // still drives the reflection above, so an edge keeps its sheen.
+    float alpha = clamp(albedoSample.a * material.opacity, 0.0, 1.0);
     // Premultiplied for the see-through pipeline; the opaque one ignores alpha,
     // and with opacity 1 this is exactly the previous colour.
     outColor = vec4(mix(surface, frame.fogColor.rgb, fogT) * alpha, alpha);
