@@ -162,6 +162,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     sintesi e controlli di coerenza in `docs/GATE_2_14_FRAME_PROFILE.md`;
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
+### Changed
+- **Un solo blocco ABS per auto**: il convertitore derivava `ABS_V2` da `[ABS]`
+  copiando `SLIP_RATIO_LIMIT`/`CURVE`/`PRESENT`/`ACTIVE`/`RATE_HZ` e riempiendo
+  il resto con i default di riferimento, quindi ogni auto convertita si trovava
+  due blocchi ABS che dicevano la stessa cosa. La derivazione è stata rimossa:
+  resta il blocco che l'auto dichiara, e se il documento porta già un `ABS_V2`
+  nativo il vecchio `[ABS]` viene tolto. `CarElectronics` legge entrambe le
+  forme (e una coppia residua come un blocco solo), quindi per il simulatore
+  non cambia niente.
+
 ### Fixed
 - **Il converter non puo` piu` scrivere un documento JSON malformato**:
   `AcCarManifestConverter::writeDocuments` scriveva ogni documento con

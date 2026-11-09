@@ -4,10 +4,10 @@
  *
  * data/electronics.ini says which systems the car has and where it lets the
  * tyres slip: [ABS] and [TRACTION_CONTROL] both carry SLIP_RATIO_LIMIT. The
- * conversion keeps them in data.json under "electronics" (and derives the newer
- * ABS_V2 block from the older [ABS] one, carrying the limit over), so the
- * simulator cuts drive and brake torque where the car was built to, instead of
- * cutting every car at one value.
+ * conversion keeps them in data.json under "electronics" as the car declares
+ * them: one ABS block, [ABS] or a native [ABS_V2] (the conversion no longer
+ * writes both), so the simulator cuts drive and brake torque where the car was
+ * built to, instead of cutting every car at one value.
  *
  * These are the limits AC and CSP themselves read for the same systems: a
  * traction control that starts cutting at 0.08 and one that waits for 0.12 are
@@ -143,9 +143,10 @@ inline ElectronicsLimits readElectronicsLimits(const Json& document) {
             out.declaredTractionControl = true;
         }
     }
-    // ABS: the car's [ABS] block, or the ABS_V2 the conversion derived from it.
-    // Presence is read from the first block that exists; the limit from the first
-    // one that carries a usable number.
+    // ABS: the car's [ABS] block, or a native [ABS_V2]. A document written by an
+    // earlier conversion may carry both; presence comes from the first block
+    // that exists and the limit from the first one with a usable number, so the
+    // pair reads exactly like the single block it stands for.
     for (const char* name : {"ABS", "ABS_V2"}) {
         const Json* abs = child(electronics, name);
         if (abs == nullptr) continue;

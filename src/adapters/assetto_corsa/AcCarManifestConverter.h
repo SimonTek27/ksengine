@@ -1873,28 +1873,17 @@ private:
             }
         }
         {
-            // electronics.ini: older cars carry [ABS]/[TRACTION_CONTROL] and no
-            // ABS_V2/EDL block. The newer shapes mirror what the car declares,
-            // so nothing is invented for a car that never had these systems.
+            // electronics.ini: ONE ABS block per car. The car's own [ABS] (or a
+            // native [ABS_V2]) is the source; an earlier conversion also derived
+            // ABS_V2 out of [ABS], copying SLIP_RATIO_LIMIT/CURVE/PRESENT/
+            // ACTIVE/RATE_HZ and filling the rest with AC reference defaults.
+            // That left every converted car with two ABS blocks saying the same
+            // thing, so the derivation is gone: CarElectronics.h reads either
+            // shape, and a car that declares ABS_V2 natively keeps its own.
             Json& electronics = objectAt(root, "electronics");
-            if (!electronics.contains("ABS_V2")) {
-                Json abs2 = Json::object();
-                const Json* v1 = electronics.contains("ABS") && electronics["ABS"].isObject()
-                                     ? &electronics["ABS"]
-                                     : nullptr;
-                static const char* kShared[] = {"SLIP_RATIO_LIMIT", "CURVE", "PRESENT",
-                                                "ACTIVE", "RATE_HZ"};
-                for (const char* key : kShared) {
-                    if (v1 && v1->contains(key)) abs2.insert(key, (*v1)[key]);
-                }
-                if (!abs2.contains("SLIP_RATIO_LIMIT")) abs2.insert("SLIP_RATIO_LIMIT", Json(0.12));
-                if (!abs2.contains("CURVE")) abs2.insert("CURVE", Json(""));
-                if (!abs2.contains("PRESENT")) abs2.insert("PRESENT", Json(0));
-                if (!abs2.contains("ACTIVE")) abs2.insert("ACTIVE", Json(0));
-                if (!abs2.contains("RATE_HZ")) abs2.insert("RATE_HZ", Json(100));
-                abs2.insert("CHANNELS", Json(4));
-                electronics.insert("ABS_V2", abs2);
-            }
+            // A car that already carries the newer block keeps it and loses the
+            // legacy copy: one ABS block in the document, either way round.
+            if (electronics.contains("ABS_V2")) electronics.remove("ABS");
             if (!electronics.contains("EDL")) {
                 Json edl = Json::object();
                 const Json* tc =
