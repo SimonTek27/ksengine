@@ -74,6 +74,22 @@ inline bool isWeatheringTexture(const std::string& texture) {
            folded.find("dust") != std::string::npos;
 }
 
+/** A map whose NAME marks it as data rather than colour: _s (specular), _spec,
+ *  _nm/_normal (normals), _ao (ambient occlusion). AC's detail slot often
+ *  points at one of these (B191_CARBFBD ships 9x_carbfbd_T1_s.dds), and
+ *  multiplying that into the albedo paints grime and blue speckles the livery
+ *  never had. */
+inline bool isDataTexture(const std::string& texture) {
+    const std::string folded = materialLower(texture);
+    return folded.find("_s.") != std::string::npos ||
+           folded.find("_spec") != std::string::npos ||
+           folded.find("_nm.") != std::string::npos ||
+           folded.find("_nm_") != std::string::npos ||
+           folded.find("_normal") != std::string::npos ||
+           folded.find("_ao.") != std::string::npos ||
+           folded.find("_ao_") != std::string::npos;
+}
+
 inline TextureRole textureRole(const std::string& mappingName,
                                const std::string& texture) {
     if (texture.empty() || isWeatheringTexture(texture)) return TextureRole::other;
@@ -81,7 +97,8 @@ inline TextureRole textureRole(const std::string& mappingName,
     // "Normal" before "Detail": txNormalDetail is a normal map, not colour.
     if (name.find("normal") != std::string::npos) return TextureRole::normal;
     if (name.find("diffuse") != std::string::npos) return TextureRole::diffuse;
-    if (name.find("detail") != std::string::npos) return TextureRole::detail;
+    if (name.find("detail") != std::string::npos)
+        return isDataTexture(texture) ? TextureRole::other : TextureRole::detail;
     return TextureRole::other;
 }
 

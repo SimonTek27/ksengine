@@ -1177,7 +1177,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                         case graphics::TextureRole::other:
                             break;
                     }
-                    if (graphics::isWeatheringTexture(mapping.texture)) continue;
+                    // Never promote a weathering or data map (specular, AO,
+                    // normal) to the surface colour when no diffuse is named.
+                    if (graphics::isWeatheringTexture(mapping.texture) ||
+                        graphics::isDataTexture(mapping.texture))
+                        continue;
                     if (fallbackAlbedo.empty()) fallbackAlbedo = mapping.texture;
                 }
                 if (albedo.empty()) albedo = fallbackAlbedo;

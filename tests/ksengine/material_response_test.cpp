@@ -167,9 +167,27 @@ int main() {
         KS_CHECK(textureRole("txNormal", "damage.dds") == TextureRole::other);
         KS_CHECK(textureRole("txNormal", "body_nm.dds") == TextureRole::normal);
         KS_CHECK(textureRole("txDiffuse", "asr-car-body.dds") == TextureRole::diffuse);
-        KS_CHECK(textureRole("txDetail", "9x_carbfbd_T1_s.dds") == TextureRole::detail);
         KS_CHECK(textureRole("txNormalDetail", "weave_nm.dds") == TextureRole::normal);
         KS_CHECK(textureRole("txDust", "dust.dds") == TextureRole::other);
+    }
+
+    // --- spec/AO/normal maps in txDetail are data, not colour (the B191
+    //     ships 9x_carbfbd_T1_s.dds there: multiplying it into the albedo
+    //     painted blue speckles on a clean livery) ------------------------
+    {
+        KS_CHECK(isDataTexture("9x_carbfbd_T1_s.dds"));
+        KS_CHECK(isDataTexture("mat_steer_metal_t2_spec.dds"));
+        KS_CHECK(isDataTexture("9x_metal_ao.dds"));
+        KS_CHECK(isDataTexture("9x_alcnt_nm.dds"));
+        KS_CHECK(isDataTexture("panel_normal.dds"));
+        KS_CHECK(!isDataTexture("metal_detail.dds"));
+        KS_CHECK(!isDataTexture("9x_carbfbd_t1.dds"));
+
+        KS_CHECK(textureRole("txDetail", "9x_carbfbd_T1_s.dds") == TextureRole::other);
+        KS_CHECK(textureRole("txDetail", "9x_metal_ao.dds") == TextureRole::other);
+        KS_CHECK(textureRole("txDetail", "metal_detail.dds") == TextureRole::detail);
+        // A normal mapping keeps its role even when the texture is a normal.
+        KS_CHECK(textureRole("txNormalDetail", "weave_nm.dds") == TextureRole::normal);
     }
 
     // --- txDetail only when AC's useDetail asks for it ---------------------
