@@ -6,6 +6,7 @@
 #include "engine/Config/Json.h"
 #include "ui/MenuInput.h"
 #include "engine/assets/UserData.h"
+#include "engine/Config/ControllerSettings.h"
 
 #include <cctype>
 #include <cstdio>
@@ -363,6 +364,23 @@ public:
     void setKeyboardMapping(const KeyboardMapping& m) { m_kb = m; }
     const KeyboardMapping& keyboardMapping() const { return m_kb; }
 
+    /** The controller document (rFactor Controller.ini shape) the player's
+     *  settings carry. Loading merges into what is already here, so the
+     *  install defaults and the player's own overrides arrive in that order,
+     *  exactly like EngineSettings. */
+    bool loadControllerSettings(const std::string& path);
+    bool saveControllerSettings(const std::string& path) const {
+        return m_controller.saveTo(path, "controller");
+    }
+    /** Apply the values the document actually carries to the live mapping:
+     *  today the steering deadzone (STEER.DEADZONE). Absent or out-of-range
+     *  values leave the mapping alone instead of guessing a default. */
+    void applyControllerSettings();
+    const ks::engine::config::ControllerSettings& controllerSettings() const {
+        return m_controller;
+    }
+    ks::engine::config::ControllerSettings& controllerSettings() { return m_controller; }
+
     void injectAxes(const double axes[AXIS_COUNT], unsigned buttons);
     void injectAxis(int index, double value);
     void injectButton(int index, bool pressed);
@@ -392,6 +410,7 @@ private:
 
     JoystickMapping m_map = JoystickMapping::gamepadDefault();
     KeyboardMapping m_kb;
+    ks::engine::config::ControllerSettings m_controller;
 
     double m_axes[AXIS_COUNT] = {};
     unsigned m_buttons = 0;

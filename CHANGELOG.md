@@ -163,6 +163,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
+- **`ControllerSettings` collegato a `InputManager` e alle impostazioni utente**:
+  il documento rFactor vive sotto la chiave `controller` negli stessi file che
+  il motore già fonde (`system/cfg/ksengine.json`, poi
+  `user/<player>/settings.json`, l'ultimo vince). `InputManager` lo carica,
+  applica i valori che ci sono davvero (per ora `STEER.DEADZONE`) e lo
+  risalva sotto `controller` senza toccare le altre chiavi né il `_meta`
+  interno.
 - **`AERO_COMPONENTS` accanto a `DISCS_COMPONENTS` e `SUSPENSIONS_COMPONENTS`**:
   il convertitore mappa anche i nodi delle ali (`aero.AERO_COMPONENTS`), con
   `WING_FRONT` e `WING_REAR` riconosciuti in qualunque ordine di parole, anche

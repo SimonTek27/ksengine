@@ -286,6 +286,23 @@ bool InputManager::isXInputConnected() const {
 #endif
 }
 
+bool InputManager::loadControllerSettings(const std::string& path) {
+    if (!m_controller.loadFrom(path, "controller")) return false;
+    applyControllerSettings();
+    return true;
+}
+
+void InputManager::applyControllerSettings() {
+    namespace json = ks::engine::json;
+    const json::Value* steer = m_controller.root.find("STEER");
+    if (steer == nullptr || !steer->isObject()) return;
+    // The mapping has one deadzone shared by every axis, so one value is all
+    // that can be applied without inventing per-axis behaviour the input path
+    // does not have. 0..0.95 keeps the curve denominator positive.
+    const double deadZone = steer->numberAt("DEADZONE", -1.0);
+    if (deadZone >= 0.0 && deadZone < 0.95) m_map.deadZone = deadZone;
+}
+
 void InputManager::processKeyboard() {
     // Roadmap 1.4: primaries come from the rebindable mapping; arrows stay
     // fixed as alternates. Key names are matched case-insensitively (the

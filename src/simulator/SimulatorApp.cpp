@@ -1476,6 +1476,16 @@ static void initSimulation() {
                 printf("Migrated user/keyboard.ini -> %s\n", g_userLayout.controls.c_str());
         }
         g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
+
+        // Controller settings ride in the same files as the engine settings,
+        // under a "controller" object: install defaults first, the player's
+        // own second, later wins per key (the EngineSettings merge order).
+        if (im->loadControllerSettings(
+                ks::engine::assets::Paths::systemCfgFile("ksengine.json")))
+            printf("[INIT] controller settings: system defaults\n");
+        if (!g_userLayout.settings.empty() &&
+            im->loadControllerSettings(g_userLayout.settings))
+            printf("[INIT] controller settings: %s\n", g_userLayout.settings.c_str());
     }
     g_simulation->ui().keyRebind().onMappingChanged = [](const ks::sim::KeyboardMapping& m) {
         if (auto* im = g_simulation->inputManager()) im->setKeyboardMapping(m);

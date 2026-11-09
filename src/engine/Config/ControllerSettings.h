@@ -56,6 +56,48 @@ struct ControllerSettings {
         return assets::UserData::writeFile(path, json::dump(root));
     }
 
+    /** Merge only the `section` object of a settings file (the shape
+     *  EngineSettings reads: system/cfg/ksengine.json then the player's
+     *  settings.json). False when the file or that section is missing, with
+     *  the document left as it was. */
+    bool loadFrom(const std::string& path, const std::string& section) {
+        std::string text;
+        if (!assets::UserData::readFile(path, text)) return false;
+        json::Value doc;
+        std::string error;
+        if (!json::parse(text, doc, &error)) {
+            std::fprintf(stderr, "ControllerSettings: %s: %s\n", path.c_str(), error.c_str());
+            return false;
+        }
+        const json::Value* value = doc.find(section);
+        if (value == nullptr || !value->isObject()) return false;
+        merge(*value);
+        return true;
+    }
+
+    /** Put the document back under `section`, preserving every other key the
+     *  file already carries. The builtin _meta note is not a setting and is
+     *  never written into a user file. */
+    bool saveTo(const std::string& path, const std::string& section) const {
+        json::Value doc = json::Value::object();
+        std::string text;
+        if (assets::UserData::readFile(path, text)) {
+            std::string error;
+            if (!json::parse(text, doc, &error)) {
+                std::fprintf(stderr, "ControllerSettings: %s: %s\n", path.c_str(), error.c_str());
+                return false;
+            }
+            if (!doc.isObject()) return false;
+        }
+        json::Value value = json::Value::object();
+        for (const std::string& key : root.keys()) {
+            if (key == "_meta") continue;
+            if (const json::Value* entry = root.find(key)) value.set(key, *entry);
+        }
+        doc.set(section, std::move(value));
+        return assets::UserData::writeFile(path, json::dump(doc));
+    }
+
     // The built-in default document (rFactor Controller.ini shape, no values).
     static std::string defaultJson();
 
