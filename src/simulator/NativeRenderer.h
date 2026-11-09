@@ -124,6 +124,14 @@ struct NativeMesh {
     // shading to the pane model (reflection instead of diffuse).
     float opacity = 1.0f;
     float glassiness = 0.0f;
+    // Authored KN5 surface response the presets cannot know: ksSpecular
+    // scales the dielectric F0 (0.5 = the legacy 0.04), and the fresnel
+    // triplet is what AC's reflection shaders use to blend a pane in at
+    // grazing angles (fresnelMaxLevel 0 = the file authored none).
+    float specular = 0.5f;
+    float fresnelC = 0.0f;
+    float fresnelExp = 5.0f;
+    float fresnelMax = 0.0f;
     // material.blend != 0 (glass, windscreen, decals): drawn after the
     // opaque pass, blended over what is already there, no depth write.
     bool blended = false;

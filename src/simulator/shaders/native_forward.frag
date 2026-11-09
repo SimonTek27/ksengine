@@ -69,6 +69,9 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintB;
     float paintSolid;  // 1 = tint replaces the albedo instead of multiplying it
     float detailScale; // >0 = tile the detail map over the albedo
+    // Authored response (KN5 ksSpecular + fresnelC/EXP/MaxLevel), appended
+    // after detailScale so every offset above is unchanged.
+    vec4 specularFresnel; // x = ksSpecular, y = fresnelC, z = fresnelEXP, w = fresnelMaxLevel
 } material;
 
 const float PI = 3.14159265;
@@ -178,6 +181,9 @@ void main() {
     float shadow = sampleShadow(fragWorldPos, cascadeIndex);
 
     vec3 V = normalize(frame.cameraPos.xyz - fragWorldPos);
+    // ksSpecular scales the dielectric F0 around AC's 0.5 neutral: 0.5 is the
+    // legacy 0.04, 1.0 doubles it, 0 halves it.
+    float f0Scale = clamp(material.specularFresnel.x * 2.0, 0.4, 2.0);
 
     // Ambient: split-sum IBL when enabled (brief P2), legacy flat albedo *
     // 0.25 otherwise. Diffuse lobe from the irradiance map, specular from
@@ -186,7 +192,7 @@ void main() {
     vec3 ambient;
     if (frame.iblParams.x > 0.5) {
         float NdotV = max(dot(N, V), 1e-4);
-        vec3 F0 = mix(vec3(0.04), albedo, material.metalness);
+        vec3 F0 = mix(vec3(0.04) * f0Scale, albedo, material.metalness);
         vec2 brdf = texture(iblBrdfLut, vec2(NdotV, material.roughness)).rg;
         vec3 R = reflect(-V, N);
         vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
@@ -215,7 +221,7 @@ void main() {
     float k = a * 0.5;
     float G = (NdotL / (NdotL * (1.0 - k) + k)) *
               (NdotV / (NdotV * (1.0 - k) + k));
-    vec3 F0 = mix(vec3(0.04), albedo, material.metalness);
+    vec3 F0 = mix(vec3(0.04) * f0Scale, albedo, material.metalness);
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
     vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) *
                     NdotL * shadow * sunRad;
@@ -254,7 +260,18 @@ void main() {
     // A pane is not a lit surface: almost none of the diffuse survives, which is
     // what made the windscreen read as a milky slab. What you see is the tint
     // plus the reflection, and the reflection takes over towards grazing angles.
+    // Authored fresnel (fresnelC/EXP/MaxLevel) when the file carries it: that
+    // is the curve the windscreen was authored against. Without it, Schlick.
     float fresnel = pow(1.0 - NdotV, 5.0);
+    if (material.specularFresnel.w > 0.001) {
+        float fresnelBase = clamp(material.specularFresnel.y, 0.0, 1.0);
+        float fresnelMax = clamp(material.specularFresnel.w, 0.0, 1.0);
+        float fresnelExp = clamp(material.specularFresnel.z, 0.1, 64.0);
+        fresnel = clamp(fresnelBase +
+                            (max(fresnelBase, fresnelMax) - fresnelBase) *
+                                pow(1.0 - NdotV, fresnelExp),
+                        0.0, 1.0);
+    }
     float glass = clamp(material.glassiness, 0.0, 1.0);
     vec3 surface = lit;
     if (glass > 0.001) {

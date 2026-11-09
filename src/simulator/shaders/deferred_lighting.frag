@@ -205,6 +205,10 @@ void main() {
     vec3 N = normalize(normalRough.xyz);
     float coated = normalRough.w < 0.0 ? 1.0 : 0.0;
     float roughness = clamp(abs(normalRough.w), 0.05, 1.0);
+    // gbuffer.frag packs the authored ksSpecular into the coverage magnitude
+    // (1.0 = the legacy 0.04). 0.5 is AC's neutral: F0 scale 1.0.
+    float authoredSpecular = clamp((abs(coverage.w) - 1.0) * 2.0 + 0.5, 0.0, 1.0);
+    float f0Scale = clamp(authoredSpecular * 2.0, 0.4, 2.0);
     vec3 camPos = frame.cameraPos.xyz;
     float viewDist = length(worldPos - camPos);
     vec3 V = normalize(camPos - worldPos);
@@ -215,7 +219,7 @@ void main() {
     vec3 ambient;
     if (frame.iblParams.x > 0.5) {
         float NdotV = max(dot(N, V), 1e-4);
-        vec3 F0 = mix(vec3(0.04), albedo, metalness);
+        vec3 F0 = mix(vec3(0.04) * f0Scale, albedo, metalness);
         vec2 brdf = texture(iblBrdfLut, vec2(NdotV, roughness)).rg;
         vec3 R = reflect(-V, N);
         vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
@@ -239,7 +243,7 @@ void main() {
     float D = (a * a) / (PI * dd * dd);
     float k = a * 0.5;
     float G = (NdotL / (NdotL * (1.0 - k) + k)) * (NdotV / (NdotV * (1.0 - k) + k));
-    vec3 F0 = mix(vec3(0.04), albedo, metalness);
+    vec3 F0 = mix(vec3(0.04) * f0Scale, albedo, metalness);
     vec3 F = F0 + (1.0 - F0) * pow(1.0 - max(dot(H, V), 0.0), 5.0);
     vec3 specular = ((D * G * F) / (4.0 * NdotL * NdotV + 1e-4)) * NdotL * shadow * sunRad;
     float acc = 0.055 * 0.055; // sharper clearcoat for lacquered bodywork
@@ -253,7 +257,7 @@ void main() {
                         NdotL * shadow * sunRad * coated * 1.35;
     vec3 lit = ambient + diffuse + specular + specularCoat;
     vec3 refl = ssr(worldPos, N, V, L, roughness);
-    float f0 = mix(0.04, 1.0, metalness);
+    float f0 = mix(0.04 * f0Scale, 1.0, metalness);
     float fres = f0 + (1.0 - f0) * pow(1.0 - max(dot(N, V), 0.0), 5.0);
     lit += refl * fres * (1.0 - roughness);
     lit += vec3(1.0, 0.25, 0.03) * (frame.brakeGlow.x * 1.5) * brakeDisc;

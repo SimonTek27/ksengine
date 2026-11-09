@@ -932,8 +932,14 @@ struct MaterialUBO {
     // this many repeats. Rides in the block's old padding, so it stays 64.
     float detailScale = 0.0f;
     float pad3 = 0.0f;
+    // Authored ksSpecular and the fresnel triplet, appended after the pad so
+    // every offset above is unchanged (block grows 64 -> 80, still 16-aligned).
+    float specular = 0.5f;  // 0.5 = the legacy dielectric F0 of 0.04
+    float fresnelC = 0.0f;  // fresnelC base reflection at normal incidence
+    float fresnelExp = 5.0f;
+    float fresnelMax = 0.0f; // fresnelMaxLevel; 0 = no authored fresnel
 };
-static_assert(sizeof(MaterialUBO) == 64, "MaterialUBO is read as a std140 uniform block");
+static_assert(sizeof(MaterialUBO) == 80, "MaterialUBO is read as a std140 uniform block");
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -2769,6 +2775,10 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.tint[2] = mesh.tint[2];
     ubo.paintSolid = mesh.paintSolid;
     ubo.detailScale = mesh.detailTexture.empty() ? 0.0f : mesh.detailScale;
+    ubo.specular = mesh.specular;
+    ubo.fresnelC = mesh.fresnelC;
+    ubo.fresnelExp = mesh.fresnelExp;
+    ubo.fresnelMax = mesh.fresnelMax;
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,

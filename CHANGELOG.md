@@ -9,6 +9,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **La risposta superficiale d'autore arriva al frame**: il loader leggeva solo
+  `ksDiffuse`, `ksSpecularEXP`, `ksEmissive` e `ksAlphaRef`, quindi
+  `ksSpecular`, `fresnelC/EXP/MaxLevel` e `detailUVMultiplier` restavano nel
+  KN5 senza effetto. Ora `ksSpecular` scala la F0 dielettrica (0.5 = il 0.04
+  storico) in entrambi i percorsi: il GBuffer la trasporta nella magnitudine
+  della copertura, con il segno intatto per il brake glow, e il forward la
+  legge dal blocco materiale. I tre valori fresnel sostituiscono lo Schlick
+  fisso sul vetro, e un materiale con shader di riflessione e
+  `fresnelMaxLevel` d'autore viene trattato come pane (il parabrezza della
+  B191 non e' piu' una card piatta). Il dettaglio usa `detailUVMultiplier`,
+  quindi la trama carbonio si ripete 25/50/200 volte come scritto invece di
+  una sola.
 - **Lettura completa dei materiali KN5 (`kn5baker --materials`)**: il runtime
   consuma solo `ksDiffuse`, `ksSpecularEXP`, `ksEmissive` e `ksAlphaRef`,
   quindi un materiale che appare sbagliato non si poteva ricondurre al valore

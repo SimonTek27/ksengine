@@ -47,6 +47,9 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintB;
     float paintSolid;  // 1 = tint replaces the albedo (explicit paint)
     float detailScale; // >0 = tile the detail map over the albedo
+    // Authored response (KN5 ksSpecular + fresnelC/EXP/MaxLevel), appended
+    // after detailScale so every offset above is unchanged.
+    vec4 specularFresnel; // x = ksSpecular, y = fresnelC, z = fresnelEXP, w = fresnelMaxLevel
 } material;
 // Roughness/metalness maps (brief P1), red channel each. Multiplicative
 // with the material scalar: no map = white 1x1 fallback = identity, so a
@@ -112,11 +115,16 @@ void main() {
                                                    : roughness;
     outNormalRoughness = vec4(N, signedRough);
     // Brief P6: brake-disc flag in RT2.w's SIGN (RT0.a is 8-bit UNORM and
-    // would clamp a sign away — RT2 is float). Coverage becomes -1 for
-    // disc pixels instead of 1: every reader ("drawn?") decodes abs(w),
-    // which is a no-op for all legacy pixels (always +1), and
-    // deferred_lighting.frag reads the sign as the glow flag. Exact -1.0,
-    // no epsilon needed: coverage is always authored as exactly 1.0.
+    // would clamp a sign away — RT2 is float). Coverage becomes negative for
+    // disc pixels instead of positive: every reader ("drawn?") decodes
+    // abs(w), and deferred_lighting.frag reads the sign as the glow flag.
+    //
+    // The magnitude carries the authored ksSpecular: 1.0 + (spec-0.5)*0.5
+    // stays in [0.75, 1.25], so the "no geometry" tests (abs(w) < 0.5) are
+    // unaffected and a legacy material (specular 0.5) still writes exactly 1.
+    float coverageMagnitude =
+        1.0 + (clamp(material.specularFresnel.x, 0.0, 1.0) - 0.5) * 0.5;
     outWorldPosCoverage = vec4(fragWorldPos,
-                               material.brakeDisc >= 0.5 ? -1.0 : 1.0);
+                               (material.brakeDisc >= 0.5 ? -1.0 : 1.0) *
+                                   coverageMagnitude);
 }
