@@ -1,0 +1,118 @@
+#pragma once
+/**
+ * What a KN5 material's own properties mean to the renderer.
+ *
+ * The presets (MaterialPresets.h) decide what a surface IS from its shader and
+ * name; the file also carries a response the presets cannot know:
+ *
+ *   ksSpecular        multiplier around AC's 0.5 neutral for the dielectric F0
+ *                     (0.5 keeps the legacy 0.04, 1.0 doubles it, 0 halves it)
+ *   fresnelC          Fresnel base reflection at normal incidence
+ *   fresnelEXP        Fresnel exponent
+ *   fresnelMaxLevel   Fresnel cap; 0 = the file authored none
+ *   detailUVMultiplier how many times txDetail repeats over the albedo
+ *
+ * The loader and the GBuffer shader both need these numbers, so the rules live
+ * here once: a test can check them without a GPU, and a future fourth GBuffer
+ * target only has to move the encoding, not the meaning.
+ *
+ * Header-only and free of Qt/Vulkan, like MaterialPresets.h.
+ */
+#include "../FileFormat/Kn5Reader.h"
+#include "MaterialPresets.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <string>
+
+namespace ks {
+namespace graphics {
+
+namespace material_response_detail {
+
+/** First float of a shader property. AC keeps each property in a 40-byte
+ *  ValueA..D block and every scalar the surface model needs starts at 0. */
+inline bool firstFloat(const engine::fileformat::Kn5Material& material,
+                       const char* name, float& out) {
+    for (const auto& property : material.properties) {
+        if (property.name != name) continue;
+        std::memcpy(&out, property.value.data(), sizeof(out));
+        return true;
+    }
+    return false;
+}
+
+} // namespace material_response_detail
+
+/** The authored surface response, with AC's neutral values when the file
+ *  carries none: specular 0.5, no Fresnel, exponent 5. */
+struct AuthoredSurface {
+    float specular = 0.5f;
+    float fresnelC = 0.0f;
+    float fresnelExp = 5.0f;
+    float fresnelMax = 0.0f;
+};
+
+inline AuthoredSurface authoredSurface(const engine::fileformat::Kn5Material& material) {
+    AuthoredSurface surface;
+    float value = 0.0f;
+    if (material_response_detail::firstFloat(material, "ksSpecular", value))
+        surface.specular = value;
+    if (material_response_detail::firstFloat(material, "fresnelC", value))
+        surface.fresnelC = value;
+    // A zero or negative exponent would make the Fresnel curve constant.
+    if (material_response_detail::firstFloat(material, "fresnelEXP", value) && value > 0.0f)
+        surface.fresnelExp = value;
+    if (material_response_detail::firstFloat(material, "fresnelMaxLevel", value))
+        surface.fresnelMax = value;
+    return surface;
+}
+
+/** Detail-map repeats. AC authors detailUVMultiplier; ksDetailU was only ever
+ *  a guess and is kept as a fallback. 0 = no authored tiling. */
+inline float authoredDetailTiles(const engine::fileformat::Kn5Material& material) {
+    float tiles = 0.0f;
+    if (material_response_detail::firstFloat(material, "detailUVMultiplier", tiles) &&
+        tiles > 0.0f)
+        return tiles;
+    if (material_response_detail::firstFloat(material, "ksDetailU", tiles) && tiles > 0.0f)
+        return tiles;
+    return 0.0f;
+}
+
+/** ksSpecular -> dielectric F0 scale. 0.5 is AC's neutral and the legacy look
+ *  (0.04); the clamp keeps a broken value from killing or blowing the reply. */
+inline float f0Scale(float specular) {
+    return std::min(std::max(specular * 2.0f, 0.4f), 2.0f);
+}
+
+/** The specular as the GBuffer carries it: the coverage MAGNITUDE, so the
+ *  sign stays free for the brake-disc flag. 0.5 -> exactly 1.0 and every value
+ *  stays in [0.75, 1.25], above the abs(w) < 0.5 "no geometry" test. */
+inline float coverageMagnitude(float specular) {
+    const float clamped = std::min(std::max(specular, 0.0f), 1.0f);
+    return 1.0f + (clamped - 0.5f) * 0.5f;
+}
+
+/** Inverse of coverageMagnitude(), safe on the signed value the GBuffer stores. */
+inline float specularFromCoverage(float storedCoverage) {
+    const float magnitude =
+        storedCoverage < 0.0f ? -storedCoverage : storedCoverage;
+    return std::min(std::max((magnitude - 1.0f) * 2.0f + 0.5f, 0.0f), 1.0f);
+}
+
+/** A blended surface is a pane when the preset already says glass, or when the
+ *  file paints it with a reflection/windscreen shader and authored a Fresnel
+ *  cap. A decal blends but has neither, so it keeps its own alpha. */
+inline bool isGlassPane(const std::string& shader, bool presetGlass, float fresnelMax,
+                        std::uint8_t blend) {
+    if (presetGlass) return true;
+    if (blend == 0 || fresnelMax <= 0.0f) return false;
+    const std::string folded = materialLower(shader);
+    return folded.find("reflection") != std::string::npos ||
+           folded.find("windscreen") != std::string::npos;
+}
+
+} // namespace graphics
+} // namespace ks

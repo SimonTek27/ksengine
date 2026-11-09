@@ -432,6 +432,17 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_preset_test.cpp")
     set_tests_properties(material_preset_test PROPERTIES TIMEOUT 60)
 endif()
 
+# The KN5 response rules the loader applies (engine/Graphics/MaterialResponse.h):
+# ksSpecular -> F0, detailUVMultiplier -> tiling, fresnel -> pane. Header only.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/material_response_test.cpp")
+    add_executable(material_response_test material_response_test.cpp)
+    target_include_directories(material_response_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(material_response_test PRIVATE ksengine)
+    add_test(NAME material_response_test COMMAND material_response_test)
+    set_tests_properties(material_response_test PROPERTIES TIMEOUT 60)
+endif()
+
 # Vulkan validation: a bounded simulator run must log no VUID. The check is a
 # CMake script, like staged_layout_test, so no shell is involved.
 if(EXISTS "${CMAKE_SOURCE_DIR}/cmake/CheckNoValidationErrors.cmake")

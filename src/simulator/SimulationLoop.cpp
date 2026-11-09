@@ -8,6 +8,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include <thread>
 #include "engine/Graphics/MaterialPresets.h"
 #include "engine/Graphics/MaterialOverrides.h"
+#include "engine/Graphics/MaterialResponse.h"
 #include "engine/Graphics/TextureNames.h"
 #include "engine/Graphics/HiddenNodes.h" // the nodes the loaded content hides
 #include "engine/FileFormat/Json.h"
@@ -1201,12 +1202,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 nm.detailTexture = textureKey(detail, faceInside);
                 if (!nm.detailTexture.empty()) {
                     // AC authors the tiling as detailUVMultiplier; ksDetailU
-                    // was only ever a guess. Read the authored name first so
-                    // a weave repeats the 25/50/200 times the file asks for
-                    // instead of once.
-                    float tiles = propertyFloat(material, "detailUVMultiplier");
-                    if (tiles <= 0.0f) tiles = propertyFloat(material, "ksDetailU");
-                    nm.detailScale = tiles > 0.0f ? tiles : 1.0f;
+                    // was only ever a guess (rule in MaterialResponse.h).
+                    nm.detailScale = graphics::authoredDetailTiles(material);
+                    if (nm.detailScale <= 0.0f) nm.detailScale = 1.0f;
                 }
                 // No diffuse authored: the surface keeps the colour the file
                 // gives it (ksDiffuse) instead of rendering as flat white.
@@ -1249,14 +1247,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 // multiplier around the 0.5 AC default (0.5 keeps the legacy
                 // 0.04 dielectric F0), and the fresnel triplet is what AC's
                 // reflection shaders use to bring a pane in at grazing angles.
-                const float authoredSpecular = propertyFloat(material, "ksSpecular");
-                nm.specular = authoredSpecular >= 0.0f ? authoredSpecular : 0.5f;
-                const float authoredFresnelC = propertyFloat(material, "fresnelC");
-                const float authoredFresnelExp = propertyFloat(material, "fresnelEXP");
-                const float authoredFresnelMax = propertyFloat(material, "fresnelMaxLevel");
-                nm.fresnelC = authoredFresnelC >= 0.0f ? authoredFresnelC : 0.0f;
-                nm.fresnelExp = authoredFresnelExp > 0.0f ? authoredFresnelExp : 5.0f;
-                nm.fresnelMax = authoredFresnelMax >= 0.0f ? authoredFresnelMax : 0.0f;
+                const graphics::AuthoredSurface authored =
+                    graphics::authoredSurface(material);
+                nm.specular = authored.specular;
+                nm.fresnelC = authored.fresnelC;
+                nm.fresnelExp = authored.fresnelExp;
+                nm.fresnelMax = authored.fresnelMax;
                 const graphics::MaterialPresetId presetId =
                     overrides.presetFor(material.shader, material.name);
                 if (overrides.findEffective(material.name) != nullptr) ++overridden;
@@ -1324,13 +1320,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     // pane too: the Benetton windscreen is ksPerPixelReflection
                     // with C/EXP/Max authored, and reading only the preset left
                     // it as a flat blended card.
-                    const std::string foldedShader = lower(material.shader);
                     const bool presetGlass =
                         presetId == graphics::MaterialPresetId::Glass;
-                    const bool pane = presetGlass ||
-                        ((foldedShader.find("reflection") != std::string::npos ||
-                          foldedShader.find("windscreen") != std::string::npos) &&
-                         nm.fresnelMax > 0.0f);
+                    const bool pane = graphics::isGlassPane(
+                        material.shader, presetGlass, nm.fresnelMax, material.blend);
                     // A preset pane keeps the historical 0.30; an authored one
                     // keeps its texture alpha and lets the fresnel term decide.
                     nm.opacity = pane ? (presetGlass ? 0.30f : 1.0f) : 1.0f;
