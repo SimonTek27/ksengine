@@ -1608,6 +1608,15 @@ static void initSimulation() {
             printf("[INIT] KS_CAM=%s -> %s view\n", camEnv, camName);
     }
 
+    // KS_MIRROR_MESH=<name> makes the rear-view tile sample that mesh's
+    // geometry instead of the fixed screen quad (mirror stage 3). The mesh
+    // must already exist in the renderer (e.g. a bake's "mirror" entry);
+    // an unknown name silently keeps the quad.
+    if (const char* mm = std::getenv("KS_MIRROR_MESH"); mm && mm[0]) {
+        if (g_nativeRenderer) g_nativeRenderer->setMirrorGlassMesh(mm);
+        printf("[INIT] KS_MIRROR_MESH=%s\n", mm);
+    }
+
     // Gate 2.11/2.12 enabler: KS_WEATHER=<dry|damp|wet> applies the same
     // preset the menu offers, right after the optional session start so the
     // whole run (grip, spray, wetness decay) is reproducible without UI

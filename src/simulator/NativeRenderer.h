@@ -403,6 +403,9 @@ public:
         m_mirrorWantedW = width;
         m_mirrorWantedH = height;
     }
+    // Opt-in mesh that samples the rear-view tile instead of the fixed
+    // screen quad (mirror stage 3). Empty keeps the legacy quad.
+    void setMirrorGlassMesh(const std::string& name) { m_mirrorGlassMeshName = name; }
     void setTonemapMode(int mode) { m_tonemapMode = mode; }
     /** The curve in use: the settings page reads it back instead of guessing. */
     int tonemapMode() const { return m_tonemapMode; }
@@ -740,6 +743,9 @@ private:
     VkDescriptorSet m_mirrorFrameSet = VK_NULL_HANDLE;
     bool m_mirrorEnabled = false;
     uint32_t m_mirrorWantedW = 0, m_mirrorWantedH = 0;
+    std::string m_mirrorGlassMeshName;
+    mat4 m_mirrorGlassModel{};
+    bool m_mirrorGlassValid = false;
     uint32_t m_mirrorW = 0, m_mirrorH = 0;   // live target extent
     bool m_mirrorFailed = false;
     // Overlay half: layout/set shared by both pass pipelines.
@@ -753,6 +759,16 @@ private:
     VkPipeline m_mirrorOverlayDisplay = VK_NULL_HANDLE;    // built vs display pass
     VkFormat m_mirrorOverlayDisplayFormat = VK_FORMAT_UNDEFINED;
     bool m_mirrorOverlayFailed = false;
+
+    // Mirror stage 3 — optional glass mesh that samples the rear-view tile.
+    VkShaderModule m_mirrorGlassVert = VK_NULL_HANDLE;
+    VkShaderModule m_mirrorGlassFrag = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_mirrorGlassSetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_mirrorGlassPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_mirrorGlassSet = VK_NULL_HANDLE;
+    VkPipelineLayout m_mirrorGlassLayout = VK_NULL_HANDLE;
+    VkPipeline m_mirrorGlassPipeline = VK_NULL_HANDLE;
+    bool m_mirrorGlassFailed = false;
 
     // --- Deferred path (opt-in, setDeferred / setTaa) ---
     bool ensureDeferredResources();

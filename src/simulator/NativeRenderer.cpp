@@ -1805,6 +1805,13 @@ void NativeRenderer::destroyMirrorResources() {
     m_mirrorUBO = VK_NULL_HANDLE;
     m_mirrorUBOMemory = VK_NULL_HANDLE;
     destroyMirrorOverlay();
+    if (m_mirrorGlassPipeline) { vkDestroyPipeline(m_device, m_mirrorGlassPipeline, nullptr); m_mirrorGlassPipeline = VK_NULL_HANDLE; }
+    if (m_mirrorGlassLayout) { vkDestroyPipelineLayout(m_device, m_mirrorGlassLayout, nullptr); m_mirrorGlassLayout = VK_NULL_HANDLE; }
+    if (m_mirrorGlassSet) { /* pool owns */ m_mirrorGlassSet = VK_NULL_HANDLE; }
+    if (m_mirrorGlassPool) { vkDestroyDescriptorPool(m_device, m_mirrorGlassPool, nullptr); m_mirrorGlassPool = VK_NULL_HANDLE; }
+    if (m_mirrorGlassSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_mirrorGlassSetLayout, nullptr); m_mirrorGlassSetLayout = VK_NULL_HANDLE; }
+    if (m_mirrorGlassVert) { vkDestroyShaderModule(m_device, m_mirrorGlassVert, nullptr); m_mirrorGlassVert = VK_NULL_HANDLE; }
+    if (m_mirrorGlassFrag) { vkDestroyShaderModule(m_device, m_mirrorGlassFrag, nullptr); m_mirrorGlassFrag = VK_NULL_HANDLE; }
     if (m_mirrorFrameSet != VK_NULL_HANDLE) {
         // The private pool owns it; the pool free clears every set.
         m_mirrorFrameSet = VK_NULL_HANDLE;
@@ -1991,6 +1998,213 @@ void NativeRenderer::destroyMirrorOverlay() {
 bool NativeRenderer::recordMirrorOverlay(VkRenderPass pass) {
     if (!m_mirrorImage || pass == VK_NULL_HANDLE) return false;
     if (m_mirrorOverlayFailed) return false;
+
+    // Mirror stage 3: when a mesh name is supplied (KS_MIRROR_MESH) and that
+    // mesh exists, sample the rear-view tile onto its geometry instead of the
+    // fixed screen quad. The mesh is drawn in the display pass with the
+    // current view/projection so it sits where the real glass is; the tile is
+    // already rendered to m_mirrorImage by recordMirrorScene() above.
+    if (!m_mirrorGlassMeshName.empty() && m_mirrorGlassValid) {
+        auto git = m_meshes.find(m_mirrorGlassMeshName);
+        if (git != m_meshes.end() && !git->second.indices.empty() &&
+            git->second.vertexBuffer && git->second.indexBuffer) {
+            if (!m_mirrorGlassFailed) {
+                // Layout + set, built once.
+                if (!m_mirrorGlassSetLayout) {
+                    VkDescriptorSetLayoutBinding b{};
+                    b.binding = 0;
+                    b.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                    b.descriptorCount = 1;
+                    b.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+                    VkDescriptorSetLayoutCreateInfo dslCi{};
+                    dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+                    dslCi.bindingCount = 1;
+                    dslCi.pBindings = &b;
+                    if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr,
+                                                    &m_mirrorGlassSetLayout) != VK_SUCCESS) {
+                        m_mirrorGlassFailed = true;
+                    }
+                }
+                if (!m_mirrorGlassFailed && !m_mirrorGlassLayout) {
+                    VkPushConstantRange pcRange{};
+                    pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+                    pcRange.offset = 0;
+                    pcRange.size = sizeof(mat4);
+                    VkPipelineLayoutCreateInfo plCi{};
+                    plCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                    plCi.setLayoutCount = 1;
+                    plCi.pSetLayouts = &m_mirrorGlassSetLayout;
+                    plCi.pushConstantRangeCount = 1;
+                    plCi.pPushConstantRanges = &pcRange;
+                    if (vkCreatePipelineLayout(m_device, &plCi, nullptr,
+                                                &m_mirrorGlassLayout) != VK_SUCCESS) {
+                        m_mirrorGlassFailed = true;
+                    }
+                }
+                if (!m_mirrorGlassFailed && (!m_mirrorGlassVert || !m_mirrorGlassFrag)) {
+                    m_mirrorGlassVert = createShaderModule(
+                        m_device, readFile(m_shaderDir + "/mirror_glass.vert.spv"));
+                    m_mirrorGlassFrag = createShaderModule(
+                        m_device, readFile(m_shaderDir + "/mirror_glass.frag.spv"));
+                    if (!m_mirrorGlassVert || !m_mirrorGlassFrag) {
+                        fprintf(stderr, "[NativeRenderer] mirror glass: shaders not compiled\n");
+                        m_mirrorGlassFailed = true;
+                    }
+                }
+                if (!m_mirrorGlassFailed && !m_mirrorGlassPool) {
+                    VkDescriptorPoolSize ps{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+                    VkDescriptorPoolCreateInfo pci{};
+                    pci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+                    pci.maxSets = 1;
+                    pci.poolSizeCount = 1;
+                    pci.pPoolSizes = &ps;
+                    if (vkCreateDescriptorPool(m_device, &pci, nullptr,
+                                                &m_mirrorGlassPool) != VK_SUCCESS) {
+                        m_mirrorGlassFailed = true;
+                    }
+                }
+                if (!m_mirrorGlassFailed && !m_mirrorGlassSet) {
+                    VkDescriptorSetAllocateInfo ai{};
+                    ai.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+                    ai.descriptorPool = m_mirrorGlassPool;
+                    ai.descriptorSetCount = 1;
+                    ai.pSetLayouts = &m_mirrorGlassSetLayout;
+                    if (vkAllocateDescriptorSets(m_device, &ai, &m_mirrorGlassSet) != VK_SUCCESS) {
+                        m_mirrorGlassFailed = true;
+                    } else {
+                        VkDescriptorImageInfo img{};
+                        img.sampler = m_mirrorSampler;
+                        img.imageView = m_mirrorView;
+                        img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                        VkWriteDescriptorSet w{};
+                        w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        w.dstSet = m_mirrorGlassSet;
+                        w.dstBinding = 0;
+                        w.descriptorCount = 1;
+                        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                        w.pImageInfo = &img;
+                        vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
+                    }
+                }
+                if (!m_mirrorGlassFailed && !m_mirrorGlassPipeline) {
+                    VkVertexInputBindingDescription binding{};
+                    binding.binding = 0;
+                    binding.stride = sizeof(NativeVertex);
+                    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+                    VkVertexInputAttributeDescription attrs[4]{};
+                    attrs[0].location = 0; attrs[0].binding = 0;
+                    attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+                    attrs[0].offset = offsetof(NativeVertex, px);
+                    attrs[1].location = 1; attrs[1].binding = 0;
+                    attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+                    attrs[1].offset = offsetof(NativeVertex, nx);
+                    attrs[2].location = 2; attrs[2].binding = 0;
+                    attrs[2].format = VK_FORMAT_R32G32_SFLOAT;
+                    attrs[2].offset = offsetof(NativeVertex, u);
+                    attrs[3].location = 3; attrs[3].binding = 0;
+                    attrs[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                    attrs[3].offset = offsetof(NativeVertex, r);
+                    VkPipelineVertexInputStateCreateInfo vi{};
+                    vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+                    vi.vertexBindingDescriptionCount = 1;
+                    vi.pVertexBindingDescriptions = &binding;
+                    vi.vertexAttributeDescriptionCount = 4;
+                    vi.pVertexAttributeDescriptions = attrs;
+                    VkPipelineInputAssemblyStateCreateInfo ia{};
+                    ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+                    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+                    ia.primitiveRestartEnable = VK_FALSE;
+                    VkPipelineViewportStateCreateInfo vpCi{};
+                    vpCi.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+                    vpCi.viewportCount = 1;
+                    vpCi.scissorCount = 1;
+                    VkPipelineRasterizationStateCreateInfo rs{};
+                    rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+                    rs.polygonMode = VK_POLYGON_MODE_FILL;
+                    rs.cullMode = VK_CULL_MODE_NONE;
+                    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+                    rs.lineWidth = 1.0f;
+                    VkPipelineMultisampleStateCreateInfo ms{};
+                    ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+                    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+                    VkPipelineDepthStencilStateCreateInfo ds{};
+                    ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+                    ds.depthTestEnable = VK_FALSE;
+                    ds.depthWriteEnable = VK_FALSE;
+                    VkPipelineColorBlendAttachmentState cbAtt{};
+                    cbAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                    VkPipelineColorBlendStateCreateInfo cb{};
+                    cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+                    cb.attachmentCount = 1;
+                    cb.pAttachments = &cbAtt;
+                    VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+                    VkPipelineDynamicStateCreateInfo dyn{};
+                    dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+                    dyn.dynamicStateCount = 2;
+                    dyn.pDynamicStates = dynStates;
+                    VkPipelineShaderStageCreateInfo stages[2]{};
+                    stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+                    stages[0].module = m_mirrorGlassVert;
+                    stages[0].pName = "main";
+                    stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                    stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+                    stages[1].module = m_mirrorGlassFrag;
+                    stages[1].pName = "main";
+                    VkGraphicsPipelineCreateInfo gpCi{};
+                    gpCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                    gpCi.stageCount = 2;
+                    gpCi.pStages = stages;
+                    gpCi.pVertexInputState = &vi;
+                    gpCi.pInputAssemblyState = &ia;
+                    gpCi.pViewportState = &vpCi;
+                    gpCi.pRasterizationState = &rs;
+                    gpCi.pMultisampleState = &ms;
+                    gpCi.pDepthStencilState = &ds;
+                    gpCi.pColorBlendState = &cb;
+                    gpCi.pDynamicState = &dyn;
+                    gpCi.layout = m_mirrorGlassLayout;
+                    gpCi.renderPass = pass;
+                    gpCi.subpass = 0;
+                    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &gpCi, nullptr,
+                                                  &m_mirrorGlassPipeline) != VK_SUCCESS) {
+                        fprintf(stderr, "[NativeRenderer] mirror glass: pipeline build failed\n");
+                        m_mirrorGlassFailed = true;
+                    }
+                }
+            }
+            if (!m_mirrorGlassFailed && m_mirrorGlassPipeline) {
+                VkViewport vp{};
+                vp.x = 0.0f;
+                vp.y = 0.0f;
+                vp.width = static_cast<float>(m_swapChainExtent.width);
+                vp.height = static_cast<float>(m_swapChainExtent.height);
+                vp.minDepth = 0.0f;
+                vp.maxDepth = 1.0f;
+                VkRect2D sc{};
+                sc.extent = m_swapChainExtent;
+                vkCmdSetViewport(m_commandBuffer, 0, 1, &vp);
+                vkCmdSetScissor(m_commandBuffer, 0, 1, &sc);
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  m_mirrorGlassPipeline);
+                vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        m_mirrorGlassLayout, 0, 1, &m_mirrorGlassSet, 0,
+                                        nullptr);
+                mat4 mvp = m_proj * m_view * m_mirrorGlassModel;
+                vkCmdPushConstants(m_commandBuffer, m_mirrorGlassLayout,
+                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                                    0, sizeof(mat4), mvp.data());
+                VkBuffer vb = git->second.vertexBuffer;
+                VkDeviceSize off = 0;
+                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &vb, &off);
+                vkCmdBindIndexBuffer(m_commandBuffer, git->second.indexBuffer, 0,
+                                     VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(m_commandBuffer, static_cast<uint32_t>(git->second.indices.size()), 1, 0, 0, 0);
+                return true;
+            }
+        }
+    }
 
     // Layout + set: built once, shared by both pass pipelines.
     if (!m_mirrorOverlaySetLayout) {
@@ -2862,6 +3076,8 @@ bool NativeRenderer::beginFrame() {
     m_drawList.clear();
     m_mainDrawList.clear();
     m_mirrorList.clear();
+    m_mirrorGlassValid = false;
+    m_mirrorGlassModel = mat4();
     m_stats = FrameStats{};
     // Culling runs in drawMesh(), which is called *between* beginFrame() and
     // endFrame(), so the frustum has to be rebuilt here — after setCamera()
@@ -2919,6 +3135,10 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
     // every caster sits at the identity transform.
     auto it = m_meshes.find(name);
     if (it == m_meshes.end()) return;
+    if (!m_mirrorGlassMeshName.empty() && name == m_mirrorGlassMeshName) {
+        m_mirrorGlassModel = modelMatrix;
+        m_mirrorGlassValid = true;
+    }
     ++m_stats.submitted;
 
     // The occlusion grid only exists once a previous frame produced one

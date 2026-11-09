@@ -31,6 +31,8 @@ function(ks_add_shader_target _target _src_root)
 		${_src_root}/simulator/shaders/hiz_downsample.frag
 		${_src_root}/simulator/shaders/mirror_overlay.vert
 		${_src_root}/simulator/shaders/mirror_overlay.frag
+		${_src_root}/simulator/shaders/mirror_glass.vert
+		${_src_root}/simulator/shaders/mirror_glass.frag
 		# Display pass + bloom chain of the deferred path (ksengine shaders).
 		${_src_root}/engine/Graphics/shaders/tonemap.frag
 		${_src_root}/engine/Graphics/shaders/glareExtract.frag
