@@ -52,6 +52,15 @@ int main() {
         KS_CHECK(!isGlassPane(material.shader, false, surface.fresnelMax, 0));
     }
 
+    // --- an OCC map is an occlusion bake, not a colour ---------------------
+    {
+        KS_CHECK(isOcclusionTexture("INT_Seat_OCC.dds"));
+        KS_CHECK(isOcclusionTexture("INT_Cockpit_OCC+.dds"));
+        KS_CHECK(isOcclusionTexture("int_steer_occ.dds"));
+        KS_CHECK(!isOcclusionTexture("leather.dds"));
+        KS_CHECK(!isOcclusionTexture("Carpet.DDS"));
+    }
+
     // --- ksSpecular scales F0 around 0.5 (WCCARBODY = 0.2) ----------------
     {
         Kn5Material material;

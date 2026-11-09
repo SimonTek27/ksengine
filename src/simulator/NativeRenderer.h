@@ -145,6 +145,9 @@ struct NativeMesh {
     // detailScale 0 leaves the base map untouched.
     std::string detailTexture;
     float detailScale = 0.0f;
+    // Multiplier for the detail map: 2.0 neutralises AC's 0.5 grain, 1.0 is
+    // used when the detail slot carries an occlusion bake instead.
+    float detailGain = 2.0f;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is

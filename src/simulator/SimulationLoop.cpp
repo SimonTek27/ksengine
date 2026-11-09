@@ -1300,12 +1300,30 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                                        folded.compare(folded.size() - 4, 4, "_ref") == 0;
                     if (probe) albedo.clear();
                 }
+                // A txDiffuse that is an occlusion bake carries no colour at
+                // all (pure greyscale, alpha 0): the cockpit leather, carpet
+                // and dash keep their colour in txDetail instead. Painting the
+                // bake is what rendered the cabin as grey plastic, so the
+                // colour map becomes the albedo and the bake stops doubling it.
+                // OCC maps share the UV space of the diffuse, so the bake is
+                // sampled untiled, and an occlusion mask is not the neutral 0.5
+                // grain the shader doubles: its gain is 1.
+                float detailTiles = 0.0f;
+                if (graphics::isOcclusionTexture(albedo) && !detail.empty()) {
+                    const std::string occlusion = albedo;
+                    albedo = detail;
+                    detail = occlusion;
+                    detailTiles = 1.0f;
+                    nm.detailGain = 1.0f;
+                }
                 nm.albedoTexture = textureKey(albedo, faceInside);
                 nm.detailTexture = textureKey(detail, faceInside);
                 if (!nm.detailTexture.empty()) {
                     // AC authors the tiling as detailUVMultiplier; ksDetailU
                     // was only ever a guess (rule in MaterialResponse.h).
-                    nm.detailScale = graphics::authoredDetailTiles(material);
+                    nm.detailScale = detailTiles > 0.0f
+                                          ? detailTiles
+                                          : graphics::authoredDetailTiles(material);
                     if (nm.detailScale <= 0.0f) nm.detailScale = 1.0f;
                     // useDetail=0 means the map belongs to another shader: a
                     // spec/data map multiplied into the albedo looks like dirt.
@@ -1371,10 +1389,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
     const std::string albedoName = graphics::canonicalTextureName(albedo);
                     std::printf(
-                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f albedo=%-24s%s",
+                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f albedo=%-24s detail=%-20s ds=%.2f use=%d%s",
                         material.name.c_str(), material.shader.c_str(),
                         graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
                         albedo.empty() ? "-" : albedoName.c_str(),
+                        detail.empty() ? "-" : detail.c_str(),
+                        static_cast<double>(nm.detailScale),
+                        graphics::usesDetail(material) ? 1 : 0,
                         overrides.findEffective(material.name) != nullptr ? " (override)" : "");
                     std::putchar(10);
                 }

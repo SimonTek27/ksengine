@@ -72,6 +72,7 @@ layout(set = 1, binding = 2) uniform MaterialData {
     float tintB;
     float paintSolid;  // 1 = tint replaces the albedo instead of multiplying it
     float detailScale; // >0 = tile the detail map over the albedo
+    float detailGain;  // 2.0 for a neutral grain, 1.0 for an occlusion bake
     // Authored response (KN5 ksSpecular + fresnelC/EXP/MaxLevel), appended
     // after detailScale so every offset above is unchanged.
     vec4 specularFresnel; // x = ksSpecular, y = fresnelC, z = fresnelEXP, w = fresnelMaxLevel
@@ -147,7 +148,8 @@ void main() {
         // Carbon and leather carry their weave here, not in the base map.
         // A detail map is neutral at 0.5 grey, so doubling it makes a
         // flat detail the identity and only the weave shows through.
-        albedoSample.rgb *= texture(detailMap, fragUV * material.detailScale).rgb * 2.0;
+        albedoSample.rgb *=
+            texture(detailMap, fragUV * material.detailScale).rgb * material.detailGain;
     }
     // KN5 alpha test: decals, grilles and light covers are cut out instead of
     // drawn as opaque cards.

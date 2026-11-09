@@ -931,7 +931,9 @@ struct MaterialUBO {
     // Detail-map tiling: 0 = no detail map, otherwise the albedo is tiled by
     // this many repeats. Rides in the block's old padding, so it stays 64.
     float detailScale = 0.0f;
-    float pad3 = 0.0f;
+    // Detail gain (2.0 for a neutral grain, 1.0 for an occlusion bake). Fills
+    // the old pad slot, so the block stays 80 bytes.
+    float detailGain = 2.0f;
     // Authored ksSpecular and the fresnel triplet, appended after the pad so
     // every offset above is unchanged (block grows 64 -> 80, still 16-aligned).
     float specular = 0.5f;  // 0.5 = the legacy dielectric F0 of 0.04
@@ -2775,6 +2777,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     ubo.tint[2] = mesh.tint[2];
     ubo.paintSolid = mesh.paintSolid;
     ubo.detailScale = mesh.detailTexture.empty() ? 0.0f : mesh.detailScale;
+    ubo.detailGain = mesh.detailGain;
     ubo.specular = mesh.specular;
     ubo.fresnelC = mesh.fresnelC;
     ubo.fresnelExp = mesh.fresnelExp;

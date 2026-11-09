@@ -136,6 +136,18 @@ inline AuthoredSurface authoredSurface(const engine::fileformat::Kn5Material& ma
 
 /** Detail-map repeats. AC authors detailUVMultiplier; ksDetailU was only ever
  *  a guess and is kept as a fallback. 0 = no authored tiling. */
+/** A *_OCC map is a baked occlusion pass, not a colour: the Countach cockpit
+ *  names pure greyscale (alpha 0) maps as txDiffuse and keeps the leather,
+ *  carpet and plastic colours in txDetail. Painting the bake can only ever
+ *  produce grey, which is what made the cabin read as bare plastic. */
+inline bool isOcclusionTexture(const std::string& name) {
+    std::string folded;
+    folded.reserve(name.size());
+    for (char c : name)
+        folded.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c);
+    return folded.find("occ") != std::string::npos;
+}
+
 inline float authoredDetailTiles(const engine::fileformat::Kn5Material& material) {
     float tiles = 0.0f;
     if (material_response_detail::firstFloat(material, "detailUVMultiplier", tiles) &&
