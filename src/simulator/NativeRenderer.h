@@ -961,6 +961,12 @@ private:
     VkPipelineLayout m_lightingLayout = VK_NULL_HANDLE;
     VkPipeline m_gbufferPipeline = VK_NULL_HANDLE;
     VkPipeline m_lightingPipeline = VK_NULL_HANDLE;
+    // Deferred transparent pass: blended surfaces (glass, decals) drawn with
+    // the forward shader over the lit HDR image, depth-tested against the
+    // GBuffer depth and never writing it.
+    VkRenderPass m_transparentSceneRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_transparentSceneFramebuffer = VK_NULL_HANDLE;
+    VkPipeline m_transparentScenePipeline = VK_NULL_HANDLE;
     VkShaderModule m_gbufferVertModule = VK_NULL_HANDLE;
     VkShaderModule m_gbufferFragModule = VK_NULL_HANDLE;
     VkShaderModule m_lightingVertModule = VK_NULL_HANDLE;

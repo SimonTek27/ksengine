@@ -3675,8 +3675,12 @@ void NativeRenderer::endFrame() {
     // occluded objects, which may still cast visible shadows, while a camera
     // pass must not) and the main camera; the mirror pass hands in its own
     // per-eye list and its rear camera, same pipeline and its own set 0.
+    // skipBlended is only set by the GBuffer pass: see-through meshes must not
+    // land in the opaque targets there, because the transparent pass draws
+    // them over the lit image instead. Every other caller keeps the old
+    // behaviour (forward: drawn right below; mirror tile: drawn opaque).
     auto recordDrawList = [&](const std::vector<QueuedDraw>& list, const mat4& view,
-                              const mat4& proj) {
+                              const mat4& proj, bool skipBlended = false) {
         static bool s_recordDebug = getenv("KS_RECORD_DEBUG") != nullptr;
         const bool canBlend = !deferred; // the GBuffer pass has no blending
         auto drawOne = [&](const QueuedDraw& draw) {
@@ -3731,7 +3735,7 @@ void NativeRenderer::endFrame() {
         for (const auto& draw : list) {
             auto it = m_meshes.find(draw.meshName);
             if (it == m_meshes.end()) continue;
-            if (it->second.blended && canBlend) continue;
+            if (it->second.blended && (canBlend || skipBlended)) continue;
             drawOne(draw);
         }
 
@@ -3820,7 +3824,7 @@ void NativeRenderer::endFrame() {
         vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_gbufferPipeline);
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
-        recordDrawList(m_mainDrawList, m_view, projRender);
+        recordDrawList(m_mainDrawList, m_view, projRender, true);
         // Roadmap P1: sprite quads into the same GBuffer, so the lighting
         // pass below lights them exactly like geometry (they carry a
         // camera-facing normal and a real world position).
@@ -3896,6 +3900,77 @@ void NativeRenderer::endFrame() {
         vkCmdEndRenderPass(m_commandBuffer);
 
         m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Lighting);
+
+        // ---- Pass 3: transparent geometry. The GBuffer keeps the blended
+        // meshes out of its opaque targets, so without this pass a windscreen
+        // simply disappears. They are drawn here with the forward shader over
+        // the lit HDR image: depth-tested against the GBuffer depth (read
+        // only), far to near, premultiplied. A pane then keeps its authored
+        // alpha and fresnel and shows the cabin behind it, instead of the
+        // opaque silhouette the GBuffer would have produced.
+        if (m_transparentScenePipeline != VK_NULL_HANDLE &&
+            m_transparentSceneRenderPass != VK_NULL_HANDLE &&
+            m_transparentSceneFramebuffer != VK_NULL_HANDLE) {
+            std::vector<const QueuedDraw*> seeThrough;
+            for (const auto& draw : m_mainDrawList) {
+                auto it = m_meshes.find(draw.meshName);
+                if (it == m_meshes.end() || !it->second.blended) continue;
+                if (!it->second.vertexBuffer) continue;
+                seeThrough.push_back(&draw);
+            }
+            std::sort(seeThrough.begin(), seeThrough.end(),
+                      [&](const QueuedDraw* a, const QueuedDraw* b) {
+                          return (m_view * a->model)(3, 2) < (m_view * b->model)(3, 2);
+                      });
+            if (!seeThrough.empty()) {
+                VkRenderPassBeginInfo tBegin{};
+                tBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                tBegin.renderPass = m_transparentSceneRenderPass;
+                tBegin.framebuffer = m_transparentSceneFramebuffer;
+                tBegin.renderArea.extent = m_swapChainExtent;
+                // Both attachments are loaded, never cleared: the lit image
+                // and the GBuffer depth are exactly what this pass starts from.
+                tBegin.clearValueCount = 0;
+                tBegin.pClearValues = nullptr;
+                vkCmdBeginRenderPass(m_commandBuffer, &tBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+                vkCmdSetViewport(m_commandBuffer, 0, 1, &vp);
+                vkCmdSetScissor(m_commandBuffer, 0, 1, &scissor);
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  m_transparentScenePipeline);
+                vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                        m_pipelineLayout, 0, 1, &m_frameSet, 0, nullptr);
+                for (const QueuedDraw* draw : seeThrough) {
+                    auto it = m_meshes.find(draw->meshName);
+                    if (it == m_meshes.end()) continue;
+                    const NativeMesh& mesh = it->second;
+                    VkDescriptorSet materialSet =
+                        mesh.materialSet ? mesh.materialSet : m_defaultMaterialSet;
+                    if (materialSet) {
+                        vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                m_pipelineLayout, 1, 1, &materialSet, 0, nullptr);
+                    }
+                    struct { mat4 model; mat4 mvp; } pc;
+                    pc.model = draw->model;
+                    pc.mvp = projRender * m_view * draw->model;
+                    vkCmdPushConstants(m_commandBuffer, m_pipelineLayout,
+                                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pc), &pc);
+                    VkBuffer vBufs[] = {mesh.vertexBuffer};
+                    VkDeviceSize offsets[] = {0};
+                    vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, vBufs, offsets);
+                    if (mesh.indexBuffer) {
+                        vkCmdBindIndexBuffer(m_commandBuffer, mesh.indexBuffer, 0,
+                                             VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(m_commandBuffer,
+                                         static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+                    } else {
+                        vkCmdDraw(m_commandBuffer, static_cast<uint32_t>(mesh.vertices.size()),
+                                  1, 0, 0);
+                    }
+                }
+                vkCmdEndRenderPass(m_commandBuffer);
+            }
+        }
         // ---- Pass 3: temporal resolve into the history slot the *next*
         // frame reads — and, from there, the bloom extract and the display
         // pass. Stays scene-linear HDR: with TAA off this degenerates to an
@@ -6639,6 +6714,179 @@ bool NativeRenderer::ensureDeferredResources() {
         pipeCi.layout = m_lightingLayout;
         pipeCi.renderPass = m_lightingRenderPass;
         pipeCi.subpass = 0;
+        // ---- Deferred transparent pass: the lit HDR image plus the GBuffer
+        // depth as the attachments, both loaded and left where they were, so
+        // the resolve below still sees the same layouts. The pipeline is the
+        // forward one (same shader modules and layout), with premultiplied
+        // blending and the depth test on but the depth write off.
+        {
+            VkAttachmentDescription tAtts[2]{};
+            tAtts[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+            tAtts[0].samples = VK_SAMPLE_COUNT_1_BIT;
+            tAtts[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            tAtts[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            tAtts[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            tAtts[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            tAtts[0].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            tAtts[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            tAtts[1].format = VK_FORMAT_D32_SFLOAT;
+            tAtts[1].samples = VK_SAMPLE_COUNT_1_BIT;
+            tAtts[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            tAtts[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            tAtts[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+            tAtts[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+            tAtts[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            tAtts[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+            VkAttachmentReference tColor{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+            VkAttachmentReference tDepth{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+            VkSubpassDescription tSubpass{};
+            tSubpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            tSubpass.colorAttachmentCount = 1;
+            tSubpass.pColorAttachments = &tColor;
+            tSubpass.pDepthStencilAttachment = &tDepth;
+
+            VkSubpassDependency tDeps[2]{};
+            tDeps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+            tDeps[0].dstSubpass = 0;
+            tDeps[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+            tDeps[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            tDeps[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+            tDeps[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+            tDeps[1].srcSubpass = 0;
+            tDeps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+            tDeps[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                    VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+            tDeps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                     VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+            tDeps[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            tDeps[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            VkRenderPassCreateInfo tRp{};
+            tRp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+            tRp.attachmentCount = 2;
+            tRp.pAttachments = tAtts;
+            tRp.subpassCount = 1;
+            tRp.pSubpasses = &tSubpass;
+            tRp.dependencyCount = 2;
+            tRp.pDependencies = tDeps;
+            if (vkCreateRenderPass(m_device, &tRp, nullptr, &m_transparentSceneRenderPass) != VK_SUCCESS) {
+                destroyDeferredResources();
+                return false;
+            }
+
+            VkImageView tAttViews[2] = {m_hdrView, m_gbufferDepthView};
+            VkFramebufferCreateInfo tFb{};
+            tFb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            tFb.renderPass = m_transparentSceneRenderPass;
+            tFb.attachmentCount = 2;
+            tFb.pAttachments = tAttViews;
+            tFb.width = m_swapChainExtent.width;
+            tFb.height = m_swapChainExtent.height;
+            tFb.layers = 1;
+            if (vkCreateFramebuffer(m_device, &tFb, nullptr, &m_transparentSceneFramebuffer) != VK_SUCCESS) {
+                destroyDeferredResources();
+                return false;
+            }
+
+            if (m_vertModule && m_fragModule) {
+                VkPipelineShaderStageCreateInfo tStages[2]{};
+                tStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                tStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+                tStages[0].module = m_vertModule;
+                tStages[0].pName = "main";
+                tStages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                tStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+                tStages[1].module = m_fragModule;
+                tStages[1].pName = "main";
+
+                VkVertexInputBindingDescription tBinding{0, sizeof(NativeVertex),
+                                                         VK_VERTEX_INPUT_RATE_VERTEX};
+                VkVertexInputAttributeDescription tAttrs[4] = {
+                    {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, px)},
+                    {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, nx)},
+                    {2, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(NativeVertex, u)},
+                    {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(NativeVertex, r)},
+                };
+                VkPipelineVertexInputStateCreateInfo tVertexInput{};
+                tVertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+                tVertexInput.vertexBindingDescriptionCount = 1;
+                tVertexInput.pVertexBindingDescriptions = &tBinding;
+                tVertexInput.vertexAttributeDescriptionCount = 4;
+                tVertexInput.pVertexAttributeDescriptions = tAttrs;
+
+                VkPipelineInputAssemblyStateCreateInfo tInputAssembly{};
+                tInputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+                tInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+                VkPipelineViewportStateCreateInfo tViewportState{};
+                tViewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+                tViewportState.viewportCount = 1;
+                tViewportState.scissorCount = 1;
+
+                VkPipelineRasterizationStateCreateInfo tRasterizer{};
+                tRasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+                tRasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+                tRasterizer.lineWidth = 1.0f;
+                tRasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+                tRasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+                VkPipelineMultisampleStateCreateInfo tMultisampling{};
+                tMultisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+                tMultisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+                VkPipelineColorBlendAttachmentState tBlend{};
+                tBlend.blendEnable = VK_TRUE;
+                tBlend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                tBlend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                tBlend.colorBlendOp = VK_BLEND_OP_ADD;
+                tBlend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                tBlend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                tBlend.alphaBlendOp = VK_BLEND_OP_ADD;
+                tBlend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                VkPipelineColorBlendStateCreateInfo tColorBlend{};
+                tColorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+                tColorBlend.attachmentCount = 1;
+                tColorBlend.pAttachments = &tBlend;
+
+                VkPipelineDepthStencilStateCreateInfo tDepthState{};
+                tDepthState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+                tDepthState.depthTestEnable = VK_TRUE;
+                tDepthState.depthWriteEnable = VK_FALSE;
+                tDepthState.depthCompareOp = VK_COMPARE_OP_LESS;
+
+                VkDynamicState tDynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+                VkPipelineDynamicStateCreateInfo tDynState{};
+                tDynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+                tDynState.dynamicStateCount = 2;
+                tDynState.pDynamicStates = tDynStates;
+
+                VkGraphicsPipelineCreateInfo tCi{};
+                tCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                tCi.stageCount = 2;
+                tCi.pStages = tStages;
+                tCi.pVertexInputState = &tVertexInput;
+                tCi.pInputAssemblyState = &tInputAssembly;
+                tCi.pViewportState = &tViewportState;
+                tCi.pRasterizationState = &tRasterizer;
+                tCi.pMultisampleState = &tMultisampling;
+                tCi.pColorBlendState = &tColorBlend;
+                tCi.pDepthStencilState = &tDepthState;
+                tCi.pDynamicState = &tDynState;
+                tCi.layout = m_pipelineLayout;
+                tCi.renderPass = m_transparentSceneRenderPass;
+                tCi.subpass = 0;
+                if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &tCi, nullptr,
+                                              &m_transparentScenePipeline) != VK_SUCCESS) {
+                    destroyDeferredResources();
+                    return false;
+                }
+            }
+        }
+
         if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipeCi, nullptr, &m_lightingPipeline) != VK_SUCCESS) {
             destroyDeferredResources();
             return false;
@@ -6913,6 +7161,7 @@ void NativeRenderer::destroyDeferredResources() {
     for (VkFramebuffer fb : m_gbufferFramebuffers) if (fb) vkDestroyFramebuffer(m_device, fb, nullptr);
     m_gbufferFramebuffers.clear();
     if (m_lightingFramebuffer) { vkDestroyFramebuffer(m_device, m_lightingFramebuffer, nullptr); m_lightingFramebuffer = VK_NULL_HANDLE; }
+    if (m_transparentSceneFramebuffer) { vkDestroyFramebuffer(m_device, m_transparentSceneFramebuffer, nullptr); m_transparentSceneFramebuffer = VK_NULL_HANDLE; }
     for (VkFramebuffer fb : m_resolveFramebuffers) if (fb) vkDestroyFramebuffer(m_device, fb, nullptr);
     m_resolveFramebuffers.clear();
     for (int i = 0; i < 2; ++i)
@@ -6926,6 +7175,7 @@ void NativeRenderer::destroyDeferredResources() {
     // rebuilt lazily on the next frame that has particles to draw.
     destroyParticleGbufPipeline();
     if (m_lightingPipeline) { vkDestroyPipeline(m_device, m_lightingPipeline, nullptr); m_lightingPipeline = VK_NULL_HANDLE; }
+    if (m_transparentScenePipeline) { vkDestroyPipeline(m_device, m_transparentScenePipeline, nullptr); m_transparentScenePipeline = VK_NULL_HANDLE; }
     if (m_resolvePipeline) { vkDestroyPipeline(m_device, m_resolvePipeline, nullptr); m_resolvePipeline = VK_NULL_HANDLE; }
     if (m_bloomExtractPipeline) { vkDestroyPipeline(m_device, m_bloomExtractPipeline, nullptr); m_bloomExtractPipeline = VK_NULL_HANDLE; }
     if (m_bloomBlurPipeline) { vkDestroyPipeline(m_device, m_bloomBlurPipeline, nullptr); m_bloomBlurPipeline = VK_NULL_HANDLE; }
@@ -6983,6 +7233,7 @@ void NativeRenderer::destroyDeferredResources() {
 
     if (m_gbufferRenderPass) { vkDestroyRenderPass(m_device, m_gbufferRenderPass, nullptr); m_gbufferRenderPass = VK_NULL_HANDLE; }
     if (m_lightingRenderPass) { vkDestroyRenderPass(m_device, m_lightingRenderPass, nullptr); m_lightingRenderPass = VK_NULL_HANDLE; }
+    if (m_transparentSceneRenderPass) { vkDestroyRenderPass(m_device, m_transparentSceneRenderPass, nullptr); m_transparentSceneRenderPass = VK_NULL_HANDLE; }
     if (m_resolveRenderPass) { vkDestroyRenderPass(m_device, m_resolveRenderPass, nullptr); m_resolveRenderPass = VK_NULL_HANDLE; }
     if (m_bloomRenderPass) { vkDestroyRenderPass(m_device, m_bloomRenderPass, nullptr); m_bloomRenderPass = VK_NULL_HANDLE; }
     if (m_displayRenderPass) { vkDestroyRenderPass(m_device, m_displayRenderPass, nullptr); m_displayRenderPass = VK_NULL_HANDLE; }
