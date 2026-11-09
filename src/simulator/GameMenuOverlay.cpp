@@ -690,6 +690,9 @@ void GameMenuOverlay::buildControlsMenu()
     m_items.push_back({ "WHEEL", "Device and FFB", [this]() {
         if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("devices");
     }, false, true, "pad" });
+    m_items.push_back({ "CONTROLLER", "Steering deadzone and inversion", [this]() {
+        if (onOpenSettingsPanelRequested) onOpenSettingsPanelRequested("controller");
+    }, false, true, "settings" });
     m_items.push_back({ "BACK", "Return", [this]() { switchMenu(MenuState::Settings); },
         false, true, "back" });
 }

@@ -12,6 +12,7 @@
 #include "FontTtfLoader.h"
 #include "DeviceSettingsOverlay.h"
 #include "KeyRebindOverlay.h"
+#include "ControllerSettingsOverlay.h"
 #include "MultiplayerOverlay.h"
 #include "ChatOverlay.h"
 #include "ConsoleOverlay.h"
@@ -54,6 +55,7 @@ public:
     TelemetryOverlay& telemetry() { return *m_telem; }
     DeviceSettingsOverlay& devices() { return *m_devices; }
     KeyRebindOverlay& keyRebind() { return m_keyRebind; }
+    ControllerSettingsOverlay& controllerSettings() { return m_controllerSettings; }
     MultiplayerOverlay& multiplayer() { return *m_mp; }
     ChatOverlay& chat() { return *m_chat; }
     ConsoleOverlay& console() { return *m_console; }
@@ -108,6 +110,7 @@ public:
 
         m_devices->build(dl, width, height, &m_input);
         m_keyRebind.build(dl, width, height, &m_input);
+        m_controllerSettings.build(dl, width, height, &m_input);
         m_mp->build(dl, width, height, &m_input);
         m_chat->build(dl, width, height, &m_input);
         m_console->build(dl, width, height, &m_input);
@@ -133,6 +136,7 @@ public:
         }
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleKey(key)) return true;
+        if (m_controllerSettings.isVisible() && m_controllerSettings.handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
         // The startup screen is a horizontal row of tiles: the arrows walk
         // the row (DOWN/UP included, so a pad mapped either way still moves),
@@ -187,6 +191,7 @@ public:
 
         if (m_devices->isVisible() && m_devices->handleMouse(e)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleMouse(e)) return true;
+        if (m_controllerSettings.isVisible() && m_controllerSettings.handleMouse(e)) return true;
         if (m_mp->isVisible() && m_mp->handleMouse(e)) return true;
 
         if (m_menu->isVisible() || m_menu->fadeAlpha() > 0.5f) {
@@ -253,7 +258,8 @@ public:
 
     bool blocksDrivingInput() const {
         return m_menu->isInputBlocked() || m_devices->isVisible() ||
-               m_keyRebind.isVisible() || m_mp->isVisible() ||
+               m_keyRebind.isVisible() || m_controllerSettings.isVisible() ||
+               m_mp->isVisible() ||
                m_chat->isTyping() || m_console->isVisible();
     }
 
@@ -1116,6 +1122,7 @@ private:
     UiInput m_input;
     RaceTelemetryHud m_raceHud;
     KeyRebindOverlay m_keyRebind;
+    ControllerSettingsOverlay m_controllerSettings;
     int m_viewW = 1280, m_viewH = 720;
     bool m_inCarMenuAllowed = true;   // pre-session: always
     NotificationCenter m_notices;     // what the bell reports

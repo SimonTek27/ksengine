@@ -1215,6 +1215,15 @@ static void initSimulation() {
             g_simulation->ui().keyRebind().setVisible(true);
             return;
         }
+        if (panel == "controller") {
+            auto* im = g_simulation->inputManager();
+            if (!im) return;
+            g_simulation->ui().menu().setVisible(false);
+            g_simulation->ui().controllerSettings().setSettings(
+                im->controllerSettings(), im->mapping().deadZone, im->mapping().invertSteer);
+            g_simulation->ui().controllerSettings().setVisible(true);
+            return;
+        }
         if (panel == "audio") {
             g_simulation->ui().menu().openOptionsAudio();
             return;
@@ -1492,6 +1501,17 @@ static void initSimulation() {
         if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, m))
             printf("Keyboard bindings saved (%s)\n", g_userLayout.controls.c_str());
     };
+    // Controller panel: every edit goes straight into the live mapping and the
+    // player's settings.json, so closing the panel never leaves it unsaved.
+    g_simulation->ui().controllerSettings().onChanged =
+        [](const ks::engine::config::ControllerSettings& settings) {
+            auto* im = g_simulation->inputManager();
+            if (!im) return;
+            im->controllerSettings() = settings;
+            im->applyControllerSettings();
+            if (im->saveControllerSettings(g_userLayout.settings))
+                printf("Controller settings saved (%s)\n", g_userLayout.settings.c_str());
+        };
 
     // In-car pause overlay: RESTART re-enters the mode the session was started
     // in (startSession() stops the running one first), so the player is back

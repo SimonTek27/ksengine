@@ -301,6 +301,8 @@ void InputManager::applyControllerSettings() {
     // does not have. 0..0.95 keeps the curve denominator positive.
     const double deadZone = steer->numberAt("DEADZONE", -1.0);
     if (deadZone >= 0.0 && deadZone < 0.95) m_map.deadZone = deadZone;
+    if (const json::Value* invert = steer->find("INVERT"); invert && invert->isBool())
+        m_map.invertSteer = invert->asBool();
 }
 
 void InputManager::processKeyboard() {

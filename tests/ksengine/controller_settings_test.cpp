@@ -1,6 +1,7 @@
 #include "KsTest.h"
 #include "engine/Config/ControllerSettings.h"
 #include "engine/assets/UserData.h"
+#include "simulator/ui/ControllerSettingsOverlay.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -84,6 +85,39 @@ int main() {
     {
         ks::engine::config::ControllerSettings missing;
         KS_CHECK(!missing.loadFrom((dir / "nope2.json").string(), "controller"));
+    }
+
+    // The panel edits the same document: one step per key, clamped, and the
+    // change reaches the caller's callback already in the document.
+    {
+        ks::sim::ui::ControllerSettingsOverlay panel;
+        panel.setSettings(ks::engine::config::ControllerSettings{}, 0.12, false);
+        KS_CHECK(panel.deadZone() == 0.12);
+        KS_CHECK(!panel.invertSteer());
+
+        int changes = 0;
+        panel.onChanged = [&changes](const ks::engine::config::ControllerSettings&) {
+            ++changes;
+        };
+        panel.select(0);
+        panel.adjustSelected(+1);
+        KS_CHECK(panel.deadZone() == 0.13);
+        panel.adjustSelected(-1);
+        KS_CHECK(panel.deadZone() == 0.12);
+        panel.setDeadZone(10.0);
+        KS_CHECK(panel.deadZone() == 0.30);
+
+        panel.select(1);
+        panel.adjustSelected(+1);
+        KS_CHECK(panel.invertSteer());
+        panel.adjustSelected(+1);
+        KS_CHECK(!panel.invertSteer());
+        KS_CHECK(changes == 5);
+
+        // The edited document is the one the caller saves.
+        const ks::engine::json::Value* steer = panel.settings().root.find("STEER");
+        KS_CHECK(steer && steer->numberAt("DEADZONE", -1.0) == 0.30);
+        KS_CHECK(steer && steer->find("INVERT") != nullptr);
     }
 
     // Alias names compile.
