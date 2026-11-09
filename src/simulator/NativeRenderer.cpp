@@ -3078,6 +3078,19 @@ bool NativeRenderer::beginFrame() {
     m_mirrorList.clear();
     m_mirrorGlassValid = false;
     m_mirrorGlassModel = mat4();
+    // Auto-detect a mirror-glass mesh by name when none was supplied explicitly
+    // (KS_MIRROR_MESH). Convention: any mesh whose name contains "mirror"
+    // (case-insensitive) is treated as the glass that samples the rear tile.
+    if (m_mirrorGlassMeshName.empty()) {
+        for (const auto& kv : m_meshes) {
+            std::string lower = kv.first;
+            for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower.find("mirror") != std::string::npos) {
+                m_mirrorGlassMeshName = kv.first;
+                break;
+            }
+        }
+    }
     m_stats = FrameStats{};
     // Culling runs in drawMesh(), which is called *between* beginFrame() and
     // endFrame(), so the frustum has to be rebuilt here — after setCamera()
