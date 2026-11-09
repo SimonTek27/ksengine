@@ -318,6 +318,14 @@ vec3 rainOnGlass(vec3 color, vec2 uv) {
     const float drop = clamp(drop1 + drop2 + film, 0.0, 1.0);
     if (drop <= 0.002) return color;
 
+    // Windscreen wipers (stage 2, screen-space): a blade that sweeps top to
+    // bottom on the frame clock. Pixels under the blade carry no drops; the
+    // rest of the glass keeps its film, so the sweep reads as a real wiper
+    // pass without a per-mesh blade.
+    const float blade = fract(rainFx.rainFx.y * 0.3);
+    const float wiperBand = smoothstep(0.06, 0.0, abs(uv.y - blade));
+    if (wiperBand > 0.5) return color;
+
     // Refraction: shift what the covered pixel shows through, plus a hair of
     // darkening at the rim. The shift is a fraction of one cell in uv space.
     vec2 refr = (f1 - o1) * drop1 + (f2 - o2) * drop2 + f3 * film;
