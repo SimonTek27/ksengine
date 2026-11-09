@@ -11,9 +11,11 @@
 #include "KsTest.h"
 
 #include "SetupGarage.h"
+#include "ApplyGarageSetup.h"
 #include "ui/NativeUiTypes.h"
 #include "ui/TextRenderer.h"
 
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -165,6 +167,40 @@ int main() {
         buildFrame(narrow, dl, text, 1280, 480);
         KS_CHECK(commandsOutside(dl, 1280, 480) == 0);
         KS_CHECK(!drawsText(dl, "TC"));
+    }
+
+    // --- P0.3: what the garage changes reaches the car ----------------------
+    // The screen used to edit a copy nothing read (onSetupChanged had no
+    // listener). This drives the real rows with real key presses and reads the
+    // values back out of the vehicle, so the whole path is covered: row edit ->
+    // callback -> SetupParams -> physics setup.
+    {
+        using ks::physics::VehicleSimulator;
+        VehicleSimulator car;
+        auto base = car.setupParams();
+        base.arbFront = 23456.f; // a field only the car's own data owns
+        car.applySetup(base);
+
+        SetupGarage garage;
+        garage.onSetupChanged = [&](const ks::sim::SetupData& changed) {
+            car.applySetup(ks::sim::setupParamsFromGarage(changed, car.setupParams()));
+        };
+        garage.setVisible(true);
+
+        // OVERVIEW row 0 is FUEL; one RIGHT step is +1 L.
+        const float fuelBefore = garage.currentSetup().fuel;
+        KS_CHECK(garage.handleKeyPress(0x27)); // RIGHT
+        KS_CHECK(std::fabs(garage.currentSetup().fuel - (fuelBefore + 1.f)) < 1e-4f);
+        KS_CHECK(std::fabs(car.setupParams().fuelL - (fuelBefore + 1.f)) < 1e-4f);
+
+        // TYRES tab, row 0 is the front-left cold pressure (+0.05 bar a step).
+        KS_CHECK(garage.handleKeyPress(0x09)); // TAB
+        KS_CHECK(garage.handleKeyPress(0x27)); // RIGHT
+        KS_CHECK(std::fabs(car.setupParams().tirePsi[0] -
+                           garage.currentSetup().tirePressureFL) < 1e-4f);
+
+        // The screen has no row for these: the car's own values must survive.
+        KS_CHECK(std::fabs(car.setupParams().arbFront - 23456.f) < 1e-3f);
     }
 
     return ks::test::finish("setup_garage_aids_test");

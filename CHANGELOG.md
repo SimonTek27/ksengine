@@ -9,6 +9,18 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Il garage applica davvero il setup (GAP_MATRIX P0.3)**: `SetupGarage`
+  chiamava `onSetupChanged` a ogni riga mossa, ma nessuno lo ascoltava: la
+  schermata modificava una copia che la fisica non leggeva, quindi pressioni,
+  bias dei freni, altezze da terra, molle, ali, differenziale, carburante,
+  zavorra e livelli TC/ABS restavano solo sullo schermo. Ora il loop costruisce
+  il garage alla prima apertura, assegna il callback e converte `SetupData` →
+  `SetupParams` con `setupParamsFromGarage`, che parte dai parametri correnti
+  dell'auto: i valori che il garage non mostra (barre antirollio, roll center,
+  compliance, roll steer) non vengono persi. Anche un setup caricato da file
+  viene applicato subito, non solo alla riga successiva.
+  `setup_garage_aids_test` guida le righe con i tasti reali e rilegge i valori
+  dall'auto.
 - **Danni in multiplayer: il client li applica (GAP_MATRIX P1.10)**: l'host
   pubblicava `MSG_CAR_DAMAGE` a ~5 Hz e il client lo riceveva, ma nessuno
   consumava `onCarDamageReceived`, quindi nel client l'auto dell'altro

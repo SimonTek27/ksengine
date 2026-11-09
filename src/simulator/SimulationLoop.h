@@ -82,6 +82,8 @@ struct InputData;
 struct CarStateData;
 }
 
+struct SetupData; // garage rows (SetupGarage.h) -> vehicle, see applySetupToVehicle
+
 struct Vec3f {
     float x = 0, y = 0, z = 0;
     Vec3f() = default;
@@ -431,6 +433,10 @@ public:
 
 private:
     void applyInput();
+    /** GAP_MATRIX P0.3: the garage screen edits SetupData, not the vehicle's
+     *  own params. This is the only place the two meet, so a row the driver
+     *  moves reaches the physics instead of staying a copy on the screen. */
+    void applySetupToVehicle(const SetupData& s);
     /** Feeds one physics step from the playhead. Returns true when the replay
      *  drove the car this step, so the caller skips input and physics. */
     bool updateReplayPlayback(float dt);

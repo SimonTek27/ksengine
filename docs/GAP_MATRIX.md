@@ -19,7 +19,7 @@ Scala impatto: **Critico** (blocco uso serio) · **Alto** · **Medio** · **Bass
 |----|-----|---------------|--------|---------|--------|------------|
 | P0.1 | Fisica pneumatici/carico validata | Pacejka base + aero | Curve caricate da INI, load sensitivity, slip stabile | Critico | L | VehicleSimulator, tyre.ini |
 | P0.2 | Superficie pista + grip | TrackSurface + wetness base | µ per materiale, bump, bordi | Critico | M | surfaces.ini, spline |
-| P0.3 | Setup completo applicato al vehicle | SetupGarage + load file | Camber/toe/pressione/gears → integrate | Critico | M | ApplySetup, VehicleSimulator |
+| P0.3 | Setup completo applicato al vehicle | 🟡 2026-11-09: le righe del garage (pressioni, bias freni, altezze, molle, ali, differenziale, carburante, zavorra, TC/ABS) arrivano a `VehicleSimulator::applySetup`, e un setup caricato viene applicato subito. Mancano camber/toe e i rapporti del cambio, che il garage non offre come righe | Camber/toe/pressione/gears → integrate | Critico | M | ApplySetup, VehicleSimulator |
 | P0.4 | FFB da sample pneumatici | VehicleFFBSample presente | Output DeviceManager (Logitech/Fanatec/Moza) continuo | Critico | M | FFBBridge, InputSystem |
 | P0.5 | Replay play (non solo record) | ✅ chiuso 2026-11-08: clock, seek e velocità in `ReplayRecorder`; l'auto è guidata dal frame (`updateReplayPlayback`), menu + control API, `replay_test` | Scrub, play, camera follow | Alto | M | ReplayRecorder |
 | P0.6 | AI su spline con racing line | MultiCar + loadAiSpline | Speed profile, overtake base, pit-in | Alto | L | AiSpline, AIController |

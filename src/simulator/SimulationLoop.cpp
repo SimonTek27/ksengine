@@ -87,6 +87,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 
 #if HAS_VEHICLE_SIM
 #include "engine/physics/VehicleSimulator.h"
+#include "ApplyGarageSetup.h"
 #endif
 #if HAS_FFB
 #include "engine/devices/FFBBridge.h"
@@ -517,11 +518,32 @@ std::string SimulationLoop::activeLayoutId() const {
 }
 
 SetupGarage* SimulationLoop::setupGarage() {
+    // Built on first use (menu page, setup load): the loop owns it so the screen
+    // outlives a car change, and its edits have somewhere to go.
+    if (!m_setupGarage) {
+        m_setupGarage = std::make_unique<SetupGarage>();
+        // GAP_MATRIX P0.3: every row the driver moves goes straight to the
+        // vehicle. Before this, onSetupChanged was never assigned, so the garage
+        // edited a copy nothing read.
+        m_setupGarage->onSetupChanged = [this](const SetupData& s) {
+            applySetupToVehicle(s);
+        };
+    }
     // The screen is created at different points on different paths, so the car's
     // answer is applied every time it is handed out, not only at car load.
-    if (m_setupGarage)
-        m_setupGarage->setAidsAvailable(m_tcPresent != 0, m_absPresent != 0);
+    m_setupGarage->setAidsAvailable(m_tcPresent != 0, m_absPresent != 0);
     return m_setupGarage.get();
+}
+
+void SimulationLoop::applySetupToVehicle(const SetupData& s) {
+#if HAS_VEHICLE_SIM
+    if (!m_vehicle) return; // no car loaded: the screen still holds the values
+    // Start from the car's resolved params: the screen does not own arb, roll
+    // centres, compliances or roll steer, and those must survive a fuel change.
+    m_vehicle->applySetup(setupParamsFromGarage(s, m_vehicle->setupParams()));
+#else
+    (void)s;
+#endif
 }
 
 bool SimulationLoop::loadCar(const std::string& carDir) {
@@ -2038,10 +2060,14 @@ void SimulationLoop::startFeatureServices(bool hostAnnounce) {
     };
 
     m_features.onSetupLoad = [this](const std::string& path) {
-        if (!m_setupGarage || !isSafeControlPath(path)) return;
-        SetupData s = m_setupGarage->setup();
+        SetupGarage* garage = setupGarage();
+        if (!garage || !isSafeControlPath(path)) return;
+        SetupData s = garage->setup();
         if (loadSetupFromFile(s, path)) {
-            m_setupGarage->setSetup(s);
+            garage->setSetup(s);
+            // A loaded setup is a setup like any other: the car gets it now,
+            // not only when a row is moved afterwards.
+            applySetupToVehicle(s);
             std::fprintf(stderr, "SimulationLoop: setup loaded from %s\n", path.c_str());
         }
     };
