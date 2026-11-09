@@ -9,6 +9,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Lettura completa dei materiali KN5 (`kn5baker --materials`)**: il runtime
+  consuma solo `ksDiffuse`, `ksSpecularEXP`, `ksEmissive` e `ksAlphaRef`,
+  quindi un materiale che appare sbagliato non si poteva ricondurre al valore
+  scritto nel file. Il nuovo comando stampa per ogni materiale shader,
+  blend/alpha test/depth mode, tutte le proprieta' del blocco da 40 byte (i
+  dieci float ValueA..D), le mappature texture con slot e l'eventuale payload
+  mancante, quante mesh e triangoli lo usano e il preset che il runtime ne
+  ricaverebbe. Sulla Benetton B191 legge 78 materiali e 63 texture, senza
+  mappature orfane.
 - **Camber e toe nel garage, e arrivano ai pneumatici (GAP_MATRIX P0.3)**: la
   scheda SOSPENSIONI ora ha CAMBER F/R e TOE F/R. Il camber statico non esisteva
   come input: la fisica lo ricavava solo dall'escursione (`camberCurve`), quindi

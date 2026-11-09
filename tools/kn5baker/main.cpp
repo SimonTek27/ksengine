@@ -10,6 +10,11 @@
 //       Parses only (no output) and prints per-file stats — used to smoke the
 //       reader against the whole AC content corpus.
 //
+//   kn5baker --materials <input.kn5>
+//       Prints every material the file carries: shader, blend/alpha/depth
+//       flags, all shader properties, texture mappings and the preset the
+//       runtime would pick. The Content Manager view of a car's materials.
+//
 //   kn5baker --only <name_substring> [--recentre] [--skip <name_substring>] \
 //            <input.kn5> <output_directory>
 //       Bakes a subset: ONE prop pulled out of a whole track into the shared
@@ -31,11 +36,13 @@
 #include "FileFormat/DdsReader.h"
 #include "FileFormat/Kn5Baker.h"
 #include "FileFormat/Kn5Reader.h"
+#include "Graphics/MaterialPresets.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -53,6 +60,7 @@ int usage() {
     std::fprintf(stderr,
                  "usage: kn5baker <input.kn5> <output_directory>\n"
                  "       kn5baker --validate <input.kn5>\n"
+                 "       kn5baker --materials <input.kn5>\n"
                  "       kn5baker [--only <name_substring>]... [--skip <name_substring>]\n"
                  "                [--recentre] <input.kn5> <output_directory>\n"
                  "       (--only repeats: several parts of one assembly bake together)\n");
@@ -340,11 +348,76 @@ int bake(const std::string& input, const std::string& output_dir,
     return report(input, output_dir, ks::engine::fileformat::bakeKn5(parsed.file, output_dir));
 }
 
+// --materials: what each material actually carries. The 40-byte property
+// block is ten floats (AC's ValueA/B/C/D): the first three of ksDiffuse and
+// friends are the authored colour, the first float of ksSpecularEXP and
+// ksEmissive the authored scalar. Everything is printed, including the
+// values the runtime does not consume yet, so a surface that looks wrong can
+// be traced to the file instead of guessed at.
+int dumpMaterials(const std::string& input) {
+    const Kn5ParseResult parsed = ks::engine::fileformat::parseKn5File(input);
+    if (!parsed.ok()) {
+        std::fprintf(stderr, "kn5baker: %s: %s\n", input.c_str(), parsed.error.c_str());
+        return 1;
+    }
+    const auto& file = parsed.file;
+    std::vector<std::size_t> meshes(file.materials.size(), 0);
+    std::vector<std::size_t> triangles(file.materials.size(), 0);
+    auto walk = [&](auto&& self, const std::vector<Kn5Node>& nodes) -> void {
+        for (const Kn5Node& node : nodes) {
+            if (node.has_mesh) {
+                const int id = node.mesh.material_id;
+                if (id >= 0 && static_cast<std::size_t>(id) < file.materials.size()) {
+                    ++meshes[static_cast<std::size_t>(id)];
+                    triangles[static_cast<std::size_t>(id)] += node.mesh.indices.size() / 3;
+                }
+            }
+            self(self, node.children);
+        }
+    };
+    walk(walk, file.nodes);
+
+    std::unordered_set<std::string> textures;
+    for (const auto& texture : file.textures) textures.insert(texture.name);
+
+    std::printf("%s\n  %zu material(s), %zu texture(s)\n", input.c_str(),
+                file.materials.size(), file.textures.size());
+    for (std::size_t i = 0; i < file.materials.size(); ++i) {
+        const auto& material = file.materials[i];
+        const auto& preset =
+            ks::graphics::resolveMaterialPreset(material.shader, material.name);
+        std::printf("\n[%zu] %s\n", i, material.name.c_str());
+        std::printf("    shader=%s blend=%u alpha_tested=%u depth_mode=%d"
+                    " meshes=%zu tris=%zu preset=%s\n",
+                    material.shader.c_str(), material.blend, material.alpha_tested,
+                    material.depth_mode, meshes[i], triangles[i], preset.name);
+        for (const auto& property : material.properties) {
+            float values[10] = {0};
+            std::memcpy(values, property.value.data(), sizeof(values));
+            std::printf("    prop %-20s A=(%.4g %.4g %.4g %.4g)"
+                        " B=(%.4g %.4g %.4g %.4g) C=%.4g D=%.4g\n",
+                        property.name.c_str(), values[0], values[1], values[2],
+                        values[3], values[4], values[5], values[6], values[7],
+                        values[8], values[9]);
+        }
+        for (const auto& mapping : material.mappings) {
+            std::printf("    map  %-20s slot=%d texture=%s%s\n", mapping.name.c_str(),
+                        mapping.slot, mapping.texture.c_str(),
+                        mapping.texture.empty()
+                            ? " (none)"
+                            : textures.count(mapping.texture) ? ""
+                                                             : " (missing from file)");
+        }
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     int next = 1;
     bool validate_only = false;
+    bool list_materials = false;
     bool recentre = false;
     std::vector<std::string> only;
     std::string skip;
@@ -352,6 +425,9 @@ int main(int argc, char** argv) {
         const std::string_view arg = argv[next];
         if (arg == "--validate") {
             validate_only = true;
+            ++next;
+        } else if (arg == "--materials") {
+            list_materials = true;
             ++next;
         } else if (arg == "--only" && next + 1 < argc) {
             only.emplace_back(argv[next + 1]);
@@ -370,6 +446,10 @@ int main(int argc, char** argv) {
     if (validate_only) {
         if (argc - next != 1) return usage();
         return validate(argv[next]);
+    }
+    if (list_materials) {
+        if (argc - next != 1) return usage();
+        return dumpMaterials(argv[next]);
     }
     if (argc - next != 2) return usage();
     return bake(argv[next], argv[next + 1], only, skip, recentre);
