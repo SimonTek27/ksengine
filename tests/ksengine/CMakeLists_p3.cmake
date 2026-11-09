@@ -187,6 +187,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/AsphaltSkeleton.h")
     add_test(NAME geotrack_skeleton_test COMMAND geotrack_skeleton_test)
 endif()
 
+# Controller settings — header-only JSON document (rFactor Controller.ini shape).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/controller_settings_test.cpp")
+    add_executable(controller_settings_test
+        controller_settings_test.cpp)
+    target_include_directories(controller_settings_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine")
+    target_link_libraries(controller_settings_test PRIVATE ksengine)
+    add_test(NAME controller_settings_test COMMAND controller_settings_test)
+    set_tests_properties(controller_settings_test PROPERTIES TIMEOUT 60)
+endif()
+
 # Phase 3.3 — the LAYOUT row on the SINGLE PLAYER page. Header-only on the
 # overlay's own providers, so the test needs no renderer, loop or window.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/menu_layout_picker_test.cpp")

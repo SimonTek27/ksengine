@@ -32,7 +32,8 @@ struct RaceConfig {
 };
 
 struct Penalty {
-    enum class Type { DriveThrough, StopGo, TimeAdded, Disqualification };
+    enum class Type { DriveThrough, StopGo, TimeAdded, Disqualification,
+                      JumpStart, MandatoryPit, TrackCut };
     Type type = Type::TimeAdded;
     int targetCarIndex = -1;
     float value = 0;
@@ -85,6 +86,10 @@ public:
     void update(const ks::physics::SimulationState& state, float dt);
 
     float sessionTime() const { return m_sessionTime; }
+    /** Accumulated penalty time (PT) and pending penalty time (PTA), seconds.
+     *  Mirror of AC's PT/PTA accumulators (REPORT_AC_RE_ENGINEERING §5). */
+    float penaltyTime() const { return m_penaltyTime; }
+    float pendingPenaltyTime() const { return m_pendingPenaltyTime; }
     float remainingTime() const { return m_remainingTime; }
     int currentLap() const { return m_currentLap; }
     const LapTiming& timing() const { return m_timing; }
@@ -206,6 +211,8 @@ private:
 
     std::vector<Penalty> m_pendingPenalties;
     std::vector<int> m_trackLimitsViolations;
+    float m_penaltyTime = 0.0f;          // PT
+    float m_pendingPenaltyTime = 0.0f;   // PTA
 
     std::vector<DriverStanding> m_standings;
     int m_playerCarIndex = 0;

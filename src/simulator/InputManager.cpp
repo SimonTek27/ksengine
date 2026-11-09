@@ -318,6 +318,20 @@ void InputManager::processKeyboard() {
     m_handbrake = pressed(m_kb.handbrake) ? 1.0 : 0.0;
     m_clutch = keyHeld(m_kb.clutch) ? 1.0 : 0.0;
 
+    // Turn signals: rising edge toggles. Pressing left toggles the left
+    // indicator (off if already left), pressing right toggles the right one;
+    // pressing the other side switches directly.
+    bool curLeft = pressed(m_kb.turnSignalLeft);
+    bool curRight = pressed(m_kb.turnSignalRight);
+    if (curLeft && !m_prevTurnLeftKey) {
+        m_turnSignal = (m_turnSignal < 0) ? 0 : -1;
+    }
+    if (curRight && !m_prevTurnRightKey) {
+        m_turnSignal = (m_turnSignal > 0) ? 0 : 1;
+    }
+    m_prevTurnLeftKey = curLeft;
+    m_prevTurnRightKey = curRight;
+
     m_steer = curve(m_steer, m_map.steerGamma, m_map.deadZone, true);
     m_throttle = std::clamp(m_throttle, 0.0, 1.0);
     m_brake = std::clamp(m_brake, 0.0, 1.0);
@@ -333,6 +347,8 @@ void InputManager::reset() {
     m_rawThrottle = m_rawBrake = m_rawSteer = 0;
     m_shiftUp = m_shiftDown = false;
     m_starterRequested = m_prevStarterKey = false;
+    m_turnSignal = 0;
+    m_prevTurnLeftKey = m_prevTurnRightKey = false;
     m_keys.clear();
     m_buttons = 0;
     m_hasInjected = false;

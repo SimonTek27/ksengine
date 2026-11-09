@@ -7229,10 +7229,17 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     writes[6].pBufferInfo = &rectInfo;
 
     // Binding 6: the per-pixel glass mask (stage 4). Written only when a glass
-    // mesh is present; otherwise a dummy view keeps the set complete.
+    // mesh is present; otherwise a valid sampled view keeps the set complete.
+    // The fallback is the same depth view binding 3 gets: on the deferred path
+    // m_depthView is never transitioned (m_gbufferDepthView is the live one),
+    // so binding it made the frame submit claim SHADER_READ_ONLY for an image
+    // that was still UNDEFINED (VUID-vkCmdDraw-None-09600). The shader only
+    // reads this slot when glassParams.x > 0.5, and then the real mask exists.
     VkDescriptorImageInfo maskInfo{};
     maskInfo.sampler = m_windscreenMaskSampler ? m_windscreenMaskSampler : m_hdrSampler;
-    maskInfo.imageView = m_windscreenMaskView ? m_windscreenMaskView : (m_depthView ? m_depthView : m_dummyShadowView);
+    maskInfo.imageView = m_windscreenMaskView
+                             ? m_windscreenMaskView
+                             : (depthView ? depthView : m_dummyShadowView);
     maskInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     writes[7] = {};
     writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

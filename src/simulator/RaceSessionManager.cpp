@@ -358,12 +358,21 @@ void RaceSessionManager::addPenalty(int carIndex, Penalty::Type type, float valu
     if (DriverStanding* standing = standingFor(carIndex))
         standing->penalties.push_back(penalty);
 
+    // Accumulate pending penalty time (PTA) for time penalties, as AC does.
+    if (type == Penalty::Type::TimeAdded || type == Penalty::Type::TrackCut ||
+        type == Penalty::Type::MandatoryPit || type == Penalty::Type::JumpStart) {
+        m_pendingPenaltyTime += value;
+    }
+
     if (onPenaltyIssued) {
         const char* typeName = "Time Added";
         switch (type) {
             case Penalty::Type::DriveThrough: typeName = "Drive Through"; break;
             case Penalty::Type::StopGo: typeName = "Stop-Go"; break;
             case Penalty::Type::Disqualification: typeName = "Disqualification"; break;
+            case Penalty::Type::JumpStart: typeName = "Jump Start"; break;
+            case Penalty::Type::MandatoryPit: typeName = "Mandatory Pit"; break;
+            case Penalty::Type::TrackCut: typeName = "Track Cut"; break;
             case Penalty::Type::TimeAdded: break;
         }
         onPenaltyIssued(carIndex, typeName, reason);
@@ -419,7 +428,13 @@ void RaceSessionManager::applyPenalties()
 
         switch (penalty.type) {
             case Penalty::Type::TimeAdded:
+            case Penalty::Type::TrackCut:
+            case Penalty::Type::MandatoryPit:
+            case Penalty::Type::JumpStart:
                 standing->totalTime += penalty.value;
+                m_penaltyTime += penalty.value;
+                // The time is no longer pending once it is in the total.
+                m_pendingPenaltyTime = std::max(0.0f, m_pendingPenaltyTime - penalty.value);
                 break;
             case Penalty::Type::Disqualification:
                 standing->disqualified = true;

@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <array>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -37,6 +38,7 @@ namespace ac {
  * mapping a 592 B prefix stay compatible.
  */
 constexpr size_t kAcShmMappingBytes = 0x250; // 592, per acs.exe
+constexpr size_t kAcShmExtraBytes = 0x19c; // 412, Local\\acpmf (SharedFileOut)
 
 constexpr size_t acShmMappingSize(size_t pageBytes) {
     return pageBytes < kAcShmMappingBytes ? kAcShmMappingBytes : pageBytes;
@@ -72,6 +74,13 @@ public:
             MapViewOfFile(m_gfxMap, FILE_MAP_ALL_ACCESS, 0, 0, gfxBytes));
         m_stat = static_cast<AcStaticPage*>(
             MapViewOfFile(m_statMap, FILE_MAP_ALL_ACCESS, 0, 0, statBytes));
+        // Optional fourth mapping used by some AC tools: Local\\acpmf (412 B).
+        m_extraMap = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                       0, static_cast<DWORD>(kAcShmExtraBytes), L"Local\\acpmf");
+        if (m_extraMap) {
+            m_extra = MapViewOfFile(m_extraMap, FILE_MAP_ALL_ACCESS, 0, 0, kAcShmExtraBytes);
+            if (m_extra) std::memset(m_extra, 0, kAcShmExtraBytes);
+        }
         if (!m_phys || !m_gfx || !m_stat) {
             closeUnlocked();
             useSoft();
@@ -102,6 +111,23 @@ public:
         m_phys = static_cast<AcPhysicsPage*>(pp);
         m_gfx = static_cast<AcGraphicsPage*>(pg);
         m_stat = static_cast<AcStaticPage*>(ps);
+        // Optional fourth mapping: /acpmf (412 B).
+        void* pe = nullptr;
+        int efd = shm_open("/acpmf", O_CREAT | O_RDWR, 0666);
+        if (efd >= 0) {
+            if (ftruncate(efd, static_cast<off_t>(kAcShmExtraBytes)) == 0) {
+                pe = mmap(nullptr, kAcShmExtraBytes, PROT_READ | PROT_WRITE, MAP_SHARED, efd, 0);
+                if (pe == MAP_FAILED) pe = nullptr;
+            }
+            if (pe) {
+                std::memset(pe, 0, kAcShmExtraBytes);
+                m_extra = pe;
+                m_extraFd = efd;
+            } else {
+                ::close(efd);
+                m_extraFd = -1;
+            }
+        }
 #endif
         // Zero the whole mapping (incl. the 592 B padding AC readers see).
         std::memset(static_cast<void*>(m_phys), 0, physBytes);
@@ -163,6 +189,8 @@ private:
         m_phys = &m_physSoft;
         m_gfx = &m_gfxSoft;
         m_stat = &m_statSoft;
+        m_extraSoft.fill(0);
+        m_extra = m_extraSoft.data();
         m_ok = true;
         m_mapped = false;
         std::fprintf(stderr, "AcSharedMemory: soft in-process mirror active\n");
@@ -173,12 +201,15 @@ private:
         if (m_phys && m_phys != &m_physSoft) { UnmapViewOfFile(m_phys); }
         if (m_gfx && m_gfx != &m_gfxSoft) { UnmapViewOfFile(m_gfx); }
         if (m_stat && m_stat != &m_statSoft) { UnmapViewOfFile(m_stat); }
+        if (m_extra && m_extra != m_extraSoft.data()) { UnmapViewOfFile(m_extra); }
         m_phys = nullptr;
         m_gfx = nullptr;
         m_stat = nullptr;
+        m_extra = nullptr;
         if (m_physMap) { CloseHandle(m_physMap); m_physMap = nullptr; }
         if (m_gfxMap) { CloseHandle(m_gfxMap); m_gfxMap = nullptr; }
         if (m_statMap) { CloseHandle(m_statMap); m_statMap = nullptr; }
+        if (m_extraMap) { CloseHandle(m_extraMap); m_extraMap = nullptr; }
 #else
         auto unmap = [](void* p, size_t sz, int fd) {
             if (p && p != MAP_FAILED) munmap(p, sz);
@@ -190,10 +221,14 @@ private:
             unmap(m_gfx, acShmMappingSize(sizeof(AcGraphicsPage)), m_gfxFd);
         if (m_stat && m_stat != &m_statSoft)
             unmap(m_stat, acShmMappingSize(sizeof(AcStaticPage)), m_statFd);
+        if (m_extra && m_extra != m_extraSoft.data())
+            unmap(m_extra, kAcShmExtraBytes, m_extraFd);
         m_phys = nullptr;
         m_gfx = nullptr;
         m_stat = nullptr;
+        m_extra = nullptr;
         m_physFd = m_gfxFd = m_statFd = -1;
+        if (m_extraFd >= 0) { ::close(m_extraFd); m_extraFd = -1; }
 #endif
         m_ok = false;
         m_mapped = false;
@@ -207,13 +242,15 @@ private:
     AcPhysicsPage* m_phys = nullptr;
     AcGraphicsPage* m_gfx = nullptr;
     AcStaticPage* m_stat = nullptr;
+    void* m_extra = nullptr;
     AcPhysicsPage m_physSoft{};
     AcGraphicsPage m_gfxSoft{};
     AcStaticPage m_statSoft{};
+    std::array<char, kAcShmExtraBytes> m_extraSoft{};
 #ifdef _WIN32
-    HANDLE m_physMap = nullptr, m_gfxMap = nullptr, m_statMap = nullptr;
+    HANDLE m_physMap = nullptr, m_gfxMap = nullptr, m_statMap = nullptr, m_extraMap = nullptr;
 #else
-    int m_physFd = -1, m_gfxFd = -1, m_statFd = -1;
+    int m_physFd = -1, m_gfxFd = -1, m_statFd = -1, m_extraFd = -1;
 #endif
 };
 

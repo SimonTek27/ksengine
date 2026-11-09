@@ -89,6 +89,9 @@ struct KeyboardMapping {
     // 'Z' sits under the left hand next to the WASD cluster, 'I' is ignition.
     int clutch = 'Z';
     int starter = 'I';
+    // Turn signals: rising edge toggles left/right indicator.
+    int turnSignalLeft = 'J';
+    int turnSignalRight = 'K';
 
     static constexpr int AltThrottle = 0x26;   // VK_UP
     static constexpr int AltBrake = 0x28;      // VK_DOWN
@@ -161,12 +164,14 @@ inline bool saveKeyboardMapping(const std::string& path, const KeyboardMapping& 
         "# ksengine keyboard bindings (roadmap 1.4)\n"
         "throttle=%s\nbrake=%s\nsteerLeft=%s\nsteerRight=%s\n"
         "shiftUp=%s\nshiftDown=%s\nhandbrake=%s\n"
-        "clutch=%s\nstarter=%s\n",
+        "clutch=%s\nstarter=%s\n"
+        "turnSignalLeft=%s\nturnSignalRight=%s\n",
         keyName(m.throttle).c_str(), keyName(m.brake).c_str(),
         keyName(m.steerLeft).c_str(), keyName(m.steerRight).c_str(),
         keyName(m.shiftUp).c_str(), keyName(m.shiftDown).c_str(),
         keyName(m.handbrake).c_str(), keyName(m.clutch).c_str(),
-        keyName(m.starter).c_str());
+        keyName(m.starter).c_str(),
+        keyName(m.turnSignalLeft).c_str(), keyName(m.turnSignalRight).c_str());
     std::fclose(f);
     return true;
 }
@@ -199,6 +204,8 @@ inline bool loadKeyboardMapping(const std::string& path, KeyboardMapping& m) {
         else if (key == "handbrake") m.handbrake = vk;
         else if (key == "clutch") m.clutch = vk;
         else if (key == "starter") m.starter = vk;
+        else if (key == "turnSignalLeft") m.turnSignalLeft = vk;
+        else if (key == "turnSignalRight") m.turnSignalRight = vk;
     }
     std::fclose(f);
     return true;
@@ -223,6 +230,8 @@ inline bool saveKeyboardMappingJson(const std::string& path, const KeyboardMappi
     root.set("handbrake", json::Value::string(keyName(m.handbrake)));
     root.set("clutch", json::Value::string(keyName(m.clutch)));
     root.set("starter", json::Value::string(keyName(m.starter)));
+    root.set("turnSignalLeft", json::Value::string(keyName(m.turnSignalLeft)));
+    root.set("turnSignalRight", json::Value::string(keyName(m.turnSignalRight)));
     return ks::engine::assets::UserData::writeFile(path, json::dump(root));
 }
 
@@ -263,6 +272,8 @@ inline bool loadKeyboardMappingJson(const std::string& path, KeyboardMapping& m)
     apply("handbrake", m.handbrake);
     apply("clutch", m.clutch);
     apply("starter", m.starter);
+    apply("turnSignalLeft", m.turnSignalLeft);
+    apply("turnSignalRight", m.turnSignalRight);
     return applied > 0;
 }
 
@@ -303,6 +314,10 @@ public:
     double steer() const { return m_steer; }
     double clutch() const { return m_clutch; }
     double handbrake() const { return m_handbrake; }
+    // Turn signal state: -1 = left, 0 = off, 1 = right.
+    int turnSignal() const { return m_turnSignal; }
+    bool turnSignalLeft() const { return m_turnSignal < 0; }
+    bool turnSignalRight() const { return m_turnSignal > 0; }
 
     double rawThrottle() const { return m_rawThrottle; }
     double rawBrake() const { return m_rawBrake; }
@@ -366,6 +381,8 @@ private:
     static double curve(double v, double gamma, double deadZone, bool bipolar);
 
     double m_throttle = 0, m_brake = 0, m_steer = 0, m_clutch = 0, m_handbrake = 0;
+    int m_turnSignal = 0;
+    bool m_prevTurnLeftKey = false, m_prevTurnRightKey = false;
     double m_rawThrottle = 0, m_rawBrake = 0, m_rawSteer = 0;
 
     bool m_shiftUp = false, m_shiftDown = false;
