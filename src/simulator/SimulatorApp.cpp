@@ -1616,6 +1616,10 @@ static void initSimulation() {
         if (g_nativeRenderer) g_nativeRenderer->setMirrorGlassMesh(mm);
         printf("[INIT] KS_MIRROR_MESH=%s\n", mm);
     }
+    if (const char* wg = std::getenv("KS_WINDSCREEN_GLASS"); wg && wg[0]) {
+        if (g_nativeRenderer) g_nativeRenderer->setWindscreenGlassMesh(wg);
+        printf("[INIT] KS_WINDSCREEN_GLASS=%s\n", wg);
+    }
 
     // Gate 2.11/2.12 enabler: KS_WEATHER=<dry|damp|wet> applies the same
     // preset the menu offers, right after the optional session start so the

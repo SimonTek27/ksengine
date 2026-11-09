@@ -424,6 +424,9 @@ public:
         m_windscreenCockpit = inCockpit;
         m_windscreenClock = clockSeconds;
     }
+    // Opt-in mesh whose screen-space AABB restricts the rain to the real glass
+    // (windscreen stage 3). Empty keeps the stage-1 screen band.
+    void setWindscreenGlassMesh(const std::string& name) { m_windscreenGlassMeshName = name; }
 
     // Colour grading of the display pass: the preset's colorGrading block and
     // the video config's saturation/contrast ride these. The defaults keep
@@ -863,9 +866,17 @@ private:
     VkBuffer m_windscreenUBO = VK_NULL_HANDLE;
     VkDeviceMemory m_windscreenMemory = VK_NULL_HANDLE;
     void* m_windscreenMapped = nullptr;
+    VkBuffer m_windscreenRectUBO = VK_NULL_HANDLE;
+    VkDeviceMemory m_windscreenRectMemory = VK_NULL_HANDLE;
+    void* m_windscreenRectMapped = nullptr;
     float m_windscreenCoverage = 0.0f;
     bool m_windscreenCockpit = false;
     float m_windscreenClock = 0.0f;
+    std::string m_windscreenGlassMeshName;
+    mat4 m_windscreenGlassModel{};
+    bool m_windscreenGlassValid = false;
+    float m_windscreenGlassRect[4] = {0.0f, 0.0f, 1.0f, 1.0f};
+    bool m_windscreenGlassHasRect = false;
 
     VkFormat m_gbufferFormats[kGBufferCount] = {
         VK_FORMAT_R8G8B8A8_UNORM,

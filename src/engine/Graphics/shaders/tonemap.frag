@@ -48,6 +48,14 @@ layout(set = 0, binding = 4) uniform WindscreenFx {
     vec4 rainFx; // x coverage 0..1, y animation clock (s),
                  // z in-cockpit flag (0/1), w aspect
 } rainFx;
+// Windscreen glass rect (stage 3): which pixels of the cockpit view actually
+// carry glass, so the rain only lands on the real windows instead of the
+// whole screen band. params.x = 1 when a glass mesh supplied the rect (rect
+// is its screen-space AABB in UV space); 0 falls back to the stage-1 band.
+layout(set = 0, binding = 5) uniform WindscreenGlass {
+    vec4 glassRect; // xy = min uv, zw = max uv
+    vec4 glassParams; // x = hasRect (0/1)
+} windscreenGlass;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -277,11 +285,19 @@ float rainHash(vec2 p) {
 vec3 rainOnGlass(vec3 color, vec2 uv) {
     if (rainFx.rainFx.x <= 0.001 || rainFx.rainFx.z < 0.5) return color;
 
-    // Windscreen band: full weight across the mid band the glass occupies,
-    // dying out over the roofline above and the cowl below. The soft profile
-    // keeps a dry stripe at the very top even without a roof to sample.
-    float coverage = rainFx.rainFx.x *
-        smoothstep(0.10, 0.30, uv.y) * (1.0 - smoothstep(0.62, 0.88, uv.y));
+    // Windscreen glass rect (stage 3): when a real glass mesh supplied its
+    // screen-space AABB, the rain only lands inside it; otherwise fall back
+    // to the stage-1 screen band.
+    float coverage;
+    if (windscreenGlass.glassParams.x > 0.5) {
+        if (uv.x < windscreenGlass.glassRect.x || uv.x > windscreenGlass.glassRect.z ||
+            uv.y < windscreenGlass.glassRect.y || uv.y > windscreenGlass.glassRect.w)
+            return color;
+        coverage = rainFx.rainFx.x;
+    } else {
+        coverage = rainFx.rainFx.x *
+            smoothstep(0.10, 0.30, uv.y) * (1.0 - smoothstep(0.62, 0.88, uv.y));
+    }
     if (coverage <= 0.002) return color;
 
     // Aspect-corrected coordinates keep the cells round.

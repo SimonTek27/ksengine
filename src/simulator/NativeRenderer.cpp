@@ -3091,6 +3091,22 @@ bool NativeRenderer::beginFrame() {
             }
         }
     }
+    m_windscreenGlassValid = false;
+    m_windscreenGlassModel = mat4();
+    m_windscreenGlassHasRect = false;
+    m_windscreenGlassRect[0] = 0.0f; m_windscreenGlassRect[1] = 0.0f;
+    m_windscreenGlassRect[2] = 1.0f; m_windscreenGlassRect[3] = 1.0f;
+    if (m_windscreenGlassMeshName.empty()) {
+        for (const auto& kv : m_meshes) {
+            std::string lower = kv.first;
+            for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower.find("glass") != std::string::npos ||
+                lower.find("windscreen") != std::string::npos) {
+                m_windscreenGlassMeshName = kv.first;
+                break;
+            }
+        }
+    }
     m_stats = FrameStats{};
     // Culling runs in drawMesh(), which is called *between* beginFrame() and
     // endFrame(), so the frustum has to be rebuilt here — after setCamera()
@@ -3151,6 +3167,10 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
     if (!m_mirrorGlassMeshName.empty() && name == m_mirrorGlassMeshName) {
         m_mirrorGlassModel = modelMatrix;
         m_mirrorGlassValid = true;
+    }
+    if (!m_windscreenGlassMeshName.empty() && name == m_windscreenGlassMeshName) {
+        m_windscreenGlassModel = modelMatrix;
+        m_windscreenGlassValid = true;
     }
     ++m_stats.submitted;
 
@@ -3697,6 +3717,66 @@ void NativeRenderer::endFrame() {
                             ? static_cast<float>(m_swapChainExtent.width) /
                                   static_cast<float>(m_swapChainExtent.height)
                             : 1.0f;
+        }
+        // Stage 3: compute the glass mesh's screen-space AABB (if valid) and
+        // refill the rect UBO. Falls back to "no glass" sentinel otherwise.
+        m_windscreenGlassHasRect = false;
+        m_windscreenGlassRect[0] = 0.0f; m_windscreenGlassRect[1] = 0.0f;
+        m_windscreenGlassRect[2] = 1.0f; m_windscreenGlassRect[3] = 1.0f;
+        if (m_windscreenGlassValid && !m_windscreenGlassMeshName.empty()) {
+            auto git = m_meshes.find(m_windscreenGlassMeshName);
+            if (git != m_meshes.end() && git->second.hasBounds) {
+                const auto& mn = git->second.boundsMin;
+                const auto& mx = git->second.boundsMax;
+                float minU = 1.0f, minV = 1.0f, maxU = 0.0f, maxV = 0.0f;
+                bool any = false;
+                for (int i = 0; i < 8; ++i) {
+                    float x = (i & 1) ? mx.x : mn.x;
+                    float y = (i & 2) ? mx.y : mn.y;
+                    float z = (i & 4) ? mx.z : mn.z;
+                    // model -> world
+                    float w[4] = {x, y, z, 1.0f};
+                    float world[4] = {
+                        m_windscreenGlassModel(0,0)*w[0] + m_windscreenGlassModel(0,1)*w[1] + m_windscreenGlassModel(0,2)*w[2] + m_windscreenGlassModel(0,3)*w[3],
+                        m_windscreenGlassModel(1,0)*w[0] + m_windscreenGlassModel(1,1)*w[1] + m_windscreenGlassModel(1,2)*w[2] + m_windscreenGlassModel(1,3)*w[3],
+                        m_windscreenGlassModel(2,0)*w[0] + m_windscreenGlassModel(2,1)*w[1] + m_windscreenGlassModel(2,2)*w[2] + m_windscreenGlassModel(2,3)*w[3],
+                        m_windscreenGlassModel(3,0)*w[0] + m_windscreenGlassModel(3,1)*w[1] + m_windscreenGlassModel(3,2)*w[2] + m_windscreenGlassModel(3,3)*w[3]};
+                    // view
+                    float v[4] = {
+                        m_view(0,0)*world[0] + m_view(0,1)*world[1] + m_view(0,2)*world[2] + m_view(0,3)*world[3],
+                        m_view(1,0)*world[0] + m_view(1,1)*world[1] + m_view(1,2)*world[2] + m_view(1,3)*world[3],
+                        m_view(2,0)*world[0] + m_view(2,1)*world[1] + m_view(2,2)*world[2] + m_view(2,3)*world[3],
+                        m_view(3,0)*world[0] + m_view(3,1)*world[1] + m_view(3,2)*world[2] + m_view(3,3)*world[3]};
+                    // proj
+                    float c[4] = {
+                        m_proj(0,0)*v[0] + m_proj(0,1)*v[1] + m_proj(0,2)*v[2] + m_proj(0,3)*v[3],
+                        m_proj(1,0)*v[0] + m_proj(1,1)*v[1] + m_proj(1,2)*v[2] + m_proj(1,3)*v[3],
+                        m_proj(2,0)*v[0] + m_proj(2,1)*v[1] + m_proj(2,2)*v[2] + m_proj(2,3)*v[3],
+                        m_proj(3,0)*v[0] + m_proj(3,1)*v[1] + m_proj(3,2)*v[2] + m_proj(3,3)*v[3]};
+                    if (c[3] <= 0.0f) continue;
+                    float ndcX = c[0] / c[3];
+                    float ndcY = c[1] / c[3];
+                    float u = ndcX * 0.5f + 0.5f;
+                    float vuv = ndcY * 0.5f + 0.5f; // Vulkan NDC y down? proj already
+                    if (u < minU) minU = u; if (u > maxU) maxU = u;
+                    if (vuv < minV) minV = vuv; if (vuv > maxV) maxV = vuv;
+                    any = true;
+                }
+                if (any) {
+                    m_windscreenGlassRect[0] = minU; m_windscreenGlassRect[1] = minV;
+                    m_windscreenGlassRect[2] = maxU; m_windscreenGlassRect[3] = maxV;
+                    m_windscreenGlassHasRect = true;
+                }
+            }
+        }
+        if (m_windscreenRectMapped) {
+            float* r = static_cast<float*>(m_windscreenRectMapped);
+            r[0] = m_windscreenGlassRect[0];
+            r[1] = m_windscreenGlassRect[1];
+            r[2] = m_windscreenGlassRect[2];
+            r[3] = m_windscreenGlassRect[3];
+            r[4] = m_windscreenGlassHasRect ? 1.0f : 0.0f;
+            r[5] = 0.0f; r[6] = 0.0f; r[7] = 0.0f;
         }
         writeDisplayDescriptorSets(m_historyViews[historyWrite],
                                    deferred ? m_gbufferDepthView : m_depthView);
@@ -6065,22 +6145,25 @@ bool NativeRenderer::ensureDeferredResources() {
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[5]{};
+        VkDescriptorSetLayoutBinding bindings[6]{};
         for (int i = 0; i < 4; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         // Binding 4 (windscreenFX, tonemap.frag): the 4-float rain UBO the
         // session refills every frame. Add-only after the four samplers.
         bindings[4] = {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 5 (windscreen glass rect, stage 3): 32 bytes, the mesh's
+        // screen-space AABB (or a "no glass" sentinel).
+        bindings[5] = {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 5;
+        dslCi.bindingCount = 6;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorPoolSize poolSizes[2]{
             {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolCi.maxSets = 1;
@@ -6105,6 +6188,18 @@ bool NativeRenderer::ensureDeferredResources() {
                           m_windscreenUBO, m_windscreenMemory) ||
             vkMapMemory(m_device, m_windscreenMemory, 0, 16, 0,
                         &m_windscreenMapped) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+        // Rect UBO (binding 5): 32 bytes, the glass mesh's screen-space AABB
+        // (or a "no glass" sentinel) refilled every frame.
+        if (!createBuffer(m_physicalDevice, m_device, 32,
+                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          m_windscreenRectUBO, m_windscreenRectMemory) ||
+            vkMapMemory(m_device, m_windscreenRectMemory, 0, 32, 0,
+                        &m_windscreenRectMapped) != VK_SUCCESS) {
             destroyDeferredResources();
             return false;
         }
@@ -6595,6 +6690,10 @@ void NativeRenderer::destroyDeferredResources() {
     if (m_windscreenUBO) { vkDestroyBuffer(m_device, m_windscreenUBO, nullptr); m_windscreenUBO = VK_NULL_HANDLE; }
     if (m_windscreenMemory) { vkFreeMemory(m_device, m_windscreenMemory, nullptr); m_windscreenMemory = VK_NULL_HANDLE; }
     m_windscreenMapped = nullptr;
+    if (m_windscreenRectMapped) vkUnmapMemory(m_device, m_windscreenRectMemory);
+    if (m_windscreenRectUBO) { vkDestroyBuffer(m_device, m_windscreenRectUBO, nullptr); m_windscreenRectUBO = VK_NULL_HANDLE; }
+    if (m_windscreenRectMemory) { vkFreeMemory(m_device, m_windscreenRectMemory, nullptr); m_windscreenRectMemory = VK_NULL_HANDLE; }
+    m_windscreenRectMapped = nullptr;
     if (m_displaySetLayout) { vkDestroyDescriptorSetLayout(m_device, m_displaySetLayout, nullptr); m_displaySetLayout = VK_NULL_HANDLE; }
     if (m_gbufferSampler) { vkDestroySampler(m_device, m_gbufferSampler, nullptr); m_gbufferSampler = VK_NULL_HANDLE; }
     if (m_hdrSampler) { vkDestroySampler(m_device, m_hdrSampler, nullptr); m_hdrSampler = VK_NULL_HANDLE; }
@@ -6782,7 +6881,7 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     lutInfo.imageView = m_lutView;
     lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[6]{};
+    VkWriteDescriptorSet writes[7]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -6847,7 +6946,19 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[5].pBufferInfo = &rainInfo;
 
-    vkUpdateDescriptorSets(m_device, 6, writes, 0, nullptr);
+    // Binding 5: the windscreen glass rect (stage 3). 32 bytes; the session
+    // refills it every frame from the glass mesh's screen-space AABB.
+    VkDescriptorBufferInfo rectInfo{};
+    rectInfo.buffer = m_windscreenRectUBO;
+    rectInfo.range = 32;
+    writes[6].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[6].dstSet = m_displaySet;
+    writes[6].dstBinding = 5;
+    writes[6].descriptorCount = 1;
+    writes[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[6].pBufferInfo = &rectInfo;
+
+    vkUpdateDescriptorSets(m_device, 7, writes, 0, nullptr);
 }
 
 } // namespace ks::sim
