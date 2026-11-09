@@ -91,7 +91,8 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
     if (m_map.clutchAxis >= 0) {
         double c = axis(m_map.clutchAxis);
         if (c < 0) c = 0;
-        m_clutch = curve(c, 1.0, 0.02, false);
+        m_clutch = std::clamp(
+            curve(c, 1.0, m_map.clutchDeadZone, false) * m_map.clutchSensitivity, 0.0, 1.0);
     } else if (m_map.clutchButton >= 0) {
         m_clutch = (buttons & (1u << m_map.clutchButton)) ? 1.0 : 0.0;
     } else {
@@ -307,6 +308,7 @@ void InputManager::applyControllerSettings() {
         {"STEER", &m_map.deadZone, &m_map.steerSensitivity},
         {"THROTTLE", &m_map.throttleDeadZone, &m_map.throttleSensitivity},
         {"BRAKE", &m_map.brakeDeadZone, &m_map.brakeSensitivity},
+        {"CLUTCH", &m_map.clutchDeadZone, &m_map.clutchSensitivity},
     };
     // Only the keys a file really carries are applied: absent or out-of-range
     // values leave the mapping alone. 0..0.95 keeps the curve denominator

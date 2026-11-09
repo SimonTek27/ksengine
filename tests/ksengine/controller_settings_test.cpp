@@ -98,6 +98,8 @@ int main() {
         KS_CHECK(panel.value(1) == 1.0);
         KS_CHECK(panel.value(2) == 0.12);
         KS_CHECK(panel.value(5) == 1.0);
+        KS_CHECK(panel.value(6) == 0.12);
+        KS_CHECK(panel.value(7) == 1.0);
         KS_CHECK(!panel.invertSteer());
 
         int changes = 0;
@@ -117,13 +119,18 @@ int main() {
         KS_CHECK_NEAR(panel.value(1), 1.05, 1e-9);
         panel.setValue(3, 9.0);
         KS_CHECK(panel.value(3) == 2.00);
-
         panel.select(6);
+        panel.adjustSelected(+1);
+        KS_CHECK(panel.value(6) == 0.13);
+        panel.setValue(7, 9.0);
+        KS_CHECK(panel.value(7) == 2.00);
+
+        panel.select(8);
         panel.adjustSelected(+1);
         KS_CHECK(panel.invertSteer());
         panel.adjustSelected(+1);
         KS_CHECK(!panel.invertSteer());
-        KS_CHECK(changes == 7);
+        KS_CHECK(changes == 9);
 
         // The edited document is the one the caller saves.
         const ks::engine::json::Value* steer = panel.settings().root.find("STEER");
@@ -133,6 +140,9 @@ int main() {
         KS_CHECK(throttle && throttle->numberAt("SENSITIVITY", -1.0) == 2.00);
         const ks::engine::json::Value* brake = panel.settings().root.find("BRAKE");
         KS_CHECK(brake == nullptr || brake->isObject());
+        const ks::engine::json::Value* clutch = panel.settings().root.find("CLUTCH");
+        KS_CHECK(clutch && clutch->numberAt("DEADZONE", -1.0) == 0.13);
+        KS_CHECK(clutch && clutch->numberAt("SENSITIVITY", -1.0) == 2.00);
     }
 
     // Alias names compile.

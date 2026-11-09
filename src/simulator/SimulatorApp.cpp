@@ -1227,6 +1227,8 @@ static void initSimulation() {
             fallbacks.throttleSensitivity = map.throttleSensitivity;
             fallbacks.brakeDeadZone = map.brakeDeadZone;
             fallbacks.brakeSensitivity = map.brakeSensitivity;
+            fallbacks.clutchDeadZone = map.clutchDeadZone;
+            fallbacks.clutchSensitivity = map.clutchSensitivity;
             fallbacks.invertSteer = map.invertSteer;
             g_simulation->ui().controllerSettings().setSettings(im->controllerSettings(),
                                                                 fallbacks);

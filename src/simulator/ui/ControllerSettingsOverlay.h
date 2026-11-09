@@ -2,8 +2,8 @@
 /**
  * Controller settings panel (rFactor Controller.ini shape), Qt-free.
  *
- * Per axis — steering, throttle, brake — a deadzone and a sensitivity, plus
- * steering inversion. Edits land in the ControllerSettings document
+ * Per axis — steering, throttle, brake, clutch — a deadzone and a
+ * sensitivity, plus steering inversion. Edits land in the ControllerSettings document
  * immediately, so the caller can apply them to the live mapping and persist
  * them in the player's settings file; the panel owns no I/O.
  */
@@ -22,8 +22,8 @@ namespace ui {
 
 class ControllerSettingsOverlay {
 public:
-    // 0-5: deadzone/sensitivity per axis; 6: steering inversion.
-    static constexpr int kRows = 7;
+    // 0-7: deadzone/sensitivity per axis; 8: steering inversion.
+    static constexpr int kRows = 9;
 
     /** What the panel shows for a key the document does not carry yet: the
      *  live mapping, so the panel and the car can never disagree. */
@@ -34,6 +34,8 @@ public:
         double throttleSensitivity = 1.0;
         double brakeDeadZone = 0.12;
         double brakeSensitivity = 1.0;
+        double clutchDeadZone = 0.12;
+        double clutchSensitivity = 1.0;
         bool invertSteer = false;
     };
 
@@ -50,6 +52,8 @@ public:
         m_fallback[3] = fallbacks.throttleSensitivity;
         m_fallback[4] = fallbacks.brakeDeadZone;
         m_fallback[5] = fallbacks.brakeSensitivity;
+        m_fallback[6] = fallbacks.clutchDeadZone;
+        m_fallback[7] = fallbacks.clutchSensitivity;
         m_fallbackInvert = fallbacks.invertSteer;
         m_selected = 0;
     }
@@ -63,11 +67,16 @@ public:
         case 3: return "Throttle sensitivity";
         case 4: return "Brake deadzone";
         case 5: return "Brake sensitivity";
+        case 6: return "Clutch deadzone";
+        case 7: return "Clutch sensitivity";
         default: return "Invert steer";
         }
     }
     static const char* sectionFor(int row) {
-        return row < 2 ? "STEER" : (row < 4 ? "THROTTLE" : "BRAKE");
+        if (row < 2) return "STEER";
+        if (row < 4) return "THROTTLE";
+        if (row < 6) return "BRAKE";
+        return "CLUTCH";
     }
     static const char* keyFor(int row) {
         return (row % 2 == 0) ? "DEADZONE" : "SENSITIVITY";
@@ -85,7 +94,7 @@ public:
     /** Current value of a row: the document's, or the fallback when absent. */
     double value(int row) const {
         if (row < 0 || row >= kRows) return 0.0;
-        if (row == 6) return invertSteer() ? 1.0 : 0.0;
+        if (row == 8) return invertSteer() ? 1.0 : 0.0;
         const ks::engine::json::Value* section = m_settings.root.find(sectionFor(row));
         if (section && section->isObject()) {
             const double v = section->numberAt(keyFor(row), -1.0);
@@ -111,7 +120,7 @@ public:
     int selected() const { return m_selected; }
 
     void setValue(int row, double v) {
-        if (row < 0 || row >= 6) return;
+        if (row < 0 || row >= 8) return;
         writeValue(sectionFor(row), keyFor(row),
                    ks::engine::json::Value::number(snap(v, minValue(row), maxValue(row))));
         notify();
@@ -126,7 +135,7 @@ public:
      *  is clamped, invert flips. The setters report through onChanged. */
     void adjustSelected(int direction) {
         if (direction == 0) return;
-        if (m_selected == 6) { setInvert(!invertSteer()); return; }
+        if (m_selected == 8) { setInvert(!invertSteer()); return; }
         const double delta = direction > 0 ? stepValue(m_selected) : -stepValue(m_selected);
         setValue(m_selected, value(m_selected) + delta);
     }
@@ -164,7 +173,7 @@ public:
 
             dl.addText(rr.x + 10, rr.y + 9, labelFor(i), Color::rgb(230, 230, 230), 1.05f);
 
-            if (i == 6) std::snprintf(text, sizeof(text), "%s", invertSteer() ? "ON" : "OFF");
+            if (i == 8) std::snprintf(text, sizeof(text), "%s", invertSteer() ? "ON" : "OFF");
             else std::snprintf(text, sizeof(text), "%.2f", value(i));
             dl.addText(rr.x + 310, rr.y + 9, text, Color::rgb(160, 200, 255), 1.05f);
             rowY += rowH;
@@ -226,7 +235,7 @@ private:
 
     bool m_visible = false;
     int m_selected = 0;
-    double m_fallback[6] = {0.12, 1.0, 0.12, 1.0, 0.12, 1.0};
+    double m_fallback[8] = {0.12, 1.0, 0.12, 1.0, 0.12, 1.0, 0.12, 1.0};
     bool m_fallbackInvert = false;
     ks::engine::config::ControllerSettings m_settings;
 };

@@ -49,6 +49,7 @@ struct JoystickMapping {
     double deadZone = 0.12; // steering
     double throttleDeadZone = 0.12;
     double brakeDeadZone = 0.12;
+    double clutchDeadZone = 0.12;
     double steerGamma = 1.6;
     double throttleGamma = 1.0;
     double brakeGamma = 1.0;
@@ -57,6 +58,7 @@ struct JoystickMapping {
     double steerSensitivity = 1.0;
     double throttleSensitivity = 1.0;
     double brakeSensitivity = 1.0;
+    double clutchSensitivity = 1.0;
 
     static JoystickMapping gamepadDefault() { return JoystickMapping{}; }
 
@@ -70,6 +72,7 @@ struct JoystickMapping {
         m.deadZone = 0.02;
         m.throttleDeadZone = 0.02;
         m.brakeDeadZone = 0.02;
+        m.clutchDeadZone = 0.02;
         m.shiftUpButton = 4;
         m.shiftDownButton = 5;
         m.handbrakeButton = -1; // wheels differ: mapped by the owner, not guessed
