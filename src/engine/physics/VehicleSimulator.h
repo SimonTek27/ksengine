@@ -178,6 +178,13 @@ public:
         float rideHeightRearMm = 35.f;
         float springRateFront = 150.f; // N/mm proxy (wheel rate)
         float springRateRear = 180.f;
+        /** Static wheel alignment. Camber is negative with the top of the wheel
+         *  inward (AC convention); toe is the axle's total toe-in in degrees,
+         *  split evenly between its two wheels (positive = toe-in). */
+        float camberFrontDeg = -2.5f;
+        float camberRearDeg = -1.5f;
+        float toeFrontDeg = 0.f;
+        float toeRearDeg = 0.10f;
         /** Anti-roll bar effective roll stiffness (N·m/rad), Milliken Kφ contribution. */
         float arbFront = 18000.f;
         float arbRear = 12000.f;
@@ -208,6 +215,10 @@ public:
     void applySetup(const SetupParams& p);
     const SetupParams& setupParams() const { return m_setup; }
     float brakeBias() const { return m_setup.brakeBias; }
+    /** Per-corner spring/damper state: what the setup's static camber and the
+     *  travel kinematics produce (also what a HUD or a test wants to read). */
+    SuspensionModel& suspension() { return m_suspension; }
+    const SuspensionModel& suspension() const { return m_suspension; }
 
     /** Milliken LLTD: front fraction of elastic lateral load transfer (0–1). */
     float lltdFrontFraction() const { return m_lltdFront; }

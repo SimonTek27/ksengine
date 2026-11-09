@@ -128,6 +128,11 @@ void SuspensionModel::update(float dt, float chassisAccZ, float lateralAccel, fl
             c.camberDeg = lut(m_damper.camberCurve, c.compression);
         else
             c.camberDeg = -1.0f - c.compression * 20.0f; // gain rough
+        // Setup static camber: the kinematics give the gain from travel, the
+        // setup shifts the whole curve. Without this a camber row would move
+        // nothing the tyres see.
+        c.camberDeg += (i < 2) ? m_geom.staticCamberFrontDeg
+                               : m_geom.staticCamberRearDeg;
     }
 }
 

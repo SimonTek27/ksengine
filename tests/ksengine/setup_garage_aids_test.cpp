@@ -203,5 +203,45 @@ int main() {
         KS_CHECK(std::fabs(car.setupParams().arbFront - 23456.f) < 1e-3f);
     }
 
+    // --- Camber and toe are setup values, not only suspension travel ------
+    // The screen's new rows must reach the physics: camber as the static part
+    // of the suspension's wheel angle, toe as a stored setup value (it becomes
+    // a slip-angle offset inside the vehicle step).
+    {
+        using ks::physics::VehicleSimulator;
+        SetupGarage garage;
+        garage.setVisible(true);
+        KS_CHECK(garage.handleKeyPress(0x09)); // OVERVIEW -> TYRES
+        KS_CHECK(garage.handleKeyPress(0x09)); // TYRES -> SUSPENSION
+        KS_CHECK(garage.rows().size() == 8);   // ride/spring x2 + camber/toe x2
+
+        VehicleSimulator car;
+        garage.onSetupChanged = [&](const ks::sim::SetupData& changed) {
+            car.applySetup(ks::sim::setupParamsFromGarage(changed, car.setupParams()));
+        };
+        // Row 0 is CAMBER F: one LEFT step is -0.1 deg.
+        KS_CHECK(garage.handleKeyPress(0x25)); // LEFT
+        KS_CHECK(std::fabs(car.setupParams().camberFrontDeg -
+                           garage.currentSetup().camberFront) < 1e-4f);
+
+        // The static camber actually shifts the wheel angle the tyres see.
+        VehicleSimulator soft, hard;
+        auto p = soft.setupParams();
+        p.camberFrontDeg = -2.5f;
+        soft.applySetup(p);
+        p.camberFrontDeg = -4.0f;
+        hard.applySetup(p);
+        soft.suspension().update(1.f / 60.f, 0.f, 0.f, 0.f, 1200.f, 0.f, 0.f);
+        hard.suspension().update(1.f / 60.f, 0.f, 0.f, 0.f, 1200.f, 0.f, 0.f);
+        KS_CHECK(hard.suspension().corner(0).camberDeg <=
+                 soft.suspension().corner(0).camberDeg - 1.4f);
+
+        // Toe survives the setup round trip (the vehicle step reads it).
+        auto t = hard.setupParams();
+        t.toeFrontDeg = 0.30f;
+        hard.applySetup(t);
+        KS_CHECK(std::fabs(hard.setupParams().toeFrontDeg - 0.30f) < 1e-4f);
+    }
+
     return ks::test::finish("setup_garage_aids_test");
 }

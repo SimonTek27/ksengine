@@ -38,6 +38,10 @@ struct SetupData {
     float rideHeightRear = 35.f;
     float springRateFront = 150.f; // N/mm proxy
     float springRateRear = 180.f;
+    float camberFront = -2.5f;     // deg, negative = top of the wheel inward
+    float camberRear = -1.5f;
+    float toeFront = 0.f;          // deg of total toe-in, split per wheel
+    float toeRear = 0.10f;         // deg, front/rear axle
     float frontWingAngle = 10.f;   // deg
     float rearWingAngle = 12.f;
     float diffPreload = 30.f;      // Nm proxy

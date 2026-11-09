@@ -30,6 +30,10 @@ inline ks::physics::VehicleSimulator::SetupParams setupParamsFromGarage(
     p.rideHeightRearMm = s.rideHeightRear;
     p.springRateFront = s.springRateFront;
     p.springRateRear = s.springRateRear;
+    p.camberFrontDeg = s.camberFront;
+    p.camberRearDeg = s.camberRear;
+    p.toeFrontDeg = s.toeFront;
+    p.toeRearDeg = s.toeRear;
     p.frontWingDeg = s.frontWingAngle;
     p.rearWingDeg = s.rearWingAngle;
     p.diffPreloadNm = s.diffPreload;

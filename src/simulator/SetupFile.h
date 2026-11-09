@@ -27,6 +27,10 @@ inline bool saveSetupToFile(const SetupData& s, const std::string& path) {
     out << "RideHeightRear=" << s.rideHeightRear << "\n";
     out << "SpringFront=" << s.springRateFront << "\n";
     out << "SpringRear=" << s.springRateRear << "\n";
+    out << "CamberFront=" << s.camberFront << "\n";
+    out << "CamberRear=" << s.camberRear << "\n";
+    out << "ToeFront=" << s.toeFront << "\n";
+    out << "ToeRear=" << s.toeRear << "\n";
     out << "[AERO]\n";
     out << "FrontWing=" << s.frontWingAngle << "\n";
     out << "RearWing=" << s.rearWingAngle << "\n";
@@ -70,6 +74,10 @@ inline bool loadSetupFromFile(SetupData& s, const std::string& path) {
         else if (key == "RideHeightRear") s.rideHeightRear = f;
         else if (key == "SpringFront") s.springRateFront = f;
         else if (key == "SpringRear") s.springRateRear = f;
+        else if (key == "CamberFront") s.camberFront = f;
+        else if (key == "CamberRear") s.camberRear = f;
+        else if (key == "ToeFront") s.toeFront = f;
+        else if (key == "ToeRear") s.toeRear = f;
         else if (key == "FrontWing") s.frontWingAngle = f;
         else if (key == "RearWing") s.rearWingAngle = f;
         else if (key == "DiffPreload") s.diffPreload = f;

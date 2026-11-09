@@ -84,6 +84,10 @@ void SetupGarage::rebuildRows()
         addF("RIDE HEIGHT R", "mm", "Rear static ride height", &m_setup.rideHeightRear, 15.f, 80.f, 0.5f);
         addF("SPRING F", "N/mm", "Front spring rate", &m_setup.springRateFront, 60.f, 300.f, 2.f);
         addF("SPRING R", "N/mm", "Rear spring rate", &m_setup.springRateRear, 60.f, 300.f, 2.f);
+        addF("CAMBER F", "deg", "Front static camber (negative = in)", &m_setup.camberFront, -5.f, 0.f, 0.1f);
+        addF("CAMBER R", "deg", "Rear static camber (negative = in)", &m_setup.camberRear, -4.f, 0.f, 0.1f);
+        addF("TOE F", "deg", "Front total toe-in", &m_setup.toeFront, -0.4f, 0.4f, 0.05f);
+        addF("TOE R", "deg", "Rear total toe-in", &m_setup.toeRear, -0.4f, 0.4f, 0.05f);
         break;
     case GarageTab::Aero:
         addF("FRONT WING", "deg", "Front wing angle", &m_setup.frontWingAngle, 0.f, 30.f, 0.5f);

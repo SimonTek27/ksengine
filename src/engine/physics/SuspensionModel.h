@@ -48,6 +48,10 @@ public:
         float motionRatio = 1.0f;
         float rollCenterFront = 0.05f;
         float rollCenterRear = 0.08f;
+        /** Setup static camber per axle (deg, negative = top inward), added to
+         *  the travel-derived camber so a garage change moves the wheel. */
+        float staticCamberFrontDeg = -2.5f;
+        float staticCamberRearDeg = -1.5f;
     };
 
     struct CornerState {

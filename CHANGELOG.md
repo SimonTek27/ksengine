@@ -9,6 +9,16 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Camber e toe nel garage, e arrivano ai pneumatici (GAP_MATRIX P0.3)**: la
+  scheda SOSPENSIONI ora ha CAMBER F/R e TOE F/R. Il camber statico non esisteva
+  come input: la fisica lo ricavava solo dall'escursione (`camberCurve`), quindi
+  `GeometryConfig` porta due offset statici per asse che la cinematica somma a
+  ogni angolo. Il toe non esisteva affatto: `SetupParams` ora lo dichiara per
+  asse (gradi totali di toe-in, metà per ruota) e il passo del veicolo lo
+  applica come offset di angolo di deriva, con segno opposto sulle due ruote
+  dell'asse. Entrambi sono salvati e riletti nei file `.setup`.
+  `setup_garage_aids_test` muove le righe con i tasti reali, verifica che il
+  camber cambi l'angolo della sospensione e che il toe sopravviva al round-trip.
 - **Il garage applica davvero il setup (GAP_MATRIX P0.3)**: `SetupGarage`
   chiamava `onSetupChanged` a ogni riga mossa, ma nessuno lo ascoltava: la
   schermata modificava una copia che la fisica non leggeva, quindi pressioni,

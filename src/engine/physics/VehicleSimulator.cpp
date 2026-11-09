@@ -462,6 +462,10 @@ void VehicleSimulator::applySetup(const SetupParams& p) {
     }
     m_setup.springRateFront = std::clamp(p.springRateFront, 40.f, 400.f);
     m_setup.springRateRear = std::clamp(p.springRateRear, 40.f, 400.f);
+    m_setup.camberFrontDeg = std::clamp(p.camberFrontDeg, -6.f, 1.f);
+    m_setup.camberRearDeg = std::clamp(p.camberRearDeg, -6.f, 1.f);
+    m_setup.toeFrontDeg = std::clamp(p.toeFrontDeg, -0.6f, 0.6f);
+    m_setup.toeRearDeg = std::clamp(p.toeRearDeg, -0.6f, 0.6f);
     m_setup.rideHeightFrontMm = std::clamp(p.rideHeightFrontMm, 10.f, 100.f);
     m_setup.rideHeightRearMm = std::clamp(p.rideHeightRearMm, 10.f, 100.f);
     m_rhFront = m_setup.rideHeightFrontMm * 0.001f;
@@ -483,6 +487,8 @@ void VehicleSimulator::applySetup(const SetupParams& p) {
     auto geom = m_suspension.geometryConfig();
     geom.rollCenterFront = m_setup.rollCenterFrontM;
     geom.rollCenterRear = m_setup.rollCenterRearM;
+    geom.staticCamberFrontDeg = m_setup.camberFrontDeg;
+    geom.staticCamberRearDeg = m_setup.camberRearDeg;
     geom.wheelBase = static_cast<float>(m_wheelBase);
     geom.frontTrackWidth = static_cast<float>(m_trackWidth);
     geom.rearTrackWidth = static_cast<float>(m_trackWidth);
@@ -922,6 +928,19 @@ void VehicleSimulator::integrate(double dt) {
     const auto& sFR = m_damage.suspensionDamage(1);
     saFL += sFL.toeDeviation * 0.01745f;
     saFR += sFR.toeDeviation * 0.01745f;
+
+    // Setup toe: a static steer angle per wheel, half the axle's total on each
+    // side. Toe-in (positive) points the left wheel right and the right wheel
+    // left, so both slip angles grow by the same amount in opposite sign —
+    // which is what makes the axle bite and the car stable in a straight line.
+    {
+        const float toeF = m_setup.toeFrontDeg * 0.5f * 0.01745f;
+        const float toeR = m_setup.toeRearDeg * 0.5f * 0.01745f;
+        saFL += toeF;
+        saFR -= toeF;
+        saRL += toeR;
+        saRR -= toeR;
+    }
 
     const size_t gi = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     float gearRatio = static_cast<float>(m_gearRatios[gi]);
