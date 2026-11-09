@@ -68,6 +68,12 @@ enum class TextureRole {
 
 inline bool isWeatheringTexture(const std::string& texture) {
     const std::string folded = materialLower(texture);
+    // "nodamage" is the CLEAN variant of a damage map (Kunos ships
+    // nodamage_lod0.dds as the body diffuse of the Esprit), so the word
+    // "damage" inside it must not disqualify a surface the file names.
+    if (folded.find("nodamage") != std::string::npos ||
+        folded.find("no_damage") != std::string::npos)
+        return false;
     return folded.find("damage") != std::string::npos ||
            folded.find("scratch") != std::string::npos ||
            folded.find("dirt") != std::string::npos ||
@@ -142,6 +148,19 @@ inline float authoredDetailTiles(const engine::fileformat::Kn5Material& material
 
 /** ksSpecular -> dielectric F0 scale. 0.5 is AC's neutral and the legacy look
  *  (0.04); the clamp keeps a broken value from killing or blowing the reply. */
+/** AC authors ksDiffuse as a scalar multiplier on the diffuse map, not a
+ *  colour: the file stores it in the first float and leaves Y/Z at zero.
+ *  Reading those three floats as RGB turned every untextured part into a
+ *  dark red panel (0.4, 0, 0). A file that really wrote a colour keeps it. */
+inline void diffuseFactors(const float authored[3], float out[3]) {
+    const float y = authored[1] < 0.0f ? -authored[1] : authored[1];
+    const float z = authored[2] < 0.0f ? -authored[2] : authored[2];
+    const bool scalar = y < 1e-4f && z < 1e-4f;
+    out[0] = authored[0];
+    out[1] = scalar ? authored[0] : authored[1];
+    out[2] = scalar ? authored[0] : authored[2];
+}
+
 inline float f0Scale(float specular) {
     return std::min(std::max(specular * static_cast<float>(KS_MATERIAL_SPECULAR_F0_SCALE),
                              static_cast<float>(KS_MATERIAL_SPECULAR_F0_MIN)),

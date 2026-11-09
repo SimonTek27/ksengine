@@ -872,6 +872,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     // KS_MATERIAL_DEBUG lists each material once with the preset it landed
     // on, which is the only way to see why a surface looks the way it does.
     const bool debugMaterials = std::getenv("KS_MATERIAL_DEBUG") != nullptr;
+    // Diagnostic: paint each mesh a flat colour derived from its material name
+    // and log the name with that colour, so a screenshot names the surface.
+    const bool debugMaterialIds = std::getenv("KS_MATERIAL_IDS") != nullptr;
+    std::set<std::string> printedMaterialIds;
     std::set<std::string> printedMaterials;
     {
         std::error_code ec;
@@ -1222,10 +1226,14 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (!faceInside && albedo.empty()) {
                     float authored[3] = {1.f, 1.f, 1.f};
                     if (propertyVec3(material, "ksDiffuse", authored)) {
+                        // ksDiffuse is AC's scalar multiplier, not a colour:
+                        // (0.4, 0, 0) would paint the part dark red.
+                        float factors[3] = {1.f, 1.f, 1.f};
+                        graphics::diffuseFactors(authored, factors);
                         for (NativeVertex& v : nm.vertices) {
-                            v.r = std::min(std::max(authored[0], 0.f), 1.f);
-                            v.g = std::min(std::max(authored[1], 0.f), 1.f);
-                            v.b = std::min(std::max(authored[2], 0.f), 1.f);
+                            v.r = std::min(std::max(factors[0], 0.f), 1.f);
+                            v.g = std::min(std::max(factors[1], 0.f), 1.f);
+                            v.b = std::min(std::max(factors[2], 0.f), 1.f);
                         }
                     }
                 }
@@ -1346,6 +1354,26 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (emissiveValue > 0.0f) {
                     nm.emissive = std::min(emissiveValue, 8.0f);
                     ++selfLit;
+                }
+                // Diagnostic (KS_MATERIAL_IDS): one flat colour per material so
+                // a screenshot names the surface that carries an artifact.
+                if (debugMaterialIds) {
+                    std::uint32_t hash = 2166136261u;
+                    for (unsigned char c : material.name) {
+                        hash ^= c;
+                        hash *= 16777619u;
+                    }
+                    const unsigned r = (hash >> 0) & 15u;
+                    const unsigned g = (hash >> 4) & 15u;
+                    const unsigned b = (hash >> 8) & 15u;
+                    nm.tint[0] = static_cast<float>(r) / 15.0f;
+                    nm.tint[1] = static_cast<float>(g) / 15.0f;
+                    nm.tint[2] = static_cast<float>(b) / 15.0f;
+                    nm.paintSolid = 1.0f;
+                    if (printedMaterialIds.insert(lower(material.name)).second) {
+                        std::fprintf(stderr, "[matid] %-22s %u %u %u\n",
+                                     material.name.c_str(), r, g, b);
+                    }
                 }
             }
 

@@ -163,6 +163,11 @@ int main() {
         KS_CHECK(isWeatheringTexture("dust.dds"));
         KS_CHECK(isWeatheringTexture("9x_tread_dirty.dds"));
         KS_CHECK(!isWeatheringTexture("asr-car-body.dds"));
+        // "nodamage" is the clean map Kunos ships as the Esprit body diffuse;
+        // the word "damage" inside it must not hide it.
+        KS_CHECK(!isWeatheringTexture("nodamage_lod0.dds"));
+        KS_CHECK(!isWeatheringTexture("no_damage.dds"));
+        KS_CHECK(textureRole("txDiffuse", "nodamage_lod0.dds") == TextureRole::diffuse);
 
         KS_CHECK(textureRole("txNormal", "damage.dds") == TextureRole::other);
         KS_CHECK(textureRole("txNormal", "body_nm.dds") == TextureRole::normal);
@@ -188,6 +193,19 @@ int main() {
         KS_CHECK(textureRole("txDetail", "metal_detail.dds") == TextureRole::detail);
         // A normal mapping keeps its role even when the texture is a normal.
         KS_CHECK(textureRole("txNormalDetail", "weave_nm.dds") == TextureRole::normal);
+    }
+
+    // --- ksDiffuse is a scalar in AC, not a colour: reading the three raw
+    //     floats as RGB turned untextured parts dark red ---------------------
+    {
+        float out[3] = {0.f, 0.f, 0.f};
+        const float scalar[3] = {0.4f, 0.0f, 0.0f};
+        diffuseFactors(scalar, out);
+        KS_CHECK(near(out[0], 0.4f) && near(out[1], 0.4f) && near(out[2], 0.4f));
+
+        const float colour[3] = {0.8f, 0.1f, 0.2f};
+        diffuseFactors(colour, out);
+        KS_CHECK(near(out[0], 0.8f) && near(out[1], 0.1f) && near(out[2], 0.2f));
     }
 
     // --- txDetail only when AC's useDetail asks for it ---------------------
