@@ -1,5 +1,8 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+#include "../../engine/Graphics/MaterialResponseConstants.h"
+
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec4 fragColor;
@@ -183,7 +186,9 @@ void main() {
     vec3 V = normalize(frame.cameraPos.xyz - fragWorldPos);
     // ksSpecular scales the dielectric F0 around AC's 0.5 neutral: 0.5 is the
     // legacy 0.04, 1.0 doubles it, 0 halves it.
-    float f0Scale = clamp(material.specularFresnel.x * 2.0, 0.4, 2.0);
+    float f0Scale = clamp(material.specularFresnel.x * KS_MATERIAL_SPECULAR_F0_SCALE,
+                          KS_MATERIAL_SPECULAR_F0_MIN,
+                          KS_MATERIAL_SPECULAR_F0_MAX);
 
     // Ambient: split-sum IBL when enabled (brief P2), legacy flat albedo *
     // 0.25 otherwise. Diffuse lobe from the irradiance map, specular from
@@ -262,11 +267,13 @@ void main() {
     // plus the reflection, and the reflection takes over towards grazing angles.
     // Authored fresnel (fresnelC/EXP/MaxLevel) when the file carries it: that
     // is the curve the windscreen was authored against. Without it, Schlick.
-    float fresnel = pow(1.0 - NdotV, 5.0);
+    float fresnel = pow(1.0 - NdotV, KS_MATERIAL_FRESNEL_POWER);
     if (material.specularFresnel.w > 0.001) {
         float fresnelBase = clamp(material.specularFresnel.y, 0.0, 1.0);
         float fresnelMax = clamp(material.specularFresnel.w, 0.0, 1.0);
-        float fresnelExp = clamp(material.specularFresnel.z, 0.1, 64.0);
+        float fresnelExp = clamp(material.specularFresnel.z,
+                                 KS_MATERIAL_FRESNEL_MIN_EXP,
+                                 KS_MATERIAL_FRESNEL_MAX_EXP);
         fresnel = clamp(fresnelBase +
                             (max(fresnelBase, fresnelMax) - fresnelBase) *
                                 pow(1.0 - NdotV, fresnelExp),

@@ -20,6 +20,7 @@
  */
 #include "../FileFormat/Kn5Reader.h"
 #include "MaterialPresets.h"
+#include "MaterialResponseConstants.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -48,9 +49,9 @@ inline bool firstFloat(const engine::fileformat::Kn5Material& material,
 /** The authored surface response, with AC's neutral values when the file
  *  carries none: specular 0.5, no Fresnel, exponent 5. */
 struct AuthoredSurface {
-    float specular = 0.5f;
+    float specular = static_cast<float>(KS_MATERIAL_SPECULAR_NEUTRAL);
     float fresnelC = 0.0f;
-    float fresnelExp = 5.0f;
+    float fresnelExp = static_cast<float>(KS_MATERIAL_FRESNEL_DEFAULT_EXP);
     float fresnelMax = 0.0f;
 };
 
@@ -84,7 +85,9 @@ inline float authoredDetailTiles(const engine::fileformat::Kn5Material& material
 /** ksSpecular -> dielectric F0 scale. 0.5 is AC's neutral and the legacy look
  *  (0.04); the clamp keeps a broken value from killing or blowing the reply. */
 inline float f0Scale(float specular) {
-    return std::min(std::max(specular * 2.0f, 0.4f), 2.0f);
+    return std::min(std::max(specular * static_cast<float>(KS_MATERIAL_SPECULAR_F0_SCALE),
+                             static_cast<float>(KS_MATERIAL_SPECULAR_F0_MIN)),
+                    static_cast<float>(KS_MATERIAL_SPECULAR_F0_MAX));
 }
 
 /** The specular as the GBuffer carries it: the coverage MAGNITUDE, so the
@@ -92,14 +95,20 @@ inline float f0Scale(float specular) {
  *  stays in [0.75, 1.25], above the abs(w) < 0.5 "no geometry" test. */
 inline float coverageMagnitude(float specular) {
     const float clamped = std::min(std::max(specular, 0.0f), 1.0f);
-    return 1.0f + (clamped - 0.5f) * 0.5f;
+    return 1.0f + (clamped - static_cast<float>(KS_MATERIAL_SPECULAR_NEUTRAL)) *
+                      static_cast<float>(KS_MATERIAL_COVERAGE_STEP);
 }
 
 /** Inverse of coverageMagnitude(), safe on the signed value the GBuffer stores. */
 inline float specularFromCoverage(float storedCoverage) {
     const float magnitude =
         storedCoverage < 0.0f ? -storedCoverage : storedCoverage;
-    return std::min(std::max((magnitude - 1.0f) * 2.0f + 0.5f, 0.0f), 1.0f);
+    return std::min(
+        std::max((magnitude - 1.0f) /
+                         static_cast<float>(KS_MATERIAL_COVERAGE_STEP) +
+                     static_cast<float>(KS_MATERIAL_SPECULAR_NEUTRAL),
+                 0.0f),
+        1.0f);
 }
 
 /** A blended surface is a pane when the preset already says glass, or when the
@@ -110,8 +119,8 @@ inline bool isGlassPane(const std::string& shader, bool presetGlass, float fresn
     if (presetGlass) return true;
     if (blend == 0 || fresnelMax <= 0.0f) return false;
     const std::string folded = materialLower(shader);
-    return folded.find("reflection") != std::string::npos ||
-           folded.find("windscreen") != std::string::npos;
+    return folded.find(KS_MATERIAL_GLASS_SHADER_REFLECTION) != std::string::npos ||
+           folded.find(KS_MATERIAL_GLASS_SHADER_WINDSCREEN) != std::string::npos;
 }
 
 } // namespace graphics

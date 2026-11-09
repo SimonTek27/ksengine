@@ -1,5 +1,8 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+#include "../../engine/Graphics/MaterialResponseConstants.h"
+
 // GBuffer MRT. Three render targets, all cleared to zero, with coverage
 // encoded in RT2.w (geometry writes 1.0 there, -1 on brake-disc pixels —
 // brief P6) so the deferred lighting pass can tell "no geometry here"
@@ -123,7 +126,8 @@ void main() {
     // stays in [0.75, 1.25], so the "no geometry" tests (abs(w) < 0.5) are
     // unaffected and a legacy material (specular 0.5) still writes exactly 1.
     float coverageMagnitude =
-        1.0 + (clamp(material.specularFresnel.x, 0.0, 1.0) - 0.5) * 0.5;
+        1.0 + (clamp(material.specularFresnel.x, 0.0, 1.0) -
+                  KS_MATERIAL_SPECULAR_NEUTRAL) * KS_MATERIAL_COVERAGE_STEP;
     outWorldPosCoverage = vec4(fragWorldPos,
                                (material.brakeDisc >= 0.5 ? -1.0 : 1.0) *
                                    coverageMagnitude);

@@ -1,5 +1,8 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+#include "../../engine/Graphics/MaterialResponseConstants.h"
+
 // Deferred lighting + volumetric atmosphere.
 //
 // Reads the GBuffer, re-runs the same directional-light + cascaded-shadow
@@ -207,8 +210,13 @@ void main() {
     float roughness = clamp(abs(normalRough.w), 0.05, 1.0);
     // gbuffer.frag packs the authored ksSpecular into the coverage magnitude
     // (1.0 = the legacy 0.04). 0.5 is AC's neutral: F0 scale 1.0.
-    float authoredSpecular = clamp((abs(coverage.w) - 1.0) * 2.0 + 0.5, 0.0, 1.0);
-    float f0Scale = clamp(authoredSpecular * 2.0, 0.4, 2.0);
+    float authoredSpecular = clamp((abs(coverage.w) - 1.0) /
+                                           KS_MATERIAL_COVERAGE_STEP +
+                                       KS_MATERIAL_SPECULAR_NEUTRAL,
+                                   0.0, 1.0);
+    float f0Scale = clamp(authoredSpecular * KS_MATERIAL_SPECULAR_F0_SCALE,
+                          KS_MATERIAL_SPECULAR_F0_MIN,
+                          KS_MATERIAL_SPECULAR_F0_MAX);
     vec3 camPos = frame.cameraPos.xyz;
     float viewDist = length(worldPos - camPos);
     vec3 V = normalize(camPos - worldPos);

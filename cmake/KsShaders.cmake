@@ -75,7 +75,10 @@ function(ks_add_shader_target _target _src_root)
 			add_custom_command(OUTPUT "${_spv}"
 				COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/shaders"
 				COMMAND ${KS_GLSLC} -O ${_stage} -o "${_spv}" "${_shader}"
+				# Shared C++/GLSL constants: editing them must rebuild every
+				# shader, or an old .spv would keep the previous numbers.
 				DEPENDS "${_shader}"
+				        "${_src_root}/engine/Graphics/MaterialResponseConstants.h"
 				COMMENT "glslc ${_name}.spv"
 				VERBATIM)
 			list(APPEND _ksim_spv_files "${_spv}")
