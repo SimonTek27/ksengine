@@ -1055,24 +1055,67 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
             }
         }
 
-        if (!bytes.empty() && ff::isDds(bytes)) {
-            const auto image = ff::decodeDds(bytes);
-            if (!image.ok() || image.rgba.empty()) {
-                std::fprintf(stderr, "[kn5] texture %s: %s", wanted.c_str(),
-                             image.info.error.c_str());
-                std::putchar(10);
+        std::vector<unsigned char> rgba;
+        int width = 0;
+        int height = 0;
+        if (!bytes.empty()) {
+            if (ff::isDds(bytes)) {
+                const auto image = ff::decodeDds(bytes);
+                if (!image.ok() || image.rgba.empty()) {
+                    std::fprintf(stderr, "[kn5] texture %s: %s", wanted.c_str(),
+                                 image.info.error.c_str());
+                    std::putchar(10);
+                } else {
+                    rgba = image.rgba;
+                    width = image.info.width;
+                    height = image.info.height;
+                }
             } else {
-                std::vector<unsigned char> rgba = image.rgba;
-                int width = image.info.width;
-                int height = image.info.height;
+                // KN5 textures are not all DDS: this car's window panes are
+                // Windows_D.png, and skipping them left the glass untextured
+                // (white fallback, no alpha to blend).
+                ks::image::RawImage png;
+                std::string why;
+                if (ks::image::decodePng(
+                        reinterpret_cast<const std::uint8_t*>(bytes.data()),
+                        bytes.size(), &png, &why)) {
+                    rgba = std::move(png.rgba);
+                    width = png.width;
+                    height = png.height;
+                } else if (!why.empty()) {
+                    std::fprintf(stderr, "[kn5] texture %s: %s\n", wanted.c_str(),
+                                 why.c_str());
+                }
+            }
+        }
+        if (!rgba.empty() && width > 0 && height > 0) {
                 if (soften) {
                     for (int pass = 0; pass < 4; ++pass) halveImage(rgba, width, height);
+                }
+                // Diagnostic (KS_DUMP_TEXTURES): write the decoded map out so a
+                // surface that renders wrong can be traced to the pixels the
+                // engine actually sampled (alpha of a pane, an AO map used as
+                // albedo, a fallback to white).
+                if (const char* dumpDir = std::getenv("KS_DUMP_TEXTURES")) {
+                    if (dumpDir[0] != '\0') {
+                        std::string safe = canonical;
+                        for (char& c : safe)
+                            if (c == '/' || c == '\\' || c == ':') c = '_';
+                        ks::image::RawImage dumped;
+                        dumped.width = width;
+                        dumped.height = height;
+                        dumped.rgba = rgba;
+                        const std::string out = std::string(dumpDir) + "/" + safe + ".png";
+                        std::string why;
+                        if (!ks::image::saveImageFile(out, dumped, &why))
+                            std::fprintf(stderr, "[tex] dump %s failed: %s\n",
+                                         out.c_str(), why.c_str());
+                    }
                 }
                 if (m_vulkanRenderer->addTextureFromMemory(
                         cacheKey, rgba, width, height)) {
                     key = cacheKey;
                 }
-            }
         }
         decodedTextures.emplace(wanted, key);
         return key;
