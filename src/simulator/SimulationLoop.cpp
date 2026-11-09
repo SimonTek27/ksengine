@@ -2408,6 +2408,10 @@ void SimulationLoop::applyShowroomLight() {
 }
 
 void SimulationLoop::updateWeather(float dt) {
+    // The windscreen rain animates off this clock (frame time, not wall
+    // time): dt == 0 while a modal overlay pauses the world, and suspended
+    // drops hang on the glass until the loop moves again.
+    m_weatherClock += dt;
     // A showroom comes with its own light. The menu runs the idle branch of
     // tick(), which never reaches this function, so the room applies its light
     // when it opens (see openShowroom) — this branch is for a session that
@@ -2440,6 +2444,28 @@ void SimulationLoop::updateWeather(float dt) {
         // crisp on a clear day.
         const float fogDensity = 0.0004f + m_weather.cloudCover * 0.004f;
         m_vulkanRenderer->setFog({0.6f, 0.7f, 0.85f}, fogDensity, 0.018f);
+        // Rain on the windscreen (stage 1). Coverage is the evolving mm/h
+        // capped at the deluge end, and the animation clock is this file's
+        // own frame time — the clock freezes with the world when the loop
+        // pauses, so suspended drops stay where they were. KS_RAIN (0..100)
+        // overrides the coverage for a test run without touching the grip
+        // model the real rainIntensity feeds. Only the driver's eye has
+        // glass in front of it: any other camera keeps the layer off.
+        // (The layer is screen-space on purpose — the glass pipeline
+        // depth-tests without writing, so the depth buffer cannot locate
+        // the glass; see rainOnGlass() in tonemap.frag.)
+        double coverage =
+            m_weather.rainIntensity > 0.0f
+                ? static_cast<double>(m_weather.rainIntensity) / 40.0
+                : 0.0;
+        if (const char* rainEnv = std::getenv("KS_RAIN"); rainEnv && *rainEnv)
+            coverage = std::atof(rainEnv) / 100.0;
+        const bool inCockpit = m_camera &&
+            m_camera->mode() == CameraController::Mode::Cockpit;
+        m_vulkanRenderer->setWindscreen(
+            static_cast<float>(std::clamp(coverage, 0.0, 1.0)),
+            inCockpit,
+            m_weatherClock);
     }
 }
 

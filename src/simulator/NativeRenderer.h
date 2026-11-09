@@ -409,6 +409,19 @@ public:
     void setHdrWhiteNits(float nits) { if (nits > 0.0f) m_hdrWhiteNits = nits; }
     float hdrWhiteNits() const { return m_hdrWhiteNits; }
 
+    // --- Rain on the windscreen (display pass, tonemap.frag binding 4) ---
+    // A 4-float UBO the session fills once per frame: coverage 0..1, the
+    // animation clock, the in-cockpit flag (the layer is screen-space: no
+    // glass mesh is sampled, so it only paints where the driver's window is)
+    // and the viewport aspect. No push room was left (TonemapPC ends at
+    // exactly the 128-byte guarantee), so the effect rides its own descriptor.
+    void setWindscreen(float coverage, bool inCockpit, float clockSeconds) {
+        m_windscreenCoverage =
+            coverage < 0.0f ? 0.0f : (coverage > 1.0f ? 1.0f : coverage);
+        m_windscreenCockpit = inCockpit;
+        m_windscreenClock = clockSeconds;
+    }
+
     // Colour grading of the display pass: the preset's colorGrading block and
     // the video config's saturation/contrast ride these. The defaults keep
     // the exact image the hardcoded push constants produced before them.
@@ -830,6 +843,13 @@ private:
     int m_dofBackLevels = -1;
     float m_dofMeterHalfX = 0.5f;  // metering half-size, UV fractions
     float m_dofMeterHalfY = 0.5f;
+
+    VkBuffer m_windscreenUBO = VK_NULL_HANDLE;
+    VkDeviceMemory m_windscreenMemory = VK_NULL_HANDLE;
+    void* m_windscreenMapped = nullptr;
+    float m_windscreenCoverage = 0.0f;
+    bool m_windscreenCockpit = false;
+    float m_windscreenClock = 0.0f;
 
     VkFormat m_gbufferFormats[kGBufferCount] = {
         VK_FORMAT_R8G8B8A8_UNORM,

@@ -39,6 +39,15 @@ layout(set = 0, binding = 2) uniform sampler2D gradeLut;
 // read when pc.dofEnabled == 1; when DOF is off the binding is still written
 // (the set must stay complete) but the shader never samples it.
 layout(set = 0, binding = 3) uniform sampler2D depthSampler;
+// Rain on the windscreen (stage 1), appended at the END of the display set
+// (the add-only rule for bindings): one vec4 in a small dedicated UBO — the
+// push block below fills exactly 128 bytes, the guaranteed limit, so it has
+// no room left. rainFx.x 0 (or z = 0: not the cockpit view) makes every read
+// of it dead code: the effect costs nothing but the uniform fetch.
+layout(set = 0, binding = 4) uniform WindscreenFx {
+    vec4 rainFx; // x coverage 0..1, y animation clock (s),
+                 // z in-cockpit flag (0/1), w aspect
+} rainFx;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -248,11 +257,86 @@ vec3 dofBlur(vec3 center, vec2 fragUV, ivec2 px, ivec2 extent, float focus) {
     return sum / weight;
 }
 
+// ---- Rain on the windscreen (stage 1) ----
+// Screen-space for stage 1: the depth buffer cannot locate the glass because
+// the glass pipeline is depth-tested, never written (NativeRenderer glass
+// blend state) — a windscreen pixel carries the depth of the world *behind*
+// it, so a near-depth gate would wet the dashboard and leave the glass dry.
+// What the display pass knows instead is the cockpit layout: rainFx.z is the
+// session's in-cockpit flag, and the drops ride the windscreen's screen band.
+// Three hash-built procedural layers, no texture shipping with the effect:
+//   1. a fine sliding ladder of small drops,
+//   2. a sparse slow layer of large beads,
+//   3. a static wetting film the fresh coverage seeds.
+// Each layer refracts the HDR it covers (a drop is a lens sitting on the
+// glass) and leaves a hair of darkening.
+float rainHash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 rainOnGlass(vec3 color, vec2 uv) {
+    if (rainFx.rainFx.x <= 0.001 || rainFx.rainFx.z < 0.5) return color;
+
+    // Windscreen band: full weight across the mid band the glass occupies,
+    // dying out over the roofline above and the cowl below. The soft profile
+    // keeps a dry stripe at the very top even without a roof to sample.
+    float coverage = rainFx.rainFx.x *
+        smoothstep(0.10, 0.30, uv.y) * (1.0 - smoothstep(0.62, 0.88, uv.y));
+    if (coverage <= 0.002) return color;
+
+    // Aspect-corrected coordinates keep the cells round.
+    const vec2 coords = uv * vec2(rainFx.rainFx.w, 1.0);
+    // coords-space displacement -> uv displacement: only the x axis was
+    // scaled up by the aspect, so only it scales back down.
+    const vec2 cellToUv = vec2(1.0 / rainFx.rainFx.w, 1.0);
+
+    // Layer 1: a fine ladder of fast sliding drops.
+    vec2 g1 = coords * vec2(24.0, 16.0);
+    g1.y += rainFx.rainFx.y * 1.4;
+    vec2 c1 = floor(g1);
+    vec2 f1 = fract(g1) - 0.5;
+    const float hit1 = step(rainHash(c1 + 3.7), coverage * 0.45);
+    vec2 o1 = vec2(rainHash(c1 + 17.1), rainHash(c1 + 31.7)) - 0.5;
+    const float drop1 = hit1 * smoothstep(0.16, 0.03, length(f1 - o1));
+
+    // Layer 2: slower, sparser, bigger beads.
+    vec2 g2 = coords * vec2(12.0, 8.0);
+    g2.y += rainFx.rainFx.y * 0.6;
+    vec2 c2 = floor(g2);
+    vec2 f2 = fract(g2) - 0.5;
+    const float hit2 = step(rainHash(c2 + 91.3), coverage * 0.30);
+    vec2 o2 = vec2(rainHash(c2 + 113.1), rainHash(c2 + 127.7)) - 0.5;
+    const float drop2 = hit2 * smoothstep(0.15, 0.04, length(f2 - o2));
+
+    // The wetting film: static nucleation the fresh coverage seeds.
+    vec2 g3 = coords * vec2(90.0, 60.0);
+    vec2 c3 = floor(g3);
+    vec2 f3 = fract(g3) - 0.5;
+    const float film = smoothstep(coverage * 0.5, 0.0, length(f3)) *
+                       step(0.55, rainHash(c3 + 211.7));
+
+    const float drop = clamp(drop1 + drop2 + film, 0.0, 1.0);
+    if (drop <= 0.002) return color;
+
+    // Refraction: shift what the covered pixel shows through, plus a hair of
+    // darkening at the rim. The shift is a fraction of one cell in uv space.
+    vec2 refr = (f1 - o1) * drop1 + (f2 - o2) * drop2 + f3 * film;
+    vec3 behind =
+        texture(hdrBuffer, uv + refr * cellToUv * 0.035).rgb;
+    return mix(color, behind, drop * 0.85) * (1.0 - drop * 0.08);
+}
+
 void main() {
     // The HDR frame and the bloom buffer are both scene-linear and both
     // pre-exposure, so exposure lands on their sum (same order the old
     // shader used).
     vec3 color = texture(hdrBuffer, fragUV).rgb;
+    // Rain on the windscreen: a screen-space droplet layer for the cockpit
+    // view, applied on the scene-linear light so DOF, the sharpen and the
+    // bloom fold all see the same refracted image as the displayed one. The
+    // gate (coverage 0, or not the cockpit view) makes the call a no-op
+    // before its first texture fetch.
+    color = rainOnGlass(color, fragUV);
     // Depth of field runs on the scene-linear light, before the bloom fold
     // and before the curve: a photographic lens blurs light, not the graded
     // image. dofEnabled 0 leaves every byte of this untouched.

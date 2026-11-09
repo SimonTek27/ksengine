@@ -169,12 +169,13 @@
         "feature": "rain",
         "status": "live",
         "landsAs": "weather rain shading + drops/spray",
-        "note": "The lighting pass reads rain intensity and track wetness from the weather every frame, and the drops and spray come from the particle emitters video.particles starts."
+        "note": "Rain and track wetness are live inputs: the engine-side RenderSystem stores them (wetSpecular() feeds its scene shading), the sim syncs them into TrackSurface for the grip model every frame, and the drops and spray come from the particle emitters video.particles starts. The sim's NativeRenderer does not read the rain state directly — the visible rain inside the cockpit rides windscreenEffects."
       },
       {
         "feature": "windscreenEffects",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "rain on the windscreen",
+        "note": "Stage 1 ships: the display pass (tonemap.frag, its own binding-4 UBO — the push block was already at the 128-byte guarantee) grows three hash-built procedural layers over the driver's view — a fine sliding ladder, sparse large beads and a static wetting film — each refracting the scene-linear HDR beneath it before DOF, sharpen and bloom. Coverage follows the evolving rain (mm/h over 40 tops it) plus KS_RAIN 0..100 as a visual-only override (grip untouched); it paints only in the cockpit view and animates on the frame clock, so it freezes with the world. The layer is screen-space on purpose: the glass pipeline depth-tests without ever writing, so the depth buffer cannot locate the glass — the band is the screen instead, which means stage 2+ should sample the real glass mesh (wipers, per-window fronts) rather than widen this one. In a parked showroom the layer stays off (the weather branch early-returns there)."
       },
       {
         "feature": "skidmarks",

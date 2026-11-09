@@ -1585,6 +1585,29 @@ static void initSimulation() {
         g_simulation->ui().menu().setVisible(false);
     }
 
+    // KS_CAM=<cockpit|chase|free> forces the camera the session starts in.
+    // The key 'C' still toggles it afterwards; this env exists so an unattended
+    // run (screenshot capture, perf logging) lands in the intended view with
+    // no input plumbing — the windscreen rain gate, for one, only paints in
+    // the cockpit view.
+    if (const char* camEnv = std::getenv("KS_CAM"); camEnv && camEnv[0]) {
+        ks::sim::CameraController::Mode cam =
+            ks::sim::CameraController::Mode::Chase;
+        const char* camName = "chase";
+        if (!std::strcmp(camEnv, "cockpit")) {
+            cam = ks::sim::CameraController::Mode::Cockpit;
+            camName = "cockpit";
+        } else if (!std::strcmp(camEnv, "free")) {
+            cam = ks::sim::CameraController::Mode::Free;
+            camName = "free";
+        } else if (std::strcmp(camEnv, "chase") != 0) {
+            printf("[INIT] KS_CAM=%s -> unknown view, keeping chase\n", camEnv);
+        }
+        g_simulation->setCameraMode(cam);
+        if (std::strcmp(camName, "chase") != 0)
+            printf("[INIT] KS_CAM=%s -> %s view\n", camEnv, camName);
+    }
+
     // Gate 2.11/2.12 enabler: KS_WEATHER=<dry|damp|wet> applies the same
     // preset the menu offers, right after the optional session start so the
     // whole run (grip, spray, wetness decay) is reproducible without UI

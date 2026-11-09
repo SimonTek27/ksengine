@@ -3453,6 +3453,18 @@ void NativeRenderer::endFrame() {
         // not shimmer), the horizontal blur reads its output, the vertical
         // blur reads that and writes the result back to slot A, which is
         // what the display pass samples. ----
+        // The windscreen rain rides the same 16 bytes every frame: coverage,
+        // the animation clock and the in-cockpit flag are the session's words.
+        if (m_windscreenMapped) {
+            float* rainFx = static_cast<float*>(m_windscreenMapped);
+            rainFx[0] = m_windscreenCoverage;
+            rainFx[1] = m_windscreenClock;
+            rainFx[2] = m_windscreenCockpit ? 1.0f : 0.0f;
+            rainFx[3] = m_swapChainExtent.height > 0
+                            ? static_cast<float>(m_swapChainExtent.width) /
+                                  static_cast<float>(m_swapChainExtent.height)
+                            : 1.0f;
+        }
         writeDisplayDescriptorSets(m_historyViews[historyWrite],
                                    deferred ? m_gbufferDepthView : m_depthView);
         {
@@ -3505,7 +3517,10 @@ void NativeRenderer::endFrame() {
             // writes to it, so flipping it back right after the pass keeps
             // every later consumer (the occlusion grid, the next frame's
             // GBuffer clear) untouched — DOF off skips both barriers and the
-            // depth stays exactly as the GBuffer pass left it.
+            // depth stays exactly as the GBuffer pass left it. (The windscreen
+            // rain in the same pass stopped reading the depth on purpose: the
+            // glass pipeline depth-tests without ever writing, so a glass
+            // pixel carries the depth of the world behind it, not the glass.)
             if (m_dofEnabled && m_gbufferDepthImage) {
                 VkImageMemoryBarrier dofIn{};
                 dofIn.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -5817,22 +5832,27 @@ bool NativeRenderer::ensureDeferredResources() {
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[4]{};
+        VkDescriptorSetLayoutBinding bindings[5]{};
         for (int i = 0; i < 4; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 4 (windscreenFX, tonemap.frag): the 4-float rain UBO the
+        // session refills every frame. Add-only after the four samplers.
+        bindings[4] = {4, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 4;
+        dslCi.bindingCount = 5;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
-        VkDescriptorPoolSize poolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4};
+        VkDescriptorPoolSize poolSizes[2]{
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolCi.maxSets = 1;
-        poolCi.poolSizeCount = 1;
-        poolCi.pPoolSizes = &poolSize;
+        poolCi.poolSizeCount = 2;
+        poolCi.pPoolSizes = poolSizes;
         if (vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_displayPool) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorSetLayout setLayouts[1] = {m_displaySetLayout};
@@ -5842,6 +5862,19 @@ bool NativeRenderer::ensureDeferredResources() {
         dsAi.descriptorSetCount = 1;
         dsAi.pSetLayouts = setLayouts;
         if (vkAllocateDescriptorSets(m_device, &dsAi, &m_displaySet) != VK_SUCCESS) { destroyDeferredResources(); return false; }
+
+        // The rain UBO itself: 16 bytes, host-visible, mapped once and
+        // written from endFrame() every frame.
+        if (!createBuffer(m_physicalDevice, m_device, 16,
+                          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          m_windscreenUBO, m_windscreenMemory) ||
+            vkMapMemory(m_device, m_windscreenMemory, 0, 16, 0,
+                        &m_windscreenMapped) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
     }
 
     // ---- GBuffer pipeline: forward's vertex input and pipeline layout
@@ -6324,6 +6357,11 @@ void NativeRenderer::destroyDeferredResources() {
     if (m_bloomInputSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_bloomInputSetLayout, nullptr); m_bloomInputSetLayout = VK_NULL_HANDLE; }
     if (m_displayPool) { vkDestroyDescriptorPool(m_device, m_displayPool, nullptr); m_displayPool = VK_NULL_HANDLE; }
     m_displaySet = VK_NULL_HANDLE;
+    // The windscreen rain UBO dies with the display set it feeds.
+    if (m_windscreenMapped) vkUnmapMemory(m_device, m_windscreenMemory);
+    if (m_windscreenUBO) { vkDestroyBuffer(m_device, m_windscreenUBO, nullptr); m_windscreenUBO = VK_NULL_HANDLE; }
+    if (m_windscreenMemory) { vkFreeMemory(m_device, m_windscreenMemory, nullptr); m_windscreenMemory = VK_NULL_HANDLE; }
+    m_windscreenMapped = nullptr;
     if (m_displaySetLayout) { vkDestroyDescriptorSetLayout(m_device, m_displaySetLayout, nullptr); m_displaySetLayout = VK_NULL_HANDLE; }
     if (m_gbufferSampler) { vkDestroySampler(m_device, m_gbufferSampler, nullptr); m_gbufferSampler = VK_NULL_HANDLE; }
     if (m_hdrSampler) { vkDestroySampler(m_device, m_hdrSampler, nullptr); m_hdrSampler = VK_NULL_HANDLE; }
@@ -6511,7 +6549,7 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     lutInfo.imageView = m_lutView;
     lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[5]{};
+    VkWriteDescriptorSet writes[6]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -6562,7 +6600,21 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[4].pImageInfo = &depthInfo;
 
-    vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+    // Binding 4: the windscreen rain UBO. The session writes coverage, the
+    // animation clock, the glass near-depth threshold and the aspect into it
+    // every frame (endFrame()); here it is only ever pointed at the shader.
+    VkDescriptorBufferInfo rainInfo{};
+    rainInfo.buffer = m_windscreenUBO;
+    rainInfo.range = 16;
+
+    writes[5].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[5].dstSet = m_displaySet;
+    writes[5].dstBinding = 4;
+    writes[5].descriptorCount = 1;
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writes[5].pBufferInfo = &rainInfo;
+
+    vkUpdateDescriptorSets(m_device, 6, writes, 0, nullptr);
 }
 
 } // namespace ks::sim

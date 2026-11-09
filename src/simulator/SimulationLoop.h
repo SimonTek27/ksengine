@@ -558,6 +558,8 @@ private:
     bool m_carLoaded = false;
 
     float m_timeOfDay = 12.0f;
+    // Frame clock behind the windscreen rain animation (see updateWeather).
+    float m_weatherClock = 0.0f;
     ks::physics::WeatherState m_weather{};
     // Roadmap 2.1 (P2.8): evolves the preset above over time — rain
     // accumulation / track drying — and is mirrored back into m_weather
