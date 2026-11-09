@@ -216,6 +216,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   come un blocco solo), quindi per il simulatore non cambia niente.
 
 ### Fixed
+- **Le impostazioni engine non cancellano piu` il blocco controller**:
+  `EngineSettings::save` riscriveva `user/<player>/settings.json` con i soli
+  campi che conosce, quindi all'uscita la sezione `controller` (scritta dal
+  pannello) e ogni altra chiave sconosciuta sparivano: verificato con un file
+  che conteneva `controller` e un campo `physics.note`, entrambi persi. Ora il
+  salvataggio fa merge nel documento esistente, preserva i campi che non
+  gestisce e, se il file esiste ma non si parsa, non lo sovrascrive.
+  `controller_settings_test` copre merge, sopravvivenza della sezione e il
+  rifiuto del file rotto. Nello stesso giro, `system/cfg/ksengine.json` aveva
+  le virgolette di `"mirror"` non escapate in una nota: il parser rifiutava
+  l'intero documento e engine e controller restavano sui default di codice.
 - **Il converter non puo` piu` scrivere un documento JSON malformato**:
   `AcCarManifestConverter::writeDocuments` scriveva ogni documento con
   `dump()` e si fidava dell'output, quindi un routing difettoso avrebbe

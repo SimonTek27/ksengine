@@ -1,8 +1,10 @@
 #include "KsTest.h"
 #include "engine/Config/ControllerSettings.h"
+#include "engine/Config/EngineSettings.h"
 #include "engine/assets/UserData.h"
 #include "simulator/ui/ControllerSettingsOverlay.h"
 
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -169,6 +171,46 @@ int main() {
         KS_CHECK(throttle && throttle->numberAt("SENSITIVITY", -1.0) == 2.00);
         const ks::engine::json::Value* clutch = panel.settings().root.find("CLUTCH");
         KS_CHECK(clutch && clutch->numberAt("DEADZONE", -1.0) == 0.13);
+    }
+
+    // EngineSettings shares settings.json with the controller block: saving
+    // the engine keys must merge them in, not replace the document.
+    {
+        const std::string shared = (dir / "shared.json").string();
+        std::FILE* seed = std::fopen(shared.c_str(), "w");
+        if (seed) {
+            std::fputs("{\"controller\":{\"STEER\":{\"DEADZONE\":0.2}},"
+                       "\"physics\":{\"fixedDt\":0.01,\"note\":\"keep\"}}",
+                       seed);
+            std::fclose(seed);
+        }
+        ks::engine::config::EngineSettings es;
+        KS_CHECK(es.load(shared));
+        KS_CHECK(std::fabs(es.physicsFixedDt - 0.01) < 1e-12);
+        es.physicsFixedDt = 0.008;
+        KS_CHECK(es.save(shared));
+
+        std::string text;
+        ks::engine::json::Value doc;
+        KS_CHECK(ks::engine::assets::UserData::readFile(shared, text));
+        std::string parseError;
+        KS_CHECK(ks::engine::json::parse(text, doc, &parseError));
+        const ks::engine::json::Value* physics = doc.find("physics");
+        KS_CHECK(physics && physics->numberAt("fixedDt", -1.0) == 0.008);
+        KS_CHECK(physics && physics->stringAt("note") == "keep");
+        const ks::engine::json::Value* controller = doc.find("controller");
+        const ks::engine::json::Value* steer =
+            controller ? controller->find("STEER") : nullptr;
+        KS_CHECK(steer && steer->numberAt("DEADZONE", -1.0) == 0.2);
+
+        // A file that cannot be parsed is not overwritten.
+        const std::string broken = (dir / "broken.json").string();
+        std::FILE* bf = std::fopen(broken.c_str(), "w");
+        if (bf) { std::fputs("{ nope", bf); std::fclose(bf); }
+        KS_CHECK(!es.save(broken));
+        std::string brokenText;
+        KS_CHECK(ks::engine::assets::UserData::readFile(broken, brokenText));
+        KS_CHECK(brokenText == "{ nope");
     }
 
     // Alias names compile.

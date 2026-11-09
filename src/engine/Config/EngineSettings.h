@@ -135,9 +135,42 @@ struct EngineSettings {
         return root;
     }
 
-    /** Write back the carried keys (creating the folder if needed). */
+    /** Write back the carried keys (creating the folder if needed). The file
+     *  is shared with other writers (the controller block lives in the same
+     *  document), so this merges its keys into what the file already holds
+     *  instead of replacing it. A file that exists but cannot be parsed is left
+     *  untouched rather than overwritten, so a bad edit costs nothing. */
     bool save(const std::string& path) const {
-        return assets::UserData::writeFile(path, json::dump(toJson()));
+        json::Value root = json::Value::object();
+        std::string text;
+        if (assets::UserData::readFile(path, text)) {
+            std::string error;
+            if (!json::parse(text, root, &error)) {
+                std::fprintf(stderr, "EngineSettings: %s: %s\n", path.c_str(), error.c_str());
+                return false;
+            }
+            if (!root.isObject()) root = json::Value::object();
+        }
+        const json::Value own = toJson();
+        for (const std::string& section : own.keys()) {
+            const json::Value* mine = own.find(section);
+            if (!mine) continue;
+            if (!mine->isObject()) {
+                root.set(section, *mine);
+                continue;
+            }
+            json::Value merged = json::Value::object();
+            if (const json::Value* existing = root.find(section);
+                existing && existing->isObject()) {
+                merged = *existing;
+            }
+            for (const std::string& key : mine->keys()) {
+                if (const json::Value* value = mine->find(key))
+                    merged.set(key, *value);
+            }
+            root.set(section, std::move(merged));
+        }
+        return assets::UserData::writeFile(path, json::dump(root));
     }
 };
 
