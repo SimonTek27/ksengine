@@ -145,3 +145,6 @@ backups/
 milliken_extract/
 *.zip
 !content/**/*.zip
+
+# Runtime writes its GPU/driver shader stamp here on every boot
+system/cfg/shader_stamp.txt
