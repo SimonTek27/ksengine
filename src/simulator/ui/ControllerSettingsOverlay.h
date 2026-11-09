@@ -237,10 +237,13 @@ public:
             else if (closeBtn.contains(mx, my)) setVisible(false);
         }
 
+        // Short enough to stay inside the panel: the long hint used to end
+        // under the right edge ("Esc: cance"), so both lines are measured
+        // against the same 448 px of usable width.
         dl.addText(x + 16, y + panelH - 28,
                    m_dirty
-                       ? "Unsaved changes  -  Save writes settings, Esc cancels"
-                       : "Up/Down: row   Left/Right: change   Save writes settings   Esc: cancel",
+                       ? "Unsaved changes  -  Save writes, Esc cancels"
+                       : "Up/Down: row   Left/Right: change   Save   Esc: cancel",
                    m_dirty ? Color::rgb(255, 210, 90) : Color::rgb(140, 150, 160), 0.9f);
     }
 

@@ -27,7 +27,7 @@
     "offsetY": 0.0
   },
   "depthOfField": {
-    "enabled": true,
+    "enabled": false,
     "quality": 5,
     "apertureFNumber": 3.3,
     "imageSensorHeight": 0.29,
@@ -215,7 +215,7 @@
       "BACKGROUND_MASK_THRESHOLD": 0.11,
       "BASE_FOV": 90,
       "EDGE_QUALITY": 4,
-      "ENABLED": true,
+      "ENABLED": false,
       "IMAGE_SENSOR_HEIGHT": 0.29,
       "QUALITY": 5
     },

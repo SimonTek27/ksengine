@@ -216,6 +216,17 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   come un blocco solo), quindi per il simulatore non cambia niente.
 
 ### Fixed
+- **La scena non e` piu` sfocata e sovraesposta (video)**: il preset `Normal`
+  teneva il depth of field attivo a f/3.3 su tutto il frame, quindi anche
+  l'auto in primo piano e il pavimento dello showroom arrivavano sfocati; ora
+  il preset lo lascia spento (i valori restano nel file, pronti per essere
+  riattivati). La config video forzava `exposure` a 1.0 sopra lo 0.72 del
+  preset, bruciando cielo e pavimento: il valore e` tornato a 0.72. Il testo
+  dell'interfaccia era rasterizzato a 17 px e ingrandito con campionamento
+  nearest, quindi a 1440p ogni glifo diventava a scalini: il campionatore
+  dell'atlante e` ora lineare (l'atlante ha un pixel di padding per glifo).
+  Corretto anche il footer del pannello controller, che finiva sotto il bordo
+  destro (`Esc: cance`).
 - **Le impostazioni engine non cancellano piu` il blocco controller**:
   `EngineSettings::save` riscriveva `user/<player>/settings.json` con i soli
   campi che conosce, quindi all'uscita la sezione `controller` (scritta dal

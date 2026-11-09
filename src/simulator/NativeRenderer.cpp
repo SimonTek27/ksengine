@@ -4087,12 +4087,15 @@ void NativeRenderer::endFrame() {
             // attachment writes -> shader reads. The display pass then never
             // writes to it, so flipping it back right after the pass keeps
             // every later consumer (the occlusion grid, the next frame's
-            // GBuffer clear) untouched — DOF off skips both barriers and the
-            // depth stays exactly as the GBuffer pass left it. (The windscreen
+            // GBuffer clear) untouched. The barrier runs even when DOF is off:
+            // the display set always claims SHADER_READ_ONLY_OPTIMAL for the
+            // depth view (see the descriptor write), and skipping the barrier
+            // made the validation layer flag the draw
+            // (VUID-vkCmdDraw-imageLayout-00344). (The windscreen
             // rain in the same pass stopped reading the depth on purpose: the
             // glass pipeline depth-tests without ever writing, so a glass
             // pixel carries the depth of the world behind it, not the glass.)
-            if (m_dofEnabled && m_gbufferDepthImage) {
+            if (m_gbufferDepthImage) {
                 VkImageMemoryBarrier dofIn{};
                 dofIn.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
                 dofIn.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -4201,7 +4204,7 @@ void NativeRenderer::endFrame() {
             // DOF — depth reads are done: hand the image back to whatever the
             // rest of the frame expects (the attachment layout it had on the
             // way in).
-            if (m_dofEnabled && m_gbufferDepthImage) {
+            if (m_gbufferDepthImage) {
                 VkImageMemoryBarrier dofOut{};
                 dofOut.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
                 dofOut.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

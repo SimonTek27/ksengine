@@ -68,7 +68,7 @@
     "ssao": false,
     "ssr": false,
     "motionBlur": true,
-    "exposure": 1.0,
+    "exposure": 0.72,
     "tonemap": "ACES",
     "tonemaps": [
       "NONE",

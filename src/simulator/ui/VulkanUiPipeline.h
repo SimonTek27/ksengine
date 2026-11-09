@@ -397,8 +397,12 @@ private:
 
     bool createSampler() {
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        si.magFilter = VK_FILTER_NEAREST;
-        si.minFilter = VK_FILTER_NEAREST;
+        // The atlas is rasterized at one fixed pixel size and drawn at menu
+        // scales around 1.0-1.4, so nearest magnification turned every glyph
+        // into stair steps at 1440p. TtfRasterizer pads each glyph by one
+        // empty pixel, which is why linear filtering has no bleeding to leak.
+        si.magFilter = VK_FILTER_LINEAR;
+        si.minFilter = VK_FILTER_LINEAR;
         si.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
