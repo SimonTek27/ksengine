@@ -58,6 +58,8 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include "engine/terrain/TerrainMesh.h"
 #include "engine/terrain/TerrainHeightmap.h"
 #include "engine/FileFormat/PngReader.h"
+#include "engine/Graphics/SkinColour.h"
+#include "engine/material/PngCodec.h"
 
 #include "adapters/assetto_corsa/AcSharedMemoryPublisher.h"
 #include "adapters/assetto_corsa/AcSurfacesLoader.h"
@@ -795,6 +797,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     int cutouts = 0;
     int seeThrough = 0;
     int selfLit = 0;
+    // The colour the bodywork actually took, for the [paint] line below: the
+    // skin's own swatch and the car's declared list are different sources.
+    float appliedPaint[3] = {1.0f, 1.0f, 1.0f};
     std::map<std::string, std::string> decodedTextures; // kn5 texture -> cache key
 
     // The nodes the content hides: the car's overrides name them and the
@@ -970,6 +975,27 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         }
         return {};
     };
+
+    // AC keeps a skin's paint colour in its livery.png swatch: a Kunos skin
+    // such as the Countach's 0_rosso_siviglia_gold ships that file and no body
+    // texture, so the neutral paint map inside the KN5 has to take the skin's
+    // own colour or the car loads white.
+    float skinPaint[3] = {0.0f, 0.0f, 0.0f};
+    bool hasSkinPaint = false;
+    if (!skinDir.empty()) {
+        const std::vector<unsigned char> swatch = readSkinTexture("livery.png");
+        if (!swatch.empty()) {
+            ks::image::RawImage swatchImage;
+            if (ks::image::decodePng(swatch.data(), swatch.size(), &swatchImage) &&
+                graphics::skinColour(swatchImage.rgba.data(), swatchImage.width,
+                                     swatchImage.height, skinPaint)) {
+                hasSkinPaint = true;
+                std::fprintf(stderr, "[paint] skin colour %.3f %.3f %.3f from livery.png",
+                             skinPaint[0], skinPaint[1], skinPaint[2]);
+                std::putchar(10);
+            }
+        }
+    }
 
     // Decodes a KN5 texture once and returns the key the mesh names. Empty
     // when neither the skin nor the file carries it, which leaves the surface
@@ -1299,6 +1325,20 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     // pick lands everywhere, and there it replaces the colour.
                     const bool liveryBody =
                         !skinDir.empty() && !readSkinTexture(albedo).empty();
+                    // The skin's own colour paints the body map it shipped no
+                    // texture for. A multiply keeps the map's black trim black,
+                    // which a solid paint would cover. A colour declared by the
+                    // car or picked by the player still wins below.
+                    if (!liveryBody && hasSkinPaint && !m_carPaintExplicit) {
+                        nm.tint[0] = skinPaint[0];
+                        nm.tint[1] = skinPaint[1];
+                        nm.tint[2] = skinPaint[2];
+                        appliedPaint[0] = skinPaint[0];
+                        appliedPaint[1] = skinPaint[1];
+                        appliedPaint[2] = skinPaint[2];
+                        nm.paintSolid = 0.0f;
+                        ++tinted;
+                    }
                     // No declared colours means no factory paint: tinting by a
                     // white default would only be the identity, while the log
                     // then claimed a repaint that never happened.
@@ -1306,6 +1346,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                         nm.tint[0] = m_carPaint[0];
                         nm.tint[1] = m_carPaint[1];
                         nm.tint[2] = m_carPaint[2];
+                        appliedPaint[0] = m_carPaint[0];
+                        appliedPaint[1] = m_carPaint[1];
+                        appliedPaint[2] = m_carPaint[2];
                         nm.paintSolid = liveryBody ? 1.0f : 0.0f;
                         ++tinted;
                     }
@@ -1433,14 +1476,15 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     if (tinted > 0) {
         // Runtime proof that the paint reached the bodywork, not just the file.
         std::printf("[paint] body %d mesh(es) tinted %.3f %.3f %.3f%s\n", tinted,
-                    m_carPaint[0], m_carPaint[1], m_carPaint[2],
+                    appliedPaint[0], appliedPaint[1], appliedPaint[2],
                     m_carPaintExplicit ? " (solid)" : "");
         std::putchar(10);
     } else if (painted > 0) {
         // Say which of the two it is: a livery already carries the body colour,
         // while a car with no colour list has no factory paint to apply at all.
         std::printf("[paint] %d painted mesh(es): %s\n", painted,
-                    m_carPaintDeclared ? "livery owns them, paint not applied"
+                    (m_carPaintDeclared || hasSkinPaint)
+                        ? "livery owns them, paint not applied"
                                        : "no factory colour declared, left as authored");
         std::putchar(10);
     }

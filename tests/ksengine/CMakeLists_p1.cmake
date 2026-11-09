@@ -68,6 +68,7 @@ set(KS_QT_FREE_TESTS
     udp_command_listener_test
     keyboard_mapping_test
     content_library_test
+    skin_colour_test
     scene_assets_test
     wet_physics_test
     rain_effects_test
