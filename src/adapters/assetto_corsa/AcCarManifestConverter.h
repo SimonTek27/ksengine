@@ -1504,6 +1504,42 @@ for (const char* owner : {"suspensions", "car"}) {
         return result;
     }
 
+    // Same idea for the component maps: re-derives the disc, suspension-leg and
+    // wing entries from the model the folder carries, touching only
+    // data/data.json so the other documents keep what they hold.
+    static Result refreshComponentMapsInDocument(const fs::path& carDir) {
+        Result result;
+        const fs::path path = manifestPath(carDir);
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            result.error = "no data document in " + carDir.string();
+            return result;
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        bool ok = false;
+        std::string error;
+        Json root = Json::parse(buffer.str(), &ok, &error);
+        if (!ok || !root.isObject()) {
+            result.error = "invalid data document `" + path.filename().string() + "`: " + error;
+            return result;
+        }
+        addComponentMaps(root, collectModelNodeNames(carDir));
+        std::string text;
+        if (!encodeJsonDocument(root, text, error)) {
+            result.error = "data document " + error;
+            return result;
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            result.error = "cannot write " + path.string();
+            return result;
+        }
+        out << text;
+        result.converted = true;
+        return result;
+    }
+
 private:
     static bool iequals(const std::string& a, const std::string& b) {
         if (a.size() != b.size()) return false;
@@ -1817,6 +1853,32 @@ private:
         return std::string();
     }
 
+    // A wing assembly, whichever way the model spells front and rear:
+    // "WING_FRONT", "FRONT_WING", "REAR_WING", but also the compact
+    // "ben_fwing"/"ben_rwing" some cars use. A model that names neither gets
+    // no entry, never a guess.
+    static std::string findAeroNode(const std::vector<std::string>& nodes, bool front) {
+        static const char* const kFront[] = {"FRONT", "FWING", "WINGF"};
+        static const char* const kRear[] = {"REAR", "RWING", "WINGR"};
+        const char* const* tokens = front ? kFront : kRear;
+        for (const std::string& name : nodes) {
+            const std::string upperName = upper(name);
+            if (upperName.find("WING") == std::string::npos) continue;
+            // A distant LOD copy is not the component itself, and content
+            // sometimes carries meshes from another car (a leftover Silvia
+            // wing node inside a Jaguar model must not become its front wing).
+            const std::size_t lod = upperName.find("LOD");
+            if (lod != std::string::npos &&
+                (lod == 0 || upperName[lod - 1] == '_' || upperName[lod - 1] == '-')) {
+                continue;
+            }
+            for (int i = 0; i < 3; ++i) {
+                if (upperName.find(tokens[i]) != std::string::npos) return name;
+            }
+        }
+        return std::string();
+    }
+
     // One role per corner, the same shape the reference manifests carry:
     // DISC_LF -> the disc node, SUSP_LF -> the suspension leg node. A car whose
     // model has no such node gets no entry, never a guess.
@@ -1852,6 +1914,22 @@ private:
                 const std::string node = findComponentNode(nodes, "SUSP", token);
                 if (!node.empty()) suspensions.insert(role, Json(node));
             }
+        }
+        {
+            // The wing assemblies live with the aero they produce, next to the
+            // disc and suspension maps: same rule, one entry per role that the
+            // model really carries.
+            Json& aeroSection = objectAt(root, "aero");
+            Json& aero = objectAt(aeroSection, "AERO_COMPONENTS");
+            for (const char* role : {"WING_FRONT", "WING_REAR"}) {
+                // The map says what the model carries: a role whose node is not
+                // there any more goes, the one that is there is rewritten.
+                const std::string node = findAeroNode(nodes, role[5] == 'F');
+                aero.remove(role);
+                if (!node.empty()) aero.insert(role, Json(node));
+            }
+            // A model with no wing nodes gets no empty map either.
+            if (aero.isEmpty()) aeroSection.remove("AERO_COMPONENTS");
         }
     }
 

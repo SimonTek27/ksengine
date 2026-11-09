@@ -13,6 +13,7 @@
 //   ks_cartool apply   <car-dir>
 //   ks_cartool prune   <car-dir>
 //   ks_cartool damage  <car-dir>
+//   ks_cartool components <car-dir>
 //   ks_cartool info    <car-dir>
 
 #include "../../src/adapters/assetto_corsa/AcCarManifestConverter.h"
@@ -118,6 +119,19 @@ static int runDamage(const fs::path& car) {
     return 0;
 }
 
+// The disc/suspension/aero component maps, re-derived from the model on a
+// folder that is already converted: only data/data.json is rewritten.
+static int runComponents(const fs::path& car) {
+    const AcCarManifestConverter::Result result =
+        AcCarManifestConverter::refreshComponentMapsInDocument(car);
+    if (!result.converted) {
+        std::printf("components failed: %s\n", result.error.c_str());
+        return 1;
+    }
+    std::printf("components: data.json carries the disc, suspension and aero maps\n");
+    return 0;
+}
+
 static int runPack(const fs::path& car) {
     const AcCarManifestConverter::Result result = AcCarManifestConverter::packAcd(car);
     if (!result.packDone) {
@@ -181,6 +195,7 @@ int main(int argc, char** argv) {
                     "       ks_cartool apply   <car-dir>\n"
                     "       ks_cartool prune   <car-dir>\n"
                     "       ks_cartool damage  <car-dir>\n"
+                    "       ks_cartool components <car-dir>\n"
                     "       ks_cartool pack    <car-dir>\n"
                     "       ks_cartool info    <car-dir>\n");
         return 2;
@@ -198,6 +213,7 @@ int main(int argc, char** argv) {
     if (command == "prune") return runPrune(src);
     if (command == "pack") return runPack(src);
     if (command == "damage") return runDamage(src);
+    if (command == "components") return runComponents(src);
     if (command == "split") {
         const AcCarManifestConverter::Result result = AcCarManifestConverter::split(src);
         if (!result.converted) {

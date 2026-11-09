@@ -163,6 +163,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
+- **`AERO_COMPONENTS` accanto a `DISCS_COMPONENTS` e `SUSPENSIONS_COMPONENTS`**:
+  il convertitore mappa anche i nodi delle ali (`aero.AERO_COMPONENTS`), con
+  `WING_FRONT` e `WING_REAR` riconosciuti in qualunque ordine di parole, anche
+  in forma compatta (`WING_FRONT`, `REAR_WING`, `ben_fwing`, `ben_rwing`).
+  Le copie LOD degli stessi nodi non contano. Come per le altre mappe, una voce esiste
+  solo se il modello ha quel nodo. `ks_cartool components <car-dir>` riapplica
+  le tre mappe a un documento già convertito riscrivendo solo `data.json`.
 - **`ks_cartool damage <car-dir>`**: riapplica la sezione `damage` unica a un
   documento già convertito leggendo e riscrivendo solo `data/data.json`.
   Serve perché `split`, su un'auto già convertita, riporta nel data document
