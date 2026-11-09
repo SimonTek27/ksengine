@@ -12,6 +12,7 @@
 //   ks_cartool verify  <car-dir>
 //   ks_cartool apply   <car-dir>
 //   ks_cartool prune   <car-dir>
+//   ks_cartool damage  <car-dir>
 //   ks_cartool info    <car-dir>
 
 #include "../../src/adapters/assetto_corsa/AcCarManifestConverter.h"
@@ -104,6 +105,19 @@ static int runPrune(const fs::path& car) {
     return 0;
 }
 
+// The unified damage section, applied to a folder that is already converted:
+// only data/data.json is read and rewritten, never the other documents.
+static int runDamage(const fs::path& car) {
+    const AcCarManifestConverter::Result result =
+        AcCarManifestConverter::unifyDamageInDocument(car);
+    if (!result.converted) {
+        std::printf("damage failed: %s\n", result.error.c_str());
+        return 1;
+    }
+    std::printf("damage: data.json keeps every damage block in one section\n");
+    return 0;
+}
+
 static int runPack(const fs::path& car) {
     const AcCarManifestConverter::Result result = AcCarManifestConverter::packAcd(car);
     if (!result.packDone) {
@@ -166,6 +180,7 @@ int main(int argc, char** argv) {
                     "       ks_cartool verify  <car-dir>\n"
                     "       ks_cartool apply   <car-dir>\n"
                     "       ks_cartool prune   <car-dir>\n"
+                    "       ks_cartool damage  <car-dir>\n"
                     "       ks_cartool pack    <car-dir>\n"
                     "       ks_cartool info    <car-dir>\n");
         return 2;
@@ -182,6 +197,7 @@ int main(int argc, char** argv) {
     if (command == "apply") return runApply(src);
     if (command == "prune") return runPrune(src);
     if (command == "pack") return runPack(src);
+    if (command == "damage") return runDamage(src);
     if (command == "split") {
         const AcCarManifestConverter::Result result = AcCarManifestConverter::split(src);
         if (!result.converted) {

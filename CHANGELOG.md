@@ -163,6 +163,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
+- **`ks_cartool damage <car-dir>`**: riapplica la sezione `damage` unica a un
+  documento già convertito leggendo e riscrivendo solo `data/data.json`.
+  Serve perché `split`, su un'auto già convertita, riporta nel data document
+  anche chiavi che appartengono agli altri documenti (`hidden_nodes`,
+  `sections`); questo comando lascia `model.json`, `driver.json` e gli altri
+  esattamente come sono.
 - **Tutti i danni in una sola sezione `damage`**: i dati di danno erano sparsi.
   Il blocco della carrozzeria stava in `damage`, ma `engine`, `drivetrain` e
   `suspensions` portavano ciascuno un proprio `DAMAGE`. Il convertitore ora
@@ -181,10 +187,10 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   copiando `SLIP_RATIO_LIMIT`/`CURVE`/`PRESENT`/`ACTIVE`/`RATE_HZ` e riempiendo
   il resto con i default di riferimento, quindi ogni auto convertita si trovava
   due blocchi ABS che dicevano la stessa cosa. La derivazione è stata rimossa:
-  resta il blocco che l'auto dichiara, e se il documento porta già un `ABS_V2`
-  nativo il vecchio `[ABS]` viene tolto. `CarElectronics` legge entrambe le
-  forme (e una coppia residua come un blocco solo), quindi per il simulatore
-  non cambia niente.
+  resta il blocco che l'auto dichiara: se il documento porta entrambi vince
+  `[ABS]` (lo stesso che il lettore preferisce) e la copia `ABS_V2` derivata
+  viene tolta. `CarElectronics` legge entrambe le forme (e una coppia residua
+  come un blocco solo), quindi per il simulatore non cambia niente.
 
 ### Fixed
 - **Il converter non puo` piu` scrivere un documento JSON malformato**:

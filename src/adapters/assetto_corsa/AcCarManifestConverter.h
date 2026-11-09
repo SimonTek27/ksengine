@@ -1465,6 +1465,45 @@ for (const char* owner : {"suspensions", "car"}) {
         return result;
     }
 
+    // Brings an already-converted folder up to date with the damage rule
+    // without re-splitting it: only data/data.json is read and written, so the
+    // other documents (model overrides included) stay exactly as they are. The
+    // split path is not usable for this: it folds every document back into the
+    // root, which carries their own keys (hidden_nodes, sections) into the data
+    // document as a side effect.
+    static Result unifyDamageInDocument(const fs::path& carDir) {
+        Result result;
+        const fs::path path = manifestPath(carDir);
+        std::ifstream in(path, std::ios::binary);
+        if (!in) {
+            result.error = "no data document in " + carDir.string();
+            return result;
+        }
+        std::ostringstream buffer;
+        buffer << in.rdbuf();
+        bool ok = false;
+        std::string error;
+        Json root = Json::parse(buffer.str(), &ok, &error);
+        if (!ok || !root.isObject()) {
+            result.error = "invalid data document `" + path.filename().string() + "`: " + error;
+            return result;
+        }
+        unifyDamage(root);
+        std::string text;
+        if (!encodeJsonDocument(root, text, error)) {
+            result.error = "data document " + error;
+            return result;
+        }
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            result.error = "cannot write " + path.string();
+            return result;
+        }
+        out << text;
+        result.converted = true;
+        return result;
+    }
+
 private:
     static bool iequals(const std::string& a, const std::string& b) {
         if (a.size() != b.size()) return false;
@@ -1918,9 +1957,10 @@ private:
             // thing, so the derivation is gone: CarElectronics.h reads either
             // shape, and a car that declares ABS_V2 natively keeps its own.
             Json& electronics = objectAt(root, "electronics");
-            // A car that already carries the newer block keeps it and loses the
-            // legacy copy: one ABS block in the document, either way round.
-            if (electronics.contains("ABS_V2")) electronics.remove("ABS");
+            // One ABS block, and it is the car's own: [ABS] wins over an
+            // ABS_V2 derived from it (the reader also reads ABS first), while a
+            // car that only declares the newer block keeps that one.
+            if (electronics.contains("ABS")) electronics.remove("ABS_V2");
             if (!electronics.contains("EDL")) {
                 Json edl = Json::object();
                 const Json* tc =
