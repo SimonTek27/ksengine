@@ -1768,7 +1768,14 @@ private:
             }
         }
         {
-            Json& suspensions = objectAt(objectAt(root, "brakes"), "SUSPENSIONS_COMPONENTS");
+            // The suspension legs belong with the suspension: the disc map stays
+            // under brakes, this one under suspensions. A document written by an
+            // earlier conversion still has the old copy inside brakes, so it is
+            // dropped instead of leaving two maps that say the same thing.
+            if (root.contains("brakes") && root["brakes"].isObject() &&
+                root["brakes"].contains("SUSPENSIONS_COMPONENTS"))
+                root["brakes"].remove("SUSPENSIONS_COMPONENTS");
+            Json& suspensions = objectAt(objectAt(root, "suspensions"), "SUSPENSIONS_COMPONENTS");
             for (const char* corner : {"LF", "RF", "LR", "RR"}) {
                 const std::string token = corner;
                 const std::string role = "SUSP_" + token;

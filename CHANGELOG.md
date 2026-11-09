@@ -163,6 +163,11 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
+- **`SUSPENSIONS_COMPONENTS` sotto `suspensions`**: il convertitore scriveva la
+  mappa dei nodi sospensione dentro la sezione `brakes`, accanto a
+  `DISCS_COMPONENTS`. Ora sta in `suspensions`, dove appartiene; una copia
+  lasciata lì da una conversione precedente viene rimossa, così la mappa è una
+  sola.
 - **Un solo blocco ABS per auto**: il convertitore derivava `ABS_V2` da `[ABS]`
   copiando `SLIP_RATIO_LIMIT`/`CURVE`/`PRESENT`/`ACTIVE`/`RATE_HZ` e riempiendo
   il resto con i default di riferimento, quindi ogni auto convertita si trovava
