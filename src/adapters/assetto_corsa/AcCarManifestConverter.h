@@ -203,12 +203,17 @@ public:
             {kAiDocument, "ai.LOOKAHEAD.SPEED_GAIN", "ai", "LOOKAHEAD", "SPEED_GAIN"},
             {kAiDocument, "ai.TYRES"},
             {kAiDocument, "ai.WING_VARIATION"},
-            {kDataDocument, "electronics.ABS_V2"},
+            // One ABS block: the car's own [ABS]. A car that declares the newer
+            // [ABS_V2] needs no entry here — the conversion no longer invents
+            // one, and the reader accepts either shape.
+            {kDataDocument, "electronics.ABS", "electronics", "ABS"},
             {kDataDocument, "electronics.EDL"},
             // A car can say NONE for the upshift profile, or carry no drivetrain
             // damage block at all: both are declarations, not gaps.
             {kDataDocument, "drivetrain.UPSHIFT_PROFILE", "drivetrain", "UPSHIFT_PROFILE"},
-            {kDataDocument, "drivetrain.DAMAGE", "drivetrain", "DAMAGE"},
+            // The block still comes from drivetrain.ini [DAMAGE]; it now lives in
+            // the document's single damage section.
+            {kDataDocument, "damage.DRIVETRAIN", "drivetrain", "DAMAGE"},
             // Range is a menu spec: electric cars declare it, the others do not.
             {kDataDocument, "specs.range", nullptr, nullptr, nullptr, "specs.range"},
             {kDriverDocument, "GRAPHICS.DRIVEREYES"},
@@ -551,10 +556,35 @@ static void normalizeBrakes(Json& root) {
         if (rest.isEmpty()) root.remove("script__car_params");
     }
 
+    // Every damage block in one section. The body block already sits at
+    // "damage" (damage.ini), while engine, drivetrain and suspensions each kept
+    // their own "DAMAGE" sub-block in their own section: three places to look
+    // for the same subject. They move under "damage", named after the system
+    // they describe, and the emptied source section goes if it held nothing else.
+    static void unifyDamage(Json& root) {
+        const auto moveToDamage = [&](const char* from, const char* as) {
+            if (!root.contains(from) || !root[from].isObject()) return;
+            Json& owner = root[from];
+            if (!owner.contains("DAMAGE") || !owner["DAMAGE"].isObject()) return;
+            // Copy before touching root: inserting or removing a root member can
+            // reallocate the objects a reference points into.
+            const Json payload = owner["DAMAGE"];
+            owner.remove("DAMAGE");
+            const bool ownerEmpty = owner.isEmpty();
+            if (ownerEmpty) root.remove(from);
+            Json& damage = objectAt(root, "damage");
+            if (!damage.contains(as)) damage.insert(as, payload);
+        };
+        moveToDamage("engine", "ENGINE");
+        moveToDamage("drivetrain", "DRIVETRAIN");
+        moveToDamage("suspensions", "SUSPENSION");
+    }
+
     static void normalize(Json& root, const fs::path& carDir) {
         normalizeGraphics(root);
         normalizeBrakes(root);
         addComponentMaps(root, collectModelNodeNames(carDir));
+        unifyDamage(root);
         projectDamperAndBumpstop(root);
         Json& fuel = objectAt(root, "fuel");
         addTypeDefaults(root, fuel);

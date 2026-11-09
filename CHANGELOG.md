@@ -163,6 +163,15 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
+- **Tutti i danni in una sola sezione `damage`**: i dati di danno erano sparsi.
+  Il blocco della carrozzeria stava in `damage`, ma `engine`, `drivetrain` e
+  `suspensions` portavano ciascuno un proprio `DAMAGE`. Il convertitore ora
+  sposta quei tre blocchi sotto `damage` come `ENGINE`, `DRIVETRAIN` e
+  `SUSPENSION` (valori invariati), e toglie la sezione di origine se resta
+  vuota. La verifica del convertitore richiedeva `drivetrain.DAMAGE`: ora
+  richiede `damage.DRIVETRAIN`; la voce `electronics.ABS_V2` è diventata
+  `electronics.ABS`, coerente con l'unico blocco ABS. Il test del convertitore
+  copre la struttura con un'auto che dichiara danno in tutti e tre i file.
 - **`SUSPENSIONS_COMPONENTS` sotto `suspensions`**: il convertitore scriveva la
   mappa dei nodi sospensione dentro la sezione `brakes`, accanto a
   `DISCS_COMPONENTS`. Ora sta in `suspensions`, dove appartiene; una copia

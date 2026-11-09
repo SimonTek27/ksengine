@@ -240,7 +240,16 @@ int main()
         writeFile(convDir / "data" / "suspensions.ini",
                   "[FRONT]\nDAMP_BUMP=16000\nDAMP_REBOUND=8000\n"
                   "BUMPSTOP_UP=0.055\nBUMP_STOP_RATE=150000\n"
+                  "[DAMAGE]\nMIN_VELOCITY=40\nGAIN=0.0004\nMAX_DAMAGE=0.05\n"
                   "[GRAPHICS_OFFSETS]\nWHEEL_LF=-0.01\nSUSP_LF=0.0\n");
+        // Damage data the other files declare: it must end up in the document's
+        // single section, not in a DAMAGE block inside each system.
+        writeFile(convDir / "data" / "engine.ini",
+                  "[DAMAGE]\nRPM_THRESHOLD=13700\nRPM_DAMAGE_K=1\n");
+        writeFile(convDir / "data" / "drivetrain.ini",
+                  "[DAMAGE]\nRPM_WINDOW_K=100\n");
+        writeFile(convDir / "data" / "damage.ini",
+                  "[SCRATCHES]\nMAX_SPEED=100\n[DAMAGE]\nINITIAL_LEVEL=20\n");
         writeFile(convDir / "data" / "brakes.ini",
                   "[DATA]\nMAX_TORQUE=2700\nFRONT_SHARE=0.5\n"
                   "[DISCS_GRAPHICS]\nDISC_LF=g_Disk_LF\nFRONT_MAX_GLOW=12\n"
@@ -315,6 +324,28 @@ int main()
         CHECK(fs::exists(convDir / "data" / "verify.json"));
         CHECK(dataText.find("\"GRAPHICS_OFFSET\"") == std::string::npos);
         CHECK(near(c1.fuelTankCapacityL(), 200.0, 1e-4));
+        // One damage section: the body block plus one sub-block per system,
+        // named after it. No system keeps a DAMAGE block of its own.
+        {
+            bool parsed = false;
+            const ks::Json damageDoc = ks::Json::parse(dataText, &parsed);
+            CHECK(parsed);
+            CHECK(damageDoc.contains("damage"));
+            if (damageDoc.contains("damage")) {
+                const ks::Json& dmg = damageDoc["damage"];
+                CHECK(dmg.isObject());
+                CHECK(dmg.contains("ENGINE"));
+                CHECK(dmg.contains("DRIVETRAIN"));
+                CHECK(dmg.contains("SUSPENSION"));
+                CHECK(dmg.contains("SCRATCHES")); // the body block stays put
+            }
+            if (damageDoc.contains("engine"))
+                CHECK(!damageDoc["engine"].contains("DAMAGE"));
+            if (damageDoc.contains("drivetrain"))
+                CHECK(!damageDoc["drivetrain"].contains("DAMAGE"));
+            if (damageDoc.contains("suspensions"))
+                CHECK(!damageDoc["suspensions"].contains("DAMAGE"));
+        }
         // Final step: data.acd is rebuilt from the folder and reads back with the
         // key of the car folder name.
         const ks::assetto_corsa::AcCarManifestConverter::Result packed =
