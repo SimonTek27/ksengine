@@ -741,6 +741,31 @@ private:
     VkRenderPass m_mirrorRenderPass = VK_NULL_HANDLE;
     VkFramebuffer m_mirrorFramebuffer = VK_NULL_HANDLE;
     VkSampler m_mirrorSampler = VK_NULL_HANDLE;
+    // Side tiles (left/right mirrors): own targets, cameras, frustums and
+    // draw lists. Render pass is shared (same format/extent as the rear tile).
+    mat4 m_mirrorLeftViewFrame, m_mirrorLeftProjFrame;
+    ks::math::Frustum m_mirrorLeftFrustum;
+    bool m_mirrorLeftFrameValid = false;
+    uint32_t m_mirrorLeftW = 0, m_mirrorLeftH = 0;
+    VkImage m_mirrorLeftImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorLeftMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorLeftView = VK_NULL_HANDLE;
+    VkImage m_mirrorLeftDepthImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorLeftDepthMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorLeftDepthView = VK_NULL_HANDLE;
+    VkFramebuffer m_mirrorLeftFramebuffer = VK_NULL_HANDLE;
+    mat4 m_mirrorRightViewFrame, m_mirrorRightProjFrame;
+    ks::math::Frustum m_mirrorRightFrustum;
+    bool m_mirrorRightFrameValid = false;
+    uint32_t m_mirrorRightW = 0, m_mirrorRightH = 0;
+    VkImage m_mirrorRightImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorRightMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorRightView = VK_NULL_HANDLE;
+    VkImage m_mirrorRightDepthImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_mirrorRightDepthMemory = VK_NULL_HANDLE;
+    VkImageView m_mirrorRightDepthView = VK_NULL_HANDLE;
+    VkFramebuffer m_mirrorRightFramebuffer = VK_NULL_HANDLE;
+    bool m_mirrorSideEnabled = true;
     VkBuffer m_mirrorUBO = VK_NULL_HANDLE;
     VkDeviceMemory m_mirrorUBOMemory = VK_NULL_HANDLE;
     void* m_mirrorUBOMapped = nullptr;
@@ -1004,9 +1029,12 @@ private:
     // endFrame() passes its local recordDrawList lambda down here and the
     // mirror scene pass is its only other caller. Declared next to QueuedDraw
     // because the signature needs it complete.
-    void recordMirrorScene(
-        const std::function<void(const std::vector<QueuedDraw>&, const mat4&,
-                                 const mat4&)>& drawList);
+    void recordMirrorScene(const mat4& view, const mat4& proj,
+                          VkImage colorImage, VkImageView colorView,
+                          VkFramebuffer framebuffer, uint32_t width, uint32_t height,
+                          const std::vector<QueuedDraw>& drawListVec,
+                          const std::function<void(const std::vector<QueuedDraw>&, const mat4&, const mat4&)>& drawFunc,
+                          bool withOcclusion);
     // Everything that survived the frustum test: the shadow cascades render
     // this list (an object hidden from the camera can still cast a visible
     // shadow) ...
@@ -1018,6 +1046,8 @@ private:
     // its eye can see, including meshes the main camera turned its back on
     // (both lists can hold the same instance, a wall to the side says).
     std::vector<QueuedDraw> m_mirrorList;
+    std::vector<QueuedDraw> m_mirrorLeftList;
+    std::vector<QueuedDraw> m_mirrorRightList;
 
     mat4 m_view;
     mat4 m_proj;

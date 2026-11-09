@@ -1717,6 +1717,90 @@ bool NativeRenderer::ensureMirrorResources() {
         return false;
     }
 
+    // Side targets (left/right): same format/extent/render pass, own colour
+    // + depth. Created only when side tiles are enabled.
+    if (m_mirrorSideEnabled) {
+        m_mirrorLeftW = w; m_mirrorLeftH = h;
+        m_mirrorRightW = w; m_mirrorRightH = h;
+        if (!createSampledTarget(m_physicalDevice, m_device, w, h, colorFormat,
+                                 m_mirrorLeftImage, m_mirrorLeftMemory, m_mirrorLeftView)) {
+            fprintf(stderr, "[NativeRenderer] mirror left: color target failed\n");
+            m_mirrorFailed = true; return false;
+        }
+        if (!createSampledTarget(m_physicalDevice, m_device, w, h, colorFormat,
+                                 m_mirrorRightImage, m_mirrorRightMemory, m_mirrorRightView)) {
+            fprintf(stderr, "[NativeRenderer] mirror right: color target failed\n");
+            m_mirrorFailed = true; return false;
+        }
+        // depth left
+        {
+            VkImageCreateInfo dCi{};
+            dCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            dCi.imageType = VK_IMAGE_TYPE_2D;
+            dCi.format = VK_FORMAT_D32_SFLOAT;
+            dCi.extent = {w, h, 1};
+            dCi.mipLevels = 1; dCi.arrayLayers = 1;
+            dCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+            dCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            dCi.samples = VK_SAMPLE_COUNT_1_BIT;
+            dCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            if (vkCreateImage(m_device, &dCi, nullptr, &m_mirrorLeftDepthImage) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+            VkMemoryRequirements dMr; vkGetImageMemoryRequirements(m_device, m_mirrorLeftDepthImage, &dMr);
+            VkMemoryAllocateInfo dAi{}; dAi.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; dAi.allocationSize=dMr.size;
+            dAi.memoryTypeIndex = findMemoryType(m_physicalDevice, dMr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (vkAllocateMemory(m_device, &dAi, nullptr, &m_mirrorLeftDepthMemory) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+            vkBindImageMemory(m_device, m_mirrorLeftDepthImage, m_mirrorLeftDepthMemory, 0);
+            VkImageViewCreateInfo dVi{}; dVi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; dVi.image=m_mirrorLeftDepthImage;
+            dVi.viewType=VK_IMAGE_VIEW_TYPE_2D; dVi.format=VK_FORMAT_D32_SFLOAT;
+            dVi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_DEPTH_BIT; dVi.subresourceRange.levelCount=1; dVi.subresourceRange.layerCount=1;
+            if (vkCreateImageView(m_device, &dVi, nullptr, &m_mirrorLeftDepthView) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+        }
+        // depth right
+        {
+            VkImageCreateInfo dCi{};
+            dCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+            dCi.imageType = VK_IMAGE_TYPE_2D;
+            dCi.format = VK_FORMAT_D32_SFLOAT;
+            dCi.extent = {w, h, 1};
+            dCi.mipLevels = 1; dCi.arrayLayers = 1;
+            dCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+            dCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+            dCi.samples = VK_SAMPLE_COUNT_1_BIT;
+            dCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            if (vkCreateImage(m_device, &dCi, nullptr, &m_mirrorRightDepthImage) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+            VkMemoryRequirements dMr; vkGetImageMemoryRequirements(m_device, m_mirrorRightDepthImage, &dMr);
+            VkMemoryAllocateInfo dAi{}; dAi.sType=VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO; dAi.allocationSize=dMr.size;
+            dAi.memoryTypeIndex = findMemoryType(m_physicalDevice, dMr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if (vkAllocateMemory(m_device, &dAi, nullptr, &m_mirrorRightDepthMemory) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+            vkBindImageMemory(m_device, m_mirrorRightDepthImage, m_mirrorRightDepthMemory, 0);
+            VkImageViewCreateInfo dVi{}; dVi.sType=VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO; dVi.image=m_mirrorRightDepthImage;
+            dVi.viewType=VK_IMAGE_VIEW_TYPE_2D; dVi.format=VK_FORMAT_D32_SFLOAT;
+            dVi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_DEPTH_BIT; dVi.subresourceRange.levelCount=1; dVi.subresourceRange.layerCount=1;
+            if (vkCreateImageView(m_device, &dVi, nullptr, &m_mirrorRightDepthView) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+        }
+        // framebuffers
+        {
+            VkImageView fbAtts[2] = {m_mirrorLeftView, m_mirrorLeftDepthView};
+            VkFramebufferCreateInfo fbCi{};
+            fbCi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fbCi.renderPass = m_mirrorRenderPass;
+            fbCi.attachmentCount = 2;
+            fbCi.pAttachments = fbAtts;
+            fbCi.width = w; fbCi.height = h; fbCi.layers = 1;
+            if (vkCreateFramebuffer(m_device, &fbCi, nullptr, &m_mirrorLeftFramebuffer) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+        }
+        {
+            VkImageView fbAtts[2] = {m_mirrorRightView, m_mirrorRightDepthView};
+            VkFramebufferCreateInfo fbCi{};
+            fbCi.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fbCi.renderPass = m_mirrorRenderPass;
+            fbCi.attachmentCount = 2;
+            fbCi.pAttachments = fbAtts;
+            fbCi.width = w; fbCi.height = h; fbCi.layers = 1;
+            if (vkCreateFramebuffer(m_device, &fbCi, nullptr, &m_mirrorRightFramebuffer) != VK_SUCCESS) { m_mirrorFailed=true; return false; }
+        }
+    }
+
     // Sampling back out of the colour target: linear, clamp, no mips.
     VkSamplerCreateInfo sCi{};
     sCi.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1805,6 +1889,21 @@ void NativeRenderer::destroyMirrorResources() {
     m_mirrorUBO = VK_NULL_HANDLE;
     m_mirrorUBOMemory = VK_NULL_HANDLE;
     destroyMirrorOverlay();
+    // Side targets
+    if (m_mirrorLeftFramebuffer) { vkDestroyFramebuffer(m_device, m_mirrorLeftFramebuffer, nullptr); m_mirrorLeftFramebuffer = VK_NULL_HANDLE; }
+    if (m_mirrorLeftDepthView) { vkDestroyImageView(m_device, m_mirrorLeftDepthView, nullptr); m_mirrorLeftDepthView = VK_NULL_HANDLE; }
+    if (m_mirrorLeftDepthImage) { vkDestroyImage(m_device, m_mirrorLeftDepthImage, nullptr); m_mirrorLeftDepthImage = VK_NULL_HANDLE; }
+    if (m_mirrorLeftDepthMemory) { vkFreeMemory(m_device, m_mirrorLeftDepthMemory, nullptr); m_mirrorLeftDepthMemory = VK_NULL_HANDLE; }
+    if (m_mirrorLeftView) { vkDestroyImageView(m_device, m_mirrorLeftView, nullptr); m_mirrorLeftView = VK_NULL_HANDLE; }
+    if (m_mirrorLeftImage) { vkDestroyImage(m_device, m_mirrorLeftImage, nullptr); m_mirrorLeftImage = VK_NULL_HANDLE; }
+    if (m_mirrorLeftMemory) { vkFreeMemory(m_device, m_mirrorLeftMemory, nullptr); m_mirrorLeftMemory = VK_NULL_HANDLE; }
+    if (m_mirrorRightFramebuffer) { vkDestroyFramebuffer(m_device, m_mirrorRightFramebuffer, nullptr); m_mirrorRightFramebuffer = VK_NULL_HANDLE; }
+    if (m_mirrorRightDepthView) { vkDestroyImageView(m_device, m_mirrorRightDepthView, nullptr); m_mirrorRightDepthView = VK_NULL_HANDLE; }
+    if (m_mirrorRightDepthImage) { vkDestroyImage(m_device, m_mirrorRightDepthImage, nullptr); m_mirrorRightDepthImage = VK_NULL_HANDLE; }
+    if (m_mirrorRightDepthMemory) { vkFreeMemory(m_device, m_mirrorRightDepthMemory, nullptr); m_mirrorRightDepthMemory = VK_NULL_HANDLE; }
+    if (m_mirrorRightView) { vkDestroyImageView(m_device, m_mirrorRightView, nullptr); m_mirrorRightView = VK_NULL_HANDLE; }
+    if (m_mirrorRightImage) { vkDestroyImage(m_device, m_mirrorRightImage, nullptr); m_mirrorRightImage = VK_NULL_HANDLE; }
+    if (m_mirrorRightMemory) { vkFreeMemory(m_device, m_mirrorRightMemory, nullptr); m_mirrorRightMemory = VK_NULL_HANDLE; }
     if (m_mirrorGlassPipeline) { vkDestroyPipeline(m_device, m_mirrorGlassPipeline, nullptr); m_mirrorGlassPipeline = VK_NULL_HANDLE; }
     if (m_mirrorGlassLayout) { vkDestroyPipelineLayout(m_device, m_mirrorGlassLayout, nullptr); m_mirrorGlassLayout = VK_NULL_HANDLE; }
     if (m_mirrorGlassSet) { /* pool owns */ m_mirrorGlassSet = VK_NULL_HANDLE; }
@@ -1843,8 +1942,12 @@ void NativeRenderer::destroyMirrorResources() {
 // the tile camera and the TAA feedback is zero (the tile is not a history
 // slot and never reprojects).
 void NativeRenderer::recordMirrorScene(
-    const std::function<void(const std::vector<QueuedDraw>&, const mat4&, const mat4&)>&
-        drawList) {
+    const mat4& view, const mat4& proj,
+    VkImage colorImage, VkImageView colorView,
+    VkFramebuffer framebuffer, uint32_t width, uint32_t height,
+    const std::vector<QueuedDraw>& drawListVec,
+    const std::function<void(const std::vector<QueuedDraw>&, const mat4&, const mat4&)>& drawFunc,
+    bool withOcclusion) {
     // One real image, one writer: rewriting the UBO is the cheap part; only
     // the camera changes from here.
     // Camera: built in beginFrame() from this frame's matrices — yaw-180 about
@@ -1853,9 +1956,9 @@ void NativeRenderer::recordMirrorScene(
     // pipelines were built with never changes), vertical focal kept and the
     // horizontal rescaled to the tile aspect. Rendering from the cached pair is
     // what makes the tile draw exactly the list drawMesh() tested for it.
-    const mat4& mirrorView = m_mirrorViewFrame;
-    const mat4& mirrorProj = m_mirrorProjFrame;
-    m_stats.mirrorDrawn = static_cast<uint32_t>(m_mirrorList.size());
+    const mat4& mirrorView = view;
+    const mat4& mirrorProj = proj;
+    m_stats.mirrorDrawn = static_cast<uint32_t>(drawListVec.size());
 
     FrameDataUBO frameData{};
     frameData.sunDirection[0] = m_sun.direction.x;
@@ -1958,20 +2061,20 @@ void NativeRenderer::recordMirrorScene(
     VkRenderPassBeginInfo mBegin{};
     mBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     mBegin.renderPass = m_mirrorRenderPass;
-    mBegin.framebuffer = m_mirrorFramebuffer;
-    mBegin.renderArea.extent = VkExtent2D{m_mirrorW, m_mirrorH};
+    mBegin.framebuffer = framebuffer;
+    mBegin.renderArea.extent = VkExtent2D{width, height};
     mBegin.clearValueCount = 2;
     mBegin.pClearValues = mClears;
     vkCmdBeginRenderPass(m_commandBuffer, &mBegin, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkViewport mVp{0, 0, float(m_mirrorW), float(m_mirrorH), 0.0f, 1.0f};
-    VkRect2D mSc{{0, 0}, {m_mirrorW, m_mirrorH}};
+    VkViewport mVp{0, 0, float(width), float(height), 0.0f, 1.0f};
+    VkRect2D mSc{{0, 0}, {width, height}};
     vkCmdSetViewport(m_commandBuffer, 0, 1, &mVp);
     vkCmdSetScissor(m_commandBuffer, 0, 1, &mSc);
     vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
     vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                             0, 1, &m_mirrorFrameSet, 0, nullptr);
-    if (drawList) drawList(m_mirrorList, mirrorView, mirrorProj);
+    if (drawFunc) drawFunc(drawListVec, mirrorView, mirrorProj);
     vkCmdEndRenderPass(m_commandBuffer);
 }
 
@@ -2399,6 +2502,66 @@ bool NativeRenderer::recordMirrorOverlay(VkRenderPass pass) {
     vkCmdPushConstants(m_commandBuffer, m_mirrorOverlayLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
                        0, sizeof(pc), &pc);
     vkCmdDraw(m_commandBuffer, 4, 1, 0, 0);
+
+    // Side tiles (left/right): reuse the same pipeline, repointing the
+    // descriptor set at each target and recomputing the quad rect.
+    if (m_mirrorSideEnabled) {
+        const float scaleW = 0.22f;
+        const float swapW = static_cast<float>(m_swapChainExtent.width);
+        const float swapH = static_cast<float>(m_swapChainExtent.height);
+        const float margin = swapH * 0.03f;
+        struct SideTile { VkImageView view; uint32_t tw, th; float cx; };
+        SideTile sides[2];
+        int nSides = 0;
+        if (m_mirrorLeftView && m_mirrorLeftW > 0 && m_mirrorLeftH > 0)
+            sides[nSides++] = {m_mirrorLeftView, m_mirrorLeftW, m_mirrorLeftH, -0.72f};
+        if (m_mirrorRightView && m_mirrorRightW > 0 && m_mirrorRightH > 0)
+            sides[nSides++] = {m_mirrorRightView, m_mirrorRightW, m_mirrorRightH, 0.72f};
+        for (int i = 0; i < nSides; ++i) {
+            float tileH = swapH;
+            if (sides[i].tw > 0 && sides[i].th > 0 && swapW > 0 && swapH > 0) {
+                const float aspect = static_cast<float>(sides[i].th) / static_cast<float>(sides[i].tw);
+                tileH = swapW * scaleW * aspect;
+                if (tileH > swapH * 0.22f) tileH = swapH * 0.22f;
+            }
+            const float halfW = swapW * scaleW * 0.5f;
+            const float halfH = tileH * 0.5f;
+            const float ndcHalfW = halfW / swapW;
+            const float ndcHalfH = halfH / swapH;
+            const float ndcTop = -1.0f + (margin + halfH) / swapH * 2.0f;
+
+            VkDescriptorImageInfo img{};
+            img.sampler = m_mirrorSampler;
+            img.imageView = sides[i].view;
+            img.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            VkWriteDescriptorSet w{};
+            w.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            w.dstSet = m_mirrorOverlaySet;
+            w.dstBinding = 0;
+            w.descriptorCount = 1;
+            w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w.pImageInfo = &img;
+            vkUpdateDescriptorSets(m_device, 1, &w, 0, nullptr);
+
+            struct MirrorOverlayPC { float rect[4]; float params[4]; } pc{};
+            pc.rect[0] = sides[i].cx - ndcHalfW;
+            pc.rect[1] = ndcTop - ndcHalfH;
+            pc.rect[2] = sides[i].cx + ndcHalfW;
+            pc.rect[3] = ndcTop;
+            pc.params[0] = 1.0f;
+            pc.params[1] = 0.92f;
+            pc.params[2] = 0.0f;
+            pc.params[3] = 0.0f;
+
+            vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, slot);
+            vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    m_mirrorOverlayLayout, 0, 1, &m_mirrorOverlaySet, 0, nullptr);
+            vkCmdPushConstants(m_commandBuffer, m_mirrorOverlayLayout, VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(pc), &pc);
+            vkCmdDraw(m_commandBuffer, 4, 1, 0, 0);
+        }
+    }
+
     return true;
 }
 
@@ -3076,6 +3239,8 @@ bool NativeRenderer::beginFrame() {
     m_drawList.clear();
     m_mainDrawList.clear();
     m_mirrorList.clear();
+    m_mirrorLeftList.clear();
+    m_mirrorRightList.clear();
     m_mirrorGlassValid = false;
     m_mirrorGlassModel = mat4();
     // Auto-detect a mirror-glass mesh by name when none was supplied explicitly
@@ -3138,6 +3303,41 @@ bool NativeRenderer::beginFrame() {
         m_mirrorFrustum = ks::math::Frustum::fromViewProj(
             asMath(m_mirrorProjFrame * m_mirrorViewFrame));
         m_mirrorFrameValid = true;
+
+        // Side tiles: cameras yawed ±75° about the view's up axis. Same tile
+        // size and vertical focal; only the horizontal focal is rescaled.
+        m_mirrorLeftFrameValid = false;
+        m_mirrorRightFrameValid = false;
+        if (m_mirrorSideEnabled) {
+            const float c = std::cos(1.309f); // 75 deg
+            const float s = std::sin(1.309f);
+            mat4 yawLeft; // +75 deg about Y
+            yawLeft(0,0)=c; yawLeft(0,2)=s;
+            yawLeft(1,1)=1.0f;
+            yawLeft(2,0)=-s; yawLeft(2,2)=c;
+            yawLeft(3,3)=1.0f;
+            mat4 yawRight; // -75 deg about Y
+            yawRight(0,0)=c; yawRight(0,2)=-s;
+            yawRight(1,1)=1.0f;
+            yawRight(2,0)=s; yawRight(2,2)=c;
+            yawRight(3,3)=1.0f;
+            m_mirrorLeftViewFrame = yawLeft * m_view;
+            m_mirrorRightViewFrame = yawRight * m_view;
+            uint32_t lw, lh, rw, rh;
+            resolvedMirrorSize(lw, lh); rw = lw; rh = lh;
+            m_mirrorLeftW = lw; m_mirrorLeftH = lh;
+            m_mirrorRightW = rw; m_mirrorRightH = rh;
+            m_mirrorLeftProjFrame = m_proj;
+            m_mirrorLeftProjFrame(0, 0) = m_proj(1, 1) * static_cast<float>(lh) / static_cast<float>(lw);
+            m_mirrorRightProjFrame = m_proj;
+            m_mirrorRightProjFrame(0, 0) = m_proj(1, 1) * static_cast<float>(rh) / static_cast<float>(rw);
+            m_mirrorLeftFrustum = ks::math::Frustum::fromViewProj(
+                asMath(m_mirrorLeftProjFrame * m_mirrorLeftViewFrame));
+            m_mirrorRightFrustum = ks::math::Frustum::fromViewProj(
+                asMath(m_mirrorRightProjFrame * m_mirrorRightViewFrame));
+            m_mirrorLeftFrameValid = true;
+            m_mirrorRightFrameValid = true;
+        }
     }
     if (m_frustumCulling && m_cameraValid && getenv("KS_CULL_DEBUG") != nullptr) {
         static bool s_planes = false;
@@ -3233,6 +3433,13 @@ void NativeRenderer::drawMesh(const std::string& name, const mat4& modelMatrix) 
             else
                 m_mirrorList.push_back({name, modelMatrix});
         }
+
+         if (m_mirrorSideEnabled && m_mirrorLeftFrameValid && haveBounds &&
+             m_mirrorLeftFrustum.intersects(wmin, wmax))
+             m_mirrorLeftList.push_back({name, modelMatrix});
+         if (m_mirrorSideEnabled && m_mirrorRightFrameValid && haveBounds &&
+             m_mirrorRightFrustum.intersects(wmin, wmax))
+             m_mirrorRightList.push_back({name, modelMatrix});
 
         if (m_frustumCulling && haveBounds && !m_frustum.intersects(wmin, wmax)) {
             ++m_stats.culled;
@@ -3548,8 +3755,16 @@ void NativeRenderer::endFrame() {
     // No valid frame pair means beginFrame() had no camera to build one from;
     // rendering from last frame's matrices would be a lie, so skip the tile
     // rather than show something stale.
-    if (m_mirrorEnabled && m_mirrorFrameValid && ensureMirrorResources())
-        recordMirrorScene(recordDrawList);
+    if (m_mirrorEnabled && m_mirrorFrameValid && ensureMirrorResources()) {
+        recordMirrorScene(m_mirrorViewFrame, m_mirrorProjFrame, m_mirrorImage, m_mirrorView,
+                         m_mirrorFramebuffer, m_mirrorW, m_mirrorH, m_mirrorList, recordDrawList, true);
+        if (m_mirrorSideEnabled && m_mirrorLeftFrameValid)
+            recordMirrorScene(m_mirrorLeftViewFrame, m_mirrorLeftProjFrame, m_mirrorLeftImage, m_mirrorLeftView,
+                             m_mirrorLeftFramebuffer, m_mirrorLeftW, m_mirrorLeftH, m_mirrorLeftList, recordDrawList, false);
+        if (m_mirrorSideEnabled && m_mirrorRightFrameValid)
+            recordMirrorScene(m_mirrorRightViewFrame, m_mirrorRightProjFrame, m_mirrorRightImage, m_mirrorRightView,
+                             m_mirrorRightFramebuffer, m_mirrorRightW, m_mirrorRightH, m_mirrorRightList, recordDrawList, false);
+    }
 
     // ---- Mirror occlusion grid: the tile's depth is in the attachment layout
     // the shared grid pass expects (recordMirrorScene() just ended, and its
