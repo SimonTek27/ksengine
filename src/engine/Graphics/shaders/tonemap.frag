@@ -54,8 +54,11 @@ layout(set = 0, binding = 4) uniform WindscreenFx {
 // is its screen-space AABB in UV space); 0 falls back to the stage-1 band.
 layout(set = 0, binding = 5) uniform WindscreenGlass {
     vec4 glassRect; // xy = min uv, zw = max uv
-    vec4 glassParams; // x = hasRect (0/1)
+    vec4 glassParams; // x = hasRect (0/1), y = viewW, z = viewH
 } windscreenGlass;
+// Per-pixel glass mask (stage 4): R8, 1 where a real glass mesh covers the
+// pixel. When glassParams.x > 0.5 this gates the rain instead of the rect.
+layout(set = 0, binding = 6) uniform sampler2D windscreenMask;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -290,9 +293,9 @@ vec3 rainOnGlass(vec3 color, vec2 uv) {
     // to the stage-1 screen band.
     float coverage;
     if (windscreenGlass.glassParams.x > 0.5) {
-        if (uv.x < windscreenGlass.glassRect.x || uv.x > windscreenGlass.glassRect.z ||
-            uv.y < windscreenGlass.glassRect.y || uv.y > windscreenGlass.glassRect.w)
-            return color;
+        // Stage 4: per-pixel mask wins over the rect when it is available.
+        float m = texture(windscreenMask, uv).r;
+        if (m <= 0.5) return color;
         coverage = rainFx.rainFx.x;
     } else {
         coverage = rainFx.rainFx.x *

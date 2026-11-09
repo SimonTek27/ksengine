@@ -3819,6 +3819,49 @@ void NativeRenderer::endFrame() {
         }
 
         m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Bloom);
+        // ---- Windscreen stage 4: per-pixel glass mask. Render the glass mesh
+        // into an R8 target before the display pass so tonemap can gate the
+        // rain on real glass instead of the stage-1 screen band.
+        if (m_windscreenGlassValid && !m_windscreenGlassMeshName.empty() &&
+            ensureWindscreenMaskResources()) {
+            auto git = m_meshes.find(m_windscreenGlassMeshName);
+            if (git != m_meshes.end() && git->second.vertexBuffer &&
+                git->second.indexBuffer && git->second.indices.size() > 0) {
+                VkClearValue clear{};
+                clear.color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+                VkRenderPassBeginInfo rbi{};
+                rbi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+                rbi.renderPass = m_windscreenMaskRenderPass;
+                rbi.framebuffer = m_windscreenMaskFramebuffer;
+                rbi.renderArea.extent = m_swapChainExtent;
+                rbi.clearValueCount = 1;
+                rbi.pClearValues = &clear;
+                vkCmdBeginRenderPass(m_commandBuffer, &rbi, VK_SUBPASS_CONTENTS_INLINE);
+                VkViewport vp{};
+                vp.width = static_cast<float>(m_swapChainExtent.width);
+                vp.height = static_cast<float>(m_swapChainExtent.height);
+                vp.maxDepth = 1.0f;
+                VkRect2D sc{};
+                sc.extent = m_swapChainExtent;
+                vkCmdSetViewport(m_commandBuffer, 0, 1, &vp);
+                vkCmdSetScissor(m_commandBuffer, 0, 1, &sc);
+                vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                  m_windscreenMaskPipeline);
+                mat4 mvp = m_proj * m_view * m_windscreenGlassModel;
+                vkCmdPushConstants(m_commandBuffer, m_windscreenMaskLayout,
+                                    VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mat4),
+                                    mvp.data());
+                VkBuffer vb = git->second.vertexBuffer;
+                VkDeviceSize off = 0;
+                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, &vb, &off);
+                vkCmdBindIndexBuffer(m_commandBuffer, git->second.indexBuffer, 0,
+                                     VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(m_commandBuffer,
+                                 static_cast<uint32_t>(git->second.indices.size()), 1, 0, 0, 0);
+                vkCmdEndRenderPass(m_commandBuffer);
+                // transition mask image to shader read (render pass final layout already shader read optimal)
+            }
+        }
         // ---- Pass 5: display — the only writer of the swapchain now.
         // Tone-maps the resolved frame, folds in the bloom, and encodes for
         // whichever surface the swapchain was created with: sRGB OETF on the
@@ -6145,7 +6188,7 @@ bool NativeRenderer::ensureDeferredResources() {
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[6]{};
+        VkDescriptorSetLayoutBinding bindings[7]{};
         for (int i = 0; i < 4; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         // Binding 4 (windscreenFX, tonemap.frag): the 4-float rain UBO the
@@ -6154,15 +6197,17 @@ bool NativeRenderer::ensureDeferredResources() {
         // Binding 5 (windscreen glass rect, stage 3): 32 bytes, the mesh's
         // screen-space AABB (or a "no glass" sentinel).
         bindings[5] = {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 6 (windscreen glass mask, stage 4): per-pixel mask (R8).
+        bindings[6] = {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 6;
+        dslCi.bindingCount = 7;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorPoolSize poolSizes[2]{
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -6694,6 +6739,16 @@ void NativeRenderer::destroyDeferredResources() {
     if (m_windscreenRectUBO) { vkDestroyBuffer(m_device, m_windscreenRectUBO, nullptr); m_windscreenRectUBO = VK_NULL_HANDLE; }
     if (m_windscreenRectMemory) { vkFreeMemory(m_device, m_windscreenRectMemory, nullptr); m_windscreenRectMemory = VK_NULL_HANDLE; }
     m_windscreenRectMapped = nullptr;
+    if (m_windscreenMaskFramebuffer) { vkDestroyFramebuffer(m_device, m_windscreenMaskFramebuffer, nullptr); m_windscreenMaskFramebuffer = VK_NULL_HANDLE; }
+    if (m_windscreenMaskView) { vkDestroyImageView(m_device, m_windscreenMaskView, nullptr); m_windscreenMaskView = VK_NULL_HANDLE; }
+    if (m_windscreenMaskImage) { vkDestroyImage(m_device, m_windscreenMaskImage, nullptr); m_windscreenMaskImage = VK_NULL_HANDLE; }
+    if (m_windscreenMaskMemory) { vkFreeMemory(m_device, m_windscreenMaskMemory, nullptr); m_windscreenMaskMemory = VK_NULL_HANDLE; }
+    if (m_windscreenMaskSampler) { vkDestroySampler(m_device, m_windscreenMaskSampler, nullptr); m_windscreenMaskSampler = VK_NULL_HANDLE; }
+    if (m_windscreenMaskRenderPass) { vkDestroyRenderPass(m_device, m_windscreenMaskRenderPass, nullptr); m_windscreenMaskRenderPass = VK_NULL_HANDLE; }
+    if (m_windscreenMaskPipeline) { vkDestroyPipeline(m_device, m_windscreenMaskPipeline, nullptr); m_windscreenMaskPipeline = VK_NULL_HANDLE; }
+    if (m_windscreenMaskLayout) { vkDestroyPipelineLayout(m_device, m_windscreenMaskLayout, nullptr); m_windscreenMaskLayout = VK_NULL_HANDLE; }
+    if (m_windscreenMaskVert) { vkDestroyShaderModule(m_device, m_windscreenMaskVert, nullptr); m_windscreenMaskVert = VK_NULL_HANDLE; }
+    if (m_windscreenMaskFrag) { vkDestroyShaderModule(m_device, m_windscreenMaskFrag, nullptr); m_windscreenMaskFrag = VK_NULL_HANDLE; }
     if (m_displaySetLayout) { vkDestroyDescriptorSetLayout(m_device, m_displaySetLayout, nullptr); m_displaySetLayout = VK_NULL_HANDLE; }
     if (m_gbufferSampler) { vkDestroySampler(m_device, m_gbufferSampler, nullptr); m_gbufferSampler = VK_NULL_HANDLE; }
     if (m_hdrSampler) { vkDestroySampler(m_device, m_hdrSampler, nullptr); m_hdrSampler = VK_NULL_HANDLE; }
@@ -6881,7 +6936,7 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     lutInfo.imageView = m_lutView;
     lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[7]{};
+    VkWriteDescriptorSet writes[8]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -6958,7 +7013,202 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     writes[6].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[6].pBufferInfo = &rectInfo;
 
-    vkUpdateDescriptorSets(m_device, 7, writes, 0, nullptr);
+    // Binding 6: the per-pixel glass mask (stage 4). Written only when a glass
+    // mesh is present; otherwise a dummy view keeps the set complete.
+    VkDescriptorImageInfo maskInfo{};
+    maskInfo.sampler = m_windscreenMaskSampler ? m_windscreenMaskSampler : m_hdrSampler;
+    maskInfo.imageView = m_windscreenMaskView ? m_windscreenMaskView : (m_depthView ? m_depthView : m_dummyShadowView);
+    maskInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    writes[7] = {};
+    writes[7].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[7].dstSet = m_displaySet;
+    writes[7].dstBinding = 6;
+    writes[7].descriptorCount = 1;
+    writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[7].pImageInfo = &maskInfo;
+
+    vkUpdateDescriptorSets(m_device, 8, writes, 0, nullptr);
+}
+
+bool NativeRenderer::ensureWindscreenMaskResources() {
+    if (m_windscreenMaskFailed) return false;
+    if (m_windscreenMaskFramebuffer && m_windscreenMaskImage) return true;
+    if (!m_device || m_swapChainExtent.width == 0) return false;
+
+    // Render pass: single R8 color attachment, cleared to 0.
+    if (!m_windscreenMaskRenderPass) {
+        VkAttachmentDescription att{};
+        att.format = VK_FORMAT_R8_UNORM;
+        att.samples = VK_SAMPLE_COUNT_1_BIT;
+        att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        att.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkSubpassDescription sub{};
+        sub.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount = 1;
+        sub.pColorAttachments = &ref;
+        VkRenderPassCreateInfo rpci{};
+        rpci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        rpci.attachmentCount = 1;
+        rpci.pAttachments = &att;
+        rpci.subpassCount = 1;
+        rpci.pSubpasses = &sub;
+        if (vkCreateRenderPass(m_device, &rpci, nullptr, &m_windscreenMaskRenderPass) != VK_SUCCESS) {
+            m_windscreenMaskFailed = true; return false;
+        }
+    }
+    // Image + view
+    if (!m_windscreenMaskImage) {
+        VkImageCreateInfo ici{};
+        ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ici.imageType = VK_IMAGE_TYPE_2D;
+        ici.format = VK_FORMAT_R8_UNORM;
+        ici.extent = {m_swapChainExtent.width, m_swapChainExtent.height, 1};
+        ici.mipLevels = 1;
+        ici.arrayLayers = 1;
+        ici.samples = VK_SAMPLE_COUNT_1_BIT;
+        ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        if (vkCreateImage(m_device, &ici, nullptr, &m_windscreenMaskImage) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(m_device, m_windscreenMaskImage, &mr);
+        VkMemoryAllocateInfo mai{};
+        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        mai.allocationSize = mr.size;
+        mai.memoryTypeIndex = findMemoryType(m_physicalDevice, mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        if (vkAllocateMemory(m_device, &mai, nullptr, &m_windscreenMaskMemory) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+        vkBindImageMemory(m_device, m_windscreenMaskImage, m_windscreenMaskMemory, 0);
+        VkImageViewCreateInfo vci{};
+        vci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        vci.image = m_windscreenMaskImage;
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.format = VK_FORMAT_R8_UNORM;
+        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vci.subresourceRange.levelCount = 1;
+        vci.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(m_device, &vci, nullptr, &m_windscreenMaskView) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+    }
+    // Sampler
+    if (!m_windscreenMaskSampler) {
+        VkSamplerCreateInfo sci{};
+        sci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sci.magFilter = VK_FILTER_NEAREST;
+        sci.minFilter = VK_FILTER_NEAREST;
+        sci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sci.maxLod = 1.0f;
+        if (vkCreateSampler(m_device, &sci, nullptr, &m_windscreenMaskSampler) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+    }
+    // Framebuffer
+    if (!m_windscreenMaskFramebuffer) {
+        VkFramebufferCreateInfo fci{};
+        fci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fci.renderPass = m_windscreenMaskRenderPass;
+        fci.attachmentCount = 1;
+        fci.pAttachments = &m_windscreenMaskView;
+        fci.width = m_swapChainExtent.width;
+        fci.height = m_swapChainExtent.height;
+        fci.layers = 1;
+        if (vkCreateFramebuffer(m_device, &fci, nullptr, &m_windscreenMaskFramebuffer) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+    }
+    // Shaders
+    if (!m_windscreenMaskVert || !m_windscreenMaskFrag) {
+        m_windscreenMaskVert = createShaderModule(m_device, readFile(m_shaderDir + "/windscreen_mask.vert.spv"));
+        m_windscreenMaskFrag = createShaderModule(m_device, readFile(m_shaderDir + "/windscreen_mask.frag.spv"));
+        if (!m_windscreenMaskVert || !m_windscreenMaskFrag) { m_windscreenMaskFailed = true; return false; }
+    }
+    // Pipeline
+    if (!m_windscreenMaskPipeline) {
+        VkVertexInputBindingDescription binding{0, sizeof(NativeVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+        VkVertexInputAttributeDescription attrs[4] = {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, px)},
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, nx)},
+            {2, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(NativeVertex, u)},
+            {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(NativeVertex, r)},
+        };
+        VkPipelineVertexInputStateCreateInfo vi{};
+        vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vi.vertexBindingDescriptionCount = 1;
+        vi.pVertexBindingDescriptions = &binding;
+        vi.vertexAttributeDescriptionCount = 4;
+        vi.pVertexAttributeDescriptions = attrs;
+        VkPipelineInputAssemblyStateCreateInfo ia{};
+        ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vpCi{};
+        vpCi.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        vpCi.viewportCount = 1;
+        vpCi.scissorCount = 1;
+        VkPipelineRasterizationStateCreateInfo rs{};
+        rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rs.polygonMode = VK_POLYGON_MODE_FILL;
+        rs.cullMode = VK_CULL_MODE_NONE;
+        rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rs.lineWidth = 1.0f;
+        VkPipelineMultisampleStateCreateInfo ms{};
+        ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+        VkPipelineDepthStencilStateCreateInfo ds{};
+        ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        ds.depthTestEnable = VK_FALSE;
+        ds.depthWriteEnable = VK_FALSE;
+        VkPipelineColorBlendAttachmentState cbAtt{};
+        cbAtt.colorWriteMask = VK_COLOR_COMPONENT_R_BIT;
+        VkPipelineColorBlendStateCreateInfo cb{};
+        cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        cb.attachmentCount = 1;
+        cb.pAttachments = &cbAtt;
+        VkDynamicState dynStates[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dyn{};
+        dyn.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        dyn.dynamicStateCount = 2;
+        dyn.pDynamicStates = dynStates;
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        stages[0].module = m_windscreenMaskVert;
+        stages[0].pName = "main";
+        stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        stages[1].module = m_windscreenMaskFrag;
+        stages[1].pName = "main";
+        VkPushConstantRange pcRange{};
+        pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        pcRange.offset = 0;
+        pcRange.size = sizeof(mat4);
+        VkPipelineLayoutCreateInfo plCi{};
+        plCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        plCi.pushConstantRangeCount = 1;
+        plCi.pPushConstantRanges = &pcRange;
+        if (vkCreatePipelineLayout(m_device, &plCi, nullptr, &m_windscreenMaskLayout) != VK_SUCCESS) { m_windscreenMaskFailed = true; return false; }
+        VkGraphicsPipelineCreateInfo gpCi{};
+        gpCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        gpCi.stageCount = 2;
+        gpCi.pStages = stages;
+        gpCi.pVertexInputState = &vi;
+        gpCi.pInputAssemblyState = &ia;
+        gpCi.pViewportState = &vpCi;
+        gpCi.pRasterizationState = &rs;
+        gpCi.pMultisampleState = &ms;
+        gpCi.pDepthStencilState = &ds;
+        gpCi.pColorBlendState = &cb;
+        gpCi.pDynamicState = &dyn;
+        gpCi.layout = m_windscreenMaskLayout;
+        gpCi.renderPass = m_windscreenMaskRenderPass;
+        gpCi.subpass = 0;
+        if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &gpCi, nullptr, &m_windscreenMaskPipeline) != VK_SUCCESS) {
+            m_windscreenMaskFailed = true; return false;
+        }
+    }
+    return true;
 }
 
 } // namespace ks::sim

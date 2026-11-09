@@ -427,6 +427,7 @@ public:
     // Opt-in mesh whose screen-space AABB restricts the rain to the real glass
     // (windscreen stage 3). Empty keeps the stage-1 screen band.
     void setWindscreenGlassMesh(const std::string& name) { m_windscreenGlassMeshName = name; }
+    bool ensureWindscreenMaskResources();
 
     // Colour grading of the display pass: the preset's colorGrading block and
     // the video config's saturation/contrast ride these. The defaults keep
@@ -869,6 +870,20 @@ private:
     VkBuffer m_windscreenRectUBO = VK_NULL_HANDLE;
     VkDeviceMemory m_windscreenRectMemory = VK_NULL_HANDLE;
     void* m_windscreenRectMapped = nullptr;
+
+    // Windscreen stage 4: per-pixel glass mask (R8), rendered before the
+    // display pass from the glass mesh so the rain only lands on real glass.
+    VkImage m_windscreenMaskImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_windscreenMaskMemory = VK_NULL_HANDLE;
+    VkImageView m_windscreenMaskView = VK_NULL_HANDLE;
+    VkSampler m_windscreenMaskSampler = VK_NULL_HANDLE;
+    VkRenderPass m_windscreenMaskRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_windscreenMaskFramebuffer = VK_NULL_HANDLE;
+    VkPipeline m_windscreenMaskPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_windscreenMaskLayout = VK_NULL_HANDLE;
+    VkShaderModule m_windscreenMaskVert = VK_NULL_HANDLE;
+    VkShaderModule m_windscreenMaskFrag = VK_NULL_HANDLE;
+    bool m_windscreenMaskFailed = false;
     float m_windscreenCoverage = 0.0f;
     bool m_windscreenCockpit = false;
     float m_windscreenClock = 0.0f;
