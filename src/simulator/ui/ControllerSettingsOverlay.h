@@ -122,27 +122,16 @@ public:
     }
 
     /** Current value of a row: the document's, or the fallback when absent. */
-    double value(int row) const {
-        if (row < 0 || row >= kRows) return 0.0;
-        if (row == 8) return invertSteer() ? 1.0 : 0.0;
-        const ks::engine::json::Value* section = m_settings.root.find(sectionFor(row));
-        if (section && section->isObject()) {
-            const double v = section->numberAt(keyFor(row), -1.0);
-            if (v >= minValue(row)) return snap(v, minValue(row), maxValue(row));
-        }
-        return m_fallback[row];
+    double value(int row) const { return readValue(m_settings, row); }
+
+    /** The row shows something different from the saved baseline. */
+    bool rowDirty(int row) const {
+        if (row < 0 || row >= kRows) return false;
+        if (row == 8) return invertSteerOf(m_settings) != invertSteerOf(m_baseline);
+        return readValue(m_settings, row) != readValue(m_baseline, row);
     }
 
-    bool invertSteer() const {
-        const ks::engine::json::Value* steer = m_settings.root.find("STEER");
-        if (steer && steer->isObject()) {
-            if (const ks::engine::json::Value* v = steer->find("INVERT");
-                v && v->isBool()) {
-                return v->asBool();
-            }
-        }
-        return m_fallbackInvert;
-    }
+    bool invertSteer() const { return invertSteerOf(m_settings); }
 
     void select(int row) {
         if (row >= 0 && row < kRows) m_selected = row;
@@ -181,9 +170,13 @@ public:
         dl.addRectFilled({0, 0, (float)screenW, (float)screenH}, Color::rgba(0, 0, 0, 0.45f));
         dl.addRectFilled({x, y, panelW, panelH}, Color::rgba(0.08f, 0.09f, 0.12f, 0.95f));
         dl.addRect({x, y, panelW, panelH}, Color::rgb(80, 160, 255), 2.f);
-        dl.addText(x + 16, y + 16, "Controls - Controller", Color::rgb(220, 230, 255), 1.4f);
 
-        char text[32];
+        char title[64];
+        std::snprintf(title, sizeof(title), "Controls - Controller%s",
+                      m_dirty ? "  *" : "");
+        dl.addText(x + 16, y + 16, title, Color::rgb(220, 230, 255), 1.4f);
+
+        char text[40];
         float rowY = y + 54;
         for (int i = 0; i < kRows; ++i) {
             Rect rr{x + 12, rowY, panelW - 24, 36};
@@ -203,9 +196,18 @@ public:
 
             dl.addText(rr.x + 10, rr.y + 9, labelFor(i), Color::rgb(230, 230, 230), 1.05f);
 
-            if (i == 8) std::snprintf(text, sizeof(text), "%s", invertSteer() ? "ON" : "OFF");
-            else std::snprintf(text, sizeof(text), "%.2f", value(i));
-            dl.addText(rr.x + 310, rr.y + 9, text, Color::rgb(160, 200, 255), 1.05f);
+            const bool changed = rowDirty(i);
+            if (i == 8) {
+                std::snprintf(text, sizeof(text), "%s%s", invertSteer() ? "ON" : "OFF",
+                              changed ? "  *" : "");
+            } else {
+                std::snprintf(text, sizeof(text), "%.2f%s", value(i), changed ? "  *" : "");
+            }
+            // Amber marks a row that differs from the saved file, so an
+            // unsaved edit is visible without reading the footer.
+            dl.addText(rr.x + 300, rr.y + 9, text,
+                       changed ? Color::rgb(255, 210, 90) : Color::rgb(160, 200, 255),
+                       1.05f);
             rowY += rowH;
         }
 
@@ -236,8 +238,10 @@ public:
         }
 
         dl.addText(x + 16, y + panelH - 28,
-                   "Up/Down: row   Left/Right: change   Save writes settings   Esc: cancel",
-                   Color::rgb(140, 150, 160), 0.9f);
+                   m_dirty
+                       ? "Unsaved changes  -  Save writes settings, Esc cancels"
+                       : "Up/Down: row   Left/Right: change   Save writes settings   Esc: cancel",
+                   m_dirty ? Color::rgb(255, 210, 90) : Color::rgb(140, 150, 160), 0.9f);
     }
 
     bool handleKey(int key) {
@@ -264,6 +268,28 @@ public:
     std::function<void(const ks::engine::config::ControllerSettings&)> onSaved;
 
 private:
+    static bool invertSteerOf(const ks::engine::config::ControllerSettings& s) {
+        const ks::engine::json::Value* steer = s.root.find("STEER");
+        if (steer && steer->isObject()) {
+            if (const ks::engine::json::Value* v = steer->find("INVERT");
+                v && v->isBool()) {
+                return v->asBool();
+            }
+        }
+        return false;
+    }
+
+    double readValue(const ks::engine::config::ControllerSettings& s, int row) const {
+        if (row < 0 || row >= kRows) return 0.0;
+        if (row == 8) return invertSteerOf(s) ? 1.0 : 0.0;
+        const ks::engine::json::Value* section = s.root.find(sectionFor(row));
+        if (section && section->isObject()) {
+            const double v = section->numberAt(keyFor(row), -1.0);
+            if (v >= minValue(row)) return snap(v, minValue(row), maxValue(row));
+        }
+        return m_fallback[row];
+    }
+
     void notify() {
         m_dirty = true;
         if (onChanged) onChanged(m_settings);

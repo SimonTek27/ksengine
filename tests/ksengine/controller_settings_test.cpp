@@ -128,19 +128,26 @@ int main() {
         panel.adjustSelected(+1);
         KS_CHECK(panel.invertSteer());
         KS_CHECK(panel.dirty());
+        KS_CHECK(panel.rowDirty(0));  // 0.13 vs the saved 0.12
+        KS_CHECK(!panel.rowDirty(2)); // throttle deadzone untouched
+        KS_CHECK(panel.rowDirty(8));  // inversion differs
         KS_CHECK(applied == 6);
         KS_CHECK(saved == 0); // nothing written until Save
 
         panel.save();
         KS_CHECK(saved == 1);
         KS_CHECK(!panel.dirty());
+        KS_CHECK(!panel.rowDirty(0));
+        KS_CHECK(!panel.rowDirty(8));
 
         // An edit after a save is discarded by Revert, live mapping included.
         panel.setValue(0, 0.30);
         KS_CHECK(panel.value(0) == 0.30);
+        KS_CHECK(panel.rowDirty(0));
         panel.revert();
         KS_CHECK(panel.value(0) == 0.13);
         KS_CHECK(!panel.dirty());
+        KS_CHECK(!panel.rowDirty(0));
         KS_CHECK(applied == 8);
         KS_CHECK(saved == 1);
 

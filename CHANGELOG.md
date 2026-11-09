@@ -167,7 +167,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   asse — sterzo (0.00–0.30 / 0.50–2.00), acceleratore, freno e frizione — più
   inversione dello sterzo, con mouse o frecce. Ogni modifica arriva subito al
   mapping vivo, ma il file si scrive solo con **Save**; **Revert** ed **Esc**
-  riportano il documento e la guida a com'erano all'apertura. Il salvataggio va
+  riportano il documento e la guida a com'erano all'apertura. Le righe
+  modificate rispetto al file salvato sono in ambra con `*`, e il titolo porta
+  `*` finché ci sono modifiche non salvate. Il salvataggio va
   sotto `controller` nel `settings.json` del giocatore, preservando le altre
   chiavi.
 - **`ControllerSettings` collegato a `InputManager` e alle impostazioni utente**:
