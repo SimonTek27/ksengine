@@ -60,17 +60,19 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
     };
 
     double st = axis(m_map.steerAxis);
-    st = curve(st, m_map.steerGamma, m_map.deadZone, true);
+    st = curve(st, m_map.steerGamma, m_map.deadZone, true) * m_map.steerSensitivity;
     if (m_map.invertSteer) st = -st;
     m_steer = std::clamp(st, -1.0, 1.0);
 
     if (m_map.throttleIsCombined) {
         double a = axis(m_map.throttleAxis);
         if (a >= 0) {
-            m_throttle = curve(a, m_map.throttleGamma, m_map.deadZone, false);
+            m_throttle = curve(a, m_map.throttleGamma, m_map.throttleDeadZone, false) *
+                         m_map.throttleSensitivity;
             m_brake = 0;
         } else {
-            m_brake = curve(-a, m_map.brakeGamma, m_map.deadZone, false);
+            m_brake = curve(-a, m_map.brakeGamma, m_map.brakeDeadZone, false) *
+                      m_map.brakeSensitivity;
             m_throttle = 0;
         }
     } else {
@@ -80,8 +82,10 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
         if (br < 0) br = 0;
         if (m_map.invertThrottle) th = 1.0 - th;
         if (m_map.invertBrake) br = 1.0 - br;
-        m_throttle = curve(th, m_map.throttleGamma, 0.02, false);
-        m_brake = curve(br, m_map.brakeGamma, 0.02, false);
+        m_throttle = curve(th, m_map.throttleGamma, m_map.throttleDeadZone, false) *
+                     m_map.throttleSensitivity;
+        m_brake = curve(br, m_map.brakeGamma, m_map.brakeDeadZone, false) *
+                  m_map.brakeSensitivity;
     }
 
     if (m_map.clutchAxis >= 0) {
@@ -294,15 +298,32 @@ bool InputManager::loadControllerSettings(const std::string& path) {
 
 void InputManager::applyControllerSettings() {
     namespace json = ks::engine::json;
-    const json::Value* steer = m_controller.root.find("STEER");
-    if (steer == nullptr || !steer->isObject()) return;
-    // The mapping has one deadzone shared by every axis, so one value is all
-    // that can be applied without inventing per-axis behaviour the input path
-    // does not have. 0..0.95 keeps the curve denominator positive.
-    const double deadZone = steer->numberAt("DEADZONE", -1.0);
-    if (deadZone >= 0.0 && deadZone < 0.95) m_map.deadZone = deadZone;
-    if (const json::Value* invert = steer->find("INVERT"); invert && invert->isBool())
-        m_map.invertSteer = invert->asBool();
+    struct AxisMap {
+        const char* section;
+        double* deadZone;
+        double* sensitivity;
+    };
+    const AxisMap axes[] = {
+        {"STEER", &m_map.deadZone, &m_map.steerSensitivity},
+        {"THROTTLE", &m_map.throttleDeadZone, &m_map.throttleSensitivity},
+        {"BRAKE", &m_map.brakeDeadZone, &m_map.brakeSensitivity},
+    };
+    // Only the keys a file really carries are applied: absent or out-of-range
+    // values leave the mapping alone. 0..0.95 keeps the curve denominator
+    // positive; sensitivity is a gain, so 0.1..2.0 stays usable.
+    for (const AxisMap& axis : axes) {
+        const json::Value* section = m_controller.root.find(axis.section);
+        if (section == nullptr || !section->isObject()) continue;
+        const double deadZone = section->numberAt("DEADZONE", -1.0);
+        if (deadZone >= 0.0 && deadZone < 0.95) *axis.deadZone = deadZone;
+        const double sensitivity = section->numberAt("SENSITIVITY", -1.0);
+        if (sensitivity >= 0.1 && sensitivity <= 2.0) *axis.sensitivity = sensitivity;
+    }
+    if (const json::Value* steer = m_controller.root.find("STEER");
+        steer && steer->isObject()) {
+        if (const json::Value* invert = steer->find("INVERT"); invert && invert->isBool())
+            m_map.invertSteer = invert->asBool();
+    }
 }
 
 void InputManager::processKeyboard() {

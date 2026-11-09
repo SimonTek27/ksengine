@@ -87,12 +87,17 @@ int main() {
         KS_CHECK(!missing.loadFrom((dir / "nope2.json").string(), "controller"));
     }
 
-    // The panel edits the same document: one step per key, clamped, and the
-    // change reaches the caller's callback already in the document.
+    // The panel edits the same document: one step per key, clamped per axis,
+    // and the change reaches the caller's callback already in the document.
     {
         ks::sim::ui::ControllerSettingsOverlay panel;
-        panel.setSettings(ks::engine::config::ControllerSettings{}, 0.12, false);
-        KS_CHECK(panel.deadZone() == 0.12);
+        ks::sim::ui::ControllerSettingsOverlay::Fallbacks fallbacks;
+        fallbacks.steerDeadZone = 0.12;
+        panel.setSettings(ks::engine::config::ControllerSettings{}, fallbacks);
+        KS_CHECK(panel.value(0) == 0.12);
+        KS_CHECK(panel.value(1) == 1.0);
+        KS_CHECK(panel.value(2) == 0.12);
+        KS_CHECK(panel.value(5) == 1.0);
         KS_CHECK(!panel.invertSteer());
 
         int changes = 0;
@@ -101,23 +106,33 @@ int main() {
         };
         panel.select(0);
         panel.adjustSelected(+1);
-        KS_CHECK(panel.deadZone() == 0.13);
+        KS_CHECK(panel.value(0) == 0.13);
         panel.adjustSelected(-1);
-        KS_CHECK(panel.deadZone() == 0.12);
-        panel.setDeadZone(10.0);
-        KS_CHECK(panel.deadZone() == 0.30);
+        KS_CHECK(panel.value(0) == 0.12);
+        panel.setValue(0, 10.0);
+        KS_CHECK(panel.value(0) == 0.30);
 
         panel.select(1);
+        panel.adjustSelected(+1);
+        KS_CHECK_NEAR(panel.value(1), 1.05, 1e-9);
+        panel.setValue(3, 9.0);
+        KS_CHECK(panel.value(3) == 2.00);
+
+        panel.select(6);
         panel.adjustSelected(+1);
         KS_CHECK(panel.invertSteer());
         panel.adjustSelected(+1);
         KS_CHECK(!panel.invertSteer());
-        KS_CHECK(changes == 5);
+        KS_CHECK(changes == 7);
 
         // The edited document is the one the caller saves.
         const ks::engine::json::Value* steer = panel.settings().root.find("STEER");
         KS_CHECK(steer && steer->numberAt("DEADZONE", -1.0) == 0.30);
         KS_CHECK(steer && steer->find("INVERT") != nullptr);
+        const ks::engine::json::Value* throttle = panel.settings().root.find("THROTTLE");
+        KS_CHECK(throttle && throttle->numberAt("SENSITIVITY", -1.0) == 2.00);
+        const ks::engine::json::Value* brake = panel.settings().root.find("BRAKE");
+        KS_CHECK(brake == nullptr || brake->isObject());
     }
 
     // Alias names compile.

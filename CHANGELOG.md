@@ -163,8 +163,9 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `docs/CHECKLIST.md` 2.14 spuntato, `docs/E9_PROFILER_TICK.md` aggiornato.
 
 ### Changed
-- **Pannello `Controls - Controller` nel menu**: deadzone di sterzo (0.00–0.30,
-  passo 0.01) e inversione dello sterzo, con mouse o frecce. Ogni modifica
+- **Pannello `Controls - Controller` nel menu**: deadzone e sensibilità per
+  asse — sterzo (0.00–0.30 / 0.50–2.00), acceleratore e freno — più inversione
+  dello sterzo, con mouse o frecce. Ogni modifica
   arriva subito al mapping vivo e viene salvata sotto `controller` nel
   `settings.json` del giocatore, preservando le altre chiavi.
 - **`ControllerSettings` collegato a `InputManager` e alle impostazioni utente**:

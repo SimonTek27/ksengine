@@ -1219,8 +1219,17 @@ static void initSimulation() {
             auto* im = g_simulation->inputManager();
             if (!im) return;
             g_simulation->ui().menu().setVisible(false);
-            g_simulation->ui().controllerSettings().setSettings(
-                im->controllerSettings(), im->mapping().deadZone, im->mapping().invertSteer);
+            ks::sim::ui::ControllerSettingsOverlay::Fallbacks fallbacks;
+            const ks::sim::JoystickMapping& map = im->mapping();
+            fallbacks.steerDeadZone = map.deadZone;
+            fallbacks.steerSensitivity = map.steerSensitivity;
+            fallbacks.throttleDeadZone = map.throttleDeadZone;
+            fallbacks.throttleSensitivity = map.throttleSensitivity;
+            fallbacks.brakeDeadZone = map.brakeDeadZone;
+            fallbacks.brakeSensitivity = map.brakeSensitivity;
+            fallbacks.invertSteer = map.invertSteer;
+            g_simulation->ui().controllerSettings().setSettings(im->controllerSettings(),
+                                                                fallbacks);
             g_simulation->ui().controllerSettings().setVisible(true);
             return;
         }

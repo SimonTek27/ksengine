@@ -44,10 +44,19 @@ struct JoystickMapping {
     // so the default differs instead of being shared.
     int handbrakeButton = 1;
 
-    double deadZone = 0.12;
+    // One deadzone per axis: a wheel's pedals and a pad's triggers do not
+    // centre the same way, and the steering one is the largest on a pad.
+    double deadZone = 0.12; // steering
+    double throttleDeadZone = 0.12;
+    double brakeDeadZone = 0.12;
     double steerGamma = 1.6;
     double throttleGamma = 1.0;
     double brakeGamma = 1.0;
+    // Per-axis gain applied after the curve, 1.0 = unchanged. The Controller
+    // document's SENSITIVITY keys land here.
+    double steerSensitivity = 1.0;
+    double throttleSensitivity = 1.0;
+    double brakeSensitivity = 1.0;
 
     static JoystickMapping gamepadDefault() { return JoystickMapping{}; }
 
@@ -59,6 +68,8 @@ struct JoystickMapping {
         m.clutchAxis = 3;
         m.steerGamma = 1.2;
         m.deadZone = 0.02;
+        m.throttleDeadZone = 0.02;
+        m.brakeDeadZone = 0.02;
         m.shiftUpButton = 4;
         m.shiftDownButton = 5;
         m.handbrakeButton = -1; // wheels differ: mapped by the owner, not guessed

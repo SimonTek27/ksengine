@@ -2,10 +2,10 @@
 /**
  * Controller settings panel (rFactor Controller.ini shape), Qt-free.
  *
- * Two knobs the input path really has: the steering deadzone and steering
- * inversion. Edits land in the ControllerSettings document immediately, so the
- * caller can apply them to the live mapping and persist them in the player's
- * settings file — the panel itself owns no I/O.
+ * Per axis — steering, throttle, brake — a deadzone and a sensitivity, plus
+ * steering inversion. Edits land in the ControllerSettings document
+ * immediately, so the caller can apply them to the live mapping and persist
+ * them in the player's settings file; the panel owns no I/O.
  */
 #include "NativeUiTypes.h"
 #include "UiInput.h"
@@ -22,49 +22,81 @@ namespace ui {
 
 class ControllerSettingsOverlay {
 public:
-    static constexpr int kRows = 2;
-    static constexpr double kDeadZoneMin = 0.0;
-    static constexpr double kDeadZoneMax = 0.30;
-    static constexpr double kDeadZoneStep = 0.01;
+    // 0-5: deadzone/sensitivity per axis; 6: steering inversion.
+    static constexpr int kRows = 7;
+
+    /** What the panel shows for a key the document does not carry yet: the
+     *  live mapping, so the panel and the car can never disagree. */
+    struct Fallbacks {
+        double steerDeadZone = 0.12;
+        double steerSensitivity = 1.0;
+        double throttleDeadZone = 0.12;
+        double throttleSensitivity = 1.0;
+        double brakeDeadZone = 0.12;
+        double brakeSensitivity = 1.0;
+        bool invertSteer = false;
+    };
 
     void setVisible(bool v) { m_visible = v; }
     bool isVisible() const { return m_visible; }
     void toggle() { setVisible(!m_visible); }
 
-    /** Seed from the loaded document plus the live mapping, which is what the
-     *  panel shows when a key is absent: the two never disagree by accident. */
     void setSettings(const ks::engine::config::ControllerSettings& s,
-                     double deadZoneFallback, bool invertFallback) {
+                     const Fallbacks& fallbacks) {
         m_settings = s;
-        m_fallbackDeadZone = clampDeadZone(deadZoneFallback);
-        m_fallbackInvert = invertFallback;
+        m_fallback[0] = fallbacks.steerDeadZone;
+        m_fallback[1] = fallbacks.steerSensitivity;
+        m_fallback[2] = fallbacks.throttleDeadZone;
+        m_fallback[3] = fallbacks.throttleSensitivity;
+        m_fallback[4] = fallbacks.brakeDeadZone;
+        m_fallback[5] = fallbacks.brakeSensitivity;
+        m_fallbackInvert = fallbacks.invertSteer;
         m_selected = 0;
     }
     const ks::engine::config::ControllerSettings& settings() const { return m_settings; }
 
-    static double clampDeadZone(double v) {
-        if (!(v >= kDeadZoneMin)) return kDeadZoneMin;
-        if (v > kDeadZoneMax) return kDeadZoneMax;
-        return v;
-    }
-
-    static double stepDeadZone(double v, int direction) {
-        const double delta = direction > 0 ? kDeadZoneStep : -kDeadZoneStep;
-        return clampDeadZone(std::round((clampDeadZone(v) + delta) * 100.0) / 100.0);
-    }
-
-    double deadZone() const {
-        const ks::engine::json::Value* steer = steerObject();
-        if (steer) {
-            const double v = steer->numberAt("DEADZONE", -1.0);
-            if (v >= 0.0) return clampDeadZone(v);
+    static const char* labelFor(int row) {
+        switch (row) {
+        case 0: return "Steer deadzone";
+        case 1: return "Steer sensitivity";
+        case 2: return "Throttle deadzone";
+        case 3: return "Throttle sensitivity";
+        case 4: return "Brake deadzone";
+        case 5: return "Brake sensitivity";
+        default: return "Invert steer";
         }
-        return m_fallbackDeadZone;
+    }
+    static const char* sectionFor(int row) {
+        return row < 2 ? "STEER" : (row < 4 ? "THROTTLE" : "BRAKE");
+    }
+    static const char* keyFor(int row) {
+        return (row % 2 == 0) ? "DEADZONE" : "SENSITIVITY";
+    }
+    static double minValue(int row) { return (row % 2 == 0) ? 0.0 : 0.50; }
+    static double maxValue(int row) { return (row % 2 == 0) ? 0.30 : 2.00; }
+    static double stepValue(int row) { return (row % 2 == 0) ? 0.01 : 0.05; }
+
+    static double snap(double v, double low, double high) {
+        if (!(v >= low)) return low;
+        if (v > high) return high;
+        return std::round(v * 100.0) / 100.0;
+    }
+
+    /** Current value of a row: the document's, or the fallback when absent. */
+    double value(int row) const {
+        if (row < 0 || row >= kRows) return 0.0;
+        if (row == 6) return invertSteer() ? 1.0 : 0.0;
+        const ks::engine::json::Value* section = m_settings.root.find(sectionFor(row));
+        if (section && section->isObject()) {
+            const double v = section->numberAt(keyFor(row), -1.0);
+            if (v >= minValue(row)) return snap(v, minValue(row), maxValue(row));
+        }
+        return m_fallback[row];
     }
 
     bool invertSteer() const {
-        const ks::engine::json::Value* steer = steerObject();
-        if (steer) {
+        const ks::engine::json::Value* steer = m_settings.root.find("STEER");
+        if (steer && steer->isObject()) {
             if (const ks::engine::json::Value* v = steer->find("INVERT");
                 v && v->isBool()) {
                 return v->asBool();
@@ -78,28 +110,31 @@ public:
     }
     int selected() const { return m_selected; }
 
-    void setDeadZone(double v) {
-        setSteerValue("DEADZONE",
-                      ks::engine::json::Value::number(clampDeadZone(v)));
-        notify();
-    }
-    void setInvert(bool v) {
-        setSteerValue("INVERT", ks::engine::json::Value::boolean(v));
+    void setValue(int row, double v) {
+        if (row < 0 || row >= 6) return;
+        writeValue(sectionFor(row), keyFor(row),
+                   ks::engine::json::Value::number(snap(v, minValue(row), maxValue(row))));
         notify();
     }
 
-    /** One step on the selected row: the deadzone moves by kDeadZoneStep,
-     *  invert flips. The setters report the change through onChanged. */
+    void setInvert(bool v) {
+        writeValue("STEER", "INVERT", ks::engine::json::Value::boolean(v));
+        notify();
+    }
+
+    /** One step on the selected row: a numeric row moves by its own step and
+     *  is clamped, invert flips. The setters report through onChanged. */
     void adjustSelected(int direction) {
         if (direction == 0) return;
-        if (m_selected == 0) setDeadZone(stepDeadZone(deadZone(), direction));
-        else setInvert(!invertSteer());
+        if (m_selected == 6) { setInvert(!invertSteer()); return; }
+        const double delta = direction > 0 ? stepValue(m_selected) : -stepValue(m_selected);
+        setValue(m_selected, value(m_selected) + delta);
     }
 
     void build(DrawList& dl, int screenW, int screenH, UiInput* input = nullptr) {
         if (!m_visible) return;
-        const float panelW = 460.f;
-        const float rowH = 44.f;
+        const float panelW = 480.f;
+        const float rowH = 40.f;
         const float panelH = 60.f + kRows * rowH + 64.f;
         const float x = (screenW - panelW) * 0.5f;
         const float y = (screenH - panelH) * 0.5f;
@@ -109,10 +144,10 @@ public:
         dl.addRect({x, y, panelW, panelH}, Color::rgb(80, 160, 255), 2.f);
         dl.addText(x + 16, y + 16, "Controls - Controller", Color::rgb(220, 230, 255), 1.4f);
 
-        char value[32];
-        float rowY = y + 56;
+        char text[32];
+        float rowY = y + 54;
         for (int i = 0; i < kRows; ++i) {
-            Rect rr{x + 12, rowY, panelW - 24, 40};
+            Rect rr{x + 12, rowY, panelW - 24, 36};
             const bool hover = input && input->isHovering(rr);
             if (input && input->state().leftReleased() &&
                 rr.contains(input->state().x, input->state().y)) {
@@ -127,12 +162,11 @@ public:
             dl.addRectFilled(rr, bg);
             if (hover) dl.addRect(rr, Color::rgb(100, 180, 255), 1.f);
 
-            const char* label = i == 0 ? "Steer deadzone" : "Invert steer";
-            dl.addText(rr.x + 10, rr.y + 11, label, Color::rgb(230, 230, 230), 1.1f);
+            dl.addText(rr.x + 10, rr.y + 9, labelFor(i), Color::rgb(230, 230, 230), 1.05f);
 
-            if (i == 0) std::snprintf(value, sizeof(value), "%.2f", deadZone());
-            else std::snprintf(value, sizeof(value), "%s", invertSteer() ? "ON" : "OFF");
-            dl.addText(rr.x + 300, rr.y + 11, value, Color::rgb(160, 200, 255), 1.1f);
+            if (i == 6) std::snprintf(text, sizeof(text), "%s", invertSteer() ? "ON" : "OFF");
+            else std::snprintf(text, sizeof(text), "%.2f", value(i));
+            dl.addText(rr.x + 310, rr.y + 9, text, Color::rgb(160, 200, 255), 1.05f);
             rowY += rowH;
         }
 
@@ -176,27 +210,23 @@ private:
         if (onChanged) onChanged(m_settings);
     }
 
-    const ks::engine::json::Value* steerObject() const {
-        const ks::engine::json::Value* steer = m_settings.root.find("STEER");
-        return (steer && steer->isObject()) ? steer : nullptr;
-    }
-
-    void setSteerValue(const std::string& key, const ks::engine::json::Value& value) {
+    void writeValue(const std::string& section, const std::string& key,
+                    const ks::engine::json::Value& value) {
         namespace json = ks::engine::json;
         json::Value root = m_settings.root;
-        json::Value steer = json::Value::object();
-        if (const json::Value* existing = root.find("STEER");
+        json::Value group = json::Value::object();
+        if (const json::Value* existing = root.find(section);
             existing && existing->isObject()) {
-            steer = *existing;
+            group = *existing;
         }
-        steer.set(key, value);
-        root.set("STEER", std::move(steer));
+        group.set(key, value);
+        root.set(section, std::move(group));
         m_settings.root = std::move(root);
     }
 
     bool m_visible = false;
     int m_selected = 0;
-    double m_fallbackDeadZone = 0.12;
+    double m_fallback[6] = {0.12, 1.0, 0.12, 1.0, 0.12, 1.0};
     bool m_fallbackInvert = false;
     ks::engine::config::ControllerSettings m_settings;
 };
