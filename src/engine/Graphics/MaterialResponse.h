@@ -55,6 +55,47 @@ struct AuthoredSurface {
     float fresnelMax = 0.0f;
 };
 
+/** Which slot a KN5 mapping feeds. The weathering maps (damage, scratches,
+ *  dirt, dust) are DATA for AC's damage/dirt shaders, not the surface: a file
+ *  commonly names its damage normal txNormal=damage.dds, and feeding that to
+ *  the shading normal is what makes a clean car look dented and scratched. */
+enum class TextureRole {
+    diffuse,
+    normal,
+    detail,
+    other,
+};
+
+inline bool isWeatheringTexture(const std::string& texture) {
+    const std::string folded = materialLower(texture);
+    return folded.find("damage") != std::string::npos ||
+           folded.find("scratch") != std::string::npos ||
+           folded.find("dirt") != std::string::npos ||
+           folded.find("dust") != std::string::npos;
+}
+
+inline TextureRole textureRole(const std::string& mappingName,
+                               const std::string& texture) {
+    if (texture.empty() || isWeatheringTexture(texture)) return TextureRole::other;
+    const std::string name = materialLower(mappingName);
+    // "Normal" before "Detail": txNormalDetail is a normal map, not colour.
+    if (name.find("normal") != std::string::npos) return TextureRole::normal;
+    if (name.find("diffuse") != std::string::npos) return TextureRole::diffuse;
+    if (name.find("detail") != std::string::npos) return TextureRole::detail;
+    return TextureRole::other;
+}
+
+/** AC samples txDetail only when the material asks for it (useDetail). A map
+ *  that ships without the flag is data for another shader, and multiplying it
+ *  into the albedo reads as grime. A file that never wrote the flag keeps the
+ *  historical behaviour. */
+inline bool usesDetail(const engine::fileformat::Kn5Material& material) {
+    float detail = 0.0f;
+    if (material_response_detail::firstFloat(material, "useDetail", detail))
+        return detail >= 0.5f;
+    return true;
+}
+
 inline AuthoredSurface authoredSurface(const engine::fileformat::Kn5Material& material) {
     AuthoredSurface surface;
     float value = 0.0f;

@@ -155,5 +155,37 @@ int main() {
         KS_CHECK(near(surface.fresnelC, 0.3f));
     }
 
+    // --- weathering maps are data, never the surface (WCCARBODY names its
+    //     damage normal txNormal=damage.dds: that is what looked dented) ----
+    {
+        KS_CHECK(isWeatheringTexture("damage.dds"));
+        KS_CHECK(isWeatheringTexture("scratches.dds"));
+        KS_CHECK(isWeatheringTexture("dust.dds"));
+        KS_CHECK(isWeatheringTexture("9x_tread_dirty.dds"));
+        KS_CHECK(!isWeatheringTexture("asr-car-body.dds"));
+
+        KS_CHECK(textureRole("txNormal", "damage.dds") == TextureRole::other);
+        KS_CHECK(textureRole("txNormal", "body_nm.dds") == TextureRole::normal);
+        KS_CHECK(textureRole("txDiffuse", "asr-car-body.dds") == TextureRole::diffuse);
+        KS_CHECK(textureRole("txDetail", "9x_carbfbd_T1_s.dds") == TextureRole::detail);
+        KS_CHECK(textureRole("txNormalDetail", "weave_nm.dds") == TextureRole::normal);
+        KS_CHECK(textureRole("txDust", "dust.dds") == TextureRole::other);
+    }
+
+    // --- txDetail only when AC's useDetail asks for it ---------------------
+    {
+        Kn5Material body;
+        body.properties.push_back(floatProperty("useDetail", 0.0f));
+        KS_CHECK(!usesDetail(body));
+
+        Kn5Material carbon;
+        carbon.properties.push_back(floatProperty("useDetail", 1.0f));
+        KS_CHECK(usesDetail(carbon));
+
+        // A file that never wrote the flag keeps the historical behaviour.
+        Kn5Material legacy;
+        KS_CHECK(usesDetail(legacy));
+    }
+
     return 0;
 }

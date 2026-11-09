@@ -9,6 +9,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Le mappe di usura non sono piu' la superficie**: `WCCARBODY` nomina la
+  propria normal map di danno `txNormal=damage.dds`, e il loader la usava come
+  normale di superficie: l'auto sembrava ammaccata anche da nuova. Ora
+  `textureRole()` scarta damage/scratch/dirt/dust per ogni slot, e `txDetail`
+  viene applicato solo quando il materiale scrive `useDetail=1`: la carrozzeria
+  della B191 (`useDetail=0`, dettaglio `metal_detail.dds`) non moltiplica piu'
+  una mappa di dati nell'albedo, che si leggeva come detriti.
 - **La risposta superficiale d'autore arriva al frame**: il loader leggeva solo
   `ksDiffuse`, `ksSpecularEXP`, `ksEmissive` e `ksAlphaRef`, quindi
   `ksSpecular`, `fresnelC/EXP/MaxLevel` e `detailUVMultiplier` restavano nel

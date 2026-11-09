@@ -1158,25 +1158,26 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 std::string detail;
                 for (const auto& mapping : material.mappings) {
                     if (mapping.texture.empty()) continue;
-                    const std::string mappingName = lower(mapping.name);
-                    // The normal map is authored under its own mapping name
-                    // ("Normal", "NormalDetail"), not a fixed slot, and it is
-                    // never the colour.
-                    if (mappingName.find("normal") != std::string::npos) {
-                        normal = mapping.texture;
-                        continue;
+                    // The mapping NAME says the slot, but the texture itself can
+                    // disqualify it: damage/scratch/dirt/dust maps are data for
+                    // AC's weathering shaders (WCCARBODY names its damage map
+                    // txNormal=damage.dds), and using one as the surface normal
+                    // is what made a clean car look dented. The rule lives in
+                    // MaterialResponse.h so it is testable.
+                    switch (graphics::textureRole(mapping.name, mapping.texture)) {
+                        case graphics::TextureRole::normal:
+                            normal = mapping.texture;
+                            continue;
+                        case graphics::TextureRole::diffuse:
+                            albedo = mapping.texture;
+                            continue;
+                        case graphics::TextureRole::detail:
+                            detail = mapping.texture;
+                            continue;
+                        case graphics::TextureRole::other:
+                            break;
                     }
-                    if (mappingName.find("diffuse") != std::string::npos) {
-                        albedo = mapping.texture;
-                        continue;
-                    }
-                    // txDetail: the weave carbon and leather carry on top of the
-                    // base colour. "NormalDetail" is caught above as a normal
-                    // map, so this only ever sees the colour detail.
-                    if (mappingName.find("detail") != std::string::npos) {
-                        detail = mapping.texture;
-                        continue;
-                    }
+                    if (graphics::isWeatheringTexture(mapping.texture)) continue;
                     if (fallbackAlbedo.empty()) fallbackAlbedo = mapping.texture;
                 }
                 if (albedo.empty()) albedo = fallbackAlbedo;
@@ -1205,6 +1206,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     // was only ever a guess (rule in MaterialResponse.h).
                     nm.detailScale = graphics::authoredDetailTiles(material);
                     if (nm.detailScale <= 0.0f) nm.detailScale = 1.0f;
+                    // useDetail=0 means the map belongs to another shader: a
+                    // spec/data map multiplied into the albedo looks like dirt.
+                    if (!graphics::usesDetail(material)) {
+                        nm.detailTexture.clear();
+                        nm.detailScale = 0.0f;
+                    }
                 }
                 // No diffuse authored: the surface keeps the colour the file
                 // gives it (ksDiffuse) instead of rendering as flat white.
