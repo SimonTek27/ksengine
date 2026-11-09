@@ -3,9 +3,12 @@
  * Controller settings panel (rFactor Controller.ini shape), Qt-free.
  *
  * Per axis — steering, throttle, brake, clutch — a deadzone and a
- * sensitivity, plus steering inversion. Edits land in the ControllerSettings document
- * immediately, so the caller can apply them to the live mapping and persist
- * them in the player's settings file; the panel owns no I/O.
+ * sensitivity, plus steering inversion.
+ *
+ * Edits reach the caller immediately through onChanged (the car reacts while
+ * the panel is open), but a file is written only by Save (onSaved). Revert and
+ * Esc put the document back to what it was when the panel opened, so closing
+ * the panel never leaves an edit behind by accident.
  */
 #include "NativeUiTypes.h"
 #include "UiInput.h"
@@ -15,6 +18,7 @@
 #include <cstdio>
 #include <functional>
 #include <string>
+#include <utility>
 
 namespace ks {
 namespace sim {
@@ -39,13 +43,23 @@ public:
         bool invertSteer = false;
     };
 
-    void setVisible(bool v) { m_visible = v; }
+    /** Closing the panel discards unsaved edits: show it, edit, Save or Esc. */
+    void setVisible(bool v) {
+        if (!v) {
+            revert();
+            m_visible = false;
+            return;
+        }
+        m_visible = true;
+    }
     bool isVisible() const { return m_visible; }
     void toggle() { setVisible(!m_visible); }
 
     void setSettings(const ks::engine::config::ControllerSettings& s,
                      const Fallbacks& fallbacks) {
         m_settings = s;
+        m_baseline = s;
+        m_dirty = false;
         m_fallback[0] = fallbacks.steerDeadZone;
         m_fallback[1] = fallbacks.steerSensitivity;
         m_fallback[2] = fallbacks.throttleDeadZone;
@@ -58,6 +72,22 @@ public:
         m_selected = 0;
     }
     const ks::engine::config::ControllerSettings& settings() const { return m_settings; }
+    bool dirty() const { return m_dirty; }
+
+    /** Persist: the current document becomes the new baseline. */
+    void save() {
+        m_baseline = m_settings;
+        m_dirty = false;
+        if (onSaved) onSaved(m_settings);
+    }
+
+    /** Put the document back to the baseline and tell the caller to re-apply. */
+    void revert() {
+        if (!m_dirty) return;
+        m_settings = m_baseline;
+        m_dirty = false;
+        if (onChanged) onChanged(m_settings);
+    }
 
     static const char* labelFor(int row) {
         switch (row) {
@@ -144,7 +174,7 @@ public:
         if (!m_visible) return;
         const float panelW = 480.f;
         const float rowH = 40.f;
-        const float panelH = 60.f + kRows * rowH + 64.f;
+        const float panelH = 60.f + kRows * rowH + 104.f;
         const float x = (screenW - panelW) * 0.5f;
         const float y = (screenH - panelH) * 0.5f;
 
@@ -179,22 +209,40 @@ public:
             rowY += rowH;
         }
 
-        Rect closeBtn{x + panelW - 100, y + panelH - 40, 80, 28};
-        const bool closeHover = input && input->isHovering(closeBtn);
-        dl.addRectFilled(closeBtn, closeHover ? Color::rgba(0.3f, 0.15f, 0.15f, 1.f)
-                                              : Color::rgba(0.2f, 0.12f, 0.12f, 1.f));
-        dl.addText(closeBtn.x + 18, closeBtn.y + 6, "Close", Color::rgb(230, 200, 200), 1.f);
-        if (input && input->state().leftReleased() &&
-            closeBtn.contains(input->state().x, input->state().y))
-            setVisible(false);
+        // Save / Revert / Close. Save is the only path that writes the file;
+        // the other two leave the document as it was when the panel opened.
+        const auto button = [&](Rect r, const char* label, bool enabled) {
+            const bool hover = input && input->isHovering(r);
+            const Color bg = !enabled ? Color::rgba(0.12f, 0.13f, 0.16f, 1.f)
+                             : hover   ? Color::rgba(0.2f, 0.3f, 0.45f, 1.f)
+                                       : Color::rgba(0.14f, 0.18f, 0.26f, 1.f);
+            dl.addRectFilled(r, bg);
+            if (enabled && hover) dl.addRect(r, Color::rgb(100, 180, 255), 1.f);
+            dl.addText(r.x + 20, r.y + 6, label,
+                       enabled ? Color::rgb(220, 235, 255) : Color::rgb(120, 130, 140), 1.f);
+        };
+        Rect saveBtn{x + panelW - 272, y + panelH - 76, 80, 28};
+        Rect revertBtn{x + panelW - 182, y + panelH - 76, 80, 28};
+        Rect closeBtn{x + panelW - 92, y + panelH - 76, 80, 28};
+        button(saveBtn, "Save", m_dirty);
+        button(revertBtn, "Revert", m_dirty);
+        button(closeBtn, "Close", true);
+        if (input && input->state().leftReleased()) {
+            const float mx = input->state().x;
+            const float my = input->state().y;
+            if (saveBtn.contains(mx, my) && m_dirty) save();
+            else if (revertBtn.contains(mx, my)) revert();
+            else if (closeBtn.contains(mx, my)) setVisible(false);
+        }
 
-        dl.addText(x + 16, y + panelH - 28, "Up/Down: row   Left/Right: change   Esc: close",
+        dl.addText(x + 16, y + panelH - 28,
+                   "Up/Down: row   Left/Right: change   Save writes settings   Esc: cancel",
                    Color::rgb(140, 150, 160), 0.9f);
     }
 
     bool handleKey(int key) {
         if (!m_visible) return false;
-        if (key == 27) { setVisible(false); return true; }
+        if (key == 27) { setVisible(false); return true; } // cancels unsaved edits
         if (key == 38) { if (m_selected > 0) --m_selected; return true; }
         if (key == 40) { if (m_selected + 1 < kRows) ++m_selected; return true; }
         if (key == 37) { adjustSelected(-1); return true; }
@@ -210,12 +258,14 @@ public:
         return true;
     }
 
-    /** Called after every edit with the document the caller should apply and
-     *  persist. */
+    /** Every edit, applied live (no file yet). */
     std::function<void(const ks::engine::config::ControllerSettings&)> onChanged;
+    /** Save was pressed: write the document. */
+    std::function<void(const ks::engine::config::ControllerSettings&)> onSaved;
 
 private:
     void notify() {
+        m_dirty = true;
         if (onChanged) onChanged(m_settings);
     }
 
@@ -234,10 +284,12 @@ private:
     }
 
     bool m_visible = false;
+    bool m_dirty = false;
     int m_selected = 0;
     double m_fallback[8] = {0.12, 1.0, 0.12, 1.0, 0.12, 1.0, 0.12, 1.0};
     bool m_fallbackInvert = false;
     ks::engine::config::ControllerSettings m_settings;
+    ks::engine::config::ControllerSettings m_baseline;
 };
 
 } // namespace ui

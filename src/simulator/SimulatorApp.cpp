@@ -1512,9 +1512,16 @@ static void initSimulation() {
         if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, m))
             printf("Keyboard bindings saved (%s)\n", g_userLayout.controls.c_str());
     };
-    // Controller panel: every edit goes straight into the live mapping and the
-    // player's settings.json, so closing the panel never leaves it unsaved.
+    // Controller panel: edits apply to the live mapping immediately, but only
+    // Save writes settings.json; Revert/Esc restore the opening document.
     g_simulation->ui().controllerSettings().onChanged =
+        [](const ks::engine::config::ControllerSettings& settings) {
+            auto* im = g_simulation->inputManager();
+            if (!im) return;
+            im->controllerSettings() = settings;
+            im->applyControllerSettings();
+        };
+    g_simulation->ui().controllerSettings().onSaved =
         [](const ks::engine::config::ControllerSettings& settings) {
             auto* im = g_simulation->inputManager();
             if (!im) return;
