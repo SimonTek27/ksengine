@@ -78,6 +78,28 @@ inline float alphaReference(const engine::fileformat::Kn5Material& material) {
     return std::min(authored, 1.0f);
 }
 
+/** Whether the file's alpha test samples the DETAIL slot instead of the albedo.
+ *
+ *  AC tests the alpha of the diffuse mapping the file names, and that mapping
+ *  is not always the surface colour: the Countach's seats and dash top name an
+ *  occlusion bake (INT_Cockpit_OCC+.dds), so the loader moves the colour to the
+ *  map that carries it and the bake to the detail slot. The ALPHA stays with
+ *  the bake, and a bake is flat — there is nothing to cut. Reading the wear
+ *  layer that replaced it as a mask instead turned leather.dds into a sieve:
+ *  1.4% of its texels are exactly transparent, and every one of them became a
+ *  pinhole the bright showroom background shone through. That is the dot
+ *  pattern that shows on the Countach's windscreen: the holes are behind the
+ *  glass, not on it.
+ *
+ *  detailGain is the signature the loader leaves behind — the bake's 1.0, where
+ *  a real detail grain keeps 2.0 (MaterialResponseConstants.h). A detail slot
+ *  that is not bound (scale 0) cannot carry the mask at all. */
+inline bool alphaMaskFromDetail(float detailGain, float detailScale) {
+    if (detailScale <= 0.0f) return false;
+    return detailGain <= KS_MATERIAL_DETAIL_GAIN_BAKE + 0.5f &&
+           detailGain >= KS_MATERIAL_DETAIL_GAIN_BAKE - 0.5f;
+}
+
 /** Which slot a KN5 mapping feeds. The weathering maps (damage, scratches,
  *  dirt, dust) are DATA for AC's damage/dirt shaders, not the surface: a file
  *  commonly names its damage normal txNormal=damage.dds, and feeding that to

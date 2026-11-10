@@ -281,6 +281,18 @@ int main() {
 
     // --- txDetail only when AC's useDetail asks for it ---------------------
     {
+    //     reads the map the FILE named, not the wear layer that replaced it --
+    {
+        // The swap's signature: the loader writes the bake's gain (1.0) when the
+        // detail slot carries the file's own diffuse mapping.
+        KS_CHECK(alphaMaskFromDetail(1.0f, 1.0f));
+        // No detail map bound: nothing to read the mask from.
+        KS_CHECK(!alphaMaskFromDetail(1.0f, 0.0f));
+        // A real detail grain (2.0) is not the bake: the albedo carries the mask.
+        KS_CHECK(!alphaMaskFromDetail(2.0f, 1.0f));
+        KS_CHECK(!alphaMaskFromDetail(2.0f, 25.0f));
+    }
+
         Kn5Material body;
         body.properties.push_back(floatProperty("useDetail", 0.0f));
         KS_CHECK(!usesDetail(body));

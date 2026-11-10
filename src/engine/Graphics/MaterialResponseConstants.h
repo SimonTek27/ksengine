@@ -46,6 +46,14 @@
  * average, while an authored tint gradient survives as a blurred version. */
 #define KS_MATERIAL_PANE_ALPHA_LOD 5.0
 
+/* The detail gain the loader writes when the detail slot carries the file's OWN
+ * diffuse mapping: an occlusion bake moved there because it carries no colour
+ * (see SimulationLoop). A real detail grain keeps 2.0, so the two values are
+ * what tells the shaders which map the file's alpha test samples — the bake,
+ * never the wear layer that took its place in the albedo. */
+#define KS_MATERIAL_DETAIL_GAIN_BAKE 1.0
+#define KS_MATERIAL_DETAIL_GAIN_NEUTRAL 2.0
+
 /* Pane classification keywords. C++ only: GLSL never matches shader names,
  * it receives the resulting glassiness flag. */
 #define KS_MATERIAL_GLASS_SHADER_REFLECTION "reflection"

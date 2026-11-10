@@ -99,11 +99,19 @@ void main() {
             texture(detailMap, fragUV * material.detailScale).rgb * material.detailGain;
     }
     // KN5 alpha test, same rule as native_forward.frag: without it a decal
-    // plane writes opaque albedo and the deferred path fills its quad. The
-    // comparison includes the reference, so a material that authored no
-    // ksAlphaRef (reference 0) still cuts the texels its mask marks fully
-    // transparent and leaves every soft alpha alone.
-    if (material.alphaTest >= 0.5 && albedoSample.a <= material.alphaRef) discard;
+    // plane writes opaque albedo and the deferred path fills its quad. The map
+    // it samples is the one the FILE named as its diffuse mapping, and that is
+    // not always the surface colour: when it is an occlusion bake the loader
+    // moves it to the detail slot (detailGain 1.0) and the colour to the map
+    // that has it — the bake carries the alpha, and it is flat. The comparison
+    // includes the reference, so a material that authored no ksAlphaRef
+    // (reference 0) still cuts the texels its mask marks fully transparent and
+    // leaves every soft alpha alone.
+    float maskAlpha = albedoSample.a;
+    if (material.alphaTest >= 0.5 && material.detailScale > 0.0 &&
+        abs(material.detailGain - KS_MATERIAL_DETAIL_GAIN_BAKE) < 0.5)
+        maskAlpha = texture(detailMap, fragUV).a; // untiled: it shares the diffuse UVs
+    if (material.alphaTest >= 0.5 && maskAlpha <= material.alphaRef) discard;
     vec3 paint = vec3(material.tintR, material.tintG, material.tintB);
     outAlbedoAO = vec4(mix(albedoSample.rgb * paint, paint, material.paintSolid),
                        metalness);

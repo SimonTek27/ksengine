@@ -155,7 +155,19 @@ void main() {
     // drawn as opaque cards. The comparison includes the reference, so a
     // material that authored no ksAlphaRef (reference 0) still cuts the texels
     // its mask marks fully transparent and leaves every soft alpha alone.
-    if (material.alphaTest >= 0.5 && albedoSample.a <= material.alphaRef) discard;
+    // The alpha test samples the map the FILE named as its diffuse mapping, and
+    // that mapping is not always the surface colour: when it is an occlusion
+    // bake the loader moves the bake to the detail slot (detailGain 1.0) and
+    // the colour to the map that has it. The ALPHA stays with the bake, which is
+    // flat, so nothing is cut — testing the wear layer that replaced it punched
+    // 1.4% of the Countach's leather into pinholes the bright background shone
+    // through, which is the dot pattern that shows on its windscreen (the holes
+    // are behind the glass, not on it). See graphics::alphaMaskFromDetail.
+    float maskAlpha = albedoSample.a;
+    if (material.alphaTest >= 0.5 && material.detailScale > 0.0 &&
+        abs(material.detailGain - KS_MATERIAL_DETAIL_GAIN_BAKE) < 0.5)
+        maskAlpha = texture(detailMap, fragUV).a; // untiled: it shares the diffuse UVs
+    if (material.alphaTest >= 0.5 && maskAlpha <= material.alphaRef) discard;
     // A livery texture carries its own colour, so a paint the player picked
     // replaces it; painting a plain body only tints it.
     vec3 paint = vec3(material.tintR, material.tintG, material.tintB);

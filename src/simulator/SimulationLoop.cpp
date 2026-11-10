@@ -1338,7 +1338,10 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                     albedo = detail;
                     detail = occlusion;
                     detailTiles = 1.0f;
-                    nm.detailGain = 1.0f;
+                    // The gain is also the signature the shaders read to know
+                    // that the alpha test's map is this bake, not the wear layer
+                    // that took its place in the albedo (alphaMaskFromDetail).
+                    nm.detailGain = KS_MATERIAL_DETAIL_GAIN_BAKE;
                 }
                 nm.albedoTexture = textureKey(albedo, faceInside);
                 nm.detailTexture = textureKey(detail, faceInside);
@@ -1413,7 +1416,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
     const std::string albedoName = graphics::canonicalTextureName(albedo);
                     std::printf(
-                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f spec=%.2f fres=%.2f/%.2f/%.2f albedo=%-24s detail=%-20s ds=%.2f use=%d at=%d blend=%d ref=%.3f%s",
+                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f spec=%.2f fres=%.2f/%.2f/%.2f albedo=%-24s detail=%-20s ds=%.2f gain=%.2f use=%d at=%d blend=%d ref=%.3f%s",
                         material.name.c_str(), material.shader.c_str(),
                         graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
                         static_cast<double>(authored.specular),
@@ -1423,6 +1426,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                         albedo.empty() ? "-" : albedoName.c_str(),
                         detail.empty() ? "-" : detail.c_str(),
                         static_cast<double>(nm.detailScale),
+                        static_cast<double>(nm.detailGain),
                         graphics::usesDetail(material) ? 1 : 0,
                         static_cast<int>(material.alpha_tested),
                         static_cast<int>(material.blend),
