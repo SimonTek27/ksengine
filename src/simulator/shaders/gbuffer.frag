@@ -99,8 +99,11 @@ void main() {
             texture(detailMap, fragUV * material.detailScale).rgb * material.detailGain;
     }
     // KN5 alpha test, same rule as native_forward.frag: without it a decal
-    // plane writes opaque albedo and the deferred path fills its quad.
-    if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
+    // plane writes opaque albedo and the deferred path fills its quad. The
+    // comparison includes the reference, so a material that authored no
+    // ksAlphaRef (reference 0) still cuts the texels its mask marks fully
+    // transparent and leaves every soft alpha alone.
+    if (material.alphaTest >= 0.5 && albedoSample.a <= material.alphaRef) discard;
     vec3 paint = vec3(material.tintR, material.tintG, material.tintB);
     outAlbedoAO = vec4(mix(albedoSample.rgb * paint, paint, material.paintSolid),
                        metalness);

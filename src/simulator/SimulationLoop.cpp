@@ -1413,7 +1413,7 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
     const std::string albedoName = graphics::canonicalTextureName(albedo);
                     std::printf(
-                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f spec=%.2f fres=%.2f/%.2f/%.2f albedo=%-24s detail=%-20s ds=%.2f use=%d%s",
+                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f spec=%.2f fres=%.2f/%.2f/%.2f albedo=%-24s detail=%-20s ds=%.2f use=%d at=%d blend=%d ref=%.3f%s",
                         material.name.c_str(), material.shader.c_str(),
                         graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
                         static_cast<double>(authored.specular),
@@ -1424,6 +1424,9 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                         detail.empty() ? "-" : detail.c_str(),
                         static_cast<double>(nm.detailScale),
                         graphics::usesDetail(material) ? 1 : 0,
+                        static_cast<int>(material.alpha_tested),
+                        static_cast<int>(material.blend),
+                        static_cast<double>(propertyFloat(material, "ksAlphaRef")),
                         overrides.findEffective(material.name) != nullptr ? " (override)" : "");
                     std::putchar(10);
                 }
@@ -1484,9 +1487,12 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 // over whatever is behind it. Cutting a windscreen out at
                 // half alpha made it vanish instead of turning see-through.
                 if (material.alpha_tested != 0) {
-                    const float ref = propertyFloat(material, "ksAlphaRef");
+                    // The reference is the file's, and an unauthored one is 0:
+                    // it cuts the texels the mask marks fully transparent and
+                    // nothing else. The 0.5 this used to substitute shredded
+                    // the car's soft alphas — see graphics::alphaReference.
                     nm.alphaTested = true;
-                    nm.alphaRef = ref > 0.0f ? ref : 0.5f;
+                    nm.alphaRef = graphics::alphaReference(material);
                     ++cutouts;
                 }
                 if (material.blend != 0) {

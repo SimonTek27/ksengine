@@ -56,6 +56,28 @@ struct AuthoredSurface {
     float fresnelMax = 0.0f;
 };
 
+/** The reference an alpha-tested material cuts with. The file's own
+ *  ksAlphaRef is the authority, clamped to [0, 1]; a material that authored
+ *  none cuts only the texels its mask marks FULLY transparent, never a soft
+ *  alpha at some fraction.
+ *
+ *  The 0.5 this replaces was an invention — it is the value the AC editor
+ *  shows for a NEW material, not what the file says — and it shredded every
+ *  soft alpha in the Countach: its interior leather (leather.dds,
+ *  leather_GREY.dds) carries a wear layer whose alpha is 98% intermediate
+ *  values with not one fully opaque texel, so at 0.5 the seats and the dash
+ *  top lost 73% of their texels and the white showroom floor showed through
+ *  the holes. A real cut-out mask is bimodal, and cutting its exact zeros is
+ *  what draws it: INT_Speaker.dds is 72.7% zeros with solid bars,
+ *  INT_stitching.dds 49% zeros with opaque thread. */
+inline float alphaReference(const engine::fileformat::Kn5Material& material) {
+    float authored = 0.0f;
+    if (!material_response_detail::firstFloat(material, "ksAlphaRef", authored) ||
+        authored <= 0.0f)
+        return 0.0f;
+    return std::min(authored, 1.0f);
+}
+
 /** Which slot a KN5 mapping feeds. The weathering maps (damage, scratches,
  *  dirt, dust) are DATA for AC's damage/dirt shaders, not the surface: a file
  *  commonly names its damage normal txNormal=damage.dds, and feeding that to

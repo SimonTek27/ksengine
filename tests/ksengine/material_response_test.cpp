@@ -79,6 +79,37 @@ int main() {
         KS_CHECK(!isOcclusionTexture("Carpet.DDS"));
     }
 
+    // --- the alpha-test reference is the file's, and 0 without one ---------
+    {
+        // The Countach's interior leather is alpha tested with no ksAlphaRef
+        // and its alpha is a soft wear layer: cut at 0.5 it lost 73% of its
+        // texels and the seats became a colander. No reference cuts the mask's
+        // fully transparent texels only.
+        Kn5Material leather;
+        leather.name = "INT_Occ_SKIN_A";
+        leather.shader = "ksPerPixelMultiMap_AT_NMDetail";
+        leather.alpha_tested = 1;
+        KS_CHECK(near(alphaReference(leather), 0.0f));
+
+        // An authored reference is the authority.
+        Kn5Material decal;
+        decal.name = "EXT_plastic_alpha";
+        decal.shader = "ksPerPixelMultiMap_AT";
+        decal.alpha_tested = 1;
+        decal.properties.push_back(floatProperty("ksAlphaRef", 0.25f));
+        KS_CHECK(near(alphaReference(decal), 0.25f));
+
+        // An explicit zero is not a reference: it cuts exact transparency.
+        Kn5Material explicitZero;
+        explicitZero.properties.push_back(floatProperty("ksAlphaRef", 0.0f));
+        KS_CHECK(near(alphaReference(explicitZero), 0.0f));
+
+        // A file that asks for more than full opacity is clamped.
+        Kn5Material greedy;
+        greedy.properties.push_back(floatProperty("ksAlphaRef", 4.0f));
+        KS_CHECK(near(alphaReference(greedy), 1.0f));
+    }
+
     // --- ksSpecular scales F0 around 0.5 (WCCARBODY = 0.2) ----------------
     {
         Kn5Material material;

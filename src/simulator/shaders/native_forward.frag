@@ -152,8 +152,10 @@ void main() {
             texture(detailMap, fragUV * material.detailScale).rgb * material.detailGain;
     }
     // KN5 alpha test: decals, grilles and light covers are cut out instead of
-    // drawn as opaque cards.
-    if (material.alphaTest >= 0.5 && albedoSample.a < material.alphaRef) discard;
+    // drawn as opaque cards. The comparison includes the reference, so a
+    // material that authored no ksAlphaRef (reference 0) still cuts the texels
+    // its mask marks fully transparent and leaves every soft alpha alone.
+    if (material.alphaTest >= 0.5 && albedoSample.a <= material.alphaRef) discard;
     // A livery texture carries its own colour, so a paint the player picked
     // replaces it; painting a plain body only tints it.
     vec3 paint = vec3(material.tintR, material.tintG, material.tintB);
