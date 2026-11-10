@@ -1,7 +1,7 @@
 # ksengine — Architecture
 
 **Product:** Kinetika (ksengine / ksim / ksEditor)  
-**Updated:** 2026-10-18  
+**Updated:** 2026-11-10  
 **Scope:** layers, data flow, runtime systems, source layout.
 
 This is the single architecture reference for the repository. Older notes
@@ -58,9 +58,16 @@ historical; prefer this document for new work.
 | Product | Path | Qt | Output |
 |---------|------|----|--------|
 | **ksengine** | `src/engine/` | No | `ksengine` (static or shared) |
+| **ksenginehw** | `src/hw/` (facade) over `src/engine/{devices,Audio,Video}` | No | static archive linked into `ksengine` |
 | **SimulatorApp** | `src/simulator/` | No | `ksim.exe` / SimulatorApp |
 | **Adapters** | `src/adapters/` | No | Linked as needed |
 | **ksEditor** | `src/MainWindow*`, modules, sdk | Yes | `kseditor.exe` |
+
+`ksengine` does not call a device, a WASAPI endpoint or the Vulkan loader
+itself: those backends compile into **ksenginehw** and are reached through
+`src/hw/HardwareBackend.h` — controls (`devices/`), audio endpoints
+(`Audio/AudioDevices`, `AudioUtil`, `WASAPIInput`) and video (`Video/` plus the
+runtime probe).
 
 ---
 
@@ -81,11 +88,12 @@ ksengine/
     │   ├── Engine.* / EngineModule.h / KsExport.h
     │   ├── Math/
     │   ├── physics/             # vehicle, Pacejka, suspension, aero, damage, weather
-    │   ├── devices/             # FFB + simracing backends
-    │   ├── Graphics/ Audio/ FileFormat/
+    │   ├── devices/             # controls backends: compiled by ksenginehw
+    │   ├── Graphics/ Audio/ Video/ FileFormat/   # endpoints + encoder: ksenginehw
     │   ├── scene/               # ECS registry / systems
     │   ├── network/ AI/ Config/ assets/
     │   └── …
+    ├── hw/                      # ksenginehw: hardware backends + facade (see 4.3)
     ├── simulator/               # ★ race runtime
     │   ├── SimulatorApp.cpp
     │   ├── SimulationLoop.*
@@ -123,10 +131,25 @@ ksengine/
 
 Physics is Qt-free and driven by the simulator fixed-step loop.
 
-### 4.3 Devices & FFB
+### 4.3 Hardware layer (`src/hw/` → `ksenginehw`)
 
-- Abstract FFB base + vendor backends (`devices/simracing/`).
-- Input state fed into the vehicle each tick.
+ksengine keeps no device, WASAPI-endpoint or Vulkan-loader code. Those
+backends compile into the static archive **ksenginehw**
+(`src/hw/CMakeLists.txt`), which ksengine links; the only entry point is the
+facade `src/hw/HardwareBackend.h` (`ks::hw`), asked once at start-up by
+`Engine::initialize()` and logged.
+
+| Group | Backends compiled by `ksenginehw` | Facade |
+|-------|-----------------------------------|--------|
+| Controls | `devices/` — DirectInput, XInput, FFB bridges, VR device layer | device status in `summarize()` |
+| Audio | `Audio/AudioDevices`, `AudioUtil`, `WASAPIInput` — endpoint enumeration and capture | `audioOutputNames`, `audioInputNames`, `defaultAudioOutputName` |
+| Video | `Video/` — encoder; Vulkan runtime probe | `videoRuntimePresent`, `videoRuntimeVersion` |
+
+Sources stay in their historical folders so existing includes keep
+resolving; ksengine excludes exactly those files from its own glob, so each
+one compiles once, by ksenginehw, with `KSENGINE_BUILDING_DLL` (the archive
+lands inside `ksengine.dll` and must keep exporting). Renderer, playback and
+input policy remain in `src/simulator/` and are not part of this boundary yet.
 
 ### 4.4 Scene & formats
 
