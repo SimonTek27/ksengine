@@ -15,15 +15,22 @@
 //   ks_cartool damage  <car-dir>
 //   ks_cartool components <car-dir>
 //   ks_cartool info    <car-dir>
+//   ks_cartool materials <car-dir>   (every KN5 material as JSON, no GPU)
 
 #include "../../src/adapters/assetto_corsa/AcCarManifestConverter.h"
 #include "../../src/engine/FileFormat/AcdReader.h"
+#include "../../src/engine/FileFormat/Kn5Reader.h"
 
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 using ks::assetto_corsa::AcCarManifestConverter;
@@ -186,6 +193,125 @@ static int runUnpack(const fs::path& car) {
     return written > 0 ? 0 : 1;
 }
 
+// Latin-1 to UTF-8 so the dump is always valid JSON: AC names are ASCII in
+// practice, but a file is free to carry a high byte.
+static std::string jsonEscape(const std::string& text) {
+    std::string out;
+    out.reserve(text.size() + 8);
+    for (const unsigned char c : text) {
+        switch (c) {
+        case '"': out += "\\\""; break;
+        case '\\': out += "\\\\"; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            if (c < 0x20) {
+                char escaped[7];
+                std::snprintf(escaped, sizeof(escaped), "\\u%04x", c);
+                out += escaped;
+            } else if (c < 0x80) {
+                out += static_cast<char>(c);
+            } else {
+                out += static_cast<char>(0xC0 | (c >> 6));
+                out += static_cast<char>(0x80 | (c & 0x3F));
+            }
+        }
+    }
+    return out;
+}
+
+// The property blob is opaque in the engine (40 bytes, kept raw so tooling can
+// read it). Its first four bytes are the value the file wrote as a float —
+// 0.5 in an authored ksAlphaRef, 0.0 when the material says "never cut".
+static float firstFloat(const std::array<std::uint8_t, 40>& value) {
+    float out = 0.0f;
+    std::memcpy(&out, value.data(), sizeof(out));
+    return out;
+}
+
+static void printMaterialJson(const ks::engine::fileformat::Kn5Material& material) {
+    std::printf("        {\n");
+    std::printf("          \"name\": \"%s\",\n", jsonEscape(material.name).c_str());
+    std::printf("          \"shader\": \"%s\",\n", jsonEscape(material.shader).c_str());
+    std::printf("          \"blend\": %d,\n", static_cast<int>(material.blend));
+    std::printf("          \"alphaTested\": %d,\n", static_cast<int>(material.alpha_tested));
+    std::printf("          \"depthMode\": %d,\n", material.depth_mode);
+
+    std::printf("          \"properties\": {");
+    for (std::size_t i = 0; i < material.properties.size(); ++i) {
+        const ks::engine::fileformat::Kn5Property& property = material.properties[i];
+        std::printf("%s\n            \"%s\": {\"value\": %g, \"raw\": \"",
+                    i == 0 ? "" : ",", jsonEscape(property.name).c_str(),
+                    static_cast<double>(firstFloat(property.value)));
+        for (const std::uint8_t byte : property.value)
+            std::printf("%02x", static_cast<int>(byte));
+        std::printf("\"}");
+    }
+    std::printf("%s},\n", material.properties.empty() ? "" : "\n          ");
+
+    std::printf("          \"mappings\": [");
+    for (std::size_t i = 0; i < material.mappings.size(); ++i) {
+        const ks::engine::fileformat::Kn5TextureMapping& mapping = material.mappings[i];
+        std::printf("%s\n            {\"slot\": \"%s\", \"index\": %d, \"texture\": \"%s\"}",
+                    i == 0 ? "" : ",", jsonEscape(mapping.name).c_str(), mapping.slot,
+                    jsonEscape(mapping.texture).c_str());
+    }
+    std::printf("%s]\n        }", material.mappings.empty() ? "" : "\n          ");
+}
+
+// Reads every .kn5 of the folder through the renderer's own parser and prints
+// the material records as JSON. Texture payloads are skipped, so inspecting a
+// car costs a fraction of loading it — and nothing here needs a GPU or a state.
+static int runMaterials(const fs::path& car) {
+    std::error_code ec;
+    std::vector<fs::path> files;
+    for (fs::directory_iterator it(car, ec), end; !ec && it != end; it.increment(ec)) {
+        const fs::path& path = it->path();
+        std::string extension = path.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (extension == ".kn5") files.push_back(path);
+    }
+    std::sort(files.begin(), files.end());
+    if (files.empty()) {
+        std::printf("materials failed: no .kn5 in %s\n", car.string().c_str());
+        return 1;
+    }
+
+    std::printf("{\n  \"car\": \"%s\",\n  \"files\": [\n",
+                jsonEscape(car.filename().string()).c_str());
+    int total = 0;
+    int unreadable = 0;
+    for (std::size_t i = 0; i < files.size(); ++i) {
+        const ks::engine::fileformat::Kn5ParseResult parsed =
+            ks::engine::fileformat::parseKn5File(files[i].string());
+        std::printf("    {\n      \"file\": \"%s\",\n",
+                    jsonEscape(files[i].filename().string()).c_str());
+        const char* tail = i + 1 < files.size() ? "," : "";
+        if (!parsed.ok()) {
+            std::printf("      \"error\": \"%s\"\n    }%s\n",
+                        jsonEscape(parsed.error).c_str(), tail);
+            ++unreadable;
+            continue;
+        }
+        std::printf("      \"version\": %d,\n      \"textureCount\": %d,\n      \"materials\": [\n",
+                    parsed.file.version, static_cast<int>(parsed.file.textures.size()));
+        const std::vector<ks::engine::fileformat::Kn5Material>& materials =
+            parsed.file.materials;
+        total += static_cast<int>(materials.size());
+        for (std::size_t m = 0; m < materials.size(); ++m) {
+            printMaterialJson(materials[m]);
+            std::printf("%s\n", m + 1 < materials.size() ? "," : "");
+        }
+        std::printf("      ]\n    }%s\n", tail);
+    }
+    std::printf("  ]\n}\n");
+    std::fprintf(stderr, "materials: %d file, %d materiali, %d illeggibili\n",
+                 static_cast<int>(files.size()), total, unreadable);
+    return unreadable == 0 ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::printf("usage: ks_cartool unpack  <car-dir>\n"
@@ -197,7 +323,8 @@ int main(int argc, char** argv) {
                     "       ks_cartool damage  <car-dir>\n"
                     "       ks_cartool components <car-dir>\n"
                     "       ks_cartool pack    <car-dir>\n"
-                    "       ks_cartool info    <car-dir>\n");
+                    "       ks_cartool info    <car-dir>\n"
+                    "       ks_cartool materials <car-dir>\n");
         return 2;
     }
     const std::string command = argv[1];
@@ -207,6 +334,7 @@ int main(int argc, char** argv) {
         printInfo(src);
         return 0;
     }
+    if (command == "materials") return runMaterials(src);
     if (command == "unpack") return runUnpack(src);
     if (command == "verify") return runVerify(src);
     if (command == "apply") return runApply(src);
