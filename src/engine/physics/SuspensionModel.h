@@ -6,6 +6,7 @@
  */
 
 #include "PhysicsCoreTypes.h"
+#include "../KsExport.h"
 
 #include <array>
 #include <cmath>
@@ -16,7 +17,9 @@
 namespace ks {
 namespace physics {
 
-class SuspensionModel {
+// KSENGINE_API: i test (setup_garage_aids_test) chiamano update() fuori dalla
+// DLL; senza annotazione MSVC non esporta i membri out-of-line.
+class KSENGINE_API SuspensionModel {
 public:
     struct SpringConfig {
         float rate = 15000.0f;          // N/m

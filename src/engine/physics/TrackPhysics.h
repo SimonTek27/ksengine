@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include "../KsExport.h"
 #include "PhysicsCoreTypes.h"
 
 #include "PhysicsTypes.h"  // TrackLayout, TrackSessionState
@@ -92,7 +93,9 @@ public:
 
 class VehicleSimulator;
 
-class TrackSimulator {
+// KSENGINE_API: i test (track_physics_test) vivono fuori dalla DLL; i membri
+// out-of-line (ctor/loadTrack) devono essere esportati.
+class KSENGINE_API TrackSimulator {
     public:
     explicit TrackSimulator();
     ~TrackSimulator();

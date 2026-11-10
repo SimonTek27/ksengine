@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../KsExport.h"
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -117,26 +118,35 @@ struct XrControllerState {
     XrMat4 gripPose;
     bool aimValid = false;
     bool gripValid = false;
+    XrPosef aimPoseRaw{{0, 0, 0, 1}, {0, 0, 0}};
+    XrPosef gripPoseRaw{{0, 0, 0, 1}, {0, 0, 0}};
 };
 
-class XrManager {
+class KSENGINE_API XrManager {
 public:
     static XrManager* instance();
 
     XrManager();
     ~XrManager();
 
-    XrManager(const XrManager&) = delete;
-    XrManager& operator=(const XrManager&) = delete;
-
     bool initialize(const std::string& applicationName = "ksEditor VR");
+    bool prepareVulkanBootstrap(const std::string& applicationName = "KinetiKa Simulator");
+    const std::vector<std::string>& requiredVulkanInstanceExtensions() const {
+        return m_vulkanInstanceExtensions;
+    }
+    std::vector<std::string> requiredVulkanDeviceExtensions(VkPhysicalDevice physicalDevice) const;
+    VkPhysicalDevice vulkanGraphicsDevice(VkInstance instance) const;
     void shutdown();
     bool isInitialized() const { return m_initialized; }
     bool isSessionRunning() const { return m_sessionRunning; }
     bool isSessionFocused() const { return m_sessionFocused; }
+    XrPosef headPose() const;
+    bool headPoseValid() const;
 
     bool beginXRFrame();
     bool endXRFrame();
+    bool isFrameBegun() const { return m_frameBegun; }
+    bool shouldRenderFrame() const { return m_shouldRenderFrame; }
     bool beginEyeRender(int eyeIndex);
     void endEyeRender(int eyeIndex);
 
@@ -152,6 +162,7 @@ public:
 
     bool pollEvents();
     bool pollActions();
+    XrTime predictedDisplayTime() const { return m_predictedDisplayTime; }
 
     XrControllerState& leftController() { return m_leftController; }
     XrControllerState& rightController() { return m_rightController; }
@@ -205,6 +216,7 @@ private:
     XrSystemId m_systemId = XR_NULL_SYSTEM_ID;
 
     int m_eyeCount = 0;
+    char m_systemName[XR_MAX_SYSTEM_NAME_SIZE] = {};
     XrEye m_eyes[2];
     XrViewConfigurationProperties m_viewConfigProps{};
 
@@ -231,6 +243,13 @@ private:
 
     XrPath m_leftHandPath = XR_NULL_PATH;
     XrPath m_rightHandPath = XR_NULL_PATH;
+    std::vector<std::string> m_vulkanInstanceExtensions;
+    XrTime m_predictedDisplayTime = 0;
+    XrPosef m_headPoseRaw{{0, 0, 0, 1}, {0, 0, 0}};
+    bool m_headPoseValid = false;
+    XrViewState m_viewState{XR_TYPE_VIEW_STATE};
+    bool m_frameBegun = false;
+    bool m_shouldRenderFrame = false;
 
     mutable std::mutex m_mutex;
 };
@@ -240,8 +259,21 @@ private:
 
 #else // OpenXR not available
 
+#if !__has_include(<vulkan/vulkan.h>)
+using VkDevice = void*;
+using VkQueue = void*;
+using VkCommandPool = void*;
+using VkInstance = void*;
+using VkPhysicalDevice = void*;
+#endif
+
 namespace ks {
 namespace device {
+
+struct XrPosef {
+    struct Orientation { float x = 0, y = 0, z = 0, w = 1; } orientation;
+    struct Position { float x = 0, y = 0, z = 0; } position;
+};
 
 struct Vec2 { float x = 0, y = 0; };
 struct XrMat4 {
@@ -263,7 +295,7 @@ struct XrControllerState {
     XrMat4 gripPose;
 };
 
-class XrManager {
+class KSENGINE_API XrManager {
 public:
     static XrManager* instance() {
         static XrManager s;
@@ -272,11 +304,37 @@ public:
     XrManager() = default;
     ~XrManager() = default;
     bool initialize(const std::string& = {}) { return false; }
+    bool prepareVulkanBootstrap(const std::string& = {}) { return false; }
+    const std::vector<std::string>& requiredVulkanInstanceExtensions() const {
+        static const std::vector<std::string> empty;
+        return empty;
+    }
+    std::vector<std::string> requiredVulkanDeviceExtensions(VkPhysicalDevice) const { return {}; }
+    VkPhysicalDevice vulkanGraphicsDevice(VkInstance) const {
+#if __has_include(<vulkan/vulkan.h>)
+        return VK_NULL_HANDLE;
+#else
+        return nullptr;
+#endif
+    }
     void shutdown() {}
     bool isInitialized() const { return false; }
     bool isSessionRunning() const { return false; }
     bool isSessionFocused() const { return false; }
+    bool shouldRenderFrame() const { return false; }
+    int eyeCount() const { return 0; }
+    const char* systemName() const { return ""; }
+    XrPosef headPose() const { return {}; }
+    bool headPoseValid() const { return false; }
     bool pollEvents() { return false; }
+    bool pollActions() { return false; }
+    bool beginXRFrame() { return false; }
+    bool endXRFrame() { return false; }
+    bool isFrameBegun() const { return false; }
+    XrMat4 projectionMatrix(int, float = 0.1f, float = 1000.0f) const { return XrMat4{}; }
+    XrMat4 viewMatrix(int) const { return XrMat4{}; }
+    void setVulkanDevice(VkDevice, VkPhysicalDevice, VkInstance, uint32_t, uint32_t) {}
+    void setVulkanCommandResources(VkCommandPool, VkQueue) {}
     XrControllerState& leftController() { return m_left; }
     XrControllerState& rightController() { return m_right; }
     std::function<void(bool)> onInitialized;

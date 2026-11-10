@@ -322,6 +322,14 @@ public:
     bool antistallActive() const { return m_antistallActive; }
 
     int currentGear() const { return m_currentGear; }
+    /** Cambio manuale del pilota (stile rF2/RaceRoom): requestGearShift
+     *  accumula +1/-1 (leva sequenziale), requestGear seleziona direttamente
+     *  la marcia dell'H-shifter (0 = folle, -1 = retromarcia). Ogni richiesta manualmente
+     *  attiva spegne l'autocambio finché il pilota non lo riattiva. */
+    void requestGearShift(int delta);
+    void requestGear(int gear);
+    void setAutoShifting(bool on) { m_autoShift = on; }
+    bool autoShifting() const { return m_autoShift; }
     double rpm() const { return m_rpm; }
     const std::vector<double>& gearRatios() const { return m_gearRatios; }
     float finalDrive() const { return static_cast<float>(m_finalDrive); }
@@ -389,6 +397,12 @@ private:
     double m_wheelRadius = 0.33, m_finalDrive = 3.9;
     std::vector<double> m_gearRatios = {3.5, 2.5, 1.8, 1.4, 1.1, 0.9};
     int m_currentGear = 1;
+    /** Cambio manuale: richieste in attesa consumate da shiftGears(). */
+    bool m_autoShift = true;
+    int m_pendingGearShifts = 0;
+    bool m_manualGearPending = false;
+    int m_manualGear = 0;
+    double m_reverseRatio = 3.2; // marcia retro (rapporto fisso)
     double m_rpm = 1000;
     CarStartConfig m_start;
     EngineRunState m_runState = EngineRunState::Running;

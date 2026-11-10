@@ -21,6 +21,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include "SimulationLoop.h"
 #include "ContentLibrary.h"
 #include "InputManager.h"
+#include "engine/input/WheelLedControl.h" // LED strip del volante (stato RPM/marcia)
 #include "MultiCarManager.h"
 #include "NetworkManager.h"
 #include "SetupGarage.h"
@@ -53,6 +54,9 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include "engine/scene/SceneModule.h"
 #include "engine/Graphics/RenderSystem.h"
 #include "engine/devices/InputSystem.h"
+#include "engine/devices/vr/XrManager.h"
+#include "engine/input/HeadTracking.h"
+#include "engine/input/VRInput.h"
 #include "engine/Scripting/ScriptModule.h"
 #include "engine/Scripting/ModSdk.h"
 #include "engine/terrain/TerrainMesh.h"
@@ -288,6 +292,8 @@ SimulationLoop::~SimulationLoop() {
     ks::scripting::ScriptModule::instance().shutdown();
     ks::engine::devices::InputSystem::instance().shutdown();
     ks::engine::graphics::RenderSystem::instance().shutdown();
+    ks::engine::input::HeadTracking::instance().shutdown();
+    ks::engine::input::VRInput::instance().shutdown();
     Engine::instance().shutdown();
 #if HAS_FFB
     if (m_ffb) { m_ffb->shutdown(); m_ffb.reset(); }
@@ -308,6 +314,12 @@ bool SimulationLoop::initialize() {
     m_camera->setFarPlane(5000.0f);
     engine.registerModule("ks.input", borrowModule(ks::engine::devices::InputSystem::instance()));
     engine.registerModule("ks.render", borrowModule(ks::engine::graphics::RenderSystem::instance()));
+    auto& headTracking = ks::engine::input::HeadTracking::instance();
+    auto& vrInput = ks::engine::input::VRInput::instance();
+    engine.registerModule("ks.input.head_tracking", borrowModule(headTracking));
+    engine.registerModule("ks.input.vr", borrowModule(vrInput));
+    headTracking.initialize();
+    vrInput.initialize();
     auto& scene = ks::ecs::SceneModule::instance();
     scene.attach(&engine.registry());
     scene.addSystem("syncCarTransforms", [this](ks::ecs::Registry&, double) { syncCarTransforms(); });
@@ -2349,6 +2361,10 @@ void SimulationLoop::applyInput() {
     ks::engine::devices::InputSystem::instance().setState(input);
 #if HAS_VEHICLE_SIM
     if (!m_vehicle) return;
+    // Le richieste di cambio non devono restare in coda mentre un menu blocca
+    // la guida: si leggono comunque (e si scartano), si applicano solo a
+    // auto sbloccata. I flag shiftUp/shiftDown vengono azzerati da update()
+    // al frame successivo, quindi un menu aperto li disperde da sé.
     if (blocked) {
         m_vehicle->setThrottle(0);
         m_vehicle->setBrake(0);
@@ -2357,13 +2373,68 @@ void SimulationLoop::applyInput() {
         // Menus hold the clutch in: the car must not stall while the driver is
         // in a menu it cannot drive out of.
         m_vehicle->setClutchPedal(1.0);
+        m_input->takeGearRequest();
         return;
     }
+    // Cambio manuale (stile rF2): leva sequenziale a fronte e H-shifter a
+    // livello arrivano da InputManager; ogni richiesta manuale spegne
+    // l'autocambio nel veicolo.
+    if (m_input->shiftUp()) m_vehicle->requestGearShift(1);
+    if (m_input->shiftDown()) m_vehicle->requestGearShift(-1);
+    const int gearReq = m_input->takeGearRequest();
+    // 0 = nessuna richiesta, 1..7 = marce avanti, -1 = bottone retromarcia.
+    // Il modello veicolo non modella ancora la retromarcia: il bottone retro
+    // passa per ora in folle (autoReverse di controls.json resta in coda).
+    if (gearReq != 0) m_vehicle->requestGear(gearReq);
     m_vehicle->setThrottle(m_input->throttle());
     m_vehicle->setBrake(m_input->brake());
-    m_vehicle->setSteering(m_input->steer());
+    float steerValue = static_cast<float>(m_input->steer());
+    const auto& cc = m_input->controlsConfig();
+    if (cc.speedSensitiveSteering > 0.0 && cc.steerRatioSpeed > 0.0) {
+        double speed = 0.0;
+        if (m_vehicle) speed = m_vehicle->getState().speed;
+        double factor = 1.0 - cc.speedSensitiveSteering *
+            std::clamp(speed / cc.steerRatioSpeed, 0.0, 1.0);
+        steerValue = static_cast<float>(steerValue * factor);
+    }
+    m_vehicle->setSteering(steerValue);
     m_vehicle->setHandbrake(m_input->handbrake());
     m_vehicle->setClutchPedal(m_input->clutch());
+    // autoReverse (controls.json): da fermo, tenere il freno scambia
+    // temporaneamente i pedali (freno = gas in retro, gas = freno) finché
+    // la macchina torna a fermo, come in rF2/RaceRoom.
+    if (cc.autoReverse) {
+        const double speed = m_vehicle->getState().speed;
+        const double brk = m_input->brake();
+        const double thr = m_input->throttle();
+        const double dt = 1.0 / 60.0;
+        if (!m_autoReverseActive) {
+            if (speed < 0.5 && brk > 0.9 && thr < 0.1) {
+                m_autoReverseHold += dt;
+                if (m_autoReverseHold >= 0.4) {
+                    m_autoReverseActive = true;
+                    m_vehicle->requestGear(-1);
+                }
+            } else {
+                m_autoReverseHold = 0.0;
+            }
+        } else if (speed > 0.3) {
+            // ancora in moto: freno diventa gas in retro, gas diventa freno.
+            m_vehicle->setThrottle(brk);
+            m_vehicle->setBrake(thr);
+        } else if (brk > 0.9 && thr < 0.1) {
+            m_autoReverseHold += dt;
+            if (m_autoReverseHold >= 0.4) {
+                m_autoReverseActive = false;
+                m_autoReverseHold = 0.0;
+                m_vehicle->requestGear(1);
+            }
+        } else {
+            m_autoReverseHold = 0.0;
+            m_autoReverseActive = false;
+            m_vehicle->requestGear(1);
+        }
+    }
     // The starter key is the driver's button: ignition on, then crank. While
     // the engine runs it is the kill instead, and the vehicle applies its own
     // standstill rule. A car that declares a crew start accepts only the kill
@@ -2689,6 +2760,21 @@ void SimulationLoop::syncUiFromVehicle() {
     m_ui.setInCarMenuAllowed(
         inCarMenuAllowed(multiplayer, static_cast<float>(st.speed) * 3.6f));
     m_ui.telemetry().update(st.speed, m_vehicle->rpm(), st.throttle, st.brake, st.steering, 0.f, 0.f);
+    // Striscia LED del volante (stati RPM/marcia già presenti nel loop):
+    // aggiornata solo quando qualcosa cambia, così il per-frame non riempie
+    // il log del modulo LED.
+    static int lastLedRpmPct = -1, lastLedGear = -1;
+    const int rpmPct = static_cast<int>(std::clamp(
+        m_vehicle->rpm() / std::max(1.0, m_vehicle->maxRpm()) * 100.0, 0.0, 100.0));
+    const int ledGear = std::max(0, m_vehicle->currentGear());
+    if (rpmPct != lastLedRpmPct || ledGear != lastLedGear) {
+        lastLedRpmPct = rpmPct;
+        lastLedGear = ledGear;
+        ks::engine::input::WheelLedState led;
+        led.rpmPercentage = static_cast<uint8_t>(rpmPct);
+        led.gearNumber = static_cast<uint8_t>(ledGear);
+        ks::engine::input::WheelLedControl::instance().setWheelLedState(led);
+    }
     // Roadmap 2.10 — single source of truth for the session display: the
     // player's row is read from RaceSessionManager (the same standings the
     // RESULTS screen and the control API report) instead of a hard-coded 1/1.
@@ -2795,6 +2881,22 @@ void SimulationLoop::updateCamera(float dt) {
     if (m_viewW > 0 && m_viewH > 0)
         m_camera->setAspectRatio(static_cast<float>(m_viewW) / static_cast<float>(m_viewH));
     m_camera->update(dt, carBody, speedKmh);
+
+    const auto& head = ks::engine::input::HeadTracking::instance();
+    if (m_camera->mode() == CameraController::Mode::Cockpit && head.isPoseValid()) {
+        const auto& pose = head.getCurrentPose();
+        ks::math::quat orientation = pose.orientation;
+        const ks::math::vec3 localForward = orientation.rotatedVec({0, 0, 1});
+        const ks::math::vec3 localUp = orientation.rotatedVec({0, 1, 0});
+        m_camera->setHeadTrackingOffset(
+            {pose.position.x * 0.001f, pose.position.y * 0.001f,
+             pose.position.z * 0.001f},
+            {localForward.x, localForward.y, localForward.z},
+            {localUp.x, localUp.y, localUp.z});
+        m_camera->update(dt, carBody, speedKmh);
+    } else {
+        m_camera->clearHeadTracking();
+    }
 
     if (m_vulkanRenderer)
         m_vulkanRenderer->setCamera(m_camera->viewMatrix(), m_camera->projectionMatrix(),
@@ -3728,6 +3830,8 @@ void SimulationLoop::paceFrame() {
 
 void SimulationLoop::tick() {
     m_frameStart = std::chrono::steady_clock::now();
+    auto* xrManager = ks::device::XrManager::instance();
+    if (xrManager->isInitialized()) xrManager->pollEvents();
     // The video options page asks for a rebuild of every pipeline from the
     // .spv on disk; the renderer owns the device wait and the reload, and this
     // is before the frame opens, so nothing is recording. A dev hook
@@ -3777,7 +3881,9 @@ void SimulationLoop::tick() {
         // through the external API.
         updateNetworkSync(1.0f / 60.0f);
         pumpFeatureHub(1.0f / 60.0f, false);
+        if (xrManager->isSessionRunning()) xrManager->beginXRFrame();
         render();
+        if (xrManager->isFrameBegun()) xrManager->endXRFrame();
         PROFILE_END_FRAME();
         paceFrame();
         return;
@@ -3860,6 +3966,7 @@ void SimulationLoop::tick() {
         in.camberFL = samp.camberFL; in.camberFR = samp.camberFR;
         in.speedMs = samp.speedMs; in.steerAngle = samp.steerAngle;
         float torqueNm = ks::device::FFBBridge::computeSteeringTorque(in, &m_vehicle->tires(), &m_vehicle->tires());
+        torqueNm *= static_cast<float>(m_input->controlsConfig().ffbGain);
         if (m_ffb) m_ffb->updateFFB(torqueNm);
     }
 #endif
@@ -4048,7 +4155,9 @@ void SimulationLoop::tick() {
     {
         PROFILE_SECTION("render");
         updateCamera(static_cast<float>(elapsed));
+        if (xrManager->isSessionRunning()) xrManager->beginXRFrame();
         render(static_cast<float>(elapsed));
+        if (xrManager->isFrameBegun()) xrManager->endXRFrame();
     }
     PROFILE_END_FRAME();
     paceFrame();

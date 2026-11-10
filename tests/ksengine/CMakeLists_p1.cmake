@@ -67,6 +67,8 @@ set(KS_QT_FREE_TESTS
     ac_shared_memory_publisher_test
     udp_command_listener_test
     keyboard_mapping_test
+    input_calibration_test
+    input_profile_test
     content_library_test
     skin_colour_test
     scene_assets_test

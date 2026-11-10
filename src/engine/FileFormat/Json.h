@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../KsExport.h"
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -10,7 +11,7 @@ namespace ks {
 /**
  * @brief Qt-free JSON value with a QJsonValue/QJsonObject/QJsonArray-like API.
  */
-class Json {
+class KSENGINE_API Json {
 public:
     enum class Type {
         Undefined,
@@ -41,8 +42,10 @@ public:
 
         bool operator!=(const const_iterator& other) const { return !(*this == other); }
 
-        std::string key() const;
-        const Json& value() const;
+        // MSVC: una classe annidata non eredita l'export della classe
+        // contenitore — ogni membro usato fuori dalla DLL va annotato.
+        KSENGINE_API std::string key() const;
+        KSENGINE_API const Json& value() const;
 
     private:
         const Json* m_container;

@@ -248,13 +248,13 @@ if(KS_QT_FREE_BUILD)
 	# Track module catalog (roadmap 3.8 groundwork): KN5 node inventory plus
 	# corners measured on the AI line, for the curve/kerb module library.
 	# Geotrack (fase 1): satellite + vettoriale -> cartella pista giocabile.
-	# Json.cpp viaggia con il tool, come in ks_cartool.
+	# NB: Json.cpp e PngCodec.cpp non viaggiano piu' con il tool — i loro
+	# simboli sono KSENGINE_API di ksengine.dll e ricompilarli qui crea
+	# duplicati (LNK2005) contro l'import lib. Deflate.cpp resta (non esportato).
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/geotrack/main.cpp")
 		add_executable(ks_geotrack
 			tools/geotrack/main.cpp
 			tools/geotrack/TrackSceneCore.cpp
-			src/engine/FileFormat/Json.cpp
-			src/engine/material/PngCodec.cpp
 			src/engine/FileFormat/Deflate.cpp)
 		target_include_directories(ks_geotrack PRIVATE
 			"${CMAKE_CURRENT_SOURCE_DIR}/tools"
@@ -276,11 +276,10 @@ if(KS_QT_FREE_BUILD)
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp")
     # AC car content conversion: writes the single data/data.json manifest
     # from a stock .ini car folder (content pipeline).
-    # Json.cpp is compiled into the tool: the engine library keeps the JSON
-    # value type internal, the same way the tests do.
+    # NB: Json.cpp non viaggia piu' con il tool — Json è KSENGINE_API di
+    # ksengine.dll; ricompilarlo qui crea simboli duplicati (LNK2005).
     add_executable(ks_cartool
-        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/FileFormat/Json.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp")
     target_link_libraries(ks_cartool PRIVATE ksengine)
     set_target_properties(ks_cartool PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

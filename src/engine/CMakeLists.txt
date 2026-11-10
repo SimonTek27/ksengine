@@ -15,7 +15,7 @@ endif()
 
 set(KSENGINE_QT_FREE_DIRS
   Math physics devices FileFormat archive Config network material sim Graphics
-  Audio assets sys AI animation hwril mesh Tools Scripting Video terrain
+  Audio assets sys AI animation hwril mesh Tools Scripting Video terrain input ui
 )
 set(KSENGINE_SOURCES "")
 foreach(_dir ${KSENGINE_QT_FREE_DIRS})

@@ -551,6 +551,12 @@ private:
     double m_simAccumulator = 0;
     static constexpr double m_physicsDt = 0.001;
 
+    // autoReverse (controls.json = 1): da fermo, tenere il freno per qualche
+    // istante mette la retromarcia e scambia i pedali (freno = gas in retro,
+    // gas = freno), finché la macchina torna a fermo (stile rF2).
+    double m_autoReverseHold = 0.0;
+    bool m_autoReverseActive = false;
+
     std::unique_ptr<ks::device::FFBBase> m_ffb;
     bool m_ffbEnabled = true;
     bool m_running = false;

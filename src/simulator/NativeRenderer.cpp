@@ -150,18 +150,33 @@ bool createBuffer(VkPhysicalDevice pd, VkDevice device, VkDeviceSize size, VkBuf
 
 NativeRenderer::~NativeRenderer() { shutdown(); }
 
-bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
+bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface,
+                                  VkPhysicalDevice preferredPhysicalDevice,
+                                  const std::vector<std::string>& extraDeviceExtensions) {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
     if (deviceCount == 0) { fprintf(stderr, "[NativeRenderer] no Vulkan physical devices\n"); return false; }
     std::vector<VkPhysicalDevice> devices(deviceCount);
     vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
 
+    m_instance = instance;
     m_physicalDevice = devices[0];
-    for (auto dev : devices) {
-        VkPhysicalDeviceProperties props;
-        vkGetPhysicalDeviceProperties(dev, &props);
-        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) { m_physicalDevice = dev; break; }
+    if (preferredPhysicalDevice != VK_NULL_HANDLE) {
+        const auto preferred = std::find(devices.begin(), devices.end(), preferredPhysicalDevice);
+        if (preferred == devices.end()) {
+            fprintf(stderr, "[NativeRenderer] OpenXR physical device is not available in Vulkan instance\n");
+            return false;
+        }
+        m_physicalDevice = preferredPhysicalDevice;
+    } else {
+        for (auto dev : devices) {
+            VkPhysicalDeviceProperties props{};
+            vkGetPhysicalDeviceProperties(dev, &props);
+            if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+                m_physicalDevice = dev;
+                break;
+            }
+        }
     }
 
     uint32_t qfCount = 0;
@@ -207,7 +222,33 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
         }
     }
 
-    const char* extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    std::vector<std::string> enabledExtensionNames{VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    for (const auto& extension : extraDeviceExtensions) {
+        if (std::find(enabledExtensionNames.begin(), enabledExtensionNames.end(), extension) ==
+            enabledExtensionNames.end())
+            enabledExtensionNames.push_back(extension);
+    }
+    uint32_t deviceExtensionCount = 0;
+    vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &deviceExtensionCount, nullptr);
+    std::vector<VkExtensionProperties> availableDeviceExtensions(deviceExtensionCount);
+    if (deviceExtensionCount)
+        vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &deviceExtensionCount,
+                                             availableDeviceExtensions.data());
+    for (const auto& requested : enabledExtensionNames) {
+        const bool available = std::any_of(availableDeviceExtensions.begin(),
+            availableDeviceExtensions.end(), [&requested](const VkExtensionProperties& extension) {
+                return requested == extension.extensionName;
+            });
+        if (!available) {
+            fprintf(stderr, "[NativeRenderer] required device extension unavailable: %s\n",
+                    requested.c_str());
+            return false;
+        }
+    }
+    std::vector<const char*> extensionNames;
+    extensionNames.reserve(enabledExtensionNames.size());
+    for (const auto& extension : enabledExtensionNames)
+        extensionNames.push_back(extension.c_str());
     // RENDERING_AI_BRIEF P0: anisotropic filtering on the material samplers.
     // The feature must be enabled here or sampler anisotropyEnable=TRUE is
     // invalid, so the same flag is handed to TextureRuntime below — support
@@ -222,8 +263,8 @@ bool NativeRenderer::createDevice(VkInstance instance, VkSurfaceKHR surface) {
     devCi.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     devCi.queueCreateInfoCount = 1;
     devCi.pQueueCreateInfos = &qCi;
-    devCi.enabledExtensionCount = 1;
-    devCi.ppEnabledExtensionNames = extensions;
+    devCi.enabledExtensionCount = static_cast<uint32_t>(extensionNames.size());
+    devCi.ppEnabledExtensionNames = extensionNames.data();
     devCi.pEnabledFeatures = &features;
 
     if (vkCreateDevice(m_physicalDevice, &devCi, nullptr, &m_device) != VK_SUCCESS) {
@@ -4532,6 +4573,7 @@ void NativeRenderer::shutdown() {
 
     vkDestroyDevice(m_device, nullptr);
     m_device = VK_NULL_HANDLE;
+    m_instance = VK_NULL_HANDLE;
     m_physicalDevice = VK_NULL_HANDLE;
 }
 

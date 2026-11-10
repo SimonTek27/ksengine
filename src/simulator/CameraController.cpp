@@ -67,15 +67,35 @@ void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh, floa
         m_headInitialized = false;
     }
 
+    if (m_headTrackingActive)
+        localPos = localPos + m_headTrackingPosition - m_cockpitOffset;
     m_position = carMatrix * localPos;
 
     vec3 localTarget = m_cockpitLookTarget;
     vec3 worldTarget = carMatrix * localTarget;
 
-    m_forward = (worldTarget - m_position).normalized();
-    m_up = vec3(0, 1, 0);
+    if (m_headTrackingActive) {
+        const vec3 carOrigin = carMatrix * vec3(0, 0, 0);
+        const vec3 trackedForward = carMatrix * m_headTrackingForward - carOrigin;
+        const vec3 trackedUp = carMatrix * m_headTrackingUp - carOrigin;
+        m_forward = trackedForward.normalized();
+        m_up = trackedUp.normalized();
+    } else {
+        m_forward = (worldTarget - m_position).normalized();
+        m_up = vec3(0, 1, 0);
+    }
 
     m_viewMatrix = mat4::lookAt(m_position, m_position + m_forward, m_up);
+}
+
+void CameraController::setHeadTrackingOffset(const vec3& positionMeters,
+                                              const vec3& forward,
+                                              const vec3& up)
+{
+    m_headTrackingPosition = positionMeters;
+    m_headTrackingForward = forward.normalized();
+    m_headTrackingUp = up.normalized();
+    m_headTrackingActive = true;
 }
 
 void CameraController::updateChase(const mat4& carMatrix, float speedKmh, float dt)

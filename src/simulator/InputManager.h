@@ -7,8 +7,10 @@
 #include "ui/MenuInput.h"
 #include "engine/assets/UserData.h"
 #include "engine/Config/ControllerSettings.h"
+#include "ControlsConfig.h"
 
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -43,6 +45,12 @@ struct JoystickMapping {
     // Pad handbrake. A pad has a free face button where a wheel puts a switch,
     // so the default differs instead of being shared.
     int handbrakeButton = 1;
+    // H-shifter: un bottone per marcia. -1 = non mappato; indici 0..6 =
+    // marce 1..7, 7 = retromarcia. Con il dispositivo "hold" (gearSelectButtonHold)
+    // il bottone resta premuto finché si è in marcia e si rilascia tutto in folle.
+    static constexpr int kGearButtonCount = 8; // 7 marce avanti + retro
+    int gearButtons[kGearButtonCount] = {-1, -1, -1, -1, -1, -1, -1, -1};
+    int reverseGearButton = -1;
 
     // One deadzone per axis: a wheel's pedals and a pad's triggers do not
     // centre the same way, and the steering one is the largest on a pad.
@@ -87,6 +95,130 @@ struct JoystickMapping {
         return m;
     }
 };
+
+/** Calibrazione guidata di un asse (stile rF2: min/max/centro), nelle
+ *  unità raw del dispositivo (quelle che arrivano da DirectInput/XInput):
+ *  min/max vincolano la corsa utile, center corregge un centro sbagliato o
+ *  problemi di asse spezzato (0.0 = min, 0.5 = centro, 1.0 = max).
+ *  Center < 0 = asse mai calibrato: pass-through invariato. */
+struct AxisCalibration {
+    double min = 0.0;
+    double max = 1.0;
+    // -1 (o fuori 0..1) = non calibrato: nessuna correzione del centro.
+    double center = -1.0;
+
+    // min/max muti non descrivono una corsa reale: si ignora la calibrazione.
+    bool valid() const { return min < max - 1e-3; }
+    bool centerValid() const { return center >= 0.0 && center <= 1.0; }
+};
+
+// --- joystick.json (utente per giocatore) ------------------------------------
+// Simmetria con le bindings tastiera sopra: lo stesso file user/<player>/
+// è il posto comune di mapping + calibrazione dei pad volante. Il JSON
+// segue il quadro joystick (rFactor di nuovo: un blocco per controller).
+inline bool saveJoystickMappingJson(const std::string& path,
+                                    const JoystickMapping& m,
+                                    const AxisCalibration* calibration,
+                                    const int axisCount) {
+    namespace json = ks::engine::json;
+    json::Value root = json::Value::object();
+    auto setAxis = [](json::Value& v, const char* key, int value) {
+        if (value >= 0) v.set(key, json::Value::number(static_cast<double>(value)));
+    };
+    auto rootAxes = [&]() {
+        json::Value axes = json::Value::object();
+        setAxis(axes, "steerAxis", m.steerAxis);
+        setAxis(axes, "throttleAxis", m.throttleAxis);
+        setAxis(axes, "brakeAxis", m.brakeAxis);
+        setAxis(axes, "clutchAxis", m.clutchAxis);
+        return axes;
+    };
+    root.set("axes", rootAxes());
+    json::Value buttons = json::Value::object();
+    setAxis(buttons, "shiftUp", m.shiftUpButton);
+    setAxis(buttons, "shiftDown", m.shiftDownButton);
+    setAxis(buttons, "clutch", m.clutchButton);
+    setAxis(buttons, "handbrake", m.handbrakeButton);
+    root.set("buttons", buttons);
+    json::Value cal = json::Value::object();
+    for (int i = 0; i < axisCount; ++i) {
+        if (!calibration[i].valid()) continue;
+        char key[16];
+        std::snprintf(key, sizeof(key), "axis%d", i);
+        json::Value entry = json::Value::object();
+        entry.set("min", json::Value::number(calibration[i].min));
+        entry.set("max", json::Value::number(calibration[i].max));
+        if (calibration[i].centerValid())
+            entry.set("center", json::Value::number(calibration[i].center));
+        std::snprintf(key, sizeof(key), "axis%d", i);
+        cal.set(key, entry);
+    }
+    if (cal.size() > 0) root.set("calibration", cal);
+    return ks::engine::assets::UserData::writeFile(path, json::dump(root));
+}
+
+/** Load the saved mapping+calibration; returns which parts arrived (bitmask:
+ *  1 = assi/bottoni, 2 = calibrazione). File assente o malformed => 0 and
+ *  neither argument touched. */
+inline int loadJoystickMappingJson(const std::string& path,
+                                   JoystickMapping& m,
+                                   AxisCalibration* calibration,
+                                   const int axisCount) {
+    namespace json = ks::engine::json;
+    std::string text;
+    if (!ks::engine::assets::UserData::readFile(path, text)) return 0;
+    json::Value root;
+    std::string error;
+    if (!json::parse(text, root, &error)) {
+        std::fprintf(stderr, "joystick.json: %s: %s\n", path.c_str(), error.c_str());
+        return 0;
+    }
+    if (!root.isObject()) return 0;
+    int arrived = 0;
+    if (const json::Value* axes = root.find("axes"); axes && axes->isObject()) {
+        auto axisAt = [&](const char* key, int& field) {
+            const json::Value* v = axes->find(key);
+            if (!v || !v->isNumber()) return;
+            const int i = v->asInt(-999);
+            if (i >= -1) field = i;
+        };
+        axisAt("steerAxis", m.steerAxis);
+        axisAt("throttleAxis", m.throttleAxis);
+        axisAt("brakeAxis", m.brakeAxis);
+        axisAt("clutchAxis", m.clutchAxis);
+        ++arrived;
+    }
+    if (const json::Value* buttons = root.find("buttons"); buttons && buttons->isObject()) {
+        auto buttonAt = [&](const char* key, int& field) {
+            const json::Value* v = buttons->find(key);
+            if (!v || !v->isNumber()) return;
+            const int i = v->asInt(-999);
+            if (i >= -1) field = i;
+        };
+        buttonAt("shiftUp", m.shiftUpButton);
+        buttonAt("shiftDown", m.shiftDownButton);
+        buttonAt("clutch", m.clutchButton);
+        buttonAt("handbrake", m.handbrakeButton);
+        ++arrived;
+    }
+    if (const json::Value* cal = root.find("calibration"); cal && cal->isObject()) {
+        for (int i = 0; i < axisCount; ++i) {
+            char key[16];
+            std::snprintf(key, sizeof(key), "axis%d", i);
+            const json::Value* v = cal->find(key);
+            if (!v || !v->isObject()) continue;
+            AxisCalibration c;
+            c.min = v->numberAt("min", c.min);
+            c.max = v->numberAt("max", c.max);
+            c.center = v->numberAt("center", -1.0);
+            if (c.valid()) {
+                if (i >= 0 && i < axisCount) calibration[i] = c;
+                ++arrived;
+            }
+        }
+    }
+    return arrived;
+}
 
 // Roadmap 1.4 / GAP P2.7: rebindable keyboard driving bindings. The primary
 // keys persist to user/<player>/controls.json (the legacy user/keyboard.ini
@@ -160,6 +292,135 @@ inline int keyFromName(std::string name) {
         if (vk > 0 && vk < 256) return vk;
     }
     return -1;
+}
+
+// Profilo per giocatore: un unico file user/<player>/profiles/<name>.json con
+// mapping + calibrazione + tastiera. Funzioni libere (testabili senza
+// istanziare InputManager, che vive in src/simulator e non in ksengine.dll).
+inline bool saveInputProfileJson(const std::string& path,
+                                        const JoystickMapping& m,
+                                        const AxisCalibration* calibration,
+                                        const KeyboardMapping& kb) {
+    namespace json = ks::engine::json;
+    auto slash = path.find_last_of("/\\");
+    if (slash != std::string::npos) {
+        std::error_code ec;
+        std::filesystem::create_directories(path.substr(0, slash), ec);
+    }
+    json::Value root = json::Value::object();
+    root.set("name", json::Value::string(path));
+    json::Value kbj = json::Value::object();
+    auto kn = [](int vk) { return ks::sim::keyName(vk); };
+    kbj.set("throttle", json::Value::string(kn(kb.throttle)));
+    kbj.set("brake", json::Value::string(kn(kb.brake)));
+    kbj.set("steerLeft", json::Value::string(kn(kb.steerLeft)));
+    kbj.set("steerRight", json::Value::string(kn(kb.steerRight)));
+    kbj.set("shiftUp", json::Value::string(kn(kb.shiftUp)));
+    kbj.set("shiftDown", json::Value::string(kn(kb.shiftDown)));
+    kbj.set("handbrake", json::Value::string(kn(kb.handbrake)));
+    kbj.set("clutch", json::Value::string(kn(kb.clutch)));
+    kbj.set("starter", json::Value::string(kn(kb.starter)));
+    kbj.set("turnSignalLeft", json::Value::string(kn(kb.turnSignalLeft)));
+    kbj.set("turnSignalRight", json::Value::string(kn(kb.turnSignalRight)));
+    root.set("keyboard", kbj);
+    json::Value axes = json::Value::object();
+    axes.set("steerAxis", json::Value::number(m.steerAxis));
+    axes.set("throttleAxis", json::Value::number(m.throttleAxis));
+    axes.set("brakeAxis", json::Value::number(m.brakeAxis));
+    axes.set("clutchAxis", json::Value::number(m.clutchAxis));
+    root.set("axes", axes);
+    json::Value buttons = json::Value::object();
+    buttons.set("shiftUp", json::Value::number(m.shiftUpButton));
+    buttons.set("shiftDown", json::Value::number(m.shiftDownButton));
+    buttons.set("clutch", json::Value::number(m.clutchButton));
+    buttons.set("handbrake", json::Value::number(m.handbrakeButton));
+    root.set("buttons", buttons);
+    json::Value cal = json::Value::object();
+    for (int i = 0; i < 8; ++i) {
+        if (!calibration[i].valid()) continue;
+        char key[16];
+        std::snprintf(key, sizeof(key), "axis%d", i);
+        json::Value entry = json::Value::object();
+        entry.set("min", json::Value::number(calibration[i].min));
+        entry.set("max", json::Value::number(calibration[i].max));
+        if (calibration[i].centerValid())
+            entry.set("center", json::Value::number(calibration[i].center));
+        cal.set(key, entry);
+    }
+    if (cal.size() > 0) root.set("calibration", cal);
+    return ks::engine::assets::UserData::writeFile(path, json::dump(root));
+}
+
+inline bool loadInputProfileJson(const std::string& path,
+                                JoystickMapping& m,
+                                AxisCalibration* calibration,
+                                KeyboardMapping& kb) {
+    namespace json = ks::engine::json;
+    std::string text;
+    if (!ks::engine::assets::UserData::readFile(path, text)) return false;
+    json::Value root;
+    std::string error;
+    if (!json::parse(text, root, &error)) return false;
+    if (!root.isObject()) return false;
+    bool any = false;
+    if (const json::Value* kbj = root.find("keyboard"); kbj && kbj->isObject()) {
+        auto apply = [&](const char* key, int& field) {
+            const json::Value* v = kbj->find(key);
+            if (!v || !v->isString()) return;
+            const int vk = ks::sim::keyFromName(v->asString());
+            if (vk < 0) return;
+            field = vk; any = true;
+        };
+        apply("throttle", kb.throttle);
+        apply("brake", kb.brake);
+        apply("steerLeft", kb.steerLeft);
+        apply("steerRight", kb.steerRight);
+        apply("shiftUp", kb.shiftUp);
+        apply("shiftDown", kb.shiftDown);
+        apply("handbrake", kb.handbrake);
+        apply("clutch", kb.clutch);
+        apply("starter", kb.starter);
+        apply("turnSignalLeft", kb.turnSignalLeft);
+        apply("turnSignalRight", kb.turnSignalRight);
+    }
+    if (const json::Value* axes = root.find("axes"); axes && axes->isObject()) {
+        auto axisAt = [&](const char* key, int& field) {
+            const json::Value* v = axes->find(key);
+            if (!v || !v->isNumber()) return;
+            const int i = v->asInt(-999);
+            if (i >= -1) { field = i; any = true; }
+        };
+        axisAt("steerAxis", m.steerAxis);
+        axisAt("throttleAxis", m.throttleAxis);
+        axisAt("brakeAxis", m.brakeAxis);
+        axisAt("clutchAxis", m.clutchAxis);
+    }
+    if (const json::Value* buttons = root.find("buttons"); buttons && buttons->isObject()) {
+        auto buttonAt = [&](const char* key, int& field) {
+            const json::Value* v = buttons->find(key);
+            if (!v || !v->isNumber()) return;
+            const int i = v->asInt(-999);
+            if (i >= -1) { field = i; any = true; }
+        };
+        buttonAt("shiftUp", m.shiftUpButton);
+        buttonAt("shiftDown", m.shiftDownButton);
+        buttonAt("clutch", m.clutchButton);
+        buttonAt("handbrake", m.handbrakeButton);
+    }
+    if (const json::Value* cal = root.find("calibration"); cal && cal->isObject()) {
+        for (int i = 0; i < 8; ++i) {
+            char key[16];
+            std::snprintf(key, sizeof(key), "axis%d", i);
+            const json::Value* v = cal->find(key);
+            if (!v || !v->isObject()) continue;
+            AxisCalibration c;
+            c.min = v->numberAt("min", c.min);
+            c.max = v->numberAt("max", c.max);
+            c.center = v->numberAt("center", -1.0);
+            if (c.valid()) { calibration[i] = c; any = true; }
+        }
+    }
+    return any;
 }
 
 /** Persist to the legacy Key=Value ini (user/keyboard.ini). False if
@@ -341,6 +602,98 @@ public:
     bool shiftUp() const { return m_shiftUp; }
     bool shiftDown() const { return m_shiftDown; }
 
+    /** Richiesta di marcia da H-shifter (o gamepad): indice 0 = nessuna
+     *  richiesta, 1..7 = marce avanti, -1 = retromarcia. Consumabile una
+     *  volta sola, come takeStarterRequest. */
+    int takeGearRequest() {
+        const int g = m_gearRequest;
+        m_gearRequest = 0;
+        return g;
+    }
+
+    // --- calibrazione guidata (stile rF2: min/max/centro) -------------------
+    const AxisCalibration& axisCalibration(int axis) const {
+        return (axis >= 0 && axis < AXIS_COUNT) ? m_calib[axis] : m_noCalib;
+    }
+    void setAxisCalibration(int axis, const AxisCalibration& c) {
+        if (axis >= 0 && axis < AXIS_COUNT) m_calib[axis] = c;
+    }
+    /** Attiva la calibrazione dell'asse: da qui, ogni campione grezzo
+     *  aggiorna min/max con gli estremi raggiunti. */
+    void calibrationBegin(int axis) {
+        if (axis < 0 || axis >= AXIS_COUNT) return;
+        m_calibAxis = axis;
+        m_calibrating = true;
+        m_calib[axis] = AxisCalibration{};
+        m_calibMinSeen = m_axisRaw[axis];
+        m_calibMaxSeen = m_axisRaw[axis];
+    }
+    /** Registra il centro nel punto attuale (Guida: premere quando in folle). */
+    void calibrationCaptureCenter() {
+        if (!m_calibrating || m_calibAxis < 0) return;
+        m_calibCenterSeen = m_axisRaw[m_calibAxis];
+        m_calibHasCenter = true;
+    }
+    enum class CalibrationStep { Idle, CaptureMin, CaptureCenter, CaptureMax, Done };
+    CalibrationStep calibrationStep() const { return m_calibStep; }
+    bool calibrating() const { return m_calibrating; }
+    int calibratingAxis() const { return m_calibAxis; }
+    /** Avvia il wizard per l'asse: si parte dal min, poi centro, poi max. */
+    void calibrationWizardBegin(int axis) {
+        if (axis < 0 || axis >= AXIS_COUNT) return;
+        m_calibStep = CalibrationStep::CaptureMin;
+        m_calibAxis = axis;
+        m_calibrating = true;
+        m_calib[axis] = AxisCalibration{};
+        m_calibMinSeen = m_axisRaw[axis];
+        m_calibMaxSeen = m_axisRaw[axis];
+        m_calibCenterSeen = m_axisRaw[axis];
+        m_calibHasCenter = false;
+    }
+    /** Avanza: CaptureMin -> CaptureCenter -> CaptureMax -> Done. In
+     *  CaptureMin/Max gli estremi si accumulano; in CaptureCenter il punto
+     *  attuale viene registrato come centro. */
+    void calibrationWizardAdvance() {
+        if (!m_calibrating || m_calibAxis < 0) return;
+        if (m_calibStep == CalibrationStep::CaptureMin) {
+            m_calibStep = CalibrationStep::CaptureCenter;
+        } else if (m_calibStep == CalibrationStep::CaptureCenter) {
+            m_calibCenterSeen = m_axisRaw[m_calibAxis];
+            m_calibHasCenter = true;
+            m_calibStep = CalibrationStep::CaptureMax;
+        } else if (m_calibStep == CalibrationStep::CaptureMax) {
+            m_calibStep = CalibrationStep::Done;
+            calibrationEnd();
+        }
+    }
+    void calibrationWizardCancel() {
+        m_calibStep = CalibrationStep::Idle;
+        m_calibrating = false;
+        m_calibAxis = -1;
+    }
+    /** Estremi visti finora (per la UI che mostra la corsa coperta). */
+    double calibrationMinSeen() const { return m_calibMinSeen; }
+    double calibrationMaxSeen() const { return m_calibMaxSeen; }
+    double calibrationCenterSeen() const { return m_calibCenterSeen; }
+    bool calibrationHasCenter() const { return m_calibHasCenter; }
+    /** Chiude e valida: 0 ok, -1 se la corsa osservata è troppo stretta
+     *  (il sensore non ha raccontato due estremi realmente diversi). */
+    int calibrationEnd();
+    /** Salva/carica mapping + calibrazione nel file utente per giocatore. */
+    bool saveJoystickJson(const std::string& path) const {
+        return saveJoystickMappingJson(path, m_map, m_calib, AXIS_COUNT);
+    }
+    int loadJoystickJson(const std::string& path) {
+        return loadJoystickMappingJson(path, m_map, m_calib, AXIS_COUNT);
+    }
+
+    /** Profilo per giocatore: mapping + calibrazione + tastiera in un unico
+     *  file user/<player>/profiles/<name>.json (stile rF2 profile). Restituisce
+     *  il percorso scritto (vuoto su errore). */
+    std::string saveProfile(const std::string& dir, const std::string& name) const;
+    /** Carica un profilo; true se almeno una parte è stata applicata. */
+    bool loadProfile(const std::string& path);
+
     /** One crank request per starter press, cleared when read: the key is a
      *  button to the driver, not a state the vehicle should hold. */
     bool takeStarterRequest() {
@@ -370,6 +723,8 @@ public:
     bool isKeyDown(int key) const { return m_keys.count(key) > 0; }
 
     void setMapping(const JoystickMapping& m) { m_map = m; }
+    const ControlsConfig& controlsConfig() const { return m_controlsConfig; }
+    void loadControlsConfig(const std::string& path) { m_controlsConfig.loadFromFile(path); }
     const JoystickMapping& mapping() const { return m_map; }
     void setSteerGamma(double g) { m_map.steerGamma = g; }
     void setDeadZone(double dz) { m_map.deadZone = dz; }
@@ -421,9 +776,42 @@ private:
     bool m_prevShiftUpKey = false, m_prevShiftDownKey = false;
     bool m_prevShiftUpBtn = false, m_prevShiftDownBtn = false;
     bool m_starterRequested = false, m_prevStarterKey = false;
+    int m_gearRequest = 0;
+    int m_prevGearHeld = 0; // ultima marcia letta dall'H-shifter (0 = folle)
+    AxisCalibration m_calib[AXIS_COUNT] = {};
+    AxisCalibration m_noCalib; // ritornato per un indice fuori range
+    bool m_calibrating = false;
+    int m_calibAxis = -1;
+    CalibrationStep m_calibStep = CalibrationStep::Idle;
+    double m_calibMinSeen = 0.0, m_calibMaxSeen = 1.0;
+    double m_calibCenterSeen = 0.0;
+    bool m_calibHasCenter = false;
+    // Campioni grezzi di questo frame, per la calibrazione e i consumatori
+    // che vogliono il segnale senza curve/deadzone.
+    double m_axisRaw[AXIS_COUNT] = {};
+
+    // Filtro analogico (controls.json: analogControlFilter/filterSamples):
+    // memoria degli ultimi N campioni grezzi per canale; min e max vengono
+    // scartati e i restanti mediati, come nel Controller.ini di rFactor.
+    struct AnalogChannel {
+        double buf[10] = {};
+        int count = 0;      // campioni validi (0 = vuoto, cioè passthrough)
+        int head = 0;       // prossimo indice di scrittura
+    };
+    AnalogChannel m_filterThrottle, m_filterBrake, m_filterSteer,
+                  m_filterClutch, m_filterHandbrake;
+    double filterChannel(AnalogChannel& ch, double sample, bool enabled);
+    void resetFilterChannels();
+
+    // keyboardWeighted: integratore a primo ordine per canale (time constants
+    // from keyboardDamping, rate from keyboard*), so a key is a force and
+    // not an on/offSwitch: the pedals guide and release gradually.
+    double m_kbwThrottle = 0.0, m_kbwBrake = 0.0, m_kbwSteer = 0.0, m_kbwClutch = 0.0;
+    std::chrono::steady_clock::time_point m_lastTick{};
 
     JoystickMapping m_map = JoystickMapping::gamepadDefault();
     KeyboardMapping m_kb;
+    ControlsConfig m_controlsConfig;
     ks::engine::config::ControllerSettings m_controller;
 
     double m_axes[AXIS_COUNT] = {};

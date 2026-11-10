@@ -203,8 +203,9 @@
       },
       {
         "feature": "vrSupport",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "OpenXR bootstrap and XrManager integration",
+        "note": "OpenXR instance/system/session bootstrap and Vulkan extension wiring exist; render-to-headset and full input are not enabled yet."
       },
       {
         "feature": "tripleScreen",
@@ -302,12 +303,44 @@
         "feature": "gamepadInput",
         "status": "partial",
         "landsAs": "DirectInput joystick, default gamepad mapping",
-        "note": "InputManager polls the DirectInput stick against the built-in gamepad mapping; there is no screen to remap it and the log reports when acquiring the device fails."
+        "note": "InputManager polls the DirectInput stick against the built-in gamepad mapping; the analog filter (analogControlFilter bitfield + filterSamples con scarto di min e max), il cambio manuale per bottone (H-shifter GEAR1..GEAR7/REVERSE, hold mode via gearSelectButtonHold) e il wizard di calibrazione (pannello WHEEL) sono cablati; manca la schermata di remapping del pad."
       },
       {
         "feature": "wheelLeds",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "WheelLedControl + feed RPM/marcia dal loop",
+        "note": "LED state storage and callbacks are implemented, and SimulationLoop feeds RPM percentage and current gear from the live vehicle state (previously the container was never written); hardware device protocols remain stubs."
+      },
+      {
+        "feature": "joystickCalibration",
+        "status": "partial",
+        "landsAs": "AxisCalibration + saveJoystickMappingJson/loadJoystickMappingJson",
+        "note": "Calibrazione min/max/centro per asse (steering bipolare a centro dichiarato, pedali unipolari), applicata al poll (calUnipolar/calBipolar in applyMapping) e persistita in user/<player>/joystick.json, che l'avvio rilegge. keyboardWeighted/keyboardDamping applicati al percorso tastiera (integratore a primo ordine per canale)."
+      },
+      {
+        "feature": "inputProfiles",
+        "status": "partial",
+        "landsAs": "saveInputProfileJson/loadInputProfileJson (user/<player>/profiles/<name>.json)",
+        "note": "Profilo per giocatore che salva e ripristina mapping + calibrazione + tastiera in un unico file; UI di selezione/creazione profilo da collegare."
+      },
+      {
+        "feature": "calibrationWizard",
+        "status": "partial",
+        "landsAs": "InputManager::calibrationWizardBegin/Advance/Cancel + DeviceSettingsOverlay wizard UI",
+        "note": "Macchina a stati guidata (min -> centro -> max -> done) con test dedicato e pannello WHEEL collegato (righe per asse + pulsanti Avanza/Annulla, salvataggio su joystick.json a fine wizard)."
+      },
+      {
+        "feature": "manualGearbox",
+        "status": "partial",
+        "landsAs": "sequential + H-shifter + reverse input to VehicleSimulator",
+        "note": "shiftUp/shiftDown now reach VehicleSimulator.requestGearShift (previously consumed by nothing) and H-shifter gear buttons land via requestGear (1..7 avanti, -1 retromarcia). Gear 0 = folle (disattiva autocambio come rF2). La retromarcia e' ora modellata dal veicolo (rapporto fisso negativo, drive force invertita) e autoReverse di controls.json scambia temporaneamente i pedali da fermo (freno = gas in retro, gas = freno)."
+      }
+      ,
+      {
+        "feature": "controlsConfig",
+        "status": "partial",
+        "landsAs": "system/cfg/controls.json (rF2-style general controls)",
+        "note": "Loader/saver dedicati per i parametri generali: speedSensitiveSteering, analogControlFilter e keyboardWeighted/keyboardDamping sono applicati al runtime (sterzo, filtro analogico e integratore tastiera). I range freelook/HMD si leggono e si riscrivono ma non hanno ancora un consumatore."
       },
       {
         "feature": "actionProps",
@@ -323,8 +356,9 @@
       },
       {
         "feature": "headTracking",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "cockpit head tracking offset",
+        "note": "Camera applies a head-tracking offset in cockpit view; device input remains a stub."
       },
       {
         "feature": "vrInput",
@@ -448,8 +482,9 @@
       },
       {
         "feature": "gameplayTweaks",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "GameplayTweaks module",
+        "note": "Tweak set storage, defaults and change callback are implemented; gameplay effects are not wired into the session."
       }
     ],
     "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock, the garage flag and the standing start as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
@@ -480,8 +515,9 @@
       },
       {
         "feature": "spectatorMode",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "spectator mode state and callbacks",
+        "note": "Enter/exit, view mode, follow driver and scoreboard toggle are implemented; rendering integration remains partial."
       },
       {
         "feature": "chatBindings",

@@ -11,6 +11,7 @@
 #include "UiInput.h"
 #include "FontTtfLoader.h"
 #include "DeviceSettingsOverlay.h"
+#include "ProfileSettingsOverlay.h"
 #include "KeyRebindOverlay.h"
 #include "ControllerSettingsOverlay.h"
 #include "MultiplayerOverlay.h"
@@ -42,6 +43,7 @@ public:
         m_dash = std::make_unique<DashboardOverlay>();
         m_telem = std::make_unique<TelemetryOverlay>();
         m_devices = std::make_unique<DeviceSettingsOverlay>();
+m_profiles = std::make_unique<ProfileSettingsOverlay>();
         m_mp = std::make_unique<MultiplayerOverlay>();
         m_chat = std::make_unique<ChatOverlay>();
         m_console = std::make_unique<ConsoleOverlay>();
@@ -54,6 +56,7 @@ public:
     DashboardOverlay& dashboard() { return *m_dash; }
     TelemetryOverlay& telemetry() { return *m_telem; }
     DeviceSettingsOverlay& devices() { return *m_devices; }
+ProfileSettingsOverlay& profiles() { return *m_profiles; }
     KeyRebindOverlay& keyRebind() { return m_keyRebind; }
     ControllerSettingsOverlay& controllerSettings() { return m_controllerSettings; }
     MultiplayerOverlay& multiplayer() { return *m_mp; }
@@ -109,6 +112,7 @@ public:
             buildCinematicMenu(dl, width, height);
 
         m_devices->build(dl, width, height, &m_input);
+m_profiles->build(dl, width, height, &m_input);
         m_keyRebind.build(dl, width, height, &m_input);
         m_controllerSettings.build(dl, width, height, &m_input);
         m_mp->build(dl, width, height, &m_input);
@@ -135,6 +139,7 @@ public:
             return m_console->handleKey(key);
         }
         if (m_devices->isVisible() && m_devices->handleKey(key)) return true;
+if (m_profiles->isVisible() && m_profiles->handleKey(key)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleKey(key)) return true;
         if (m_controllerSettings.isVisible() && m_controllerSettings.handleKey(key)) return true;
         if (m_mp->isVisible() && m_mp->handleKey(key)) return true;
@@ -168,6 +173,7 @@ public:
         }
         if (key == 112) { m_devices->toggle(); return true; }
         if (key == 113) { m_mp->toggle(); return true; }
+        if (key == 114) { m_profiles->toggle(); return true; }
         if (key == 27 && !m_menu->isVisible()) {
             // Two overlays share this menu: the one before a session, and the
             // pause screen once in the car. The second is gated (see
@@ -190,6 +196,7 @@ public:
             m_input.notePressPosition();
 
         if (m_devices->isVisible() && m_devices->handleMouse(e)) return true;
+        if (m_profiles->isVisible() && m_profiles->handleMouse(e)) return true;
         if (m_keyRebind.isVisible() && m_keyRebind.handleMouse(e)) return true;
         if (m_controllerSettings.isVisible() && m_controllerSettings.handleMouse(e)) return true;
         if (m_mp->isVisible() && m_mp->handleMouse(e)) return true;
@@ -258,6 +265,7 @@ public:
 
     bool blocksDrivingInput() const {
         return m_menu->isInputBlocked() || m_devices->isVisible() ||
+               m_profiles->isVisible() ||
                m_keyRebind.isVisible() || m_controllerSettings.isVisible() ||
                m_mp->isVisible() ||
                m_chat->isTyping() || m_console->isVisible();
@@ -1138,6 +1146,7 @@ private:
     std::unique_ptr<DashboardOverlay> m_dash;
     std::unique_ptr<TelemetryOverlay> m_telem;
     std::unique_ptr<DeviceSettingsOverlay> m_devices;
+    std::unique_ptr<ProfileSettingsOverlay> m_profiles;
     std::unique_ptr<MultiplayerOverlay> m_mp;
     std::unique_ptr<ChatOverlay> m_chat;
     std::unique_ptr<ConsoleOverlay> m_console;

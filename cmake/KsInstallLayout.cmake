@@ -81,6 +81,18 @@ function(ks_stage_install_layout _target)
 			VERBATIM)
 	endif()
 
+	# system/cfg/controls.json — parametri generali dei comandi in forma rF2
+	# (analogControlFilter, fixedRateInputs, speedSensitiveSteering, HMD,
+	# freelook...), letti da InputManager all'avvio.
+	if(EXISTS "${CMAKE_SOURCE_DIR}/system/cfg/controls.json")
+		add_custom_command(TARGET ${_target} POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${_target}>/system/cfg"
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different
+				"${CMAKE_SOURCE_DIR}/system/cfg/controls.json" "$<TARGET_FILE_DIR:${_target}>/system/cfg/"
+			COMMENT "Staging system/cfg/controls.json next to $<TARGET_FILE_NAME:${_target}>"
+			VERBATIM)
+	endif()
+
 	# system/i18n/ — game strings per language (en.json + one file per
 	# translation). copy_directory keeps the directory itself in the target.
 	if(EXISTS "${KS_LAYOUT_I18N}")
@@ -172,6 +184,9 @@ function(ks_install_layout)
 	# --- system/cfg/ -------------------------------------------------------
 	if(EXISTS "${KS_LAYOUT_ENGINE_CONFIG}")
 		install(FILES "${KS_LAYOUT_ENGINE_CONFIG}" DESTINATION system/cfg)
+	endif()
+	if(EXISTS "${CMAKE_SOURCE_DIR}/system/cfg/controls.json")
+		install(FILES "${CMAKE_SOURCE_DIR}/system/cfg/controls.json" DESTINATION system/cfg)
 	endif()
 
 	# --- system/i18n/ ------------------------------------------------------

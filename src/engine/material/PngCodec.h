@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "../KsExport.h"
 namespace ks::image {
 
 // Packed 0xAARRGGBB pixel, matches ks::Rgb / QColor::rgba().
@@ -51,7 +52,7 @@ std::uint32_t adler32(const void* data, std::size_t len, std::uint32_t seed = 1)
 // Format detection by signature, independent of the file extension.
 bool decodeImage(const std::uint8_t* data, std::size_t len, RawImage* out,
                  std::string* err = nullptr);
-bool decodePng(const std::uint8_t* data, std::size_t len, RawImage* out,
+KSENGINE_API bool decodePng(const std::uint8_t* data, std::size_t len, RawImage* out,
                std::string* err = nullptr);
 bool decodeBmp(const std::uint8_t* data, std::size_t len, RawImage* out,
                std::string* err = nullptr);
@@ -70,7 +71,7 @@ bool encodeImage(const RawImage& image, const std::string& path,
                  std::vector<std::uint8_t>* out, std::string* err = nullptr);
 
 // Whole-file helpers used by Image::load()/Image::save().
-bool loadImageFile(const std::string& path, RawImage* out, std::string* err = nullptr);
+KSENGINE_API bool loadImageFile(const std::string& path, RawImage* out, std::string* err = nullptr);
 KSENGINE_API bool saveImageFile(const std::string& path, const RawImage& image, std::string* err = nullptr);
 
 } // namespace ks::image

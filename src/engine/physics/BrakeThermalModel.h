@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "../KsExport.h"
 
 namespace ks {
 namespace physics {
@@ -38,7 +39,7 @@ struct BrakeThermalState {
     float energyAccum = 0.0f;   // J this step
 };
 
-class BrakeThermalModel {
+class KSENGINE_API BrakeThermalModel {
 public:
     BrakeThermalModel() = default;
 

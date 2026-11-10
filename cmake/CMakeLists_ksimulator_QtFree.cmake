@@ -28,6 +28,7 @@ set(KSIM_SOURCES
 	# optional AC remote telemetry symbol (stub server)
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_AcRemote.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/InputManager.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/ControlsConfig.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/CameraController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorAudio.cpp
 	# race/upgrade sound packs (roadmap 2.9) — was never compiled before

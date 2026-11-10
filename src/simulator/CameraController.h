@@ -45,6 +45,9 @@ public:
 
     void setCockpitOffset(const vec3& offset) { m_cockpitOffset = offset; }
     void setCockpitLookTarget(const vec3& target) { m_cockpitLookTarget = target; }
+    void setHeadTrackingOffset(const vec3& positionMeters, const vec3& forward,
+                              const vec3& up);
+    void clearHeadTracking() { m_headTrackingActive = false; }
     /** Head physics: the cockpit head hangs on a spring, so longitudinal and
      *  lateral acceleration sway it instead of leaving it welded to the body.
      *  Off by default; the config's video.headPhysics turns it on. */
@@ -88,6 +91,10 @@ private:
     float m_headBobAmplitude = 0.003f;
 
     bool m_headPhysics = false;
+    bool m_headTrackingActive = false;
+    vec3 m_headTrackingPosition;
+    vec3 m_headTrackingForward{0, 0, 1};
+    vec3 m_headTrackingUp{0, 1, 0};
     vec3 m_headOffset;
     vec3 m_headVelocity;
     vec3 m_lastCarForward{0, 0, 1};

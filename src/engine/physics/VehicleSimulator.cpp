@@ -726,10 +726,41 @@ void VehicleSimulator::loadBrakesFromIni(const std::string& path) {
 }
 
 void VehicleSimulator::shiftGears() {
+    // Il pilota ha la precedenza: ogni richiesta manuale viene consumata qui
+    // (una sola mossa per step, la coda non deve saltare le marce) e la
+    // presenza di requestGear (H-shifter) spegne l'autocambio, come rF2.
+    if (m_manualGearPending) {
+        m_manualGearPending = false;
+        // 0 = folle: nessun rapporto, ratio viene annullato in updatePhysics.
+        m_currentGear = std::clamp(m_manualGear, -1, static_cast<int>(m_gearRatios.size()));
+        return;
+    }
+    if (m_pendingGearShifts != 0) {
+        const int step = m_pendingGearShifts > 0 ? 1 : -1;
+        m_pendingGearShifts -= step; // consuma una marcia per step
+        m_currentGear = std::clamp(m_currentGear + step, 1,
+                                   static_cast<int>(m_gearRatios.size()));
+        return;
+    }
+    if (!m_autoShift) return; // cambio manuale attivo: niente autocambio
+    if (m_currentGear < 1) return; // folle/retromarcia: non autocambiare
     if (m_rpm > m_maxRpm * 0.95 && m_currentGear < static_cast<int>(m_gearRatios.size()))
         ++m_currentGear;
     else if (m_rpm < 2000 && m_currentGear > 1)
         --m_currentGear;
+}
+
+void VehicleSimulator::requestGearShift(int delta) {
+    if (delta == 0) return;
+    m_pendingGearShifts += delta;
+    setAutoShifting(false);
+}
+
+void VehicleSimulator::requestGear(int gear) {
+    if (gear < 0) return;
+    m_manualGear = gear;
+    m_manualGearPending = true;
+    setAutoShifting(false);
 }
 
 void VehicleSimulator::integrate(double dt) {
@@ -944,6 +975,8 @@ void VehicleSimulator::integrate(double dt) {
 
     const size_t gi = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     float gearRatio = static_cast<float>(m_gearRatios[gi]);
+    if (m_currentGear == 0) gearRatio = 0.f;
+    if (m_currentGear < 0) gearRatio = -static_cast<float>(m_reverseRatio);
     float wheelOmega = speed / static_cast<float>(m_wheelRadius);
     // The start sequence runs once per step and decides whether the wheels are
     // allowed to set the revs at all: a cranking or stopped engine is not.
@@ -955,6 +988,17 @@ void VehicleSimulator::integrate(double dt) {
         shiftGears();
     const size_t gi2 = static_cast<size_t>(std::max(0, m_currentGear - 1) % static_cast<int>(m_gearRatios.size()));
     gearRatio = static_cast<float>(m_gearRatios[gi2]);
+    if (m_currentGear == 0) {
+        // Folle (H-shifter): nessuna coppia passa alle ruote e il motore
+        // ricade sulla velocity di regime a vuoto (ratio 0 → wheelRpm 0).
+        gearRatio = 0.f;
+    }
+    if (m_currentGear < 0) {
+        // Retromarcia: rapporto fisso negativo, la coppia motrice si inverte
+        // e l'auto accelera all'indietro. Il regime del motore segue il
+        // valore assoluto del rapporto (m_reverseRatio).
+        gearRatio = -static_cast<float>(m_reverseRatio);
+    }
 
     // The car's own curve when it ships one: two 1991 engines with the same
     // power and limiter must not answer the same torque at the same rpm. The

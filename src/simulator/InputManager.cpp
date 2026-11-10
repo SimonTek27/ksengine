@@ -36,6 +36,7 @@ bool InputManager::initialize() {
         m_xinput.reset();
     }
 #endif
+    m_controlsConfig.loadFromFile("system/cfg/controls.json");
     std::fprintf(stderr, "InputManager: mapping steer=%d throttle=%d brake=%d\n",
                  m_map.steerAxis, m_map.throttleAxis, m_map.brakeAxis);
     return true;
@@ -56,16 +57,40 @@ double InputManager::curve(double v, double gamma, double deadZone, bool bipolar
 void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons) {
     auto axis = [&](int idx) -> double {
         if (idx < 0 || idx >= AXIS_COUNT) return 0.0;
+        m_axisRaw[idx] = axes[idx];
+        // Calibrazione in corsa: gli estremi dell'asse bersaglio si
+        // accumulano mentre il driver muove il volante/pedale.
+        if (m_calibrating && idx == m_calibAxis) {
+            m_calibMinSeen = std::min(m_calibMinSeen, axes[idx]);
+            m_calibMaxSeen = std::max(m_calibMaxSeen, axes[idx]);
+        }
         return axes[idx];
     };
+    // Corsa utile valutata sul vettore grezzo: min/max della calibrazione
+    // ristretta diventano il 0 e il 1 della curva qui sotto.
+    auto calUnipolar = [&](double raw, const AxisCalibration& c) {
+        if (!c.valid()) return raw;
+        return std::clamp((raw - c.min) / (c.max - c.min), 0.0, 1.0);
+    };
+    // Bipolare (sterzo): center al centro dichiarato; se mai rilevato, il
+    // punto intero della corsa. Output ±1 indipendente dall'asimmetria degli
+    // estremi del sensore (avvolgimento raw slabile).
+    auto calBipolar = [&](double raw, const AxisCalibration& c) {
+        if (!c.valid()) return raw;
+        const double center = c.centerValid() ? c.center
+                                              : (c.min + c.max) * 0.5;
+        const double span = raw < center ? (center - c.min) : (c.max - center);
+        if (span < 1e-3) return 0.0;
+        return std::clamp((raw - center) / span, -1.0, 1.0);
+    };
 
-    double st = axis(m_map.steerAxis);
+    double st = calBipolar(axis(m_map.steerAxis), m_calib[m_map.steerAxis]);
     st = curve(st, m_map.steerGamma, m_map.deadZone, true) * m_map.steerSensitivity;
     if (m_map.invertSteer) st = -st;
     m_steer = std::clamp(st, -1.0, 1.0);
 
     if (m_map.throttleIsCombined) {
-        double a = axis(m_map.throttleAxis);
+        double a = calUnipolar(axis(m_map.throttleAxis), m_calib[m_map.throttleAxis]);
         if (a >= 0) {
             m_throttle = curve(a, m_map.throttleGamma, m_map.throttleDeadZone, false) *
                          m_map.throttleSensitivity;
@@ -76,8 +101,8 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
             m_throttle = 0;
         }
     } else {
-        double th = axis(m_map.throttleAxis);
-        double br = axis(m_map.brakeAxis);
+        double th = calUnipolar(axis(m_map.throttleAxis), m_calib[m_map.throttleAxis]);
+        double br = calUnipolar(axis(m_map.brakeAxis), m_calib[m_map.brakeAxis]);
         if (th < 0) th = 0;
         if (br < 0) br = 0;
         if (m_map.invertThrottle) th = 1.0 - th;
@@ -89,7 +114,7 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
     }
 
     if (m_map.clutchAxis >= 0) {
-        double c = axis(m_map.clutchAxis);
+        double c = calUnipolar(axis(m_map.clutchAxis), m_calib[m_map.clutchAxis]);
         if (c < 0) c = 0;
         m_clutch = std::clamp(
             curve(c, 1.0, m_map.clutchDeadZone, false) * m_map.clutchSensitivity, 0.0, 1.0);
@@ -114,9 +139,94 @@ void InputManager::applyMapping(const double axes[AXIS_COUNT], unsigned buttons)
     m_prevShiftUpBtn = up;
     m_prevShiftDownBtn = dn;
 
+    // H-shifter: prima di tutto un bottone per marcia. Con gearSelectButtonHold
+    // il dispositivo tiene premuto il bottone della marcia corrente e rilascia
+    // tutto in folle: la marcia è "quale bottone è giù", letta a livello e non
+    // a fronte. Senza hold ogni bottone è a fronte (device senza folle
+    // stabile): una pressione chiede la marcia, il passaggio a folle avviene
+    // quando nessun bottone di marcia resta premuto.
+    int held = 0; // 0 = nessuno/folle, 1..7 marce, -1 retro
+    for (int i = 0; i < JoystickMapping::kGearButtonCount; ++i) {
+        const int b = i < 7 ? m_map.gearButtons[i] : m_map.reverseGearButton;
+        if (b >= 0 && (buttons & (1u << b))) {
+            held = (i < 7) ? i + 1 : -1;
+            break;
+        }
+    }
+    const bool anyGearMapped =
+        m_map.reverseGearButton >= 0 ||
+        [&] { for (int i = 0; i < 7; ++i) if (m_map.gearButtons[i] >= 0) return true; return false; }();
+    if (anyGearMapped) {
+        if (m_controlsConfig.gearSelectButtonHold) {
+            // Livello: solo quando la marcia letta cambia emettiamo la richiesta.
+            if (held != m_prevGearHeld) {
+                m_gearRequest = held;
+                m_prevGearHeld = held;
+            }
+        } else {
+            // A fronte: solo pressioni verso marce avanti/retro; il rilascio
+            // verso "nessuno" non genera folle (il dispositivo non garantisce
+            // una posizione di folle distinguibile).
+            if (held != 0 && held != m_prevGearHeld) m_gearRequest = held;
+            if (held != 0) m_prevGearHeld = held;
+        }
+    }
+
+    // Filtro analogico: dischiude solo i canali selezionati nel bitmask
+    // (1=throttle 2=brake 4=handbrake 8=steering 16=clutch). Il filtro vede
+    // il segnale già mappato (curva/deadzone/sensibilità inclusi), perché
+    // l'uscita del filtro è l'input del veicolo.
+    const auto& cc = m_controlsConfig;
+    m_throttle = filterChannel(m_filterThrottle, m_throttle,
+                               (cc.analogControlFilter & 1) != 0);
+    m_brake = filterChannel(m_filterBrake, m_brake,
+                            (cc.analogControlFilter & 2) != 0);
+    m_handbrake = filterChannel(m_filterHandbrake, m_handbrake,
+                                (cc.analogControlFilter & 4) != 0);
+    m_steer = filterChannel(m_filterSteer, m_steer,
+                            (cc.analogControlFilter & 8) != 0);
+    m_clutch = filterChannel(m_filterClutch, m_clutch,
+                             (cc.analogControlFilter & 16) != 0);
+
     m_rawThrottle = m_throttle;
     m_rawBrake = m_brake;
     m_rawSteer = m_steer;
+}
+
+/*
+ * Filtro analogico a finestra (analogControlFilter/filterSamples): tiene gli
+ * ultimi N campioni del canale, scarta il più basso e il più alto come dice
+ * la documentazione rFactor (3-10 campioni) e media i restanti. Finché la
+ * finestra non è piena passa il valore tal quale, così il riempimento non
+ * introduce alcun ritardo sulla prima pedalata.
+ */
+double InputManager::filterChannel(AnalogChannel& ch, double sample, bool enabled) {
+    const int samples = std::clamp(m_controlsConfig.filterSamples, 3, 10);
+    if (!enabled) {
+        ch.count = 0;
+        return sample;
+    }
+    ch.buf[ch.head] = sample;
+    ch.head = (ch.head + 1) % samples;
+    if (ch.count < samples) ++ch.count;
+    if (ch.count < samples) return sample; // finestra in riempimento: passthrough
+    double lo = ch.buf[0], hi = ch.buf[0], sum = 0.0;
+    for (int i = 0; i < samples; ++i) {
+        lo = std::min(lo, ch.buf[i]);
+        hi = std::max(hi, ch.buf[i]);
+        sum += ch.buf[i];
+    }
+    // Mediano i restanti (sum - min - max), come la descrizione del filtro:
+    // con 3 campioni residue ne resta 1, con 10 ne restano 8.
+    return (sum - lo - hi) / static_cast<double>(samples - 2);
+}
+
+void InputManager::resetFilterChannels() {
+    m_filterThrottle = AnalogChannel{};
+    m_filterBrake = AnalogChannel{};
+    m_filterSteer = AnalogChannel{};
+    m_filterClutch = AnalogChannel{};
+    m_filterHandbrake = AnalogChannel{};
 }
 
 void InputManager::injectAxes(const double axes[AXIS_COUNT], unsigned buttons) {
@@ -160,7 +270,61 @@ bool InputManager::keyHeld(int vk) const {
 #endif
 }
 
+int InputManager::calibrationEnd() {
+    if (!m_calibrating || m_calibAxis < 0) return -1;
+    // Se il centro non è stato catturato esplicitamente, il centro della
+    // corsa osservata (media dei due estremi) è la scelta più sicura per
+    // asse bipolare; per i pedali (unipolari) il centro non viene usato.
+    AxisCalibration c;
+    c.min = m_calibMinSeen;
+    c.max = m_calibMaxSeen;
+    if (m_calibHasCenter) c.center = m_calibCenterSeen;
+    else c.center = (c.min + c.max) * 0.5;
+    if (!c.valid()) {
+        m_calibrating = false;
+        m_calibAxis = -1;
+        return -1;
+    }
+    // Il centro deve stare dentro la corsa: altrimenti scartiamo la
+    // cattura e ricadiamo sul punto intero.
+    if (c.center < c.min || c.center > c.max) c.center = (c.min + c.max) * 0.5;
+    m_calib[m_calibAxis] = c;
+    m_calibrating = false;
+    m_calibAxis = -1;
+    m_calibStep = CalibrationStep::Idle;
+    return 0;
+}
+
+std::string InputManager::saveProfile(const std::string& dir, const std::string& name) const {
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    if (ec) return {};
+    std::string safe = name;
+    for (char& ch : safe)
+        if (ch == '/' || ch == '\\' || ch == ':' || ch == '*' || ch == '?' ||
+            ch == '"' || ch == '<' || ch == '>' || ch == '|')
+            ch = '_';
+    if (safe.empty()) return {};
+    const std::string path = (std::filesystem::path(dir) / (safe + ".json")).string();
+    if (!saveInputProfileJson(path, m_map, m_calib, m_kb)) return {};
+    return path;
+}
+
+bool InputManager::loadProfile(const std::string& path) {
+    return loadInputProfileJson(path, m_map, m_calib, m_kb);
+}
+
 void InputManager::update() {
+    // dt per i canali a peso (keyboardWeighted): misurato tra due tick.
+    const auto now = std::chrono::steady_clock::now();
+    const double dt = m_lastTick.time_since_epoch().count() == 0
+        ? (1.0 / 60.0)
+        : std::chrono::duration<double>(now - m_lastTick).count();
+    m_lastTick = now;
+    const bool weighted = m_controlsConfig.keyboardWeighted != 0;
+    const double damping = std::clamp(m_controlsConfig.keyboardDamping, 0.5, 4.0);
+    const double rateScale = 1.0 / damping; // 2.0 -> critica, <2 underdamped, >2 overdamped
+
     m_shiftUp = false;
     m_shiftDown = false;
 
@@ -326,6 +490,22 @@ void InputManager::applyControllerSettings() {
         if (const json::Value* invert = steer->find("INVERT"); invert && invert->isBool())
             m_map.invertSteer = invert->asBool();
     }
+    // H-shifter: un bottone per marcia nella sezione [HSHIFTER] del documento
+    // controller (forma rF2: GEAR1..GEAR7 + REVERSE). Valore = codice bottone;
+    // assenti o -2 lasciano il mappaggio com'era. La modalità hold resta
+    // a gearSelectButtonHold (controls.json), non è una proprietà del documento.
+    if (const json::Value* hs = m_controller.root.find("HSHIFTER"); hs && hs->isObject()) {
+        for (int i = 0; i < JoystickMapping::kGearButtonCount; ++i) {
+            const char* key = (i < 7) ? nullptr : "";
+            char kbuf[16];
+            if (i < 7) { std::snprintf(kbuf, sizeof(kbuf), "GEAR%d", i + 1); key = kbuf; }
+            else { key = "REVERSE"; }
+            const int b = hs->intAt(key, -2);
+            if (b < -1) continue;
+            if (i < 7) m_map.gearButtons[i] = b;
+            else m_map.reverseGearButton = b;
+        }
+    }
 }
 
 void InputManager::processKeyboard() {
@@ -341,14 +521,48 @@ void InputManager::processKeyboard() {
         return false;
     };
 
-    m_throttle = (pressed(m_kb.throttle) || pressed(KeyboardMapping::AltThrottle)) ? 1.0 : 0.0;
-    m_brake = (pressed(m_kb.brake) || pressed(KeyboardMapping::AltBrake)) ? 1.0 : 0.0;
+    const double tTarget = (pressed(m_kb.throttle) || pressed(KeyboardMapping::AltThrottle)) ? 1.0 : 0.0;
+    const double bTarget = (pressed(m_kb.brake) || pressed(KeyboardMapping::AltBrake)) ? 1.0 : 0.0;
+    double sTarget = 0;
+    if (pressed(m_kb.steerLeft) || pressed(KeyboardMapping::AltSteerLeft)) sTarget -= 1.0;
+    if (pressed(m_kb.steerRight) || pressed(KeyboardMapping::AltSteerRight)) sTarget += 1.0;
+    if (m_map.invertSteer) sTarget = -sTarget;
+    sTarget = std::clamp(sTarget, -1.0, 1.0);
+    const double cTarget = keyHeld(m_kb.clutch) ? 1.0 : 0.0;
 
-    m_steer = 0;
-    if (pressed(m_kb.steerLeft) || pressed(KeyboardMapping::AltSteerLeft)) m_steer -= 1.0;
-    if (pressed(m_kb.steerRight) || pressed(KeyboardMapping::AltSteerRight)) m_steer += 1.0;
-
-    if (m_map.invertSteer) m_steer = -m_steer;
+    const bool weighted = m_controlsConfig.keyboardWeighted != 0;
+    if (weighted) {
+        const double damping = std::clamp(m_controlsConfig.keyboardDamping, 0.5, 4.0);
+        const double rateScale = 1.0 / damping;
+        const double rateTh = m_controlsConfig.keyboardThrottle * 60.0 * rateScale;
+        const double rateBr = m_controlsConfig.keyboardBrake * 60.0 * rateScale;
+        const double rateSt = m_controlsConfig.keyboardSteering * 60.0 * rateScale;
+        const double rateCl = m_controlsConfig.keyboardClutch * 60.0 * rateScale;
+        const auto step = [&](double& state, double target, double rate, double dt) {
+            const double d = target - state;
+            const double maxDelta = rate * dt;
+            if (std::abs(d) <= maxDelta) state = target;
+            else state += std::copysign(maxDelta, d);
+        };
+        const double dt = (m_lastTick.time_since_epoch().count() == 0)
+            ? (1.0 / 60.0)
+            : std::chrono::duration<double>(std::chrono::steady_clock::now() - m_lastTick).count();
+        // Il tempo è stato già aggiornato in update(), ma per sicurezza ricadiamo
+        // sullo stesso dt misurato lì (m_lastTick conservato).
+        step(m_kbwThrottle, tTarget, rateTh, dt);
+        step(m_kbwBrake, bTarget, rateBr, dt);
+        step(m_kbwSteer, sTarget, rateSt, dt);
+        step(m_kbwClutch, cTarget, rateCl, dt);
+        m_throttle = m_kbwThrottle;
+        m_brake = m_kbwBrake;
+        m_steer = m_kbwSteer;
+        m_clutch = m_kbwClutch;
+    } else {
+        m_throttle = tTarget;
+        m_brake = bTarget;
+        m_steer = sTarget;
+        m_clutch = cTarget;
+    }
 
     bool curUp = pressed(m_kb.shiftUp);
     bool curDn = pressed(m_kb.shiftDown);
@@ -358,7 +572,6 @@ void InputManager::processKeyboard() {
     m_prevShiftDownKey = curDn;
 
     m_handbrake = pressed(m_kb.handbrake) ? 1.0 : 0.0;
-    m_clutch = keyHeld(m_kb.clutch) ? 1.0 : 0.0;
 
     // Turn signals: rising edge toggles. Pressing left toggles the left
     // indicator (off if already left), pressing right toggles the right one;
@@ -386,9 +599,13 @@ void InputManager::processKeyboard() {
 
 void InputManager::reset() {
     m_throttle = m_brake = m_steer = m_clutch = m_handbrake = 0;
+    m_kbwThrottle = m_kbwBrake = m_kbwSteer = m_kbwClutch = 0.0;
     m_rawThrottle = m_rawBrake = m_rawSteer = 0;
     m_shiftUp = m_shiftDown = false;
+    m_gearRequest = 0;
+    m_prevGearHeld = 0;
     m_starterRequested = m_prevStarterKey = false;
+    resetFilterChannels();
     m_turnSignal = 0;
     m_prevTurnLeftKey = m_prevTurnRightKey = false;
     m_keys.clear();

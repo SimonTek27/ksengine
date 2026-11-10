@@ -1,0 +1,203 @@
+{
+  "implementationTracking": {
+    "version": "0.1.1-stub",
+    "status": "compiled-stubs-not-runtime-integrated",
+    "description": "C++ scaffolds for planned features. The ksengine Debug target compiles, but these scaffolds do not complete the features or run in the simulator.",
+    "buildVerification": {
+      "target": "ksengine",
+      "configuration": "Debug",
+      "command": "cmake --build build --config Debug --target ksengine",
+      "result": "success"
+    },
+
+    "modulesCreated": {
+      "graphics": {
+        "VRSupport": {
+          "status": "stub",
+          "filepath": "src/engine/Graphics/VRSupport.h|cpp",
+          "features": ["vrSupport", "headTracking-vr"],
+          "priority": "high",
+          "plannedHeadsets": ["HTC Vive", "Oculus Rift", "Valve Index", "PlayStation VR"],
+          "todos": [
+            "Implement VR device detection",
+            "Add stereo rendering pipeline",
+            "Implement head pose tracking",
+            "Add distortion correction"
+          ]
+        },
+        "TripleScreenSupport": {
+          "status": "stub",
+          "filepath": "src/engine/Graphics/TripleScreenSupport.h|cpp",
+          "features": ["tripleScreen"],
+          "priority": "medium",
+          "architectureNotes": "Requires render loop refactoring: current architecture is one window + one swapchain. Triple screen needs multiple independent swapchains with synchronized frame submissions",
+          "todos": [
+            "Refactor render loop for multiple windows",
+            "Implement bezel correction transforms",
+            "Add warp distortion rendering",
+            "Synchronize frame timing across displays"
+          ]
+        }
+      },
+
+      "input": {
+        "WheelLedControl": {
+          "status": "stub",
+          "filepath": "src/engine/input/WheelLedControl.h|cpp",
+          "features": ["wheelLeds"],
+          "priority": "medium",
+          "plannedDevices": ["Fanatec", "Logitech", "Moza"],
+          "todos": [
+            "Implement wheel device enumeration via HID",
+            "Add per-vendor LED protocols",
+            "Implement RPM/gear indicators",
+            "Add temperature warning visualization"
+          ]
+        },
+        "HeadTracking": {
+          "status": "stub",
+          "filepath": "src/engine/input/HeadTracking.h|cpp",
+          "features": ["headTracking"],
+          "priority": "high",
+          "plannedDevices": ["TrackIR", "FaceTrackNoIR", "Opentrack", "SteamVR"],
+          "todos": [
+            "Implement device detection and connection",
+            "Add pose filtering and smoothing",
+            "Integrate with cockpit camera system",
+            "Implement calibration routines"
+          ]
+        },
+        "VRInput": {
+          "status": "stub",
+          "filepath": "src/engine/input/VRInput.h|cpp",
+          "features": ["vrInput"],
+          "priority": "high",
+          "dependencies": ["VRSupport"],
+          "plannedControllers": ["HTC Vive", "Oculus Touch", "Valve Index", "PlayStation"],
+          "todos": [
+            "Implement controller pose tracking",
+            "Add button/axis event mapping",
+            "Implement hand skeleton tracking",
+            "Add haptic feedback control"
+          ]
+        }
+      },
+
+      "simulation": {
+        "GameplayTweaks": {
+          "status": "stub",
+          "filepath": "src/engine/sim/GameplayTweaks.h|cpp",
+          "features": ["gameplayTweaks"],
+          "priority": "low",
+          "parameters": ["difficultyMultiplier", "aiAggression", "tireDamageRate", "fuelConsumption", "mechanicalFailures"],
+          "todos": [
+            "Connect to difficulty level settings",
+            "Implement AI behavior modulation",
+            "Add damage rate multipliers"
+          ]
+        },
+        "SpectatorMode": {
+          "status": "stub",
+          "filepath": "src/engine/sim/SpectatorMode.h|cpp",
+          "features": ["spectatorMode"],
+          "priority": "medium",
+          "viewModes": ["FreeCam", "Driver", "Broadcast", "Replay"],
+          "todos": [
+            "Implement free camera in multiplayer",
+            "Add driver POV cycling",
+            "Create scoreboard overlay",
+            "Add broadcast director tools"
+          ]
+        }
+      },
+
+      "content": {
+        "ContentManagement": {
+          "status": "stub",
+          "filepath": "src/engine/assets/ContentManagement.h|cpp",
+          "features": ["setupCatalog", "skins", "helmets", "driverSuits", "materialMapping"],
+          "priority": "medium",
+          "combinedFeatures": true,
+          "todos": [
+            "Implement setup catalog with load/save",
+            "Add driver suit system",
+            "Add helmet customization",
+            "Implement material mapping system"
+          ]
+        },
+        "ContentUnpacking": {
+          "status": "stub",
+          "filepath": "src/engine/archive/ContentUnpacking.h|cpp",
+          "features": ["contentUnpacking"],
+          "priority": "low",
+          "notes": "Currently content is read in-place from folders and .zip files. Packaging::unpack() is a stub returning false.",
+          "todos": [
+            "Implement archive extraction to disk",
+            "Add in-memory decompression caching",
+            "Support multiple archive formats"
+          ]
+        }
+      },
+
+      "ui": {
+        "UiComponents": {
+          "status": "stub",
+          "filepath": "src/engine/ui/UiComponents.h|cpp",
+          "features": ["splash", "creditsList", "coreSwitches"],
+          "priority": "low",
+          "combinedFeatures": true,
+          "todos": [
+            "Implement splash screen system",
+            "Add scrollable credits display",
+            "Create developer core switches UI"
+          ]
+        }
+      },
+
+      "scripting": {
+        "DevModeSupport": {
+          "status": "stub",
+          "filepath": "src/engine/Scripting/DevModeSupport.h|cpp",
+          "features": ["scripting", "moduleLoader", "appPausePolicy", "virtualTyres", "timeLimitedSession"],
+          "priority": "low",
+          "combinedFeatures": true,
+          "todos": [
+            "Implement Lua/Python script loading",
+            "Add dynamic module loader",
+            "Implement app pause on background",
+            "Add virtual tyre debug mode",
+            "Implement session time limits"
+          ]
+        }
+      }
+    },
+
+    "integration": {
+      "pattern": "All modules follow ks::engine::EngineModule pattern",
+      "namespace": "ks::engine::<category>::<ClassName>",
+      "basePath": "src/engine/",
+      "compiledByCMake": true,
+      "registeredWithEngine": false,
+      "registrationReason": "The simulator Engine registry already exists, but these stubs have no feature behavior to activate. OpenXR integration also needs the Vulkan context from the renderer bootstrap.",
+      "dependencies": {
+        "VRInput": ["VRSupport"],
+        "SpectatorMode": ["base simulator"],
+        "TripleScreenSupport": ["RenderSystem"]
+      }
+    },
+
+    "nextSteps": [
+      "Implement and test behavior for one feature at a time; do not register no-op stubs",
+      "Connect OpenXR to the simulator renderer Vulkan bootstrap before enabling VR",
+      "Implement HeadTracking and VRInput using the existing OpenXR interfaces",
+      "Add feature-level tests before changing status from stub",
+      "Implement remaining feature groups in priority order"
+    ],
+
+    "notes": {
+      "architectureConsiderations": "Most stubs are self-contained. TripleScreenSupport requires significant render loop refactoring due to current single-window architecture.",
+      "debuggingAid": "Stub log calls use the engine's sys::LogManager; no stub is currently registered in the simulator runtime",
+      "futureSync": "Update this file when implementing actual features - change status from 'stub' to 'partial' or 'live'"
+    }
+  }
+}

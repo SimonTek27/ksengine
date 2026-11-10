@@ -30,7 +30,9 @@
 #include "engine/Engine.h"
 #include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
+#include "devices/vr/XrManager.h"
 #include <cstdio>
+#include <filesystem>
 #include <utility>
 #include <algorithm>
 #include "engine/Config/Json.h"
@@ -129,7 +131,22 @@ static double g_profileElapsed = 0.0;
 
 static const wchar_t* WINDOW_CLASS = L"KsEditorSimWindow";
 
-static bool createVulkanInstance() {
+/** File stems of the input profiles in `dir`, sorted: the picker lists what
+ *  InputManager::saveProfile() actually wrote, not a guessed list. A missing
+ *  folder (no profile saved yet) is an empty list, not an error. */
+static std::vector<std::string> listInputProfiles(const std::string& dir) {
+    std::vector<std::string> names;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_regular_file(ec)) continue;
+        if (entry.path().extension() != ".json") continue;
+        names.push_back(entry.path().stem().string());
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+static bool createVulkanInstance(const std::vector<std::string>& extraExtensions = {}) {
     VkApplicationInfo appInfo = {};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "KinetiKa Simulator";
@@ -159,6 +176,27 @@ static bool createVulkanInstance() {
                 extNames.push_back(VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME);
                 break;
             }
+
+    uint32_t availableCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, nullptr);
+    std::vector<VkExtensionProperties> available(availableCount);
+    if (availableCount)
+        vkEnumerateInstanceExtensionProperties(nullptr, &availableCount, available.data());
+    for (const auto& extension : extraExtensions) {
+        const bool supported = std::any_of(available.begin(), available.end(),
+            [&extension](const VkExtensionProperties& candidate) {
+                return extension == candidate.extensionName;
+            });
+        if (!supported) {
+            fprintf(stderr, "Vulkan extension required by OpenXR is unavailable: %s\n",
+                    extension.c_str());
+            return false;
+        }
+        if (std::find_if(extNames.begin(), extNames.end(), [&extension](const char* name) {
+                return extension == name;
+            }) == extNames.end())
+            extNames.push_back(extension.c_str());
+    }
         }
     }
 
@@ -545,8 +583,27 @@ static void initVulkanAndSimulation() {
         initSimulation();
         return;
     }
+    auto* xrManager = ks::device::XrManager::instance();
+    bool xrBootstrap = false;
+    if (const char* vr = std::getenv("KS_VR"); vr && std::strcmp(vr, "0") != 0) {
+        xrBootstrap = xrManager->prepareVulkanBootstrap();
+        if (!xrBootstrap) {
+            xrManager->shutdown();
+            printf("[INIT] OpenXR unavailable; continuing in desktop mode\n");
+        }
+    }
     printf("[INIT] Creating Vulkan instance...\n");
-    if (!createVulkanInstance()) { printf("[INIT] FAILED: Vulkan instance\n"); return; }
+    const std::vector<std::string> emptyExtensions;
+    if (!createVulkanInstance(xrBootstrap ? xrManager->requiredVulkanInstanceExtensions()
+                                          : emptyExtensions)) {
+        if (!xrBootstrap || !createVulkanInstance()) {
+            printf("[INIT] FAILED: Vulkan instance\n");
+            return;
+        }
+        xrManager->shutdown();
+        xrBootstrap = false;
+        printf("[INIT] OpenXR Vulkan extensions unavailable; continuing in desktop mode\n");
+    }
     printf("[INIT] Creating Win32 surface...\n");
     if (!createWin32Surface()) { printf("[INIT] FAILED: Win32 surface\n"); return; }
 
@@ -789,7 +846,32 @@ static void initVulkanAndSimulation() {
     }
 
     printf("[INIT] Creating Vulkan device...\n");
-    if (g_nativeRenderer->createDevice(g_vkInstance, g_surface)) {
+    VkPhysicalDevice xrPhysicalDevice = xrBootstrap
+        ? xrManager->vulkanGraphicsDevice(g_vkInstance) : VK_NULL_HANDLE;
+    const std::vector<std::string> xrDeviceExtensions = xrPhysicalDevice != VK_NULL_HANDLE
+        ? xrManager->requiredVulkanDeviceExtensions(xrPhysicalDevice)
+        : std::vector<std::string>{};
+    bool deviceCreated = g_nativeRenderer->createDevice(
+        g_vkInstance, g_surface, xrPhysicalDevice, xrDeviceExtensions);
+    if (!deviceCreated && xrBootstrap) {
+        xrManager->shutdown();
+        xrBootstrap = false;
+        deviceCreated = g_nativeRenderer->createDevice(g_vkInstance, g_surface);
+        printf("[INIT] OpenXR Vulkan device setup failed; continuing in desktop mode\n");
+    }
+    if (deviceCreated) {
+        if (xrBootstrap) {
+            xrManager->setVulkanDevice(g_nativeRenderer->device(),
+                g_nativeRenderer->physicalDevice(), g_nativeRenderer->instance(),
+                g_nativeRenderer->graphicsQueueFamily(), 0);
+            if (!xrManager->initialize("KinetiKa Simulator VR")) {
+                xrManager->shutdown();
+                xrBootstrap = false;
+                printf("[INIT] OpenXR session setup failed; continuing in desktop mode\n");
+            } else {
+                printf("[INIT] OpenXR session initialized (render-to-headset not yet enabled)\n");
+            }
+        }
         RECT rc;
         GetClientRect(g_hWnd, &rc);
         printf("[INIT] Creating swap chain %dx%d...\n", rc.right - rc.left, rc.bottom - rc.top);
@@ -1243,6 +1325,43 @@ static void initSimulation() {
             g_simulation->ui().menu().openOptions();
             return;
         }
+        if (panel == "devices") {
+            auto* im = g_simulation->inputManager();
+            if (!im) return;
+            g_simulation->ui().menu().setVisible(false);
+            std::vector<ks::sim::ui::DeviceInfoRow> rows;
+            ks::sim::ui::DeviceInfoRow r1;
+            r1.name = "DirectInput wheel/pad";
+            r1.detail = im->isDirectInputConnected() ? "connected" : "not connected";
+            r1.connected = im->isDirectInputConnected();
+            rows.push_back(r1);
+            ks::sim::ui::DeviceInfoRow r2;
+            r2.name = "XInput pad";
+            r2.detail = im->isXInputConnected() ? "connected" : "not connected";
+            r2.connected = im->isXInputConnected();
+            rows.push_back(r2);
+            auto& dev = g_simulation->ui().devices();
+            dev.setInputManager(im);
+            dev.setDevices(std::move(rows));
+            dev.onCalibrationBegin = [im](int axis) {
+                im->calibrationWizardBegin(axis);
+            };
+            dev.onCalibrationAdvance = [im]() {
+                im->calibrationWizardAdvance();
+                if (!im->calibrating()) {
+                    // Wizard finito: calibrazione (e mapping) nella cartella del
+                    // giocatore, accanto a controls.json.
+                    if (im->saveJoystickJson(g_userLayout.player + "/joystick.json"))
+                        printf("Joystick mapping/calibration saved (%s/joystick.json)\n",
+                               g_userLayout.player.c_str());
+                }
+            };
+            dev.onCalibrationCancel = [im]() {
+                im->calibrationWizardCancel();
+            };
+            dev.setVisible(true);
+            return;
+        }
         printf("Settings panel: %s\n", panel.c_str());
     };
 
@@ -1496,6 +1615,55 @@ static void initSimulation() {
                 printf("Migrated user/keyboard.ini -> %s\n", g_userLayout.controls.c_str());
         }
         g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
+
+        // Mapping + calibrazione del volante/pad: joystick.json vive nella
+        // cartella del giocatore accanto a controls.json. Il wizard lo scrive a
+        // fine calibrazione; senza questa lettura il risultato andava perso a
+        // ogni avvio (l'asse restava pass-through).
+        const std::string joystickPath = g_userLayout.player + "/joystick.json";
+        if (im->loadJoystickJson(joystickPath) != 0)
+            printf("[INIT] joystick.json: mapping + calibrazione (%s)\n", joystickPath.c_str());
+
+        // --- profili input: mapping + calibrazione + tastiera in un file ---
+        // Il pannello (F3) elenca user/<player>/profiles/; Load applica il
+        // profilo, New scrive il setup corrente sotto il primo nome libero,
+        // Delete rimuove il file.
+        const std::string profileDir = g_userLayout.player + "/profiles";
+        auto* profiles = &g_simulation->ui().profiles();
+        profiles->setProfiles(listInputProfiles(profileDir));
+        profiles->onLoad = [im](const std::string& name) {
+            const std::string path = g_userLayout.player + "/profiles/" + name + ".json";
+            if (!im->loadProfile(path)) {
+                printf("Profilo input non applicato: %s\n", path.c_str());
+                return;
+            }
+            g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
+            printf("Profilo input caricato: %s\n", path.c_str());
+        };
+        profiles->onNew = [im]() {
+            const std::string dir = g_userLayout.player + "/profiles";
+            std::error_code ec;
+            for (int i = 1; i < 1000; ++i) {
+                const std::string candidate = "profile" + std::to_string(i);
+                if (std::filesystem::exists(dir + "/" + candidate + ".json", ec)) continue;
+                const std::string written = im->saveProfile(dir, candidate);
+                if (written.empty())
+                    printf("Profilo input non scrivibile in %s\n", dir.c_str());
+                else
+                    printf("Profilo input salvato: %s\n", written.c_str());
+                g_simulation->ui().profiles().setProfiles(
+                    listInputProfiles(g_userLayout.player + "/profiles"));
+                return;
+            }
+        };
+        profiles->onDelete = [](const std::string& name) {
+            const std::string path = g_userLayout.player + "/profiles/" + name + ".json";
+            std::error_code ec;
+            if (!std::filesystem::remove(path, ec))
+                printf("Profilo input non rimosso: %s\n", path.c_str());
+            g_simulation->ui().profiles().setProfiles(
+                listInputProfiles(g_userLayout.player + "/profiles"));
+        };
 
         // Controller settings ride in the same files as the engine settings,
         // under a "controller" object: install defaults first, the player's

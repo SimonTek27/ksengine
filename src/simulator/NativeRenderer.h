@@ -182,7 +182,9 @@ public:
 
     // instance/surface are created by the caller (SimulatorApp.cpp already
     // does this with raw vkCreateInstance/vkCreateWin32SurfaceKHR).
-    bool createDevice(VkInstance instance, VkSurfaceKHR surface);
+    bool createDevice(VkInstance instance, VkSurfaceKHR surface,
+                      VkPhysicalDevice preferredPhysicalDevice = VK_NULL_HANDLE,
+                      const std::vector<std::string>& extraDeviceExtensions = {});
     bool createSwapChain(VkSurfaceKHR surface, uint32_t width, uint32_t height);
     bool recreateSwapChain(uint32_t width, uint32_t height);
     // Depth-only shadow cascades are wired in here if a shadow map is
@@ -590,8 +592,10 @@ public:
     int height() const { return m_viewportH; }
 
     VkPhysicalDevice physicalDevice() const { return m_physicalDevice; }
+    VkInstance instance() const { return m_instance; }
     VkDevice device() const { return m_device; }
     VkQueue graphicsQueue() const { return m_graphicsQueue; }
+    uint32_t graphicsQueueFamily() const { return m_graphicsQueueFamily; }
     VkCommandPool commandPool() const { return m_commandPool; }
     VkCommandBuffer currentCommandBuffer() const { return m_commandBuffer; }
 
@@ -631,6 +635,7 @@ private:
     void destroySwapChain();
     void uploadMesh(NativeMesh& mesh);
 
+    VkInstance m_instance = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;

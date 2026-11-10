@@ -103,7 +103,20 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/pit_strategy_menu_test.cpp" AND
     add_test(NAME pit_strategy_menu_test COMMAND pit_strategy_menu_test)
 endif()
 
-# AI line — arc-length parameterisation: distance lookup, wrapping on a closed
+# Roadmap 2.7 — wizard di calibrazione guidato (InputManager TU).
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/input_calibration_wizard_test.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/InputManager.cpp")
+    add_executable(input_calibration_wizard_test
+        input_calibration_wizard_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/InputManager.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/ControlsConfig.cpp")
+    target_include_directories(input_calibration_wizard_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    target_link_libraries(input_calibration_wizard_test PRIVATE ksengine)
+    add_test(NAME input_calibration_wizard_test COMMAND input_calibration_wizard_test)
+endif()
+
 # loop, nearest point and uniform sampling.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ai_spline_arc_test.cpp")
     add_executable(ai_spline_arc_test ai_spline_arc_test.cpp)

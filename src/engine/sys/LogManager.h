@@ -24,7 +24,16 @@ public:
         if (m_lines.size() > 2000) m_lines.erase(m_lines.begin(), m_lines.begin() + 500);
     }
     void info(const std::string& m) { log(LogLevel::Info, m); }
+    void info(const std::string& category, const std::string& message) {
+        info(category + ": " + message);
+    }
+    void debug(const std::string& category, const std::string& message) {
+        log(LogLevel::Debug, category + ": " + message);
+    }
     void warn(const std::string& m) { log(LogLevel::Warning, m); }
+    void warn(const std::string& category, const std::string& message) {
+        warn(category + ": " + message);
+    }
     void error(const std::string& m) { log(LogLevel::Error, m); }
 private:
     std::mutex m_mutex;

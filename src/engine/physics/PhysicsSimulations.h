@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include "PhysicsCoreTypes.h"
+#include "../KsExport.h"
 
 #include "PhysicsEngine.h"
 #include <vector>
@@ -16,7 +17,9 @@ namespace physics {
 // Soft Body Physics Implementation
 // ============================================================================
 
-struct SoftBodySimulator {
+// KSENGINE_API: i test (physics_simulations_test) costruiscono la classe
+// fuori dalla DLL; senza annotazione MSVC non esporta i membri out-of-line.
+struct KSENGINE_API SoftBodySimulator {
     public:
     explicit SoftBodySimulator();
     ~SoftBodySimulator();

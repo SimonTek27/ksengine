@@ -122,13 +122,13 @@ if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/showroom_audio_test.cpp")
 endif()
 
 # Geotrack fase 1 — genera una cartella pista da una centerline geografica.
-# TrackSceneCore non fa parte di ksengine; Json.cpp viaggia con il target come
-# in ks_cartool (stesso schema del tool di conversione auto).
+# TrackSceneCore non fa parte di ksengine. Json.cpp NON viaggia più con il
+# target: dal momento che Json è KSENGINE_API di ksengine.dll, compilarlo
+# anche qui crea simboli duplicati (LNK2005) contro l'import lib.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp")
     add_executable(geotrack_generate_test
         geotrack_generate_test.cpp
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp")
     target_include_directories(geotrack_generate_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src"
@@ -137,15 +137,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp")
     add_test(NAME geotrack_generate_test COMMAND geotrack_generate_test)
 endif()
 
-# Geotrack fase 2 — misura dell'asfalto dall'ortofoto. Il codec immagini viaggia
-# con il target perche' loadImageFile() non fa parte dell'API esportata di
-# ksengine (stessa ragione di Json.cpp sopra).
+# Geotrack fase 2 — misura dell'asfalto dall'ortofoto. Il codec PNG e' esportato
+# da ksengine.dll (loadImageFile/saveImageFile/decodePng sono KSENGINE_API),
+# quindi PngCodec.cpp non viaggia piu' con il target: ricompilarlo duplicava
+# i simboli (LNK2005) contro l'import lib. Deflate.cpp resta qui, non esportato.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/OrthoImage.h")
     add_executable(geotrack_ortho_test
         geotrack_ortho_test.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
     target_include_directories(geotrack_ortho_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
@@ -160,8 +159,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TileMosaic.h")
     add_executable(geotrack_tiles_test
         geotrack_tiles_test.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
     target_include_directories(geotrack_tiles_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"
@@ -176,8 +173,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/AsphaltSkeleton.h")
     add_executable(geotrack_skeleton_test
         geotrack_skeleton_test.cpp
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools/geotrack/TrackSceneCore.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Json.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/material/PngCodec.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../src/engine/FileFormat/Deflate.cpp")
     target_include_directories(geotrack_skeleton_test PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tools"

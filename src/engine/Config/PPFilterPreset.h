@@ -1,4 +1,5 @@
 #pragma once
+#include "../KsExport.h"
 #include <string>
 #include <vector>
 
@@ -12,7 +13,7 @@ namespace ks { namespace engine { namespace config {
  * loadFromJsonText() fills every one of them and leaves the default in place
  * when the file does not carry it, so a partial preset is still usable.
  */
-struct PPFilterPreset {
+struct KSENGINE_API PPFilterPreset {
     struct AutoExposure {
         bool enabled = true;
         float delay = 0.0f;
