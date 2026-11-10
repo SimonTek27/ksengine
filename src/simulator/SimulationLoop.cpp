@@ -2320,6 +2320,23 @@ void SimulationLoop::pumpFeatureHub(float dt, bool withSession) {
 bool SimulationLoop::handleUiKey(int vk) { return m_ui.handleKey(vk); }
 bool SimulationLoop::handleUiChar(int c) { return m_ui.handleChar(c); }
 bool SimulationLoop::handleUiMouseMove(float x, float y) { return m_ui.handleMouseMove(x, y); }
+
+bool SimulationLoop::handleLookMouseMove(float x, float y) {
+    // Only the cockpit looks around, and only once the pointer has been seen
+    // here: the first sample after a screen change positions the pointer
+    // instead of yanking the driver's head.
+    if (!m_camera || m_camera->mode() != CameraController::Mode::Cockpit) {
+        m_lookMouseValid = false;
+        return false;
+    }
+    const float dx = m_lookMouseValid ? x - m_lookMouseX : 0.0f;
+    const float dy = m_lookMouseValid ? y - m_lookMouseY : 0.0f;
+    m_lookMouseX = x;
+    m_lookMouseY = y;
+    m_lookMouseValid = true;
+    if (dx != 0.0f || dy != 0.0f) m_camera->addMouseLook(dx, dy);
+    return true;
+}
 bool SimulationLoop::handleUiMouseButton(ui::MouseButton b, bool down, float x, float y) {
     return m_ui.handleMouseButton(b, down, x, y);
 }
@@ -2880,6 +2897,19 @@ void SimulationLoop::updateCamera(float dt) {
 
     if (m_viewW > 0 && m_viewH > 0)
         m_camera->setAspectRatio(static_cast<float>(m_viewW) / static_cast<float>(m_viewH));
+    if (m_input) {
+        // Cockpit look, straight from the controls document: the freelook
+        // speeds and the HMD ranges/exponents are read every frame, so an
+        // edited controls.json takes effect without a restart. Numpad 8/2/4/6
+        // look, numpad 5 recentres (the arrow keys stay the steering
+        // alternates, so the look keys cannot collide with driving).
+        m_camera->setControls(m_input->controlsConfig());
+        m_camera->setLookKeys(m_input->isKeyDown(0x68),  // NUMPAD8
+                              m_input->isKeyDown(0x62),  // NUMPAD2
+                              m_input->isKeyDown(0x64),  // NUMPAD4
+                              m_input->isKeyDown(0x66),  // NUMPAD6
+                              m_input->isKeyDown(0x65)); // NUMPAD5
+    }
     m_camera->update(dt, carBody, speedKmh);
 
     const auto& head = ks::engine::input::HeadTracking::instance();

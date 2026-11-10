@@ -463,9 +463,14 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         if (g_simulation) g_simulation->handleUiChar((int)wParam);
         return 0;
     case WM_MOUSEMOVE:
-        if (g_simulation)
-            g_simulation->handleUiMouseMove(static_cast<float>((short)LOWORD(lParam)),
-                                            static_cast<float>((short)HIWORD(lParam)));
+        if (g_simulation) {
+            const float mx = static_cast<float>((short)LOWORD(lParam));
+            const float my = static_cast<float>((short)HIWORD(lParam));
+            // The UI sees the pointer first; whatever it does not consume is a
+            // cockpit look (freelook), not a hover.
+            if (!g_simulation->handleUiMouseMove(mx, my))
+                g_simulation->handleLookMouseMove(mx, my);
+        }
         return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:

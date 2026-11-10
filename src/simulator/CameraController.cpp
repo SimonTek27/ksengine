@@ -4,7 +4,110 @@
 
 namespace ks::sim {
 
+namespace {
+// A look is a look, not a neck: past 80 degrees the cockpit view is pointing
+// at the seat behind it. Yaw stays inside one full turn.
+constexpr float kLookPitchLimit = 1.3963f;
+constexpr float kLookYawLimit = 3.14159f;
+
+/** Rodrigues rotation of `v` about the unit `axis` by `angle` radians. */
+vec3 rotateAbout(const vec3& v, const vec3& axis, float angle)
+{
+    const float c = std::cos(angle);
+    const float s = std::sin(angle);
+    const float along = axis.x * v.x + axis.y * v.y + axis.z * v.z;
+    return v * c + axis.cross(v) * s + axis * (along * (1.0f - c));
+}
+} // namespace
+
 CameraController::CameraController() = default;
+
+void CameraController::setLookKeys(bool up, bool down, bool left, bool right, bool recentre)
+{
+    m_lookUp = up;
+    m_lookDown = down;
+    m_lookLeft = left;
+    m_lookRight = right;
+    if (recentre) recentreLook();
+    m_lookPending = true;
+}
+
+void CameraController::recentreLook()
+{
+    m_lookYaw = 0.0f;
+    m_lookPitch = 0.0f;
+    m_lookKeyYaw = 0.0f;
+    m_lookKeyPitch = 0.0f;
+    m_lookKeyYawRate = 0.0f;
+    m_lookKeyPitchRate = 0.0f;
+}
+
+void CameraController::addMouseLook(float dxPixels, float dyPixels)
+{
+    // Mouse speeds are radians per pixel (0.004 in the shipped document):
+    // pointer right looks right, pointer up looks up.
+    m_lookYaw += dxPixels * static_cast<float>(m_controls.freelookMouseYawSpeed);
+    m_lookPitch -= dyPixels * static_cast<float>(m_controls.freelookMousePitchSpeed);
+    m_lookYaw = std::clamp(m_lookYaw, -kLookYawLimit, kLookYawLimit);
+    m_lookPitch = std::clamp(m_lookPitch, -kLookPitchLimit, kLookPitchLimit);
+}
+
+void CameraController::updateLook(float dt)
+{
+    const float step = std::clamp(dt, 0.0f, 0.05f);
+    const float yawSpeed = static_cast<float>(m_controls.freelookKeyboardYawSpeed);
+    const float pitchSpeed = static_cast<float>(m_controls.freelookKeyboardPitchSpeed);
+    const float yawTarget = (m_lookRight ? yawSpeed : 0.0f) - (m_lookLeft ? yawSpeed : 0.0f);
+    const float pitchTarget =
+        (m_lookUp ? pitchSpeed : 0.0f) - (m_lookDown ? pitchSpeed : 0.0f);
+
+    // The authored accel/decel are the rate limits the look keys ramp within:
+    // accelerate towards the requested rate, brake towards zero on release.
+    const auto ramp = [step](float& rate, float target, double accel, double decel) {
+        const float limit = static_cast<float>(target == 0.0f ? decel : accel) * step;
+        const float delta = target - rate;
+        rate += std::abs(delta) <= limit ? delta : std::copysign(limit, delta);
+    };
+    ramp(m_lookKeyYawRate, yawTarget, m_controls.freelookKeyboardYawAccel,
+         m_controls.freelookKeyboardYawDecel);
+    ramp(m_lookKeyPitchRate, pitchTarget, m_controls.freelookKeyboardPitchAccel,
+         m_controls.freelookKeyboardPitchDecel);
+    m_lookKeyYaw += m_lookKeyYawRate * step;
+    m_lookKeyPitch += m_lookKeyPitchRate * step;
+
+    // Keys released and the ramp settled: the offset walks back to centre at
+    // the authored keyboard speed, the way a look key behaves when let go.
+    if (yawTarget == 0.0f && m_lookKeyYawRate == 0.0f) {
+        const float back = yawSpeed * step;
+        m_lookKeyYaw = std::abs(m_lookKeyYaw) <= back
+            ? 0.0f
+            : m_lookKeyYaw - std::copysign(back, m_lookKeyYaw);
+    }
+    if (pitchTarget == 0.0f && m_lookKeyPitchRate == 0.0f) {
+        const float back = pitchSpeed * step;
+        m_lookKeyPitch = std::abs(m_lookKeyPitch) <= back
+            ? 0.0f
+            : m_lookKeyPitch - std::copysign(back, m_lookKeyPitch);
+    }
+    m_lookKeyYaw = std::clamp(m_lookKeyYaw, -kLookYawLimit, kLookYawLimit);
+    m_lookKeyPitch = std::clamp(m_lookKeyPitch, -kLookPitchLimit, kLookPitchLimit);
+}
+
+vec3 CameraController::mapHeadTranslation(const vec3& metres) const
+{
+    const auto axis = [](float value, double range, double exponent) -> float {
+        const float limit = static_cast<float>(range);
+        if (limit <= 0.0f) return 0.0f;
+        const float normalised = std::clamp(value / limit, -1.0f, 1.0f);
+        const float curve = static_cast<float>(exponent) > 0.0f
+            ? std::pow(std::abs(normalised), static_cast<float>(exponent))
+            : std::abs(normalised);
+        return std::copysign(curve * limit, normalised);
+    };
+    return {axis(metres.x, m_controls.hmdLeftRightRange, m_controls.hmdYawExponent),
+            axis(metres.y, m_controls.hmdUpDownRange, m_controls.hmdPitchExponent),
+            axis(metres.z, m_controls.hmdForeAftRange, m_controls.hmdRollExponent)};
+}
 
 void CameraController::update(float dt, const mat4& carBodyMatrix, float speedKmh)
 {
@@ -18,6 +121,13 @@ void CameraController::update(float dt, const mat4& carBodyMatrix, float speedKm
 
 void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh, float dt)
 {
+    // The look keys were sampled once this frame (setLookKeys): integrate them
+    // here so a second update for the tracked head cannot advance them twice.
+    if (m_lookPending) {
+        updateLook(dt);
+        m_lookPending = false;
+    }
+
     vec3 localPos = m_cockpitOffset;
 
     float bobSpeed = speedKmh / 3.6f;
@@ -68,7 +178,7 @@ void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh, floa
     }
 
     if (m_headTrackingActive)
-        localPos = localPos + m_headTrackingPosition - m_cockpitOffset;
+        localPos = localPos + mapHeadTranslation(m_headTrackingPosition) - m_cockpitOffset;
     m_position = carMatrix * localPos;
 
     vec3 localTarget = m_cockpitLookTarget;
@@ -83,6 +193,23 @@ void CameraController::updateCockpit(const mat4& carMatrix, float speedKmh, floa
     } else {
         m_forward = (worldTarget - m_position).normalized();
         m_up = vec3(0, 1, 0);
+    }
+
+    // Freelook: yaw about the head's own up axis (the car's in an untracked
+    // cockpit), then pitch about the resulting right axis, so the two offsets
+    // compose instead of fighting over the same vector.
+    const float lookYaw = m_lookYaw + m_lookKeyYaw;
+    const float lookPitch = std::clamp(m_lookPitch + m_lookKeyPitch, -kLookPitchLimit,
+                                       kLookPitchLimit);
+    if (lookYaw != 0.0f || lookPitch != 0.0f) {
+        const vec3 axisUp = m_up;
+        vec3 forward = rotateAbout(m_forward, axisUp, lookYaw);
+        vec3 up = rotateAbout(m_up, axisUp, lookYaw);
+        const vec3 right = forward.cross(up).normalized();
+        forward = rotateAbout(forward, right, lookPitch);
+        up = rotateAbout(up, right, lookPitch);
+        m_forward = forward;
+        m_up = up;
     }
 
     m_viewMatrix = mat4::lookAt(m_position, m_position + m_forward, m_up);

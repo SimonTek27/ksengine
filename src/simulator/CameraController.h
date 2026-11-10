@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MathTypes.h"
+#include "ControlsConfig.h"
 
 namespace ks::sim {
 
@@ -43,6 +44,31 @@ public:
     void moveFree(const vec3& delta);
     void rotateFree(float yawDelta, float pitchDelta);
 
+    /** Cockpit look, as controls.json authors it: the mouse and keyboard
+     *  freelook speeds, plus the HMD ranges/exponents that bound a tracked
+     *  head. Read every frame by SimulationLoop, so an edited document is live. */
+    void setControls(const ControlsConfig& controls) { m_controls = controls; }
+
+    /** Mouse look in pixels since the last sample, scaled by
+     *  freelookMouse*Speed (radians per pixel in the document). The offset is
+     *  held until recentreLook(); the keyboard offsets spring back instead. */
+    void addMouseLook(float dxPixels, float dyPixels);
+
+    /** Keyboard look for this frame: the four look directions and the recentre
+     *  key. A released key walks its offset back to centre at the authored
+     *  keyboard speed. One integration per frame, whatever the caller does. */
+    void setLookKeys(bool up, bool down, bool left, bool right, bool recentre);
+
+    void recentreLook();
+    float lookYaw() const { return m_lookYaw + m_lookKeyYaw; }
+    float lookPitch() const { return m_lookPitch + m_lookKeyPitch; }
+
+    /** HMDLeftRightRange/UpDownRange/ForeAftRange bound a tracked head in
+     *  metres and the matching exponents shape its response (yaw for
+     *  left/right, pitch for up/down, roll for fore/aft). Public so the mapping
+     *  can be exercised without a device attached. */
+    vec3 mapHeadTranslation(const vec3& metres) const;
+
     void setCockpitOffset(const vec3& offset) { m_cockpitOffset = offset; }
     void setCockpitLookTarget(const vec3& target) { m_cockpitLookTarget = target; }
     void setHeadTrackingOffset(const vec3& positionMeters, const vec3& forward,
@@ -56,6 +82,7 @@ public:
 
 private:
     void updateCockpit(const mat4& carMatrix, float speedKmh, float dt);
+    void updateLook(float dt);
     void updateChase(const mat4& carMatrix, float speedKmh, float dt);
     void updateFree(float dt);
     void updateProjection();
@@ -83,6 +110,19 @@ private:
     float m_freeYaw = 0;
     float m_freePitch = 0;
     float m_freeSpeed = 20.0f;
+
+    ControlsConfig m_controls{};
+    float m_lookYaw = 0.0f;      // mouse look: held until recentred
+    float m_lookPitch = 0.0f;
+    float m_lookKeyYaw = 0.0f;   // keyboard look: springs back to centre
+    float m_lookKeyPitch = 0.0f;
+    float m_lookKeyYawRate = 0.0f;
+    float m_lookKeyPitchRate = 0.0f;
+    bool m_lookUp = false;
+    bool m_lookDown = false;
+    bool m_lookLeft = false;
+    bool m_lookRight = false;
+    bool m_lookPending = false;  // setLookKeys() arms one integration per frame
 
     vec3 m_cockpitOffset{0, 1.2f, -0.3f};
     vec3 m_cockpitLookTarget{0, 1.0f, 10.0f};

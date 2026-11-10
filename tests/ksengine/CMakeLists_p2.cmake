@@ -395,6 +395,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/showroom_test.cpp")
     set_tests_properties(showroom_test PROPERTIES TIMEOUT 60)
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/camera_freelook_test.cpp")
+    # controls.json -> camera: freelook e mappatura dei range HMD, compilati come
+    # il test del turntable (CameraController vive nel simulatore).
+    add_executable(camera_freelook_test camera_freelook_test.cpp
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator/CameraController.cpp")
+    target_include_directories(camera_freelook_test PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+    add_test(NAME camera_freelook_test COMMAND camera_freelook_test)
+    set_tests_properties(camera_freelook_test PROPERTIES TIMEOUT 60)
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ppfilter_preset_test.cpp")
     # Post-processing preset loader (engine/Config/PPFilterPreset.h): needs the
     # shipped system/ppfilters/*.json, hence KS_SOURCE_DIR.

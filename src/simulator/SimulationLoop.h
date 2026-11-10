@@ -214,6 +214,9 @@ public:
     bool handleUiMouseMove(float x, float y);
     bool handleUiMouseButton(ui::MouseButton button, bool down, float x, float y);
     bool handleUiMouseWheel(float delta, float x, float y);
+    /** Pointer motion the UI did not consume: in cockpit view it drives the
+     *  freelook the controls document authors. Returns whether it was used. */
+    bool handleLookMouseMove(float x, float y);
 
     InputManager* inputManager() { return m_input.get(); }
     CameraController* camera() { return m_camera.get(); }
@@ -497,6 +500,9 @@ private:
     NativeRenderer* m_vulkanRenderer = nullptr;
     std::unique_ptr<InputManager> m_input;
     std::unique_ptr<CameraController> m_camera;
+    float m_lookMouseX = 0.0f;
+    float m_lookMouseY = 0.0f;
+    bool m_lookMouseValid = false;
     ShowroomScene m_showroom;
     bool m_showroomAudioLoaded = false;
     std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;

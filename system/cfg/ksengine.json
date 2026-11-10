@@ -340,7 +340,7 @@
         "feature": "controlsConfig",
         "status": "partial",
         "landsAs": "system/cfg/controls.json (rF2-style general controls)",
-        "note": "Loader/saver dedicati per i parametri generali: speedSensitiveSteering, analogControlFilter e keyboardWeighted/keyboardDamping sono applicati al runtime (sterzo, filtro analogico e integratore tastiera). I range freelook/HMD si leggono e si riscrivono ma non hanno ancora un consumatore."
+        "note": "Loader/saver dedicati per i parametri generali: speedSensitiveSteering, analogControlFilter e keyboardWeighted/keyboardDamping sono applicati al runtime (sterzo, filtro analogico e integratore tastiera). Anche freelookMouse*/Keyboard* e hmd*Range/Exponent arrivano alla camera: mouse e tastierino (8/2/4/6 guarda, 5 recentra) muovono lo sguardo dell'abitacolo, e una testa tracciata resta dentro i range HMD con la curva dell'esponente."
       },
       {
         "feature": "actionProps",
