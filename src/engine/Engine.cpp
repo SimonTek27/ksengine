@@ -1,4 +1,7 @@
 #include "Engine.h"
+#include "hw/HardwareBackend.h"
+
+#include <cstdio>
 
 namespace ks {
 
@@ -8,6 +11,11 @@ bool Engine::initialize() {
     m_initialized = true;
     m_running = false;
     m_accum = 0.0;
+    // The engine proper never touches a device: the hardware backends compile
+    // into ksenginehw and report what the machine actually answers. Asked once,
+    // here, so a start-up log says what audio, video and controls were found.
+    const std::string hardware = hw::summarize();
+    std::fprintf(stderr, "[engine] %s\n", hardware.c_str());
     return true;
 }
 

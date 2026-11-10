@@ -13,9 +13,11 @@ if(KSENGINE_QT_FREE)
   endif()
 endif()
 
+# devices/ (controls + VR) and Video/ are compiled by ksenginehw, not here:
+# the engine reaches them through hw/HardwareBackend.h.
 set(KSENGINE_QT_FREE_DIRS
-  Math physics devices FileFormat archive Config network material sim Graphics
-  Audio assets sys AI animation hwril mesh Tools Scripting Video terrain input ui
+  Math physics FileFormat archive Config network material sim Graphics
+  Audio assets sys AI animation hwril mesh Tools Scripting terrain input ui
 )
 set(KSENGINE_SOURCES "")
 foreach(_dir ${KSENGINE_QT_FREE_DIRS})
@@ -94,6 +96,18 @@ list(APPEND KSENGINE_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/Engine.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/KsQtFreeGuard.h")
 
+# The audio endpoints are hardware: ksenginehw owns them, so the engine's own
+# glob drops the three files instead of defining them a second time.
+foreach(_kshw_audio AudioDevices AudioUtil WASAPIInput)
+  foreach(_ext .cpp .h)
+    list(REMOVE_ITEM KSENGINE_SOURCES
+      "${CMAKE_CURRENT_SOURCE_DIR}/Audio/${_kshw_audio}${_ext}")
+  endforeach()
+endforeach()
+
+# Hardware backends: their own target, linked into the engine (src/hw).
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../hw" "${CMAKE_BINARY_DIR}/ksenginehw")
+
 # ============================================================================
 # Vendored Lua 5.4 (external/lua), preferred over a system install so a fresh
 # clone gets working scripting without the machine needing Lua present.
@@ -151,6 +165,13 @@ endif()
 # -fPIC so the default KSENGINE_SHARED=ON configuration links there too, and
 # keep it on for the static archive so both configurations agree.
 set_target_properties(ksengine PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+# The hardware backends are an implementation detail of the engine: PRIVATE, so
+# consumers resolve their symbols out of ksengine.dll (the objects are exported
+# from there) instead of linking the same archive a second time.
+if(TARGET ksenginehw)
+	target_link_libraries(ksengine PRIVATE ksenginehw)
+endif()
 
 if(KSENGINE_SHARED)
 	# dllexport while compiling the DLL, dllimport for everything linking it.
