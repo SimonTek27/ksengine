@@ -37,6 +37,15 @@
 #define KS_MATERIAL_FRESNEL_MAX_EXP 64.0
 #define KS_MATERIAL_FRESNEL_POWER 5.0
 
+/* A pane's coverage is the AVERAGE of its texture's alpha, not the per-texel
+ * value. A pane that is not alpha-tested has no holes to cut: the alpha such a
+ * file carries is a dirt and scratch layer (the Countach's INTERNAL_glass.dds
+ * holds 0..73, mean 16), and read per texel it multiplied the pane's own
+ * reflection, painting a bright speck through every scratch instead of a
+ * smooth sheen. The mip chain is a box filter, so sampling this LOD is that
+ * average, while an authored tint gradient survives as a blurred version. */
+#define KS_MATERIAL_PANE_ALPHA_LOD 5.0
+
 /* Pane classification keywords. C++ only: GLSL never matches shader names,
  * it receives the resulting glassiness flag. */
 #define KS_MATERIAL_GLASS_SHADER_REFLECTION "reflection"

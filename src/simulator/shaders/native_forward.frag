@@ -311,7 +311,17 @@ void main() {
     // ~0.53 on a side window seen at a grazing angle, which is why the sky
     // reflection painted over the cabin instead of floating on it. Fresnel
     // still drives the reflection above, so an edge keeps its sheen.
-    float alpha = clamp(albedoSample.a * material.opacity, 0.0, 1.0);
+    //
+    // The alpha is read as its average over the pane, not per texel: a pane
+    // that is not alpha-tested has no holes to cut, and the alpha such a file
+    // carries is a dirt and scratch layer. Per texel, that layer multiplied
+    // the pane's own reflection and painted a bright speck through every
+    // scratch (the Countach's INTERNAL_glass.dds, 0..73 with mean 16, read as
+    // a windscreen full of dots). The coarse LOD is the layer's average.
+    float coverage = albedoSample.a;
+    if (glass > 0.001)
+        coverage = textureLod(albedoMap, fragUV, KS_MATERIAL_PANE_ALPHA_LOD).a;
+    float alpha = clamp(coverage * material.opacity, 0.0, 1.0);
     // Premultiplied for the see-through pipeline; the opaque one ignores alpha,
     // and with opacity 1 this is exactly the previous colour.
     outColor = vec4(mix(surface, frame.fogColor.rgb, fogT) * alpha, alpha);
