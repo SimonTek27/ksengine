@@ -384,6 +384,15 @@ public:
     void setIblEnabled(bool enabled) { m_iblWanted = enabled; }
     bool isIblEnabled() const { return m_iblWanted; }
 
+    /** Rebuilds the IBL from the car's own reflection probe — AC ships it as an
+     *  equirect *_Ref map — instead of the procedural sky, so the body and the
+     *  chrome reflect the environment the car reflects in AC. Called once after
+     *  the car is loaded and before the showroom's first frame: it re-uploads
+     *  into the existing images, so every descriptor set written at pipeline
+     *  creation keeps pointing at a live view. False leaves the sky in place. */
+    bool setCarReflectionEnvironment(const std::vector<unsigned char>& rgba8, int width,
+                                     int height);
+
     // Display transform of the deferred path (the tonemap.frag pass that now
     // owns the backbuffer). Exposure and the tone-curve operator are the two
     // knobs the SDR and HDR10 encodings share; modes: 0 none, 1 Reinhard,
@@ -1257,6 +1266,8 @@ private:
     bool createIblTexture(uint32_t width, uint32_t height, uint32_t mipLevels,
                           const std::vector<uint16_t>& rgba16f,
                           VkImage& image, VkDeviceMemory& memory, VkImageView& view);
+    bool uploadIblPixels(VkImage image, uint32_t width, uint32_t height, uint32_t mipLevels,
+                         const std::vector<uint16_t>& rgba16f, VkImageLayout oldLayout);
 
 };
 

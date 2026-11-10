@@ -1305,6 +1305,32 @@ bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t 
         return false;
     }
 
+    if (!uploadIblPixels(image, width, height, mipLevels, rgba16f,
+                         VK_IMAGE_LAYOUT_UNDEFINED))
+        return false;
+
+    VkImageViewCreateInfo vCi{};
+    vCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    vCi.image = image;
+    vCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vCi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    vCi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1};
+    if ((res = vkCreateImageView(m_device, &vCi, nullptr, &view)) != VK_SUCCESS) {
+        fprintf(stderr, "[NativeRenderer] ibl: vkCreateImageView failed (%d)\n", int(res));
+        return false;
+    }
+    return true;
+}
+
+// Stages RGBA16F pixels into an IBL image (packed mip-major, one copy per mip)
+// and leaves it SHADER_READ_ONLY. `oldLayout` is UNDEFINED for a fresh image
+// and SHADER_READ_ONLY when the car's reflection probe replaces the sky inside
+// an image that is already being sampled, which is why both the barrier's
+// source stage and its source access mask depend on it.
+bool NativeRenderer::uploadIblPixels(VkImage image, uint32_t width, uint32_t height,
+                                     uint32_t mipLevels,
+                                     const std::vector<uint16_t>& rgba16f,
+                                     VkImageLayout oldLayout) {
     const VkDeviceSize bytes =
         static_cast<VkDeviceSize>(rgba16f.size()) * sizeof(uint16_t);
     VkBuffer staging = VK_NULL_HANDLE;
@@ -1323,6 +1349,7 @@ bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t 
         vkUnmapMemory(m_device, stagingMem);
     }
 
+    const bool fresh = oldLayout == VK_IMAGE_LAYOUT_UNDEFINED;
     VkCommandBufferBeginInfo cbBegin{};
     cbBegin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     cbBegin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -1331,15 +1358,17 @@ bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t 
 
     VkImageMemoryBarrier toDst{};
     toDst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    toDst.srcAccessMask = 0;
+    toDst.srcAccessMask = fresh ? 0 : VK_ACCESS_SHADER_READ_BIT;
     toDst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    toDst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    toDst.oldLayout = oldLayout;
     toDst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     toDst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toDst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     toDst.image = image;
     toDst.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1};
-    vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    vkCmdPipelineBarrier(m_commandBuffer,
+                         fresh ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
+                               : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                          VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &toDst);
 
     // One copy per mip; offsets stay 8-byte aligned because every RGBA16F
@@ -1371,7 +1400,7 @@ bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t 
     submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &m_commandBuffer;
-    res = vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
+    VkResult res = vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
     if (res == VK_SUCCESS) res = vkQueueWaitIdle(m_graphicsQueue);
     vkDestroyBuffer(m_device, staging, nullptr);
     vkFreeMemory(m_device, stagingMem, nullptr);
@@ -1379,17 +1408,28 @@ bool NativeRenderer::createIblTexture(uint32_t width, uint32_t height, uint32_t 
         fprintf(stderr, "[NativeRenderer] ibl: staging upload failed (%d)\n", int(res));
         return false;
     }
+    return true;
+}
 
-    VkImageViewCreateInfo vCi{};
-    vCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vCi.image = image;
-    vCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vCi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    vCi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels, 0, 1};
-    if ((res = vkCreateImageView(m_device, &vCi, nullptr, &view)) != VK_SUCCESS) {
-        fprintf(stderr, "[NativeRenderer] ibl: vkCreateImageView failed (%d)\n", int(res));
+bool NativeRenderer::setCarReflectionEnvironment(const std::vector<unsigned char>& rgba8,
+                                                int width, int height) {
+    if (!m_iblReady || rgba8.empty() || width <= 0 || height <= 0) return false;
+    const ibl::Image env = ibl::generateEnvFromEquirect(rgba8.data(), width, height);
+    const ibl::Image prefilter = ibl::generatePrefilteredEnv(env);
+    const ibl::Image irradiance = ibl::generateIrradiance(env);
+    if (!uploadIblPixels(m_iblImages[0], ibl::kSkyWidth, ibl::kSkyHeight,
+                         ibl::kPrefilterMips, ibl::toRgba16F(prefilter),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ||
+        !uploadIblPixels(m_iblImages[1], ibl::kIrradianceWidth, ibl::kIrradianceHeight, 1,
+                         ibl::toRgba16F(irradiance),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+        fprintf(stderr, "[NativeRenderer] ibl: car reflection probe upload failed\n");
         return false;
     }
+    std::printf("[NativeRenderer] ibl: car reflection probe %dx%d -> %dx%d prefilter + "
+                "%dx%d irradiance\n",
+                width, height, ibl::kSkyWidth, ibl::kSkyHeight, ibl::kIrradianceWidth,
+                ibl::kIrradianceHeight);
     return true;
 }
 

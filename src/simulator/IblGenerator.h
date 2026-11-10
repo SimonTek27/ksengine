@@ -200,6 +200,48 @@ inline Image generateSky(int width = kSkyWidth, int height = kSkyHeight) {
     return img;
 }
 
+// 1b. The same grid, built from an 8-bit RGBA equirect image instead of the
+// procedural sky: AC ships the car's own reflection probe this way (the
+// Countach's HDR_111_Parking_Lot_2_Ref.dds is 320x160), and reflecting that
+// probe is what makes the body and the chrome look like the car does in AC.
+// The bytes are sRGB, so they are linearised once here; the result is
+// bilinearly resampled onto the fixed sky grid, which is why every step below
+// (prefilter, irradiance, upload, descriptors) stays exactly as it was.
+inline Image generateEnvFromEquirect(const unsigned char* rgba8, int width, int height,
+                                     int outWidth = kSkyWidth, int outHeight = kSkyHeight) {
+    Image src;
+    src.width = width;
+    src.height = height;
+    if (rgba8 == nullptr || width <= 0 || height <= 0) return generateSky(outWidth, outHeight);
+    src.rgba.resize(src.texelCount() * 4);
+    for (size_t i = 0; i < src.texelCount(); ++i) {
+        for (int c = 0; c < 3; ++c) {
+            const float srgb = static_cast<float>(rgba8[i * 4 + c]) / 255.0f;
+            src.rgba[i * 4 + c] = std::pow(srgb, 2.2f);
+        }
+        src.rgba[i * 4 + 3] = 1.0f;
+    }
+
+    Image img;
+    img.width = outWidth;
+    img.height = outHeight;
+    img.rgba.resize(img.texelCount() * 4);
+    for (int y = 0; y < outHeight; ++y) {
+        for (int x = 0; x < outWidth; ++x) {
+            float d[3];
+            dirFromTexel(x, y, outWidth, outHeight, d);
+            float rgb[3];
+            sampleEnvBilinear(src, d[0], d[1], d[2], rgb);
+            const size_t o = (static_cast<size_t>(y) * outWidth + x) * 4;
+            img.rgba[o + 0] = rgb[0];
+            img.rgba[o + 1] = rgb[1];
+            img.rgba[o + 2] = rgb[2];
+            img.rgba[o + 3] = 1.0f;
+        }
+    }
+    return img;
+}
+
 // 2. GGX-prefiltered environment. Packed mip chain: mip 0 is the raw mirror
 // env (roughness 0), mip i blurs with roughness i / (mips - 1), which is
 // exactly the lod mapping the shaders use.

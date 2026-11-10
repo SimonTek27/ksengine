@@ -97,6 +97,19 @@ inline bool isDataTexture(const std::string& texture) {
            folded.find("_ao_") != std::string::npos;
 }
 
+/** A *_Ref map is AC's reflection probe: the equirect environment the car
+ *  reflects (the Countach ships HDR_111_Parking_Lot_2_Ref.dds, 320x160, on the
+ *  first slot of its default material). It is never a surface colour — a
+ *  material whose only mapping is one would be painted with a photograph of a
+ *  parking lot instead of reflecting it. */
+inline bool isReflectionProbeTexture(const std::string& texture) {
+    const std::string folded = materialLower(texture);
+    if (folded.find("_ref.") != std::string::npos ||
+        folded.find("_ref_") != std::string::npos)
+        return true;
+    return folded.find("reflection") != std::string::npos;
+}
+
 inline TextureRole textureRole(const std::string& mappingName,
                                const std::string& texture) {
     if (texture.empty() || isWeatheringTexture(texture)) return TextureRole::other;

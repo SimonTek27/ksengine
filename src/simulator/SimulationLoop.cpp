@@ -1137,6 +1137,11 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
     // This engine knows the motion, so it blurs at runtime: the baked stand-in
     // mesh is never drawn and a baked blur texture is never sampled.
     int blurStandIns = 0;
+    // AC ships the car's reflection probe as an equirect *_Ref map on the first
+    // slot of a material (the Countach carries HDR_111_Parking_Lot_2_Ref.dds).
+    // It is the environment the body and the chrome reflect, so it is
+    // remembered here and never used as a surface colour.
+    std::string reflectionProbe;
     auto stripBakedBlur = [](const std::string& name) -> std::string {
         std::string folded;
         folded.reserve(name.size());
@@ -1267,6 +1272,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 std::string detail;
                 for (const auto& mapping : material.mappings) {
                     if (mapping.texture.empty()) continue;
+                    // The reflection probe is not a surface: painting it turns
+                    // the part into a photograph of a parking lot, which is
+                    // what happened to the Countach's default material.
+                    if (graphics::isReflectionProbeTexture(mapping.texture)) {
+                        if (reflectionProbe.empty()) reflectionProbe = mapping.texture;
+                        continue;
+                    }
                     // The mapping NAME says the slot, but the texture itself can
                     // disqualify it: damage/scratch/dirt/dust maps are data for
                     // AC's weathering shaders (WCCARBODY names its damage map
@@ -1582,6 +1594,37 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
         for (const auto& child : node.children) walk(child);
     };
     for (const auto& node : parsed.file.nodes) walk(node);
+
+    // The car's own reflection probe becomes the IBL environment: that is the
+    // environment AC reflects on the body, the chrome and the glass, so the
+    // prefiltered and irradiance maps are rebuilt from it instead of the
+    // procedural gradient sky. Runs before the first frame of the showroom,
+    // which is why the one-shot upload can reuse the idle command buffer.
+    if (!reflectionProbe.empty() && m_vulkanRenderer) {
+        std::vector<unsigned char> probeBytes;
+        for (const auto& texture : parsed.file.textures) {
+            if (texture.name != reflectionProbe || texture.data.empty()) continue;
+            probeBytes.assign(texture.data.begin(), texture.data.end());
+            break;
+        }
+        bool applied = false;
+        if (!probeBytes.empty()) {
+            const std::string_view probeView(
+                reinterpret_cast<const char*>(probeBytes.data()), probeBytes.size());
+            const auto probe = ff::decodeDds(probeView);
+            if (probe.ok() && !probe.rgba.empty())
+                applied = m_vulkanRenderer->setCarReflectionEnvironment(
+                    probe.rgba, probe.info.width, probe.info.height);
+        }
+        if (applied) {
+            std::printf("[ibl] reflection probe %s replaces the sky",
+                        reflectionProbe.c_str());
+            std::putchar(10);
+        } else {
+            std::fprintf(stderr, "[ibl] reflection probe %s unusable, sky kept\n",
+                         reflectionProbe.c_str());
+        }
+    }
 
     if (meshes == 0) return false;
     if (tinted > 0) {

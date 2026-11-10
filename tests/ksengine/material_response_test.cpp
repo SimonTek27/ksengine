@@ -57,6 +57,19 @@ int main() {
         KS_CHECK(!isGlassPane(material.shader, false, surface.fresnelMax, 0));
     }
 
+    // --- a *_Ref map is the car's reflection probe, not a colour ----------
+    {
+        KS_CHECK(isReflectionProbeTexture("HDR_111_Parking_Lot_2_Ref.dds"));
+        KS_CHECK(isReflectionProbeTexture("hdr_111_parking_lot_2_ref.dds"));
+        KS_CHECK(isReflectionProbeTexture("showroom_reflection.png"));
+        KS_CHECK(isReflectionProbeTexture("sky_ref_01.dds"));
+        // A surface that merely mentions a reference is not a probe.
+        KS_CHECK(!isReflectionProbeTexture("countach_misc.dds"));
+        KS_CHECK(!isReflectionProbeTexture("metal_detail_rim.dds"));
+        KS_CHECK(!isReflectionProbeTexture("skin_00.dds"));
+        KS_CHECK(!isReflectionProbeTexture("Carpet.DDS"));
+    }
+
     // --- an OCC map is an occlusion bake, not a colour ---------------------
     {
         KS_CHECK(isOcclusionTexture("INT_Seat_OCC.dds"));
