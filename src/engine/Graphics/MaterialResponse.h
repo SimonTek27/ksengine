@@ -23,6 +23,7 @@
 #include "MaterialResponseConstants.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -179,25 +180,57 @@ inline float f0Scale(float specular) {
                     static_cast<float>(KS_MATERIAL_SPECULAR_F0_MAX));
 }
 
-/** The specular as the GBuffer carries it: the coverage MAGNITUDE, so the
- *  sign stays free for the brake-disc flag. 0.5 -> exactly 1.0 and every value
- *  stays in [0.75, 1.25], above the abs(w) < 0.5 "no geometry" test. */
-inline float coverageMagnitude(float specular) {
-    const float clamped = std::min(std::max(specular, 0.0f), 1.0f);
-    return 1.0f + (clamped - static_cast<float>(KS_MATERIAL_SPECULAR_NEUTRAL)) *
-                      static_cast<float>(KS_MATERIAL_COVERAGE_STEP);
+/** The authored response as the GBuffer carries it: the coverage MAGNITUDE,
+ *  so the sign stays free for the brake-disc flag. ksSpecular and the authored
+ *  fresnel cap are packed as two integer levels (see the constants header),
+ *  magnitude = 1 + (specLevel * 17 + fresnelLevel) * step. A quantisation of
+ *  1/16 is invisible on a reflectance, and 0.5 still decodes to exactly 0.5. */
+inline float coverageLevel(float value) {
+    const float clamped = std::min(std::max(value, 0.0f), 1.0f);
+    return std::floor(clamped * static_cast<float>(KS_MATERIAL_COVERAGE_LEVEL_MAX) + 0.5f);
 }
 
-/** Inverse of coverageMagnitude(), safe on the signed value the GBuffer stores. */
-inline float specularFromCoverage(float storedCoverage) {
+inline float coverageMagnitude(float specular, float fresnelMaxLevel = 0.0f) {
+    return 1.0f +
+           (coverageLevel(specular) *
+                static_cast<float>(KS_MATERIAL_COVERAGE_FRESNEL_BASE) +
+            coverageLevel(fresnelMaxLevel)) *
+               static_cast<float>(KS_MATERIAL_COVERAGE_STEP);
+}
+
+namespace material_coverage_detail {
+
+/** The two integer levels a stored magnitude holds, as floats. */
+inline void decodeLevels(float storedCoverage, float levels[2]) {
     const float magnitude =
         storedCoverage < 0.0f ? -storedCoverage : storedCoverage;
-    return std::min(
-        std::max((magnitude - 1.0f) /
-                         static_cast<float>(KS_MATERIAL_COVERAGE_STEP) +
-                     static_cast<float>(KS_MATERIAL_SPECULAR_NEUTRAL),
-                 0.0f),
-        1.0f);
+    const float packed =
+        (magnitude - 1.0f) / static_cast<float>(KS_MATERIAL_COVERAGE_STEP);
+    const float fresnel =
+        std::floor(std::fmod(packed,
+                             static_cast<float>(KS_MATERIAL_COVERAGE_FRESNEL_BASE)) +
+                   0.5f);
+    levels[1] = fresnel;
+    levels[0] =
+        std::floor((packed - fresnel) /
+                       static_cast<float>(KS_MATERIAL_COVERAGE_FRESNEL_BASE) +
+                   0.5f);
+}
+
+} // namespace material_coverage_detail
+
+/** Inverse of coverageMagnitude(): the specular the stored value encodes. */
+inline float specularFromCoverage(float storedCoverage) {
+    float levels[2] = {0.0f, 0.0f};
+    material_coverage_detail::decodeLevels(storedCoverage, levels);
+    return std::min(levels[0] / static_cast<float>(KS_MATERIAL_COVERAGE_LEVEL_MAX), 1.0f);
+}
+
+/** The fresnel cap the same stored value encodes (0 when none was authored). */
+inline float fresnelMaxFromCoverage(float storedCoverage) {
+    float levels[2] = {0.0f, 0.0f};
+    material_coverage_detail::decodeLevels(storedCoverage, levels);
+    return std::min(levels[1] / static_cast<float>(KS_MATERIAL_COVERAGE_LEVEL_MAX), 1.0f);
 }
 
 /** A blended surface is a pane when the preset already says glass, or when the

@@ -205,8 +205,22 @@ void main() {
         vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
                                   material.roughness * frame.iblParams.y).rgb;
         vec3 diffIbl = texture(iblIrradiance, equirectUv(N)).rgb;
+        // Same authored reflection curve as deferred_lighting.frag, except
+        // this path has the whole triple: the base and the exponent come from
+        // the material block here, where the GBuffer only had room for the
+        // cap. A material that authored no fresnel keeps the split-sum term.
+        vec3 reflection = F0 * brdf.x + brdf.y;
+        if (material.specularFresnel.w > 0.001 && material.metalness < 0.5) {
+            float base = clamp(material.specularFresnel.y, 0.0, 1.0);
+            float cap = clamp(material.specularFresnel.w, 0.0, 1.0);
+            float exponent = clamp(material.specularFresnel.z,
+                                   KS_MATERIAL_FRESNEL_MIN_EXP,
+                                   KS_MATERIAL_FRESNEL_MAX_EXP);
+            reflection = vec3(base +
+                              (max(base, cap) - base) * pow(1.0 - NdotV, exponent));
+        }
         ambient = diffIbl * albedo * (1.0 - material.metalness) +
-                  specIbl * (F0 * brdf.x + brdf.y);
+                  specIbl * reflection;
     } else {
         ambient = albedo * 0.25;
     }

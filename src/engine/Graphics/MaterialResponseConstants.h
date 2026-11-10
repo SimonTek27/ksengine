@@ -16,10 +16,18 @@
 #define KS_MATERIAL_SPECULAR_F0_MIN 0.4
 #define KS_MATERIAL_SPECULAR_F0_MAX 2.0
 
-/* The GBuffer has no free channel for ksSpecular, so it rides in the coverage
- * MAGNITUDE as 1 + (spec - neutral) * step, keeping the sign for the brake
- * disc and staying in [0.75, 1.25] (the abs(w) < 0.5 "no geometry" test). */
-#define KS_MATERIAL_COVERAGE_STEP 0.5
+/* The GBuffer has no free channel for the authored surface response, so
+ * ksSpecular and fresnelMaxLevel both ride in the coverage MAGNITUDE as two
+ * integer levels: magnitude = 1 + (specLevel * 17 + fresnelLevel) * step.
+ * The channel is a float, so the pair survives exactly; the sign still marks a
+ * brake disc and the magnitude stays in [1, 1.06], nowhere near the
+ * abs(w) < 0.5 "no geometry" test. KS_MATERIAL_COVERAGE_STEP is 1 / (16 * 17):
+ * 16 is the highest level either value reaches (so a level decodes to 0..1 by
+ * dividing by 16, and AC's 0.5 neutral lands on level 8, i.e. 0.5 again), and
+ * 17 is the base the two levels are packed in. */
+#define KS_MATERIAL_COVERAGE_LEVEL_MAX 16.0
+#define KS_MATERIAL_COVERAGE_FRESNEL_BASE 17.0
+#define KS_MATERIAL_COVERAGE_STEP 0.0036764705882352941
 
 /* Fresnel: the AC default exponent the loader substitutes when the file has
  * none, the clamp the shaders apply to an authored one, and the Schlick power

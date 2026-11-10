@@ -208,12 +208,21 @@ void main() {
     vec3 N = normalize(normalRough.xyz);
     float coated = normalRough.w < 0.0 ? 1.0 : 0.0;
     float roughness = clamp(abs(normalRough.w), 0.05, 1.0);
-    // gbuffer.frag packs the authored ksSpecular into the coverage magnitude
-    // (1.0 = the legacy 0.04). 0.5 is AC's neutral: F0 scale 1.0.
-    float authoredSpecular = clamp((abs(coverage.w) - 1.0) /
-                                           KS_MATERIAL_COVERAGE_STEP +
-                                       KS_MATERIAL_SPECULAR_NEUTRAL,
-                                   0.0, 1.0);
+    // gbuffer.frag packs the authored ksSpecular and fresnelMaxLevel into the
+    // coverage magnitude as two integer levels (see the constants header).
+    float coverageLevels =
+        (abs(coverage.w) - 1.0) / KS_MATERIAL_COVERAGE_STEP;
+    float authoredFresnelMax =
+        clamp(floor(mod(coverageLevels, KS_MATERIAL_COVERAGE_FRESNEL_BASE) + 0.5) /
+                  KS_MATERIAL_COVERAGE_LEVEL_MAX,
+              0.0, 1.0);
+    float authoredSpecular =
+        clamp(floor((coverageLevels -
+                     authoredFresnelMax * KS_MATERIAL_COVERAGE_LEVEL_MAX) /
+                        KS_MATERIAL_COVERAGE_FRESNEL_BASE +
+                    0.5) /
+                  KS_MATERIAL_COVERAGE_LEVEL_MAX,
+              0.0, 1.0);
     float f0Scale = clamp(authoredSpecular * KS_MATERIAL_SPECULAR_F0_SCALE,
                           KS_MATERIAL_SPECULAR_F0_MIN,
                           KS_MATERIAL_SPECULAR_F0_MAX);
@@ -233,8 +242,24 @@ void main() {
         vec3 specIbl = textureLod(iblPrefiltered, equirectUv(R),
                                   roughness * frame.iblParams.y).rgb;
         vec3 diffIbl = texture(iblIrradiance, equirectUv(N)).rgb;
+        // AC authors the reflection curve of a lacquered dielectric with
+        // fresnelC / fresnelEXP / fresnelMaxLevel, and the Countach body
+        // authors 0.05 rising to 0.60: ignoring it left the flank as matte as
+        // the leather, because the split-sum term only ever reflects the
+        // legacy 0.04. The GBuffer carries the cap (the base stays the legacy
+        // 0.04 and the curve uses the default exponent), so a material that
+        // authored one now reflects the environment as AC intends. Metals
+        // keep the split-sum term: their F0 is the albedo, not a dielectric
+        // curve.
+        vec3 reflection = F0 * brdf.x + brdf.y;
+        if (authoredFresnelMax > 0.001 && metalness < 0.5) {
+            float base = F0.r;
+            reflection = vec3(base +
+                              (max(base, authoredFresnelMax) - base) *
+                                  pow(1.0 - NdotV, KS_MATERIAL_FRESNEL_POWER));
+        }
         ambient = (diffIbl * albedo * (1.0 - metalness) +
-                   specIbl * (F0 * brdf.x + brdf.y)) * ssao(worldPos, N);
+                   specIbl * reflection) * ssao(worldPos, N);
     } else {
         ambient = albedo * 0.25 * ssao(worldPos, N);
     }

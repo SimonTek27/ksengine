@@ -47,7 +47,12 @@ int main() {
         KS_CHECK(near(surface.fresnelExp, 5.0f));
         KS_CHECK(near(surface.fresnelMax, 0.0f));
         KS_CHECK(near(f0Scale(surface.specular), 1.0f));
-        KS_CHECK(near(coverageMagnitude(surface.specular), 1.0f));
+        // The magnitude packs ksSpecular and the authored fresnel cap: the
+        // neutral 0.5 lands on level 8 and "no authored cap" is level 0, so a
+        // legacy material stores 1 + 136/272 and both values decode back.
+        KS_CHECK(near(coverageMagnitude(surface.specular, surface.fresnelMax), 1.5f));
+        KS_CHECK(near(specularFromCoverage(1.5f), 0.5f));
+        KS_CHECK(near(fresnelMaxFromCoverage(1.5f), 0.0f));
         KS_CHECK(near(authoredDetailTiles(material), 0.0f));
         KS_CHECK(!isGlassPane(material.shader, false, surface.fresnelMax, 0));
     }
@@ -83,14 +88,27 @@ int main() {
         const float values[] = {0.0f, 0.1f, 0.2f, 0.5f, 0.75f, 1.0f};
         for (float specular : values) {
             const float stored = coverageMagnitude(specular);
-            KS_CHECK(stored >= 0.75f && stored <= 1.25f);
-            KS_CHECK(near(specularFromCoverage(stored), specular));
+            // Two 4-bit levels in one float channel: the magnitude stays just
+            // above 1, far from the abs(w) < 0.5 "no geometry" test, and
+            // decodes to the level the value quantised to (1/16 of a
+            // reflectance, which no surface can show).
+            KS_CHECK(stored >= 1.0f && stored <= 2.1f);
+            const float quantised = std::floor(specular * 16.0f + 0.5f) / 16.0f;
+            KS_CHECK(near(specularFromCoverage(stored), quantised, 1e-4f));
             // The signed form (brake disc) decodes to the same value.
-            KS_CHECK(near(specularFromCoverage(-stored), specular));
+            KS_CHECK(near(specularFromCoverage(-stored), quantised, 1e-4f));
         }
         // Out-of-range input is clamped, not wrapped.
         KS_CHECK(near(specularFromCoverage(coverageMagnitude(-2.0f)), 0.0f));
         KS_CHECK(near(specularFromCoverage(coverageMagnitude(3.0f)), 1.0f));
+        // The authored fresnel cap rides along and comes back: 0.625 is a level
+        // (10/16), which is where the Countach's authored 0.60 quantises, so
+        // its body reflects the environment instead of the legacy 0.04.
+        const float authored = coverageMagnitude(1.0f, 0.625f);
+        KS_CHECK(near(specularFromCoverage(authored), 1.0f, 1e-4f));
+        KS_CHECK(near(fresnelMaxFromCoverage(authored), 0.625f, 1e-4f));
+        // A material that authored no cap keeps the split-sum reflection.
+        KS_CHECK(near(fresnelMaxFromCoverage(coverageMagnitude(0.5f)), 0.0f));
     }
 
     // --- detailUVMultiplier is the authored name (B191 carbon = 25) -------

@@ -1401,9 +1401,13 @@ bool SimulationLoop::loadKn5Meshes(const std::string& modelPath, const std::stri
                 if (debugMaterials && printedMaterials.insert(lower(material.name)).second) {
     const std::string albedoName = graphics::canonicalTextureName(albedo);
                     std::printf(
-                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f albedo=%-24s detail=%-20s ds=%.2f use=%d%s",
+                        "[material] %-22s shader=%-26s preset=%-13s r=%.3f m=%.3f cc=%.3f spec=%.2f fres=%.2f/%.2f/%.2f albedo=%-24s detail=%-20s ds=%.2f use=%d%s",
                         material.name.c_str(), material.shader.c_str(),
                         graphics::materialPreset(presetId).name, nm.roughness, nm.metalness, nm.clearcoat,
+                        static_cast<double>(authored.specular),
+                        static_cast<double>(authored.fresnelC),
+                        static_cast<double>(authored.fresnelExp),
+                        static_cast<double>(authored.fresnelMax),
                         albedo.empty() ? "-" : albedoName.c_str(),
                         detail.empty() ? "-" : detail.c_str(),
                         static_cast<double>(nm.detailScale),

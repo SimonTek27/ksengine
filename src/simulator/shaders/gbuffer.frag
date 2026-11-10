@@ -124,12 +124,20 @@ void main() {
     // disc pixels instead of positive: every reader ("drawn?") decodes
     // abs(w), and deferred_lighting.frag reads the sign as the glow flag.
     //
-    // The magnitude carries the authored ksSpecular: 1.0 + (spec-0.5)*0.5
-    // stays in [0.75, 1.25], so the "no geometry" tests (abs(w) < 0.5) are
-    // unaffected and a legacy material (specular 0.5) still writes exactly 1.
+    // The magnitude carries the two authored numbers deferred_lighting.frag
+    // cannot read anywhere else: ksSpecular and fresnelMaxLevel, each as an
+    // integer level 0..16 (see the constants header). A legacy material
+    // (specular 0.5, no authored fresnel) writes 1 + (8 * 17 + 0) * step,
+    // which decodes back to exactly 0.5 and 0, so its look is unchanged.
+    float specularLevel =
+        floor(clamp(material.specularFresnel.x, 0.0, 1.0) *
+                  KS_MATERIAL_COVERAGE_LEVEL_MAX + 0.5);
+    float fresnelLevel =
+        floor(clamp(material.specularFresnel.w, 0.0, 1.0) *
+                  KS_MATERIAL_COVERAGE_LEVEL_MAX + 0.5);
     float coverageMagnitude =
-        1.0 + (clamp(material.specularFresnel.x, 0.0, 1.0) -
-                  KS_MATERIAL_SPECULAR_NEUTRAL) * KS_MATERIAL_COVERAGE_STEP;
+        1.0 + (specularLevel * KS_MATERIAL_COVERAGE_FRESNEL_BASE + fresnelLevel) *
+                  KS_MATERIAL_COVERAGE_STEP;
     outWorldPosCoverage = vec4(fragWorldPos,
                                (material.brakeDisc >= 0.5 ? -1.0 : 1.0) *
                                    coverageMagnitude);
