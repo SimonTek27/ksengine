@@ -76,8 +76,9 @@
     "entries": [
       "video",
       "audio",
+      "controls",
       "gameplay",
-      "controls"
+      "ui"
     ],
     "note": "The SETTINGS screen rows: every image option lives in the video page, the volumes in audio, the session tweaks in gameplay (fuel consumption, tyre wear multipliers and the racing-rules switch, applied by GameplayTweaks) and the bindings in controls."
   },
