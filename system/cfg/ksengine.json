@@ -5,13 +5,25 @@
     "config": "system/cfg/ksengine.json",
     "playerOverrides": "user/<player>/settings.json",
     "precedence": "system/cfg first, user file second, later wins per key",
-    "note": "Sections below mirror the menu sections that exist in the simulator. effectiveKeys is exactly what the runtime reads today; every other key documents a feature and the status it has. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden. MODE SETUP takes its starting values from singleplayer.defaults below, falling back to defaultsForMode() in the code for whatever the file leaves out."
+    "note": "Sections below mirror the menu sections that exist in the simulator. The video and audio sections live in their own documents: video points at system/cfg/video.json and audio at system/cfg/audio.json, and the runtime follows both references; the video feature entries that describe engine systems (cameras, particles, weather, mirrors) are documented in videoSources. effectiveKeys is exactly what the runtime reads today; every other key documents a feature and the status it has. The runtime reports at start-up any key inside physics, audio, assist, video and singleplayer that it does not read, so a typo cannot stay hidden. MODE SETUP takes its starting values from singleplayer.defaults below, falling back to defaultsForMode() in the code for whatever the file leaves out."
   },
   "effectiveKeys": [
     "physics.fixedDt",
     "audio.master",
+    "audio.playerCar",
+    "audio.opponentCar",
+    "audio.location",
+    "audio.spotter",
+    "audio.music",
+    "audio.ui",
     "assist.tc",
     "assist.abs",
+    "wheelLeds.shiftFlashHz",
+    "gameplay.fuelConsumption",
+    "gameplay.tireDamageRate",
+    "gameplay.strictRules",
+    "showroom.default",
+    "ui.collapsedSections",
     "video.resolution",
     "video.exposure",
     "video.tonemap",
@@ -33,11 +45,27 @@
     "singleplayer.modes",
     "singleplayer.defaults",
     "video.saturation",
-    "video.contrast"
+    "video.contrast",
+    "telemetry.csvHz",
+    "controls.vehicle.throttle",
+    "controls.vehicle.brake",
+    "controls.vehicle.steerLeft",
+    "controls.vehicle.steerRight",
+    "controls.vehicle.shiftUp",
+    "controls.vehicle.shiftDown",
+    "controls.vehicle.handbrake",
+    "controls.vehicle.clutch",
+    "controls.vehicle.starter",
+    "controls.vehicle.turnSignalLeft",
+    "controls.vehicle.turnSignalRight"
   ],
   "physics": {
     "fixedDt": 0.008333333333333333,
     "note": "Fixed simulation step in seconds, accepted range 1e-5..1.0; 1/120 is the compiled default."
+  },
+  "telemetry": {
+    "csvHz": 20,
+    "note": "Session telemetry CSV rows per simulated second, 1..240; 20 writes a row every 0.05 s of simulated time. The sampler runs on the fixed physics step, so the spacing does not depend on the frame rate, and the rate is applied when a session opens: one file per session, in user/<player>/telemetry or at KS_TELEMETRY_CSV."
   },
   "assist": {
     "tc": 0,
@@ -48,324 +76,114 @@
     "entries": [
       "video",
       "audio",
+      "gameplay",
       "controls"
     ],
-    "note": "The three entries of the SETTINGS screen: every image option lives in the video page, the volumes in audio, the bindings in controls."
+    "note": "The SETTINGS screen rows: every image option lives in the video page, the volumes in audio, the session tweaks in gameplay (fuel consumption, tyre wear multipliers and the racing-rules switch, applied by GameplayTweaks) and the bindings in controls."
   },
-  "video": {
-    "note": "What this file drives at start-up: resolution, exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, mirrors with mirrorResolution, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The OPTIONS page applies fullscreen, resolution, vsync, ssao, ssr, motion blur, exposure, tonemap and master volume live and keeps them in memory; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
-    "saturation": 1.0,
-    "contrast": 1.0,
-    "resolution": "auto",
-    "resolutions": [
-      "1920x1080",
-      "1600x900",
-      "1280x720"
-    ],
-    "fullscreen": false,
-    "vsync": true,
-    "frameLimit": 0,
-    "ssao": false,
-    "ssr": false,
-    "motionBlur": true,
-    "exposure": 0.72,
-    "tonemap": "ACES",
-    "tonemaps": [
-      "NONE",
-      "REINHARD",
-      "ACES",
-      "UNCHARTED2",
-      "FILMIC"
-    ],
-    "postProcessFilter": "Normal",
-    "hdrOutput": false,
-    "msaa": 1,
-    "anisotropicFiltering": 8,
-    "shadowMapSize": 2048,
-    "shadowCascades": 3,
-    "mirrors": false,
-    "mirrorResolution": "512x128",
-    "particles": true,
-    "ssgi": false,
-    "ssgiRadius": 0.05,
-    "ssgiIntensity": 1.0,
-    "sources": [
-      {
-        "feature": "windowOutput",
-        "status": "live",
-        "landsAs": "resolution, fullscreen, vsync, frame limit, anisotropic, shadow map, AA samples",
-        "note": "Resolution, fullscreen and vsync switch the window and the swapchain; the frame limit paces the loop (0 = vsync only) and the anisotropy number caps the material samplers at the device limit. All of it comes from this file."
-      },
-      {
-        "feature": "displayTuning",
-        "status": "live",
-        "landsAs": "exposure, tonemap",
-        "note": "Exposure and the tone curve are read from this file at startup, applied after the post preset, and the page reads them back from the renderer."
-      },
-      {
-        "feature": "bloomAndFlare",
-        "status": "partial",
-        "landsAs": "bloom (bright pass + separable blur)",
-        "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Occlusion-driven lens flare is not implemented."
-      },
-      {
-        "feature": "ssgi",
-        "status": "partial",
-        "landsAs": "half-res gather + gaussian denoise",
-        "note": "The bounce is gathered at half resolution by ssgiGather.frag into its own target and denoised with two gaussian axes before the deferred lighting pass samples it as binding 8 - that filter is what keeps a wide video.ssgiRadius smooth. video.ssgi turns it on (and switches the render path to deferred, because the forward path never runs that shader, off by default); video.ssgiRadius and video.ssgiIntensity tune footprint and strength. The two engine-side ssgi compute shaders build but nothing dispatches them."
-      },
-      {
-        "feature": "screenSpaceReflections",
-        "status": "partial",
-        "landsAs": "ssr",
-        "note": "Screen-space reflections exist; planar and mirror reflections do not."
-      },
-      {
-        "feature": "mirrors",
-        "status": "partial",
-        "landsAs": "mirrors, mirrorResolution",
-        "note": "video.mirrors turns on a rear-view tile rendered to its own colour+depth target every frame with the real forward draw list (the AC virtual mirror idea), and the tile draws inside whichever colour pass writes the swapchain — skipped on an HDR10 backbuffer, where its un-encoded SDR values would glow against the PQ image. video.mirrorResolution is the tile size, forced landscape ('512x128' here). The rear view queues its own draws: it has its own frustum (the main camera yawed 180 about its up axis) and its own occlusion grid, so a mesh the main eye turned its back on still reaches the tile while something visible only ahead of the car is not re-drawn into it. Stage 3 lands the glass sampling: KS_MIRROR_MESH=<name> makes the tile ride a named mesh's geometry (drawn in the display pass with the current view/projection, sampling the tile) instead of the fixed screen quad — a fallback to the quad stays when the name is missing or unknown. Still missing: side (left/right) tiles and a convention: any mesh whose name contains \"mirror\" (case-insensitive) is auto-detected; KS_MIRROR_MESH overrides. KS_MIRROR overrides the enable for a test run."
-      },
-      {
-        "feature": "shadowMap",
-        "status": "partial",
-        "landsAs": "shadowMapSize, shadowCascades",
-        "note": "Configurable cascade count (1..3) and map size, without per-frame retargeting."
-      },
-      {
-        "feature": "wheelShadowing",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "coloredShadows",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "renderModes",
-        "status": "partial",
-        "landsAs": "deferred pass",
-        "note": "Forward and deferred paths exist; the list of named modes does not."
-      },
-      {
-        "feature": "gbufferLayout",
-        "status": "partial",
-        "landsAs": "deferred gbuffer",
-        "note": "The deferred path has its own gbuffer layout; per-material overrides are not loaded."
-      },
-      {
-        "feature": "grass",
-        "status": "missing",
-        "landsAs": null
-      },
-      {
-        "feature": "particles",
-        "status": "live",
-        "landsAs": "billboard sprite quads (dust, rain, spray)",
-        "note": "video.particles starts the ParticleSystem emitters and the billboard pass draws them; KS_PARTICLES=1 still forces them on for a capture."
-      },
-      {
-        "feature": "rain",
-        "status": "live",
-        "landsAs": "weather rain shading + drops/spray",
-        "note": "Rain and track wetness are live inputs: the engine-side RenderSystem stores them (wetSpecular() feeds its scene shading), the sim syncs them into TrackSurface for the grip model every frame, and the drops and spray come from the particle emitters video.particles starts. The sim's NativeRenderer does not read the rain state directly — the visible rain inside the cockpit rides windscreenEffects."
-      },
-      {
-        "feature": "windscreenEffects",
-        "status": "partial",
-        "landsAs": "rain on the windscreen",
-        "note": "Stage 1 ships: the display pass (tonemap.frag, its own binding-4 UBO — the push block was already at the 128-byte guarantee) grows three hash-built procedural layers over the driver's view — a fine sliding ladder, sparse large beads and a static wetting film — each refracting the scene-linear HDR beneath it before DOF, sharpen and bloom. Coverage follows the evolving rain (mm/h over 40 tops it) plus KS_RAIN 0..100 as a visual-only override (grip untouched); it paints only in the cockpit view and animates on the frame clock, so it freezes with the world. The layer is screen-space on purpose: the glass pipeline depth-tests without ever writing, so the depth buffer cannot locate the glass — the band is the screen instead, which means stage 4 lands a per-pixel mask: the named glass mesh is rendered into an R8 mask before the display pass, and the rain only lands where the mask is 1 (fallback to the stage-3 rect, then the stage-1 band, when no glass is found). In a parked showroom the layer stays off (the weather branch early-returns there)."
-      },
-      {
-        "feature": "skidmarks",
-        "status": "live",
-        "landsAs": "skid marks (particles)",
-        "note": "One emitter per wheel, parked at the wheel's position (car frame: half wheelbase fore/aft, half track across, oriented with the travel direction). Lock test: brake input past 0.7 with the wheel's rim speed (wheelOmega * radius) under 5 m/s - the same numbers the physics integrates."
-      },
-      {
-        "feature": "tyreVisuals",
-        "status": "missing",
-        "landsAs": null,
-        "note": "Tyres render as plain meshes: no deformation or flat-spot visuals."
-      },
-      {
-        "feature": "weatherShaders",
-        "status": "partial",
-        "landsAs": "weather preset",
-        "note": "A weather state drives sun and sky values; shader-level weather is absent."
-      },
-      {
-        "feature": "postChain",
-        "status": "partial",
-        "landsAs": "postProcessFilter",
-        "note": "The native display pass applies exposure, the tone curve and the ppfilter LUT; no external post-processing middleware is involved."
-      },
-      {
-        "feature": "vrSupport",
-        "status": "partial",
-        "landsAs": "OpenXR bootstrap and XrManager integration",
-        "note": "OpenXR instance/system/session bootstrap and Vulkan extension wiring exist; render-to-headset and full input are not enabled yet."
-      },
-      {
-        "feature": "tripleScreen",
-        "status": "missing",
-        "landsAs": null,
-        "note": "One window, one swapchain: no triple-head splitting or side-angle correction."
-      },
-      {
-        "feature": "headPhysics",
-        "status": "partial",
-        "landsAs": "cockpit head spring",
-        "note": "Longitudinal and lateral acceleration sway the cockpit head through a spring-damper; vertical suspension travel is not fed in yet."
-      },
-      {
-        "feature": "freeCamera",
-        "status": "partial",
-        "landsAs": "orbit camera",
-        "note": "A free orbit camera exists for the showroom and the menu backdrop."
-      },
-      {
-        "feature": "chaseCamera",
-        "status": "partial",
-        "landsAs": "chase camera",
-        "note": "Chase and cockpit views exist, without spring or offset tuning."
-      },
-      {
-        "feature": "cameraViews",
-        "status": "partial",
-        "landsAs": "chase / cockpit cameras",
-        "note": "Two views exist and switch; its per-camera bookmarks are not read."
-      },
-      {
-        "feature": "cockpitCamera",
-        "status": "partial",
-        "landsAs": "cockpit view",
-        "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
-      }
-    ],
-    "headPhysics": true
-  },
-  "audio": {
-    "note": "master is the only audio key the runtime reads; the engine, wind and environment levels are driven per frame by the session and the showroom channel starts with the simulator, so engineVolume, environmentVolume, showroomAmbience and showroomMusic document that behaviour rather than act as preferences.",
-    "master": 0.8,
-    "engineVolume": 1.0,
-    "environmentVolume": 1.0,
-    "showroomAmbience": true,
-    "showroomMusic": true,
-    "sources": [
-      {
-        "feature": "channelLevels",
-        "status": "partial",
-        "landsAs": "master",
-        "note": "Master is a real setting. Engine, wind, tyre and opponent levels are driven per frame by the session, so they are not exposed as preferences."
-      },
-      {
-        "feature": "musicPlayer",
-        "status": "live",
-        "landsAs": "showroom music channel",
-        "note": "The showroom plays ambience and music with declick and headroom; there is no playlists screen."
-      },
-      {
-        "feature": "masterVolume",
-        "status": "live",
-        "landsAs": "master volume row"
-      }
-    ]
-  },
-  "controls": {
-    "keyboard": {
-      "throttle": "W",
-      "brake": "S",
-      "steerLeft": "A",
-      "steerRight": "D",
-      "shiftUp": "E",
-      "shiftDown": "Q",
-      "handbrake": "SPACE",
-      "clutch": "Z",
-      "starter": "I"
+  "video": "system/cfg/video.json",
+  "videoSources": [
+    {
+      "feature": "headPhysics",
+      "status": "partial",
+      "landsAs": "cockpit head spring",
+      "note": "Longitudinal and lateral acceleration sway the cockpit head through a spring-damper; vertical suspension travel is not fed in yet."
     },
-    "file": "user/<player>/controls.json",
-    "sources": [
-      {
-        "feature": "keyboardBindings",
+    {
+      "feature": "freeCamera",
+      "status": "partial",
+      "landsAs": "orbit camera",
+      "note": "A free orbit camera exists for the showroom and the menu backdrop."
+    },
+    {
+      "feature": "chaseCamera",
+      "status": "partial",
+      "landsAs": "chase camera",
+      "note": "Chase and cockpit views exist, without spring or offset tuning."
+    },
+    {
+      "feature": "cameraViews",
+      "status": "partial",
+      "landsAs": "chase / cockpit cameras",
+      "note": "Two views exist and switch; its per-camera bookmarks are not read."
+    },
+    {
+      "feature": "cockpitCamera",
+      "status": "partial",
+      "landsAs": "cockpit view",
+      "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
+    },
+    {
+      "feature": "particles",
+      "status": "live",
+      "landsAs": "billboard sprite quads (dust, rain, spray)",
+      "note": "video.particles starts the ParticleSystem emitters and the billboard pass draws them; KS_PARTICLES=1 still forces them on for a capture."
+    },
+    {
+      "feature": "rain",
+      "status": "live",
+      "landsAs": "weather rain shading + drops/spray",
+      "note": "Rain and track wetness are live inputs: the engine-side RenderSystem stores them (wetSpecular() feeds its scene shading), the sim syncs them into TrackSurface for the grip model every frame, and the drops and spray come from the particle emitters video.particles starts. The sim's NativeRenderer does not read the rain state directly — the visible rain inside the cockpit rides windscreenEffects."
+    },
+    {
+      "feature": "windscreenEffects",
+      "status": "live",
+      "landsAs": "rain on the windscreen",
+      "note": "Stage 1 ships: the display pass (tonemap.frag, its own binding-4 UBO — the push block was already at the 128-byte guarantee) grows three hash-built procedural layers over the driver's view — a fine sliding ladder, sparse large beads and a static wetting film — each refracting the scene-linear HDR beneath it before DOF, sharpen and bloom. Coverage follows the evolving rain (mm/h over 40 tops it) plus KS_RAIN 0..100 as a visual-only override (grip untouched); it paints only in the cockpit view and animates on the frame clock, so it freezes with the world. The layer is screen-space on purpose: the glass pipeline depth-tests without ever writing, so the depth buffer cannot locate the glass — the band is the screen instead, which means stage 4 lands a per-pixel mask: the named glass mesh is rendered into an R8 mask before the display pass, and the rain only lands where the mask is 1 (fallback to the stage-3 rect, then the stage-1 band, when no glass is found). In a parked showroom the layer stays off (the weather branch early-returns there)."
+    },
+    {
+      "feature": "skidmarks",
+      "status": "live",
+      "landsAs": "skid marks (particles)",
+      "note": "One emitter per wheel, parked at the wheel's position (car frame: half wheelbase fore/aft, half track across, oriented with the travel direction). Lock test: brake input past 0.7 with the wheel's rim speed (wheelOmega * radius) under 5 m/s - the same numbers the physics integrates."
+    },
+    {
+      "feature": "tyreVisuals",
+      "status": "live",
+      "landsAs": null,
+      "note": "On screen now. The renderer had no per-node transform - the draw path handed every mesh of the car the body matrix, so a baked node could only move with the whole car. MeshInstance now carries a node transform (pivot, scale, offset, spin) composed after the body (ks::ecs::nodeMatrix: T(offset) * T(pivot) * Rx(spin) * S(scale) * T(-pivot)), and SimulationLoop::bindWheelVisuals maps the baked nodes to the four corners by name (wheelCornerFromNodeName: WHEEL_LF, wheel_fr, TIRE_RL, RIM_FRONT_RIGHT), taking each wheel's pivot from its own mesh bounds - node transforms are baked into the vertices, so those bounds are in car space. Every physics step updateWheelVisuals writes what TyreVisuals reports: the contact patch's radial bulge as a Y/Z scale (never along the axle X), the flat spot as the wheel sitting that much lower, and the spin the slip ratio implies (kappa = (omega*r - v)/v, so a locked wheel stops turning while the car slides over it). The bulge is uniform across the tyre's section and the flat spot is a drop rather than a dent in the mesh: the model reports metres and a section scale, not contact-patch geometry, so the visible cue is the tyre growing and the wheel riding lower. Only the player's car is bound - the AI share one mesh set per livery and would each need their own node list. Evidence: wheel_node_transform_test (node names, spin from slip, the pose, the pivot as the fixed point, body composition), tyre_visuals_test (the model behind it)."
+    },
+    {
+              "feature": "weatherShaders",
         "status": "partial",
-        "landsAs": "keyboard rebind page",
-        "note": "Keyboard only: nine actions (throttle, brake, both steering directions, both shifts, handbrake, clutch, starter), each captured and swapped so two actions never share a key; the clutch is a pedal level and the starter is a rising edge, so holding the key does not crank again. Arrow keys stay reserved."
-      },
-      {
-        "feature": "forceFeedback",
-        "status": "live",
-        "landsAs": "steering torque through FFBBridge",
-        "note": "Every frame the vehicle's FFB sample (slip angles, loads, camber, speed) goes to FFBBridge.computeSteeringTorque and the torque reaches the wheel: Logitech, Fanatec and Moza bridges are wired in FfbOutput.h, gated by m_ffbEnabled. With no supported wheel attached the loop computes the torque and nobody consumes it."
-      },
-      {
-        "feature": "gamepadInput",
-        "status": "partial",
-        "landsAs": "DirectInput joystick, default gamepad mapping",
-        "note": "InputManager polls the DirectInput stick against the built-in gamepad mapping; the analog filter (analogControlFilter bitfield + filterSamples con scarto di min e max), il cambio manuale per bottone (H-shifter GEAR1..GEAR7/REVERSE, hold mode via gearSelectButtonHold) e il wizard di calibrazione (pannello WHEEL) sono cablati; manca la schermata di remapping del pad."
-      },
-      {
-        "feature": "wheelLeds",
-        "status": "partial",
-        "landsAs": "WheelLedControl + feed RPM/marcia dal loop",
-        "note": "LED state storage and callbacks are implemented, and SimulationLoop feeds RPM percentage and current gear from the live vehicle state (previously the container was never written); hardware device protocols remain stubs."
-      },
-      {
-        "feature": "joystickCalibration",
-        "status": "partial",
-        "landsAs": "AxisCalibration + saveJoystickMappingJson/loadJoystickMappingJson",
-        "note": "Calibrazione min/max/centro per asse (steering bipolare a centro dichiarato, pedali unipolari), applicata al poll (calUnipolar/calBipolar in applyMapping) e persistita in user/<player>/joystick.json, che l'avvio rilegge. keyboardWeighted/keyboardDamping applicati al percorso tastiera (integratore a primo ordine per canale)."
-      },
-      {
-        "feature": "inputProfiles",
-        "status": "partial",
-        "landsAs": "saveInputProfileJson/loadInputProfileJson (user/<player>/profiles/<name>.json)",
-        "note": "Profilo per giocatore che salva e ripristina mapping + calibrazione + tastiera in un unico file; UI di selezione/creazione profilo da collegare."
-      },
-      {
-        "feature": "calibrationWizard",
-        "status": "partial",
-        "landsAs": "InputManager::calibrationWizardBegin/Advance/Cancel + DeviceSettingsOverlay wizard UI",
-        "note": "Macchina a stati guidata (min -> centro -> max -> done) con test dedicato e pannello WHEEL collegato (righe per asse + pulsanti Avanza/Annulla, salvataggio su joystick.json a fine wizard)."
-      },
-      {
-        "feature": "manualGearbox",
-        "status": "partial",
-        "landsAs": "sequential + H-shifter + reverse input to VehicleSimulator",
-        "note": "shiftUp/shiftDown now reach VehicleSimulator.requestGearShift (previously consumed by nothing) and H-shifter gear buttons land via requestGear (1..7 avanti, -1 retromarcia). Gear 0 = folle (disattiva autocambio come rF2). La retromarcia e' ora modellata dal veicolo (rapporto fisso negativo, drive force invertita) e autoReverse di controls.json scambia temporaneamente i pedali da fermo (freno = gas in retro, gas = freno)."
-      }
-      ,
-      {
-        "feature": "controlsConfig",
-        "status": "partial",
-        "landsAs": "system/cfg/controls.json (rF2-style general controls)",
-        "note": "Loader/saver dedicati per i parametri generali: speedSensitiveSteering, analogControlFilter e keyboardWeighted/keyboardDamping sono applicati al runtime (sterzo, filtro analogico e integratore tastiera). Anche freelookMouse*/Keyboard* e hmd*Range/Exponent arrivano alla camera: mouse e tastierino (8/2/4/6 guarda, 5 recentra) muovono lo sguardo dell'abitacolo, e una testa tracciata resta dentro i range HMD con la curva dell'esponente."
-      },
-      {
-        "feature": "actionProps",
-        "status": "partial",
-        "landsAs": "action labels",
-        "note": "Partially implemented: see landsAs for the part that exists."
-      },
-      {
-        "feature": "hotkeyList",
-        "status": "partial",
-        "landsAs": "global hotkeys",
-        "note": "Partially implemented: see landsAs for the part that exists."
-      },
-      {
-        "feature": "headTracking",
-        "status": "partial",
-        "landsAs": "cockpit head tracking offset",
-        "note": "Camera applies a head-tracking offset in cockpit view; device input remains a stub."
-      },
-      {
-        "feature": "vrInput",
-        "status": "missing",
-        "landsAs": null
-      }
-    ]
+        "landsAs": "weather preset + wet track shading (forward and deferred)",
+        "note": "A weather state drives the sun and sky values, the fog, the rain and the grip model, and now the way the ground itself is shaded, so a soaked track no longer looks dry. SimulationLoop mirrors the evolving trackWetness into NativeRenderer::setWetness, which carries it in FrameData.wetParams.x; both scene shaders apply the same rule: a wet surface keeps 0.62 of its albedo at full wetness, its roughness falls towards a water film (dry roughness times 0.30, floored at 0.06), and standing water is shaded as the dielectric film it is - Schlick at water's own F0 of 0.02, reflecting the sky colour the frame already carries in fogColor in place of the road, gated on the surface facing up (normal Y from -0.15 to 0.35). It replaces light instead of adding to it: 2% of the sky looking straight down, where the soaked asphalt has to stay dark, and most of it at grazing angles, which is the bright sky band down a wet straight - the first version added a weak sheen instead and the wet ground came out flatter than the dry one, with its brightest pixels lower (measured p99.9 0.931 dry against 0.896 wet), so it did not read as glossy at all. Glass, metal and an unlit photographic backdrop keep their own response, and wetness 0 leaves every number untouched, so a dry frame is shaded exactly as before. The numbers live in WetLook.h and are mirrored member for member in native_forward.frag and deferred_lighting.frag. Evidence: wet_look_test (the rule dry, half and full wetness, monotonicity, the Fresnel from head-on to grazing, a dry surface fully opaque again, glass/metal/unlit left alone, negative and NaN readings, the clamping at a deluge, and a read of both shader files asserting their KS_WET_* constants equal WetLookConfig and that no additive sheen survives); and the capture set tests/visual, five runs of the same still frame with the rain fixed and only the wetness moved - wetlook_dry.png (KS_WEATHER=dry), wetlook_wetdryground.png (wet weather, KS_WETNESS=0), wetlook_half.png (KS_WETNESS=50), wetlook_preset.png (the wet preset, 0.85) and wetlook_wet.png (KS_WETNESS=100) - where the floor near the camera goes 0.3063 to 0.2904 luminance at full wetness (5% darker) while the floor running to the horizon goes 0.3919 to 0.4890 (25% brighter, the sky taking over), half wetness lands between the two and wetness 0 lands back on the matte frame. Not done: wetness is still one scalar for the whole track, so there is no puddle and no drying line - a corner cannot be wet while the straight is dry; the sky the film reflects is the frame's fog tint, not a traced reflection, so it is a look and not a light path; the car gets the same dielectric treatment but nothing accumulates droplets on it; and the track content in this checkout has no mesh (content/tracks/mugello carries only ai and data), so the captures show the synthetic floor and the placeholder box, not a circuit - no lap has been driven wet, and the forward shader was compiled but the captures all ran the deferred path."
+    },
+    {
+      "feature": "mirrors",
+      "status": "live",
+      "landsAs": "mirrors, mirrorResolution",
+      "note": "video.mirrors turns on a rear-view tile rendered to its own colour+depth target every frame with the real forward draw list (the AC virtual mirror idea), and the tile draws inside whichever colour pass writes the swapchain — skipped on an HDR10 backbuffer, where its un-encoded SDR values would glow against the PQ image. video.mirrorResolution is the tile size, forced landscape ('512x128' here). The rear view queues its own draws: it has its own frustum (the main camera yawed 180 about its up axis) and its own occlusion grid, so a mesh the main eye turned its back on still reaches the tile while something visible only ahead of the car is not re-drawn into it. Stage 3 lands the glass sampling: KS_MIRROR_MESH=<name> makes the tile ride a named mesh's geometry (drawn in the display pass with the current view/projection, sampling the tile) instead of the fixed screen quad — a fallback to the quad stays when the name is missing or unknown. Still missing: side (left/right) tiles and a convention: any mesh whose name contains 'mirror' (case-insensitive) is auto-detected; KS_MIRROR_MESH overrides. KS_MIRROR overrides the enable for a test run."
+    },
+    {
+      "feature": "grass",
+      "status": "partial",
+      "landsAs": null,
+      "note": "The blades exist now, and the ground they grow on is the shared query. GrassField.h builds the field: a jittered grid of cells around the car (35 m radius, 1.6 m cells) sampled through TrackSurfaceQuery, so a cell only becomes a blade where the track's own surfaces.ini says grass, gravel, sand or soil, at that sample's floor height - asphalt, a kerb or a surface nobody named yields nothing, which is what keeps grass off the racing line. The field is round, not square: cells past the radius are dropped, and the 9 m inside it fade out with grassEdgeFade (a smoothstep on the distance) so the edge is never a line the eye can follow - the fade rides in the vertex normal slot, which a vertical card has no use for, and the pipeline blends premultiplied so a blade at the rim lands at alpha 0 instead of popping. Colour, sway and density come from GrassRenderFx::applySurface plus evaluate with the track's data.json grass section, so the authored tint, the altitude blend and the per-cell hash density still decide the look; with the section absent a blade keeps its base colour and does not sway. A blade is one vertical quad (uv.y is the height share, colour alpha is the sway in radians), so the vertex buffer is static and the wind costs nothing per frame: grass.vert bends the card by a squared height share from the clock and grass.frag lights it with the sun from the push constants (0.35 ambient plus Lambert, a touch brighter at the tip), writing colour times the edge fade. NativeRenderer builds a grass pipeline on the existing transparent scene render pass - same vertex layout, its own 112-byte push constant block (mvp, sun, clock), depth test and write on, no culling - and draws every grass-flagged mesh after the blended surfaces; the shader pair is compiled by cmake/KsShaders.cmake, and if the .spv are missing the pipeline logs once and grass stays off. SimulationLoop::updateGrassField rebuilds the field only when the car has moved 8 m, on one entity (grass_field). Still missing: the blades receive no shadow map light, they are drawn in the deferred path only, the blade count is fixed (no LOD, one density everywhere), only the player's car has a field, and the drawn result has not been seen on screen. Evidence: grass_field_test (only grass and soil bands produce blades, floor from the query, card geometry and indices, colour per ground kind, density 0, the blade cap, determinism, slope, no racing line, and the edge: blades inside the radius, fade equal to grassEdgeFade per blade, 1 at the centre and under 0.05 on the outermost one, monotone non-increasing with distance, and a narrower band staying solid closer to the rim). A capture baseline now watches it too: ksim writes the frame's signature with KS_VISUAL_DIGEST (FrameDigest.h: an FNV hash plus a 12x10 luma grid), tools/visual_baseline.ps1 drives the run, and visual_baseline_test compares the signature to tests/visual/<scenario>.baseline within a 0.06 grid distance, reporting the hash even when the tolerance lets a difference through. The showroom scenario is recorded; the driving ones need track content installed."
+    },
+    {
+      "feature": "frameGeneration",
+      "status": "partial",
+      "landsAs": null,
+      "note": "ANR (apex-compute/ANR) publishes no engine-side surface to link: its frame generation ships as a closed nvngx_dlssg.dll installed through OptiScaler, its super resolution and ray reconstruction are not released, the model source is 'coming soon' and the repository carries no license, so nothing of it can be vendored or called from ksim. What a provider of that family consumes is the game's inputs, and that side is now the engine's: FrameGenInputs.h holds the contract in ANR's own terms - nr-record's roles (backbuffer, hudless, ui, ui_alpha, depth, motion) and the NGX parameters behind them (JitterOffset, MvecScale, CameraPos..FwdZ, ClipToPrevClip, PrevClipToClip, ViewToClip, Near/Far/FOV/Aspect, Reset) - and NativeRenderer::frameGenInputs() publishes it at the end of every frame on both paths: the camera basis and its matrices, clipToPrevClip and prevClipToClip, the vertical fov and aspect read back out of the projection, the sub-pixel jitter read back out of the two projections (never remembered from the Halton sample, so its sign cannot drift from what the geometry pass used), render and output sizes, and whether the depth and the hudless colour exist (deferred: yes, the history slot holds the lit scene before the UI pass; forward: no, the scene lives only in the backbuffer). One convention is fixed once: motion is current pixel minus previous pixel, in render pixels, y down, measured with the unjittered matrices, so a provider's mvecScale is 1 and mvecJittered false, and an adapter that wants the opposite sign negates it there. The motion vectors are the GBuffer's fourth colour target now: RG16F, current pixel minus previous pixel in render pixels, y down, measured with the unjittered matrices on both sides (the shader reads the unjittered current clip out of the per-draw slot instead of gl_FragCoord, so the TAA jitter cannot fold half a pixel into every vector). Each draw's previous transform comes from last frame's main draw list, grouped by mesh name and matched by pose: a draw continues the nearest unused instance of its own name within 8 m, so culling reordering, two instances of one body and a scene swap that reuses names with different transforms each resolve correctly, and a mesh shared by several instances still needs one 256-byte slot per DRAW on a dynamic-offset uniform buffer (set 2), never one matrix per mesh. A draw with no plausible predecessor falls back to its own model, i.e. zero motion, rather than to a stale or foreign transform, and a frame where no draw matched anything publishes reset because the history describes another scene. Motion is written by the main deferred eye's opaque pass, so it exists exactly when the deferred path drew the frame: ready() accepts a deferred frame and refuses a forward one, where the target does not exist. Not produced, and said plainly: pixels no opaque geometry covered (sky, glass, particles) stay at zero, so a provider has to treat them as unmoving; and a camera cut is a reset now: the seam measures the pose between the two frames (translation plus the worst of the forward/up axes) and the lens (fov and aspect read back out of the two projections), and a step past 1.5 m, 6 deg, 1 deg of fov or 0.01 of aspect marks the frame reset, on top of a missing previous camera and a render-size change. On a reset frame every draw writes its own current matrix as the previous one, so the target holds zero instead of reprojecting across the cut, and the frame after it is contiguous and real again. Evidence: frame_gen_inputs_test (the camera basis and the lens read back from the projection; a sideways move with the magnitude the lens predicts and the point moving against the camera; a dolly that leaves the on-axis point still; y-down pinned with an object moving up; object motion against the camera-only result and objectDelta reproducing prevModel*local; the eight Halton samples inside half a pixel and a still camera with a jittered projection still reporting zero; clipToPrevClip and prevClipToClip round-tripping; readiness naming motion/depth/hudless/previous camera/camera matrices/render size/fov/depth range; the roles keeping nr-record's names and order; and a read of NativeRenderer.{h,cpp} asserting every field really is published each frame). GPU evidence (KS_FG_MOTION_DUMP, a diagnostic that copies the target back every frame for the first 150 and prints reset frames, frames past 5 px and every thirtieth frame, at 2560x1392): with the showroom camera orbiting at 8 deg/s the frame carries mean |vx| 2.54-2.60 px and |vy| 0.39 px, max 5.96 px, 94% of the frame moving and the centre at -1.0 px horizontally - the horizontal signature a yaw orbit has, magnitudes matching 8 deg/s at the frame rate the menu runs at. Parked in the garage with the camera still, the same dump reads mean 0.24 px and max 0.63 px over the first ninety frames, camera jump 0.00 m / 0.0 deg, i.e. sub-pixel and nothing the cut test looks for. The single large frame (max 95.9 px, mean |vy| 6.71 px, centre -65 px) that an earlier note blamed on a cut entering the garage is not a cut, and the diagnostic that blamed it was reading its copy one frame late: aligned to the frame it measures, that frame is f1, the first one with any history at all, its camera moved 0.00 m and 0.0 deg with the lens unchanged, and both draws matched their previous instance (2/2). The vector belongs to the car placeholder moving 0.35 m between the first two frames of the session (0.594 m in view space), a spawn placement rather than a camera jump, and it is gone by the following frame. No frame of this trace is classified as a cut, so none is zeroed: the reset branch is covered by frame_gen_inputs_test - a 3 m step, a 20 deg turn and a 0.6 rad lens change each past the bound, 0.5 m, a still pose and the same lens below it, reset not making a frame unready - and by the wiring read, not by a GPU frame, because this content has no camera cut to catch. Whether an object that teleports (a spawn, a return to the pits) should reset the frame too is open: today it publishes its real displacement. Not verified: no provider has been run against it (a closed ANR FG DLL is not in the tree, and none is redistributable), and the object-motion path is only covered by unit tests - this checkout has no car content (the showroom reports no model in content/cars), so no GPU frame ever had a moving mesh to measure. Blended surfaces, sky and particles were checked by construction, not by watching a provider use them."
+    }
+  ],
+  "audio": "system/cfg/audio.json",
+  "controls": "system/cfg/controls.json",
+  "controller": {
+    "note": "rFactor Controller.ini shape, applied through InputManager::applyControllerSettings. Install defaults first, the player's own settings.json second (later wins per key). STEER/THROTTLE/BRAKE/CLUTCH carry DEADZONE (0..0.95) and SENSITIVITY (0.1..2.0) plus STEER.INVERT; HSHIFTER carries GEAR1..GEAR7 and REVERSE (button codes, -1 = unmapped). CONTROL_DEVICES documents the device roles. FF and ASSISTS are documented here; their live values come from controls.json (ffbGain) and assist.*.",
+    "CONTROL_DEVICES": {
+      "DEVICE1": "keyboard",
+      "DEVICE2": "gamepad",
+      "note": "keyboard = VK bindings in controls.json; gamepad = first DirectInput/XInput pad; a wheel or pad is mapped in the WHEEL page and persisted to user/<player>/joystick.json."
+    },
+    "STEER": {},
+    "THROTTLE": {},
+    "BRAKE": {},
+    "CLUTCH": {},
+    "HSHIFTER": {},
+    "FF": {},
+    "ASSISTS": {}
   },
   "singleplayer": {
     "modes": [
@@ -412,7 +230,9 @@
         "aiCars": 0,
         "clockSeconds": 0,
         "startInGarage": false,
-        "standingStart": true
+        "standingStart": true,
+        "aiDifficulty": 1.0,
+        "aiAggression": 0.5
       },
       "Weekend": {
         "laps": 12,
@@ -460,13 +280,13 @@
         "feature": "sessionSetup",
         "status": "partial",
         "landsAs": "session setup",
-        "note": "Car and track come from the chosen content; the MODE SETUP screen sets the laps, the AI cars, the session clock and whether the player starts in the garage. AI level and a fixed setup are not exposed."
+        "note": "Car and track come from the chosen content and are not edited here; MODE SETUP sets the laps, the AI cars, the session clock, whether the player starts in the garage and whether the start is standing, and it carries the two AI rows - AI LEVEL, 80..120% of the racing line in steps of 5, and AI AGGRESSION, 0..100% in steps of 10 - whose values reach MultiCarManager::setAiTuning when the session starts (see gameplayTweaks). A fixed setup is still not exposed: the car's own numbers and its setups/ folder are what the screen opens on (see setupCatalog)."
       },
       {
         "feature": "driverAids",
-        "status": "partial",
-        "landsAs": "assist.tc, assist.abs",
-        "note": "Applied from the setup at start-up only."
+        "status": "live",
+        "landsAs": "assist.tc, assist.abs at start-up + TC <n> / ABS <n> in the console while driving",
+        "note": "Two paths, one meaning. The settings files seed the levels at start-up: assist.tc / assist.abs, 0..12, gated by the car's own electronics - a car whose [TRACTION_CONTROL] or [ABS] says PRESENT = 0 keeps 0 whatever the file asks, because that is what AC does with hardware nobody fitted. While driving, the console takes TC <n> and ABS <n> (a bare TC / ABS reports the level in use): they reach the car through VehicleSimulator::setDriverAidLevels, which moves only the two setup numbers and clamps 0..12 - applySetup() rebuilds mass, aero and suspension out of the setup, so a mid-session change must not go through it - and the H-DASH prints 'AIDS TC n  ABS m' ('--' for an aid the car declares absent), with the change also raised as a notice and logged as [aids]. The two levels therefore agree everywhere they are shown, and the console is the in-car switch because a wheel's own buttons are a protocol this build does not speak. Evidence: driver_aid_levels_test (the level, the clamp, a car without the hardware, the untouched setup and tank) and console_slider_test (the verbs hand the number over and print the car's answer; without a car they say the aids are not wired); a capture of the running car shows the row reading AIDS TC 0 ABS 0 with the panel sized for it. Not done: no keyboard or wheel binding moves the levels (the console is the only in-car switch), and a level changed while driving is not written back to settings.json - the next start reads the file again."
       },
       {
         "feature": "collisionRules",
@@ -483,11 +303,11 @@
       {
         "feature": "gameplayTweaks",
         "status": "partial",
-        "landsAs": "GameplayTweaks module",
-        "note": "Tweak set storage, defaults and change callback are implemented; gameplay effects are not wired into the session."
+        "landsAs": "GameplayTweaks module + VehicleSimulator fuel burn",
+        "note": "The set, its defaults and the change callback are in the module; SimulationLoop registers it, applies the set to the car on every setup apply and re-applies it when the callback fires. fuelConsumption and tireDamageRate are wired. The tank drains from the burn model, not from the pedal: VehicleSimulator::setFuelBsfcLPerKwh (0.35 L/kWh, clamped 0.05..1.5) times the crank power of the step (torque times engine speed, kept in engineCrankPowerKw, with the work since reset in engineCrankWorkKwh), so a loaded engine burns what it makes and a coasting one burns nothing; the gameplay multiplier scales that rate through setFuelConsumptionMultiplier, clamped 0..1000 because single digits are the gameplay range while devMode needs hundreds to empty a tank inside a capture. The tyres wear through setTireWearMultiplier (clamped 0..20). 1 is the model's own rate and 0 leaves the fuel or the tyres alone; both come from gameplay.fuelConsumption and gameplay.tireDamageRate in the settings files. The loop prints [TWEAKS] fuel consumption xN, tyre wear xM when either value changes. difficultyMultiplier (the field's pace against the racing line, 0.80..1.20 where 1.0 is the line) and aiAggression (0..1, the controller's own overtake and corner willingness) now reach the AI: MODE SETUP's AI LEVEL and AI AGGRESSION rows push both into the set when a session starts, MultiCarManager::setAiTuning hands them to every AI car and to any car spawned later, and the loop logs [AI] difficulty xN, aggression M when either changes. racingRulesStrict chooses the track-limits ladder: lenient is the shipped 3-strikes rule (a cut costs a second every third report, drive-through at 5, stop-go at 8, DQ at 12), strict charges every cut and brings the pit penalties forward (drive-through at 4, stop-go at 7, DQ at 10, on a 0.20 s grace and a 0.60 s cooldown). Each rung fires on the one report that reaches it: the DQ used to queue a fresh disqualification on every report from the threshold on. The switch is gameplay.strictRules, SETTINGS -> GAMEPLAY carries a RACING RULES row for it, SimulationLoop applies the ladder through FeatureHub and carries over the current LIMITS on/off state, so a director's LIMITS OFF survives a rules change. Two defects in the same path were closed with it: the session and the monitor both booked a second on the same 3rd report (a cut cost 2 s), and the monitor counted while the phase hint said 'off track', which is the countdown and the box - a standing start opened the race with a penalty. Detection is geometric, not just the phase: the line the session already loaded (fast_lane.ai, its .txt form or the lanes.csv fallback) becomes the monitor's centreline at track load and on every layout switch (SimulationLoop::updateTrackLimitsCenterline through trackLimitsCenterlineFromSpline). Where a cut begins is the track's own data rather than a distance this engine made up: data/surfaces.ini is read at track load (AcSurfacesLoader, whether or not data.json won the manifest) and every surface that declares WIDTH=n reaches n metres from the racing line, so the bands nest innermost first and a car is off track when the band it stands in declares IS_VALID_TRACK=0 or when it is past every declared band. WIDTH is this engine's extension (AC derives the road's width from the model); IS_VALID_TRACK is AC's own key. A 12 m asphalt is not a cut at 9 m, a 5 m asphalt with grass at its edge is at 6 m, a gravel trap is a cut where it starts even inside 8 m, and a run-off that declares itself valid track keeps a car on track 10 m out. A track that declares no widths keeps TrackLimitsConfig::maxLateralM (8 m) as the fallback, and a track with no line leaves detection on the phase hint, as before. Evidence: track_limits_rules_test (spline conversion, wide road at 9 m, narrow road with a kerb, IS_VALID_TRACK=0 inside 8 m, run-off that stays valid, no-band fallback, surfaces.ini to bands). mechanicalFailures and damageAffectsDriving are stored and reported, not wired yet."
       }
     ],
-    "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock, the garage flag and the standing start as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
+    "note": "modes picks the SINGLE PLAYER rows; defaults sets what MODE SETUP starts from for each of them. Only the fields an entry carries are overridden, so laps alone leaves the AI count, the clock, the garage flag, the standing start and the two AI rows (aiDifficulty pace multiplier against the racing line, aiAggression 0..1) as they are; the user file merges over the system one key by key, and an unknown mode name is reported and ignored. Practice and qualifying minutes stay in the code."
   },
   "multiplayer": {
     "hostPort": 40000,
@@ -499,7 +319,8 @@
       {
         "feature": "serverBrowser",
         "status": "live",
-        "landsAs": "SERVER BROWSER row"
+        "landsAs": "SERVER BROWSER row",
+        "note": "The JOIN SESSION row, and F2, open the lobby server browser: the row carries a callback that raises the lobby page, and the list itself is served by LobbyServerApp over HTTP on the host's port, where /, /web and /browser all reach it. A dedicated HTTP server also means the browser works from another machine on the network. Not covered headlessly: no test drives the row or the page, so its wiring is read from GameMenuOverlay.cpp only."
       },
       {
         "feature": "hosting",
@@ -523,28 +344,37 @@
         "feature": "chatBindings",
         "status": "partial",
         "landsAs": "chat",
-        "note": "Partially implemented: see landsAs for the part that exists."
+        "note": "Text chat on ksnet: MSG_CHAT carries a sender name and a payload, NetworkManager::sendChatMessage writes it on the reliable channel and onChatMessageReceived lands it in ChatOverlay. F2, or the JOIN SESSION row, opens the server browser; the chat strip appears while a network session is live, ENTER opens the composer, WM_CHAR types it, ENTER sends through onSend and ESC closes it - and while the composer is open the hub gives it every key, so a half-typed line never reaches the menu or the browser. With no session the same line is echoed locally as '[local] ...', which is how the composer can be tried offline. The order in NativeUiHub::handleKey matters: the menu is asked first, so ENTER belongs to a row while the menu is up and to the composer once it is closed (in the car). Not done: no binding of its own beyond that ENTER (nothing opens the composer from a key while the menu is up), no channels - every line goes to everyone - and no history: the log is the overlay's 80-line ring and goes away with the app."
       },
       {
         "feature": "chatEmoji",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "ChatOverlay and ChatProtocol carry plain UTF-8 text and the UI font atlas has no emoji coverage, so an emoji in a message has no glyph to draw; nothing parses :shortcodes: either. Adding a parser without a colour-glyph atlas would only move the missing box."
       },
       {
         "feature": "voiceChat",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "Neither capture nor transport exists: ksnet carries chat as text messages, with no audio stream, jitter buffer or mixer channel for a remote voice, and no codec is vendored in external/, so voice is a new transport channel plus an encoder rather than a switch. multiplayer.voice stays false for that reason."
       },
       {
         "feature": "spectatorView",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": null,
+        "note": "Driven now. SpectatorMode had nobody calling it: the control API's SPECTATE verb is that caller, and its word is classified by parseSpectateCommand - ON, OFF, TOGGLE and NEXT, where CYCLE is an alias of NEXT and an empty word toggles. SPECTATE ON enters, sets the Driver view and follows the first car on the grid; OFF gives the player's car back; NEXT steps the grid through SpectatorMode::followNext, which wraps and never lands on nobody. A valid word is answered with OK SPECTATE, the state the spectator is now in (ON, OFF or NEXT) and the followed id; an unknown word is answered with ERROR SPECTATE followed by the accepted words. The camera side needed no new camera code: SimulationLoop::updateCamera builds the body matrix and speed of the followed car (MultiCarManager::getCar) instead of the player's while spectating, so the existing chase and cockpit stack follows another driver - the cockpit of the watched car is that driver's POV. That is why the entry stays partial: the view mode is stored (FreeCam, Driver, Broadcast, Replay) but only Driver has a behaviour, the camera keeping whatever mode the player was in - Broadcast and Replay are names - and nothing draws the scoreboard the state carries (scoreboardVisible is read by no panel). Evidence: spectator_view_test (the verb's word parsing, enter and exit callbacks, follow, cycling and wrap, an empty grid, the scoreboard flag, the followed id surviving an exit); the verb's dispatch into the loop is compiled, not driven by a test."
       },
       {
         "feature": "dedicatedServer",
         "status": "partial",
         "landsAs": "host row",
         "note": "kssimserver.exe ships next to the simulator; there is no in-menu manager."
+      },
+      {
+        "feature": "udpCommandSemantics",
+        "status": "partial",
+        "landsAs": "UDP :9666 byte-commands 'K'/'O'/'L'/'P'/'D' (teleport pit, recover, restart)",
+        "note": "The acs.exe UDPCommandListener parity (REPORT_AC_RE_ENGINEERING.md §3.2): the FeatureHub owns the socket (udp-cmd-port in server/kssimserver.ini, 0 disables) and maps the commands the reverse confirmed — K teleports the player to its pit box, O with a payload index teleports that car (AI cars are announced, not moved yet), L is K plus an in-place reset, P resets the car where it stands, D restarts the session. The letters still TBD by the reverse (B, C, E..I, J, M, N, Q) fire nothing, exactly like acs.exe. Evidence: udp_command_semantics_test."
       }
     ]
   },
@@ -599,8 +429,9 @@
       },
       {
         "feature": "carInstruments",
-        "status": "missing",
-        "landsAs": null
+        "status": "notApplicable",
+        "landsAs": null,
+        "note": "Intentionally not applicable, not unfinished: there is no implementation of its own and none is needed. The in-car cluster is the DASH (digitalDashboards: DashboardOverlay, DigitalDash, DigitalDashRenderer, digital_dash_test) and the garage has no instrument view to build, so the entry names a separate screen the simulator does not have."
       },
       {
         "feature": "brakeGlow",
@@ -616,14 +447,15 @@
       },
       {
         "feature": "setupCatalog",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "MODE SETUP: the car's own setups/ folder, cycled with [ / ]",
+        "note": "A converted car brings its saved setups along in <car>/setups/*.ini (AC's own folder, the one its save button writes to; a .setup beside them is read too), and MODE SETUP now opens on the car's own numbers with those files one key away: [ and ] walk the car's numbers and then every shipped setup in name order, wrapping at both ends. A pick goes through the same reader LOAD uses (AcSetupDocument::loadSetupFile: only the rows this car declares, each clamped to the range in its setup.ini), reset on top of the car's own numbers so a file that names only some rows never inherits the values of the setup before it, and the values reach the vehicle through the same conversion every row edit uses - the header names the file, the star marks a row moved since, and the screen opens as dirty-free. The [ / ] hint appears only when the car ships setups, and a car whose setups/ folder is empty says so on the status line instead of offering a dead key. Evidence: setup_catalog_test."
       },
       {
         "feature": "surfaceEffects",
         "status": "partial",
-        "landsAs": "track surface grip",
-        "note": "Surface names map to friction; per-surface effects are not rendered."
+        "landsAs": "track surface grip + per-wheel dust, stones and rolling sound",
+        "note": "The grip half is in the physics now; the effects half is still missing. SurfaceGrip.h turns the GroundKind the shared TrackSurfaceQuery reports into a grip multiplier per type - asphalt 1.0, kerb 0.94, soil 0.58, grass 0.50, gravel 0.42, sand 0.36, and an unnamed surface keeps the road's grip unless the track declares the point off the track, in which case it takes the off-track value - clamped so nothing asks a tyre for more than 1.5 or less than 0.02. SimulationLoop::updateWheelSurfaceGrip samples the contact patch of each wheel (the pivot lowered by the tyre's current radius, the same point the blob shadow sits on) once per physics step and hands the four multipliers to VehicleSimulator::setWheelSurfaceGrip; KsTireModel grew a batch overload that takes a mu per wheel, so one wheel on the grass slides while the other three keep the road, and the friction-circle usage reads the wheel's own mu. With no wheel nodes bound, or a track with no racing line, every multiplier stays 1 and the car drives exactly as before. The numbers are the authored starting point, not a measurement: nothing has been calibrated against a real car or lap time yet, and the per-track surfaces.ini FRICTION still only reaches the base grip through TrackSurface, not these per-kind values. Evidence: surface_grip_test (the ordering road > kerb > soil > grass > gravel > sand, clamping, an unnamed surface on and off the track, a car with each wheel on a different surface, all four on the road leaving everything at 1, no racing line leaving everything at 1, and grass worse than kerb on the same track). The effects half now lands too. SurfaceEffects.h turns the same per-wheel GroundKind into rates, and SimulationLoop parks one dust emitter and one stone emitter at each wheel's contact point (particle indexes 11..18, under the same video.particles gate as the rest): grass makes dust, sand the most dust, soil dust and a few stones, gravel dust and the most stones, while a kerb or the asphalt makes neither. Nothing is thrown below 2 m/s, the rate builds to full at 25 m/s, and wet ground holds what it has - above 0.35 wetness both emitters stay off, so a soaked gravel trap neither dusts nor spits. The sound follows the measurement instead of the old grip-deficit guess: the rolling layer is tinted with the loudest ground the four wheels report (gravel, then soil, sand, grass, kerb, asphalt), so two wheels in the gravel sound like gravel; soil and sand ride the grass layer because the mixer has no layer of their own, and a car with no contact point sampled keeps the effectiveMu fallback. Evidence: surface_effects_test (the rates per kind, the speed and wetness gates, one wheel in the gravel beside three on the road, the dominance order, the sprite budget, the emitter drive functions). Still missing: the per-track surfaces.ini FRICTION still only reaches the base grip through TrackSurface and not these per-kind values, none of the numbers has been calibrated against a real car or lap time, and the stones are billboard quads like every other particle, so they read as chips rather than as gravel bouncing."
       }
     ]
   },
@@ -664,7 +496,8 @@
       {
         "feature": "replayRecording",
         "status": "live",
-        "landsAs": "RECORD / LOAD rows"
+        "landsAs": "RECORD / LOAD rows",
+        "note": "RECORD and LOAD in the menu drive ReplayRecorder: the rows read replayRecordingState to show whether a recording is running, RECORD starts or stops it, and LOAD opens the replay chooser. The recorder writes the session's frames; its playback clock is separate from recording. Evidence: replay_test (a saved replay reads back and its playback clock advances)."
       },
       {
         "feature": "replayLimits",
@@ -718,14 +551,15 @@
       },
       {
         "feature": "oemColorsVintage",
-        "status": "missing",
-        "landsAs": null,
-        "note": "No separate vintage palette: the single colors[] list above is all the choice a car folder offers today."
+        "status": "live",
+        "landsAs": "the paint picker reads every colour spelling vintage content ships",
+        "note": "One colors[] entry per paint, in whichever spelling the folder uses: the object with an rgb array (CM and AC), an rgb '#rrggbb' string (some packs), separate r/g/b numbers (older tools), and the bare [r,g,b] array vintage content ships. 0..255 channels are scaled to 0..1 and clamped, an entry without a colour is skipped instead of turning white, and an unnamed colour is 'colour N'. No palette is invented: a car that declares no colours still offers none. Evidence: content_gaps_test (five entries, four spellings, one junk) and the real content scan, where such a car reports colours=5 instead of none."
       },
       {
         "feature": "carData",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "CARS -> DATA: the car's own numbers (weight, power, torque, rev limit, drivetrain, tyres, fuel)",
+        "note": "Reads the files the physics itself reads, so the sheet is the car and not a second version of it: car.ini [BASIC] TOTALMASS and [FUEL] FUEL, engine.ini [ENGINE_DATA] LIMITER, drivetrain.ini [TRACTION] TYPE, tyres.ini [FRONT]/[REAR] NAME, and the peaks computed from power.lut's rpm|torque curve (the curve's highest torque, and power as torque x rpm at its own peak, shown in hp and kW). INI values are read the way AC writes them - tabs and ';' comments - and the key is case-insensitive. Nothing is invented: a car that declares nothing says '(no data declared)', a row appears only when the folder fills it, and no car at all says to choose one on the CARS page. The row is offered on CARS once a car is loaded, the page is read-only (only BACK acts), and it names the loaded car. Evidence: car_data_test; on the shipped Lotus it reads 1380 kg, 197 hp (147 kW) @ 6750 rpm, 222 Nm @ 4000 rpm, limiter 7200, RWD, Street90S both ends, 20 L."
       }
     ]
   },
@@ -745,18 +579,21 @@
     "sources": [
       {
         "feature": "teamSuits",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": null,
+        "note": "Listed and chosen, not worn: PROFILE enumerates content/drivers/suits through readDriverGear, the SUITS page stores the pick as profile.suit, and DriverProfileStore writes it into driver.json. No driver model exists in the showroom or the garage, so nothing wears the suit yet. Evidence: driver_profile_test."
       },
       {
         "feature": "teamHelmets",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": null,
+        "note": "Same shape as teamSuits: content/drivers/helmets is enumerated, the HELMETS page stores profile.helmet and driver.json keeps it, and there is no driver to wear it. Evidence: driver_profile_test."
       },
       {
         "feature": "driverMaterials",
         "status": "missing",
-        "landsAs": null
+        "landsAs": null,
+        "note": "The gear folders are enumerated by name only: a suit's or helmet's own texture set is never read. MaterialCache classifies car and track surfaces, and the engine has no driver-material presets to map them onto - the same structural blocker as content/materialMapping."
       }
     ]
   },
@@ -779,7 +616,7 @@
         "feature": "standings",
         "status": "partial",
         "landsAs": "results rows",
-        "note": "No export, no championship points."
+        "note": "The rows are one session's classification, and the screen is the only place it lived. EXPORT CLASSIFICATION on the RESULTS page hands the rows that are on screen to ResultsExport.h, which writes them to user/<player>/results/results-YYYY-MM-DD_HHMMSS.csv: the folder is created on the first export and the file name carries the wall clock, so two exports of the same session never overwrite each other. The columns are the classification itself rather than the sentence the page prints under a name: position, driver, status (a token - dsq, finished or running), best_lap (seconds with three decimals, rounded not truncated) and laps_completed (the laps the session counts as finished - DriverStanding::currentLap for the player, AIController::lapCount for the AI, both incremented as the car crosses the timing line rather than reporting the lap in progress, which is this + 1 and what the HUD numbers), quoted the RFC 4180 way when a field carries a comma, a quote or a line break, because a driver called 'Smith, John' has to survive a spreadsheet. An empty cell is for a value the session does not have: a driver who has set no lap leaves best_lap blank, because a lap time of 0 s cannot exist. The lap count is never blank - zero finished laps is a driver still on their first lap, a real answer that an empty cell would hide. nothing the page cannot say (championship points, penalties served, sectors) is invented for the file. The row exists only when the app has a folder to offer, an empty classification is refused instead of writing a header-only file, and the answer - the path, or why nothing was written - is printed under the rows until the page is opened again. Evidence: results_export_test (the document's five columns, the empty best lap against the zero lap count, the three-decimal rounding, the quoting, the folder created, the stamp in the file name, both refusals, the page's row, the numbers it hands over - status, seconds, laps - its answer, and a new classification dropping the old one). Not done: no championship points - a result is one session and no season is accumulated - and the file is written, never read back."
       }
     ]
   },
@@ -804,7 +641,7 @@
         "feature": "photoMode",
         "status": "partial",
         "landsAs": "photo mode",
-        "note": "A photo mode with a free camera exists; the display pass applies the preset's colour grading, its configurable bloom strength and the real depth of field from the depthOfField block (focal length, aperture, metering), and F12 toggles it unless KS_PHOTOMODE names the mode itself."
+        "note": "Photo mode hands the camera to the orbital free camera of simulator/FreeCamera.h, driven through CameraController::setPhotoOrbit: the orbit is seeded where the driver's view already was, so the frame it opens on is the frame before it. The session stops while it is open (W/S/A/D move the orbit's point, so they would otherwise throttle and brake the car under the shot), the dashboard and the menu hide, the mouse orbits the car, the wheel zooms (radius clamped to the model's 1-50 m), Q/E lower and raise the point, and leaving it gives the previous camera mode back and resumes the session. The display pass applies the preset's colour grading, its configurable bloom strength and the real depth of field from the depthOfField block (focal length, aperture, metering); the photo-mode frame is saved through the same readback, after which the mode exits. F12 toggles it unless KS_PHOTOMODE names the mode itself. Evidence: photo_camera_test (seed without a jump, orbit, zoom clamps, pan in the camera's own frame, restore), free_camera_test."
       }
     ]
   },
@@ -817,6 +654,7 @@
       "refresh",
       "notifications",
       "player",
+      "settings",
       "audio",
       "vr",
       "pad",
@@ -846,12 +684,13 @@
         "feature": "headerBar",
         "status": "partial",
         "landsAs": "header bar",
-        "note": "Partially implemented: see landsAs for the part that exists."
+        "note": "Navigation (home, back, forward, refresh), the section's name, the driver's plate and six quick actions: a settings gear, sound, VR, controller, the session planner and the bell, with the clock reading just before the last one. The gear is the first of the row, the slot the plate sits next to, and it opens the SETTINGS page itself rather than the audio panel the speaker opens - a player looking for settings should not have to know which panel holds the switch. It is lit while that page is up. The bar is also worn over the session: ESC in the car draws it above the pause bar, with the plate, the quick actions and the clock, so the gear and the audio switch are one click from a paused race instead of a screen change; over the session the four moves dim and do nothing, because back would leave a race the player only paused, while the quick actions answer as they do everywhere else. Evidence: main_menu_test - the gear is the first quick slot and clears the plate, a click on it lands on MenuState::Settings with the bar title reading SETTINGS, and the VR slot now carries its own index instead of the position the row used to put it in; a menu capture at 1600x900 shows the gear between the plate and the speaker, which is where that test says it is; in the same test the paused screen answers a click on the speaker without leaving MenuState::Pause. The pause screen is captured with KS_MENU_SCREEN=PAUSE, the capture hook that now takes that page, so the bar over the pause bar needs no hand on the keyboard mid-run. Not done: the bar carries no keyboard shortcut of its own for the quick actions."
       },
       {
         "feature": "splash",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "NativeUiHub::buildSplash, drawn over the first menu frame in buildCinematicMenu",
+        "note": "The wordmark over the menu backdrop, the accent rule under it and a hairline that fills for as long as the splash lasts; the diagonal streaks are the ones the list pages carry, so the splash and the menu read as one product. It times itself off the wall clock (0.60 s hold + 0.25 s fade), so no tick had to be threaded through the loop, and it is gone before a capture at the usual delay sees it - checked at 6 frames (splash) and 90 frames (menu, once). Not done: a key press does not skip it early, and it only appears on the Main page, which is the page the game opens on."
       }
     ]
   },
@@ -860,12 +699,14 @@
       {
         "feature": "creditsScreen",
         "status": "live",
-        "landsAs": "CREDITS screen"
+        "landsAs": "CREDITS screen",
+        "note": "The CREDITS row opens MenuState::Credits, and buildCreditsMenu fills the page: the fixed rows about the project, the formats and the audio, then one row per name the installed content declares - the names themselves are creditsList's subject. Evidence: main_menu_test (the page opens and stays open) and content_credits_test (the list it shows)."
       },
       {
         "feature": "creditsList",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "CREDITS: the authors the installed content declares, with what they made",
+        "note": "The page keeps its own rows about the project, formats and audio, then lists exactly the names the installed cars and tracks declare in ui_car.json / ui_track.json (also the ui/ and data/ spellings, the same files the libraries read): 'author', with the team in parentheses when the folder declares both. Each row carries how many cars and tracks that name made, pluralised, busiest first with ties by name, so the page reads the same on every machine. A folder that declares nobody credits nobody - no names are made up - and content that names nobody at all gets one honest note instead of an empty page. Evidence: content_credits_test; on the shipped content it lists Kunos, 1 car (the reference car)."
       }
     ]
   },
@@ -874,34 +715,39 @@
     "sources": [
       {
         "feature": "coreSwitches",
-        "status": "missing",
+        "status": "notApplicable",
         "landsAs": null,
-        "note": "The runtime is its own engine: there are no core switches to inherit."
+        "note": "Intentionally not applicable, not unfinished: the runtime is its own engine, so there are no core switches to inherit from the original. This entry describes a screen of the original that has no counterpart here."
       },
       {
         "feature": "scripting",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "dev-mode console: LUA <file> runs a script, LUA STOP drops it, LUA says what is loaded",
+        "note": "Dev-mode scripting runs as a console verb: LUA <file> loads a Lua script into the running session, LUA STOP drops it and LUA alone says what is loaded. The engine already shipped the host (Scripting/ScriptHost.h) and nothing called it; DevScripting.h is the caller. Every tick the bridge publishes ks_dt, ks_speed_ms, ks_speed_kmh, ks_rpm, ks_gear, ks_fuel_l and ks_lap - the same numbers the HUD was just handed, so a script cannot read a state the driver does not - then calls the script's optional tick(dt); ks_notice is the one line a script can put on the race HUD - the loop copies it every frame into the sample the HUD draws in its bottom-right corner, so an empty string clears it and a change is logged once instead of sixty times a second - and content/scripts/shift_alert.lua is the example that ships: LUA content/scripts/shift_alert.lua in the console, or KS_SCRIPT=<file> at start, and the line appears without writing any code (it shows the live rpm and km/h for four seconds, then asks for the next gear above 6200 rpm - once per gear, with the current rpm on the line, cleared when the gear changes or the engine drops under 5600. It carries a second rule on the same line, low fuel under 15 L, so the example shows two of them firing, one on its own and both together. KS_FUEL_CONSUMPTION=<x> overrides the fuel tweak from the environment (x200 burns the 100 L load the car starts with in about a minute), which is how the warning is shown in a capture). ks.log() lines land in the console, each load starts a fresh Lua state so one script cannot inherit the previous one's globals or its hook, a failed load leaves nothing running, and a hook that throws stops the script once with the reason in the console instead of every frame. A HAS_LUA=0 build reports that scripting is not in the binary. Evidence: dev_scripting_test (the frame and its units, the log ring, stop, a failed load, no stale tick hook, a failing hook). Not done: no script ships in content/, and moduleLoader is still missing."
       },
       {
         "feature": "moduleLoader",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": null,
+        "note": "A native module is a DLL that speaks KsModuleApi.h - four C entries (ks_module_abi_version, ks_module_name, ks_module_initialize, ks_module_shutdown) and a versioned host table (KsModuleHost: abiVersion, user, log) - and engine-side ModuleLoader loads them: every *.dll in system/modules in file-name order (KS_MODULES_DIR overrides), refused with a reason when the ABI number is not 1, when one of the four entries is missing, when LoadLibrary itself fails, or when a module of the same name is already loaded (a DLL has one set of globals, and a second initialize would replace the host table the first is holding). Only the modules that pass are initialized once; unload calls their shutdown in reverse load order and the app does that at exit. Nothing is loaded by pattern or manifest, and a directory that does not exist is a note rather than an error, which is the normal install. A module's own log lines arrive through the host table's log callback and land in the same place as the loader's, so [modules] in the app shows both. The engine's ABI is deliberately C and tiny: choosing it was the design decision the earlier note said was missing. Evidence: module_loader_test, which builds three real DLLs (good, ABI 101, no initialize) plus a text file named .dll, copies them into a temporary directory and drives the actual Windows loader: one loads and speaks through the host table, the stale one is refused with its number before initialize ever runs, the broken one is refused naming ks_module_initialize, the junk file reports Windows' error, a copy of the good module is refused as already loaded, unload calls shutdown once, and the destructor unloads what is left. The test caught the one real trap on the way: the host table cannot live on load()'s stack frame, because a module keeps the pointer for its shutdown - it now lives in the module's record. Wired in the app: SimulatorApp loads system/modules at start-up and unloads at exit (seen in a headless run loading a copy of the test module, logging its hello and its bye). Not done: DevModeSupport::loadModule in the Qt editor build is still the old scaffold and does not call this loader; nothing sandboxes a module, so a crash inside one takes the process with it; and a module that spawns threads is unloaded without a chance to stop them."
       },
       {
         "feature": "appPausePolicy",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "losing window focus pauses a running single-player session",
+        "note": "Alt-tabbing away used to leave the car driving behind another window. WM_ACTIVATEAPP now answers the one question that is not input for the car - whether it should be running at all: losing focus opens the pause screen of a running session, which pauses the physics, and focus coming back never resumes, because that would put the car back under the driver's hands at whatever speed it was left. The rule is AppPausePolicy.h: a network session keeps running (the other drivers are still racing), a menu that is already up is already a pause, and nothing happens when no session is running. KS_PAUSE_ON_FOCUS_LOSS=0 turns it off for captures and unattended runs. Evidence: dev_mode_policy_test covers every branch of the decision; the window message itself is wired in WndProc and was not exercised by a real alt-tab in these runs."
       },
       {
         "feature": "virtualTyres",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "Engineer HUD: per-tyre temperature, pressure, slip ratio and load",
+        "note": "The contact patch, taken from the same SimulationState the physics wrote this frame (tyreTemp, tyrePressure, slipRatioState, tireFz per wheel), shown as four lines - FL, FR, RL, RR - with temperature in C, pressure in bar, slip ratio as a percentage and normal load in N, each painted in the temperature band a driver acts on: under 60 C blue (cold), under 95 green (working), under 110 amber (hot), above red (cooking). It lives in the Engineer HUD mode, which is the deep-telemetry page and already cycles with the HUD key, so it needs no extra binding and no separate overlay. Evidence: dev_mode_policy_test (one band per corner, the four lines' numbers) and the shipped Lotus idle run, where the HUD sample carried 2.18/1.98 bar and 2975/3623 N front/rear."
       },
       {
         "feature": "timeLimitedSession",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "a session clock can bound a session, ending it and counting down on the HUD",
+        "note": "SessionStartParams.sessionTimeSeconds already reached RaceSessionManager, which warns and ends the session when the clock runs out (qualifying uses its own qualifyingTimeSeconds), and MODE SETUP sets the clock. What was missing is what the driver sees: the Engineer HUD now shows 'SESSION m:ss left' from the loop's own clock, amber under a minute, and only when a limit exists and the session is green - an open session or a lap race shows no countdown, and the grid countdown is not mistaken for one. Evidence: dev_mode_policy_test for the three display cases; a DRIFT session in the real app started with clock 180s and the HUD read 179s a frame later."
       },
       {
         "feature": "devModeRow",
@@ -928,8 +774,8 @@
     "showrooms": [
       "industrial"
     ],
-    "skins": false,
-    "archives": false,
+    "skins": true,
+    "archives": true,
     "sources": [
       {
         "feature": "carCatalog",
@@ -941,50 +787,55 @@
         "feature": "trackCatalog",
         "status": "live",
         "landsAs": "TRACKS page",
-        "note": "Partially implemented: see landsAs for the part that exists."
+        "note": "The TRACKS page lists what the scan found in content/tracks, and each row carries what the folder's own ui_track.json (or the data.json CSP builds carry) declares: country, city and length in km, with a folder that declares nothing keeping an empty detail instead of a raw path. A track that ships several layouts is opened through TrackLayout.h - layouts.json at the root when there is one, otherwise the subdirectories that look like layouts (data/, ai/, *.kn5) plus a default entry pointing at the track root - and the session loads the layout that was picked (see trackSelect.layoutCatalog)."
       },
       {
         "feature": "driverSuits",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "CONTENT -> SUITS page, choice kept in driver.json",
+        "note": "The suits under content/drivers/suits are listed by folder (the same library the editor's content manager reads, simulator/DriverGear.h): the row carries the suit the profile names as (current), choosing one writes it into the player's own driver.json and the CONTENT row says which one the player wears. What a choice cannot do yet is be seen: the room has no driver model of its own - the driver geometry is whatever the car's .kn5 carries - so the suit is a recorded preference, not a texture on a body. Evidence: driver_gear_test."
       },
       {
         "feature": "helmets",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": "CONTENT -> HELMETS page, choice kept in driver.json",
+        "note": "The helmets under content/drivers/helmets are listed by folder with the profile's choice marked (current); choosing one records it in driver.json beside the suit, and a choice the library no longer holds shows as MISSING instead of vanishing. As with the suits, nothing is worn yet: no driver model in the room. Evidence: driver_gear_test."
       },
       {
         "feature": "showrooms",
         "status": "partial",
         "landsAs": "garage scene",
-        "note": "One showroom is installed; its preview grid does not exist."
+        "note": "One showroom is installed; its preview grid does not exist. CONTENT -> SHOWROOMS picks the room the game opens in and stores it as showroom.default; a stored folder that is gone falls back to the first room and the loader says so."
       },
       {
         "feature": "skins",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "CONTENT -> SKINS page, choice kept in model.json's kn5.skin",
+        "note": "A car ships its texture sets as skins/<id>/ with the body texture and its maps, and a ui_skin.json naming and describing the scheme. The page lists every folder the car offers, the skin's own name leading and the folder id travelling with it (a skin without ui_skin.json is listed by its id, because the loader would still use it); the row of the skin being worn carries (current). Choosing one hands the id to the loop, which accepts it only when the folder really exists, writes it into the car's model.json kn5 block and rebuilds the car with it - so the document, the marked row and the car in the room always agree, and the next start loads the same skin without asking KS_SKIN. The same value is the SKIN row of the CARS page, which cycles it in place. A recorded id the folder no longer ships shows as MISSING and the loader opens the first folder instead. Evidence: skin_select_test, car_import_menu_test."
       },
       {
         "feature": "contentUnpacking",
-        "status": "missing",
-        "landsAs": null,
-        "note": "Packaging::unpack is a stub that returns false: content is read in place from its folder (and from .zip reads done at load time), never extracted to disk."
+        "status": "partial",
+        "landsAs": "assets::ZipArchive (in-process) + Packaging::unpack",
+        "note": "ZIP archives are read in-process: central directory, stored and deflate entries (the engine's own inflate), folder entries, and entry names checked so an archive cannot write outside the destination. Packaging::unpack uses it and only falls back to the system tar for archives that are not ZIPs; ContentUnpacking::unpackArchive, readZipInPlace and listArchiveContents delegate to it. 7z and tar are still handled by the external tool, and the content scan keeps reading archives in place instead of unpacking them."
       },
       {
         "feature": "trackTweaks",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "per-track tweaks: system/cfg/tracktweaks.json scales a track's own grip",
+        "note": "A track can be made a little different from every other copy of it from one document, keyed by the track folder name and case-insensitive: {'tracks': {'vale': {'gripMultiplier': 1.05}}}. It states a multiplier and not a value, so the track keeps declaring its own grip and an updated surfaces.ini is never overwritten by a number frozen in a config; the multiplier is clamped to 0.5..2.0, an entry that states nothing (or 1.0) changes nothing, and a missing file just says so on the log. Applied at track load, right after the track's own surfaces set the base grip, and logged as 'grip x1.100 (1.000 -> 1.100)'. Evidence: content_gaps_test (case-insensitive matching, clamping, empty entry, missing and malformed documents, the arithmetic) and a real track load in the app, where AcSurfacesLoader set 1.000 from ROAD and the tweak took it to 1.100. The shipped system/cfg/tracktweaks.json is empty and staged next to the binary like the other cfg documents."
       },
       {
         "feature": "contentManifest",
-        "status": "missing",
-        "landsAs": null
+        "status": "live",
+        "landsAs": "CONTENT -> MANIFEST: <content>/manifest.json, written and read back on the page",
+        "note": "The installed content as one document with the versions it declares: schema ksengine.content/2, one object per item (id = the folder the loader uses, name = the label the menu lists it under, version = what ui_car.json / ui_track.json say, as text so '1.2' and 1.2 compare equal, omitted when the folder declares none). CONTENT carries a MANIFEST row that reads the file back and says what it found - none yet, current, or how far behind it is (items added, gone, and versions changed) - and choosing it writes the libraries as they are now and reports the path. So a manifest left over from an older copy of the content cannot pass for the truth, and a launcher, an installer or a support ticket can read what is installed without scanning the tree. Schema 1 (bare arrays of ids, which is what the earlier writer produced) still reads, with no versions: what it said. Team rosters carry their id and label and no version, because a team.ini declares none. Evidence: content_manifest_test."
       },
       {
         "feature": "standardContent",
         "status": "partial",
         "landsAs": "content scan",
-        "note": "Partially implemented: see landsAs for the part that exists."
+        "note": "Installed content is a directory tree and the scan is ContentLibrary.h: every subdirectory of content/cars is a car and every subdirectory of content/tracks is a track, with its option keys read from the first file that exists among ui_car.json at the car root, the same file under the ui folder, and data/car.json for a car, and ui_track.json at the track root, its copy under the ui folder, and data/data.json for a track. A root that does not exist is an empty list rather than an error, which is why a fresh checkout still opens the menu and the select pages say where content goes. Archives parked under content are still read in place instead of being unpacked (see contentUnpacking)."
       },
       {
         "feature": "carOverrides",
@@ -994,8 +845,15 @@
       },
       {
         "feature": "materialMapping",
-        "status": "missing",
-        "landsAs": null
+        "status": "partial",
+        "landsAs": null,
+        "note": "Half done, and the half that is done is the part with no pixels in it. The vocabulary now meets: MaterialPresetId has seven location presets of its own - asphalt, ground, grass, water, sky, building, signs - with the number set each surface family wants (asphalt and ground rough and unbounded by the file's exponent, water glossy at 0.04 so a lake cannot become a mirror, sky flat because the dome draws it), and src/engine/Graphics/LocationMaterialMap.h maps locationmaterial.json's own category names onto them, reusing the car presets where a type already had one (metal to brushed metal, glass, lights, fabric, plastic) and answering Default for the document's own other bucket. A name has one route to a preset and it is the classifier: the category map answers categories only, and a pattern word is not a category, so locationMaterialPreset('tarmac') is Default while LocationClassifier::presetFor('tarmac') is Asphalt - and the test asserts both, so the second vocabulary cannot come back. That is deliberate: a table of synonyms in the map used to answer the same question with a different rule (exact word against substring) and the two had already drifted, calling a billboard signage where the document files billboards under buildings. Whole names are the point of keeping one route, because they are what a KN5 actually carries: clouds, vegetation and asphalt_kerb_01 resolve through the document's patterns, and two document decisions still decide against intuition - a billboard is a building and a barrier is metal, because the document says so. Nothing is invented: a name with no pattern in the file is Default, not a guess, and the words that are not in the document (vegetation is read as grass only because of its veg, clouds only because of cloud) are nowhere listed as a vocabulary of their own. materialCategoryFor() returns the document's spelling for every new preset, so the two can be looked up against each other. Evidence: location_material_map_test, which reads the real system/cfg/locationmaterial.json, requires that every one of its twelve classified categories resolves to a usable preset stated in the document's own spelling (so a category added to the file without a preset fails the test), checks the trimming and the case folding, that a pattern word is not a category and gets Default from the map while the classifier resolves it, the unknown and empty strings landing on Default with no look to apply, the roughness ordering asphalt < ground < grass, no location surface being metal or lacquered, name and id uniqueness across the whole preset table, and Default last with authoredWeight 1. Classification by name is there too: LocationClassifier reads classification.patterns from the same document, keeps the order the file lists them in (the document states that the first matching pattern wins, so the order is the rule, not a detail), lowercases and substring-matches the KN5 material name, and answers the document's other bucket when nothing matches; presetFor() then puts that through the same category-to-preset map, so a name reaches a preset with nobody naming a category. The test reads the real document for this half as well: the classifier holds all twelve categories in the document's own order, every category is still reachable (one whose patterns were all shadowed by earlier ones would be dead weight in the file), obvious names land where they should, the order decides the ambiguous ones (water before building's tower, glass before metal, grass before signs' line, ground before asphalt's ground), and names with no pattern at all fall into other with a Default preset and no look to apply - with one trap worth knowing: surface is an asphalt pattern, so a generic asterisk_surface name is a road, not a mystery. A document that cannot be read leaves the vocabulary intact and says why. The wiring exists now, behind a switch that is off by default: KS_LOCATION_MATERIALS=1 (1, true, yes, on) makes a loader read system/cfg/locationmaterial.json once per scene and apply the presets; unset, empty, 0 or any other word leaves every surface exactly as the bake authored it. Two paths are hooked, because a track's materials arrive by two roads: NativeRenderer::loadMeshesFromManifest for a baked track and SimulationLoop::loadKn5Meshes for a track .kn5 read in memory under the track_ prefix. A car's surfaces are deliberately not touched, they belong to the car presets. The application writes only the values a preset owns - roughness, metalness, clearcoat - and only where the bake states them as scalars: a field with a map on it is skipped. That is not a detail: in materials.txt a mapped cell holds the identity 1.0 because the shader multiplies it by the map, so a preset written there scales the map instead of stating a surface (a mapped roughness of 1.0 would have become 0.148 and dimmed every texel). The decision is made per field by presetWritableSurface and is checked without a renderer; roughness is still blended through authoredWeight, metalness and clearcoat are the preset's, and KS_MATERIAL_DEBUG prints each line, saying so when a field was skipped (the reference bake's metal row reads rough 0.050 -> 0.148 with metal mapped, 1.00 -> 1.00). A name nothing classifies keeps its authored values untouched. Evidence: location_material_apply_test covers the switch parser (off for 0, false, off, no, maybe and empty; on for 1, true, ON and yes), nothing applied before a document loads, a document that cannot be read leaving the applier off, the blend arithmetic (ground 0.90 over an authored 0.60 giving 0.75, asphalt 0.745, signs 0.47, metal 0.1475 with metalness 1, water 0.502 with a 0.10 coat), a name in other left untouched, and the counters the log line prints. The vocabulary can now be measured instead of assumed: KS_MATERIALS_REPORT=<path> makes a run write a report of the track's materials before the first frame, headless included, because the report is a reading of the content and not a picture of it. It reads a bake (manifest.txt with its materials.txt) or, when there is no bake, the largest .kn5 in the folder - names only, since a KN5 states its surface through properties the bake resolves and the coverage question does not need them; a folder with neither says why instead of writing an empty file. Each row carries the name, the category, the preset, whether the bake authored the values, and the values before and after the preset; then come the count per category in the document's own order with zeros included, so two tracks compare line by line, and the list of names no pattern recognised, which is the whole point. The switch is independent of KS_LOCATION_MATERIALS: measuring is useful whether or not the presets are applied. On the reference content it is the first real measurement of this vocabulary: 11 materials, 5 with a preset applied, and 6 of 11 in other - plain, smooth, rough, coated, lodable and disc, names written for a test fixture that the document was never going to know, while the row called ground lands in asphalt because the document files ground under the road. Evidence: location_material_report_test builds a two-name bake of its own, reads it back, checks every section of the text (the row, the applied values, the counts, the other list), checks that a folder with nothing to read fails with a reason and writes no file, and reads the reference bake shipped in content/ so the real content is exercised too; two headless runs on the same content produced byte-identical reports. The document is looked for where an install keeps it, not only beside the working directory: src/simulator/LocationMaterialDocument.h tries system/cfg/locationmaterial.json in the working directory (a repository launch), then the same path next to the binary (the staged install, which is where cmake puts it), then the parent of every KS_CONTENT_ROOT entry (a content folder kept outside the install, ';'-separated like ContentLibrary), and finally KS_INSTALL_PREFIX/system/cfg. The first file that exists wins; when none does, the loader says so and prints every path it tried, because going quiet is how this stayed hidden - run from build/bin/Release, the old bare relative path found nothing and the feature simply never ran. Evidence: location_document_lookup_test builds a fake install in a temporary folder (no copy in the working directory, the document next to the pretend binary, content in a different parent, two roots listed with ';', and a bare root with no parent) and checks the order, the path found and the message; a real run from a working directory without system/ found the staged copy and applied 5 of 10 materials, with the staged copy hidden it printed the not-found line listing the three paths, and with KS_CONTENT_ROOT pointing at the repository's content it found the document through the content root instead. The comparison is repeatable by anyone now: tools/visual_baseline.ps1 -LocationMaterials captures the track twice in one pass (KS_LOCATION_MATERIALS=0 then 1, same camera, same frame delay) and prints both grid distances - the off run against the stored track_location.baseline, refreshed with -Record, and the on run against the off run of that very pass - so the pair never depends on captures taken by hand on one machine. On this machine the pair reads 0.0039 off-vs-baseline and 0.0000 on-vs-off, the same scale as the off/off noise, and the script says so out loud (the grid cannot see the presets in this shot) instead of counting an expected difference as a pass. The two capture runs on the installed reference content do not judge the look: with the switch off the frame digest is hash 10923482346919560421 mean 82.4775, with it on hash 7783228308641837918 mean 82.4772, and the 12x10 luma grid distance between them is 0.0000 - identical, as is the off/off control, because the five classified meshes move by 0.02 to 0.12 roughness and sit too small in frame for that grid; the pixel diff (69 pixels above 8/255, max 182) is inside the noise of two identical runs (50 pixels, max 181), while a capture at frame 600 moves 9141 pixels with the switch off. So the capture baseline passes in both states and cannot judge this feature: what is verified is that the presets reach the meshes and the arithmetic behind them, not that a track looks better. Still out of it: the showroom hall is not hooked, no installed content ships a .kn5 track to exercise the in-memory path, and the car-material counterpart (system/cfg/carmaterial.json) remains the live one."
+      },
+      {
+        "feature": "contentManager",
+        "status": "partial",
+        "landsAs": "CONTENT page (library counts, INSTALL FROM ARCHIVE, RESCAN)",
+        "note": "The CONTENT page counts cars, tracks and teams with the same scan each row opens, lists the ZIPs waiting in <content>/packages and installs one through ContentUnpacking::installPackage. The whole archive is checked before anything is written: entries must live under a folder the engine reads (cars, tracks, teams, showrooms, fonts, gui, objects3D, characters, drivers, sfx, weather, apps) and cannot escape the content root; a refused package writes nothing. Removal/uninstall and per-item install state do not exist."
       }
     ]
   }
