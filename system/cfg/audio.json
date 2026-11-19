@@ -1,0 +1,44 @@
+{
+  "audio": {
+    "note": "Audio bus levels, all 0..2 where 1 leaves the bus unchanged. master scales the whole mix; playerCar the player's own car (engine, turbo, gear shift, backfire, limiter); opponentCar the other cars on track; location the world around the car (wind, skid, brakes, transmission, bodywork, rain, rolling, showroom ambience); spotter the race-engineer voice, which has no shipped recordings yet, so the value is the gain its channel starts with; music the showroom and menu music; ui the interface clicks. Per-channel peaks are metered (channelLevel). ksengine.json points at this document: audio = system/cfg/audio.json.",
+    "master": 0.8,
+    "playerCar": 1.0,
+    "opponentCar": 1.0,
+    "location": 1.0,
+    "spotter": 1.0,
+    "music": 1.0,
+    "ui": 1.0,
+    "sources": [
+      {
+        "feature": "busMix",
+        "status": "live",
+        "landsAs": "audio.master, audio.playerCar, audio.opponentCar, audio.location, audio.spotter, audio.music, audio.ui",
+        "note": "Seven gains, all 0..2. renderAudio applies playerCar to the engine, turbo, gear shift, backfire and limiter channels, opponentCar to the other cars, location to wind, skid, brakes, transmission, bodywork, rain, rolling and showroom ambience, music to the showroom music, ui to the theme's clicks and spotter to its own channel; master multiplies every one of them. spotter has no voice source yet: the gain is wired and the channel stays silent until one exists. Evidence: audio_bus_settings_test."
+      },
+      {
+        "feature": "channelLevels",
+        "status": "live",
+        "landsAs": "channelLevel() metering on top of the seven bus gains",
+        "note": "AudioMixer measures each channel's post-gain peak on every mixed block (level()), decays it towards zero so the meter falls instead of snapping off, and SimulatorAudio::channelLevel(channel) reads it back; a bypassed channel is not metered and an out-of-range id returns 0. The seven bus gains stay the configurable part - a channel's sample level is still driven by the session, so the document states a gain and the meter reports what came out. Evidence: audio_mixer_levels_test."
+      },
+      {
+        "feature": "musicPlayer",
+        "status": "live",
+        "landsAs": "showroom music channel",
+        "note": "The showroom plays ambience and music with declick and headroom; there is no playlists screen."
+      },
+      {
+        "feature": "nativeBankPlayback",
+        "status": "live",
+        "landsAs": "car FMOD Studio banks through the game's own runtime",
+        "note": "ks::audio::FmodBankPlayer (engine/Audio) loads fmodstudio64.dll/fmod64.dll from the AC install at run time - no FMOD SDK, no shipped DLLs - and plays a car's .bank with events found by GUID, common.bank loaded beside it and the sample pump the format needs. Proven against the 1.08.12 DLLs with the ferrari_499p bank. SimulatorAudio drives it and falls back to the internal synth path when the DLLs are absent. Evidence: fmod_bank_test."
+      },
+      {
+        "feature": "masterVolume",
+        "status": "live",
+        "landsAs": "master volume row",
+        "note": "One number, three places that must agree: audio.master (in this document, or in settings.json as an override) is read into EngineSettings::audioMaster, pushed into the mixer with SimulatorAudio::setMasterVolume at start-up, moved by the settings page row, and written back when the file is saved. The mixer scales every voice by it, so the row is the audio path and not a label. Evidence: user_data_test (the value survives the save and merge, and is guarded into range)."
+      }
+    ]
+  }
+}
