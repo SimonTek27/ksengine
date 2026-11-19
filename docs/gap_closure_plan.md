@@ -5,7 +5,7 @@ Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + si
 busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
 camera (free/chase/cockpit/cameraViews), coloredShadows, materialMapping, gameplayTweaks
 (mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare), settings.entries (ui),
-picture (profile), merge weather/terrain.
+picture (profile), merge weather/terrain, photoMode (hue/sepia grading).
 
 ## Stato attuale
 
@@ -17,7 +17,7 @@ Cluster B — Video / grafica:
 - screenSpaceReflections → **live**.
 - coloredShadows → **live**.
 - localLights → **live**.
-- vrSupport (partial) — OpenXR bootstrap esiste, render-to-headset non cablato.
+- vrSupport (partial) — codice presente, da verificare con headset.
 - tripleScreen (missing) — richiede refactor render loop.
 
 Cluster C — Controlli / input:
@@ -25,7 +25,7 @@ Cluster C — Controlli / input:
 - headTracking (partial) — offset cockpit live, device input stub.
 - vrInput (partial) — XrInput/VrInputAdapter cablati, da verificare con headset.
 
-Cluster D — Gameplay / sessione / rete / UI / contenuti: ~33 gap.
+Cluster D — Gameplay / sessione / rete / UI / contenuti: ~32 gap.
 Molti sono già implementati nel codice (gameplayTweaks, surfaceEffects, standings, showrooms,
 materialMapping, spectatorMode, photoMode, carFilters) ma marcati partial per dettagli mancanti.
 Gli altri richiedono implementazione ex novo.
@@ -34,7 +34,7 @@ Gli altri richiedono implementazione ex novo.
 headPhysics, brakeGlow, surfaceEffects, upgrades, pitService, camera (free/chase/cockpit/cameraViews),
 busMix, ssgi, SSR, localLights, windscreenEffects, mirrors, coloredShadows, materialMapping,
 gameplayTweaks (mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare),
-settings.entries (ui), profile.picture, merge weather/terrain.
+settings.entries (ui), profile.picture, merge weather/terrain, photoMode (hue/sepia grading).
 
 ## Nota
 I gap rimanenti richiedono implementazione hardware (VR, triple screen, wheel LEDs, head tracking)
