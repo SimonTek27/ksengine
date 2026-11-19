@@ -20,7 +20,7 @@ namespace sim {
  * aiAggression to the field's AI, and sets the track-limits ladder from
  * racingRulesStrict. The set is re-applied whenever the callback fires.
  * mechanicalFailures is wired (setDamageEnabled on the car); damageAffectsDriving
- * is stored and reported, not wired yet.
+ * is wired (gates whether damage scales engine power).
  */
 
 struct GameplayTweakSet {

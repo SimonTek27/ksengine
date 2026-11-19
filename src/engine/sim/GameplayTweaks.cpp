@@ -10,8 +10,8 @@ bool GameplayTweaks::initialize() {
 	logger.info("GameplayTweaks", "Initializing Gameplay Tweaks module");
 	logger.info("GameplayTweaks", "The session applies fuelConsumption and tireDamageRate to the car, "
 				 "mechanicalFailures to the damage model's enabled flag, "
-				 "the AI pace/aggression pair and racingRulesStrict to the track-limits ladder; "
-				 "damageAffectsDriving is stored but not wired");
+				 "damageAffectsDriving to whether damage scales engine power, "
+				 "the AI pace/aggression pair and racingRulesStrict to the track-limits ladder");
 	resetToDefaults();
 	return true;
 }

@@ -1069,6 +1069,7 @@ void SimulationLoop::applyGameplayTweaks() {
                         limits.timePenaltyAt, limits.driveThroughAt);
         }
     }
+    applyDamageEffects();
     if (tweaks.fuelConsumption != m_appliedFuelTweak ||
         tweaks.tireDamageRate != m_appliedTireTweak) {
         m_appliedFuelTweak = tweaks.fuelConsumption;
@@ -7233,6 +7234,7 @@ void SimulationLoop::tick() {
 #endif
     // Weather evolution freezes while a modal overlay pauses the world.
     updateWeather(paused ? 0.0f : static_cast<float>(elapsed));
+    applyDamageEffects();
     publishSharedMemory();
     publishUdpTelemetry();
     publishTcpTelemetry();
