@@ -602,6 +602,7 @@ private:
     void buildControlsMenu();
     void buildCarSelectMenu();
     void applyCarFilter();
+    void applyTrackFilter();
     void buildTrackSelectMenu();
     void buildTrackWeatherMenu();
     void setWeatherMode(WeatherSource source);
@@ -660,7 +661,12 @@ private:
     std::vector<ContentEntry> m_selectEntries;
     // Folder the current select page lists from, named by its empty-list hint
     // (it is not always content/<kind>: see ContentLibrary.h contentRootCandidates).
+    std::vector<ContentEntry> m_trackLibrary;
     std::string m_selectRoot;
+    std::vector<std::string> m_trackCountries;
+    std::vector<std::string> m_trackCircuitTypes;
+    std::string m_trackCountryFilter;
+    std::string m_trackCircuitTypeFilter;
     // map.png silhouettes and logos, one per track visited (see
     // selectedTrackMap / selectedTrackLogo).
     mutable std::map<std::string, TrackMapPreview> m_trackMaps;

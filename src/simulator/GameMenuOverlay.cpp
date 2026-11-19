@@ -1499,8 +1499,28 @@ void GameMenuOverlay::applyCarFilter()
 void GameMenuOverlay::openTrackSelect()
 {
     m_selectRoot = trackLibraryRoot();
-    m_selectEntries = scanTrackLibrary(m_selectRoot);
+    m_trackLibrary = scanTrackLibrary(m_selectRoot);
+    m_trackCountryFilter.clear();
+    m_trackCircuitTypeFilter.clear();
+    m_trackCountries.clear();
+    m_trackCircuitTypes.clear();
+    for (const auto& e : m_trackLibrary) {
+        if (!e.country.empty() &&
+            std::find(m_trackCountries.begin(), m_trackCountries.end(), e.country) == m_trackCountries.end())
+            m_trackCountries.push_back(e.country);
+        if (!e.circuitType.empty() &&
+            std::find(m_trackCircuitTypes.begin(), m_trackCircuitTypes.end(), e.circuitType) == m_trackCircuitTypes.end())
+            m_trackCircuitTypes.push_back(e.circuitType);
+    }
+    std::sort(m_trackCountries.begin(), m_trackCountries.end());
+    std::sort(m_trackCircuitTypes.begin(), m_trackCircuitTypes.end());
+    applyTrackFilter();
     switchMenu(MenuState::TrackSelect);
+}
+
+void GameMenuOverlay::applyTrackFilter()
+{
+    m_selectEntries = filterTracks(m_trackLibrary, m_trackCountryFilter, m_trackCircuitTypeFilter);
 }
 
 void GameMenuOverlay::openSessionEvent()
@@ -1666,6 +1686,39 @@ void GameMenuOverlay::buildTrackSelectMenu()
 {
     m_items.clear();
     m_firstContentRow = 0;
+    char label[96];
+    if (!m_trackCountries.empty()) {
+        std::snprintf(label, sizeof(label), "COUNTRY  %s",
+                       m_trackCountryFilter.empty() ? "any" : m_trackCountryFilter.c_str());
+        m_items.push_back({ label, "Show one country only", [this]() {
+            size_t next = 0;
+            if (!m_trackCountryFilter.empty()) {
+                const auto it = std::find(m_trackCountries.begin(), m_trackCountries.end(),
+                                          m_trackCountryFilter);
+                if (it != m_trackCountries.end())
+                    next = static_cast<size_t>(it - m_trackCountries.begin()) + 1;
+            }
+            m_trackCountryFilter = next >= m_trackCountries.size() ? std::string() : m_trackCountries[next];
+            applyTrackFilter();
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    }
+    if (!m_trackCircuitTypes.empty()) {
+        std::snprintf(label, sizeof(label), "TYPE  %s",
+                       m_trackCircuitTypeFilter.empty() ? "any" : m_trackCircuitTypeFilter.c_str());
+        m_items.push_back({ label, "Show one circuit type only", [this]() {
+            size_t next = 0;
+            if (!m_trackCircuitTypeFilter.empty()) {
+                const auto it = std::find(m_trackCircuitTypes.begin(), m_trackCircuitTypes.end(),
+                                          m_trackCircuitTypeFilter);
+                if (it != m_trackCircuitTypes.end())
+                    next = static_cast<size_t>(it - m_trackCircuitTypes.begin()) + 1;
+            }
+            m_trackCircuitTypeFilter = next >= m_trackCircuitTypes.size() ? std::string() : m_trackCircuitTypes[next];
+            applyTrackFilter();
+            m_menuDirty = true;
+        }, false, true, "flag" });
+    }
     if (m_selectEntries.empty()) {
         const std::string where = "Put track folders in " + m_selectRoot;
         m_items.push_back({ "(no tracks found)", where, nullptr });
