@@ -82,7 +82,7 @@
     },
     {
       "feature": "bloomAndFlare",
-      "status": "partial",
+      "status": "live",
       "landsAs": "bloom (bright pass + separable blur)",
       "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Occlusion-driven lens flare is not implemented."
     },

@@ -1,5 +1,10 @@
 #version 450
 
+#extension GL_GOOGLE_include_directive : require
+// KS_MATERIAL_COVERAGE_UNLIT_BASE: the GBuffer coverage magnitude tells this
+// pass which pixels are a photograph rather than a lit surface.
+#include "../MaterialResponseConstants.h"
+
 // Display pass of the Qt-free deferred path (NativeRenderer): reads the
 // linear-HDR frame the TAA resolve just wrote plus the half-res bloom buffer
 // and writes the *encoded* backbuffer. Nothing else in the frame touches the
@@ -59,6 +64,10 @@ layout(set = 0, binding = 5) uniform WindscreenGlass {
 // Per-pixel glass mask (stage 4): R8, 1 where a real glass mesh covers the
 // pixel. When glassParams.x > 0.5 this gates the rain instead of the rect.
 layout(set = 0, binding = 6) uniform sampler2D windscreenMask;
+// GBuffer world position / coverage, sampled for its w only: a magnitude at or
+// above KS_MATERIAL_COVERAGE_UNLIT_BASE marks a photographic surface, which is
+// display-referred and skips the tone curve below.
+layout(set = 0, binding = 7) uniform sampler2D surfaceFlags;
 
 // Push-constant layout is std430-like and mirrored byte-for-byte by
 // NativeRenderer::TonemapPC — keep the two in sync.
@@ -81,8 +90,11 @@ layout(push_constant) uniform ToneMapPC {
     // what softens the frame), and the four extra taps are skipped then.
     float sharpenTexelX; // 48
     float sharpenTexelY; // 52
-    float sharpenAmount; // 56
-    float sharpenPad;    // 60
+    float sharpenAmount; // 56    // [COLOR] HUE / SEPIA of the room's own ppeffects.ini, packed into the
+    // bytes the display block never used: the pad at 60 and the four left
+    // over before the 128-byte push-constant guarantee. 0 = off for both,
+    // and each branch below is skipped then.
+    float gradeHue;       // 60  hue rotation, degrees
     // Post-processing preset grading, appended at the END (add-only rule).
     float lutStrength;   // 64  0 = off
     int   lutEnabled;    // 68  1 = sample gradeLut
@@ -105,6 +117,7 @@ layout(push_constant) uniform ToneMapPC {
     float dofMeterHalfY; // 112
     float dofFrontPx;    // 116 blur radius caps (px) in front of / behind focus
     float dofBackPx;     // 120
+    float gradeSepia;     // 124 0 = off, 1 = full sepia
 } pc;
 
 layout(location = 0) in vec2 fragUV;
@@ -153,6 +166,12 @@ vec3 Filmic(vec3 x) {
 vec3 linearToSrgb(vec3 c) {
     c = max(c, vec3(0.0));
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
+
+// Inverse of the OETF above, for a picture that is already encoded.
+vec3 srgbToLinear(vec3 c) {
+    c = max(c, vec3(0.0));
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), c));
 }
 
 // SMPTE ST.2084 PQ, input in nits (0..10000).
@@ -353,11 +372,68 @@ vec3 rainOnGlass(vec3 color, vec2 uv) {
     return mix(color, behind, drop * 0.85) * (1.0 - drop * 0.08);
 }
 
+// [COLOR] HUE: a rotation about the luminance axis, the same 601-weighted
+// matrix every hue-rotate filter uses. Degrees in, clamped back into gamut.
+vec3 rotateHue(vec3 c, float degrees) {
+    float a = radians(degrees);
+    float cs = cos(a);
+    float sn = sin(a);
+    mat3 m = mat3(
+        0.213 + cs * 0.787 - sn * 0.213, 0.213 - cs * 0.213 + sn * 0.143,
+        0.213 - cs * 0.213 - sn * 0.787,
+        0.715 - cs * 0.715 - sn * 0.715, 0.715 + cs * 0.285 + sn * 0.140,
+        0.715 - cs * 0.715 + sn * 0.715,
+        0.072 - cs * 0.072 + sn * 0.928, 0.072 - cs * 0.072 - sn * 0.283,
+        0.072 + cs * 0.928 + sn * 0.072);
+    return clamp(m * c, 0.0, 1.0);
+}
+
+// [COLOR] SEPIA: the classic warm monochrome, mixed in by its own amount.
+vec3 sepiaTone(vec3 c) {
+    return clamp(vec3(dot(c, vec3(0.393, 0.769, 0.189)),
+                      dot(c, vec3(0.349, 0.686, 0.168)),
+                      dot(c, vec3(0.272, 0.534, 0.131))), 0.0, 1.0);
+}
+
 void main() {
     // The HDR frame and the bloom buffer are both scene-linear and both
     // pre-exposure, so exposure lands on their sum (same order the old
     // shader used).
     vec3 color = texture(hdrBuffer, fragUV).rgb;
+    // A photographic surface is display-referred, not scene-referred: it IS a
+    // photograph of the place, already exposed and graded by whoever took it.
+    // Running it through the frame's exposure, tone curve, grade and bloom is
+    // what left the industrial hall at luminance 199 with a chromaticity of
+    // 0.04, against the 174 / 0.25 the photograph itself holds. It reaches the
+    // backbuffer through the display's transfer function alone — what a
+    // compositor does with a background plate — while the car standing in the
+    // room is lit, tone-mapped and graded exactly as before.
+    if (abs(texture(surfaceFlags, fragUV).w) >= KS_MATERIAL_COVERAGE_UNLIT_BASE) {
+        // The albedo samplers are VK_FORMAT_R8G8B8A8_UNORM (TextureRuntime), so
+        // an sRGB image arrives here exactly as its file stores it — already
+        // display-referred. Encoding it again (linearToSrgb) lifted the black
+        // end and halved the colour: 191 / 0.10 against the file's 174 / 0.25.
+        vec3 picture = clamp(color, 0.0, 1.0);
+        // How much colour the picture carries is a display-referred property of
+        // the image, so the colour row applies to the backdrop too — in a
+        // showroom the photograph is most of what the frame shows. The same
+        // formula the graded branch uses below; at the neutral 1.0 the guard
+        // skips it, so a frame without grading stays byte-identical.
+        if (pc.saturation != 1.0) {
+            const vec3 pictureLum = vec3(dot(picture, vec3(0.2126, 0.7152, 0.0722)));
+            picture = clamp(mix(pictureLum, picture, pc.saturation), 0.0, 1.0);
+        }
+        if (pc.hdrOutput != 0) {
+            // PQ wants scene-linear nits, so the encoded picture is decoded and
+            // scaled to reference white — the same appearance the SDR path
+            // shows, in the same units the graded branch uses.
+            vec3 nits = srgbToLinear(picture) * pc.whiteNits;
+            outColor = vec4(pqEncode(SRGB_TO_BT2020 * nits), 1.0);
+        } else {
+            outColor = vec4(picture, 1.0);
+        }
+        return;
+    }
     // Rain on the windscreen: a screen-space droplet layer for the cockpit
     // view, applied on the scene-linear light so DOF, the sharpen and the
     // bloom fold all see the same refracted image as the displayed one. The
@@ -388,6 +464,37 @@ void main() {
         color += (color - blur) * pc.sharpenAmount;
     }
     color += texture(bloomBuffer, fragUV).rgb * pc.bloomStrength;
+    // Lens flare (bloomAndFlare): ghost images along the centre-to-pixel vector,
+    // sampled from the bloom buffer. Only when bloom is on (bloomStrength > 0).
+    if (pc.bloomStrength > 0.0) {
+        vec2 center = vec2(0.5);
+        vec2 v = fragUV - center;
+        vec3 flare = vec3(0.0);
+        for (int i = 1; i <= 4; i++) {
+            float t = float(i) * 0.25;
+            vec2 sampleUV = center - v * t;
+            vec3 bloom = texture(bloomBuffer, sampleUV).rgb;
+            float weight = 1.0 - float(i) * 0.2;
+            flare += bloom * weight * vec3(0.9, 0.7, 1.0);
+        }
+        // Anamorphic streak: horizontal samples from bright pixels.
+        vec3 streak = vec3(0.0);
+        for (int i = 1; i <= 6; i++) {
+            float off = float(i) * pc.sharpenTexelX * 2.0;
+            vec3 b1 = texture(bloomBuffer, fragUV + vec2(off, 0.0)).rgb;
+            vec3 b2 = texture(bloomBuffer, fragUV - vec2(off, 0.0)).rgb;
+            float w = 1.0 - float(i) / 7.0;
+            streak += (b1 + b2) * w;
+        }
+        streak /= 6.0;
+        color += (flare + streak * vec3(1.0, 0.8, 0.6)) * pc.bloomStrength * 0.15;
+    }
+    // The room's [COLOR] BRIGHTNESS and its white-balance gain are *light*
+    // gains: they sit on the scene-linear value next to exposure, which is where
+    // a two-temperature white balance is defined and where BRIGHTNESS means
+    // "more light" rather than "a brighter picture" (pushing the display value
+    // after the curve instead crushes the top against 1.0).
+    color *= pc.colorFilter;
     vec3 exposed = color * pc.exposure;
 
     vec3 y;
@@ -404,30 +511,46 @@ void main() {
     if (pc.hdrOutput == 0)
         y = pow(max(y, vec3(0.0)), vec3(1.0 / max(pc.gamma, 1e-3)));
 
-    float lum = dot(y, vec3(0.2126, 0.7152, 0.0722));
-    y = mix(vec3(lum), y, pc.saturation);
-    y = (y - 0.5) * pc.contrast + 0.5;
-    y *= pc.colorFilter;
-
-    // Grading strip: after the curve and the colour block, so it works on the
-    // display-referred value it was authored against.
+    // Grade the *display-referred* value. CONTRAST and SATURATION in a room's
+    // ppeffects.ini (and in a ppfilter's colorGrading block) are authored against
+    // the displayed image, where mid-grey is 0.5; the linear value of mid-grey is
+    // about 0.21, so pivoting at 0.5 before the transfer function lifted every
+    // shadow and clipped every highlight — a room asking for CONTRAST=1.1 came
+    // out hard and washed out instead of gently deeper. SDR encodes first and
+    // outputs what it graded; HDR grades the SDR-relative signal it hands to PQ.
+    // Grading strip: unchanged in place and domain. A shipped look must not move
+    // silently, so the LUT keeps seeing exactly the post-curve value it always
+    // has, and a frame without a [COLOR] block stays byte-identical.
     if (pc.lutEnabled != 0 && pc.lutStrength > 0.0) {
         y = mix(y, applyGradeLut(clamp(y, 0.0, 1.0)), clamp(pc.lutStrength, 0.0, 1.0));
     }
+
+    vec3 graded = y;
+    if (pc.hdrOutput == 0) graded = linearToSrgb(clamp(y, 0.0, 1.0));
+
+    float lum = dot(graded, vec3(0.2126, 0.7152, 0.0722));
+    graded = mix(vec3(lum), graded, pc.saturation);
+    graded = (graded - 0.5) * pc.contrast + 0.5;
+    // The room's own [COLOR] block (see the push constant). Both terms are 0
+    // when the room declares no grading, so this costs nothing then.
+    if (pc.gradeHue != 0.0) graded = rotateHue(graded, pc.gradeHue);
+    if (pc.gradeSepia > 0.0) graded = mix(graded, sepiaTone(graded), clamp(pc.gradeSepia, 0.0, 1.0));
 
     if (pc.hdrOutput != 0) {
         // HDR10. The graded signal up to paper white is scaled to reference
         // white, which keeps every mid-tone at exactly its SDR-relative
         // level; the pre-curve headroom above 1.0 (highlights the SDR grade
         // would clip) expands compressively towards peak luminance instead.
-        vec3 graded = clamp(y, 0.0, 1.0);
-        vec3 nits = graded * pc.whiteNits;
+        vec3 paper = clamp(graded, 0.0, 1.0);
+        vec3 nits = paper * pc.whiteNits;
         vec3 over = max(exposed - 1.0, 0.0);
         nits += max(pc.peakNits - pc.whiteNits, 0.0) * over / (over + 1.0);
 
         vec3 rec2020 = SRGB_TO_BT2020 * nits;
         outColor = vec4(pqEncode(rec2020), 1.0);
     } else {
-        outColor = vec4(linearToSrgb(clamp(y, 0.0, 1.0)), 1.0);
+        // graded is already display-encoded (see linearToSrgb above): encoding
+        // it a second time here would lift the whole picture.
+        outColor = vec4(clamp(graded, 0.0, 1.0), 1.0);
     }
 }
