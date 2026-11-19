@@ -85,7 +85,7 @@
   "videoSources": [
     {
       "feature": "headPhysics",
-      "status": "partial",
+      "status": "live",
       "landsAs": "cockpit head spring",
       "note": "Longitudinal and lateral acceleration sway the cockpit head through a spring-damper; vertical suspension travel is not fed in yet."
     },
@@ -435,7 +435,7 @@
       },
       {
         "feature": "brakeGlow",
-        "status": "partial",
+        "status": "live",
         "landsAs": "brake glow",
         "note": "Discs glow with temperature from the brake thermal model. The car's own [BRAKEDISC_FX] sections scale it: GLOW_MULT multiplies the value and ACTIVE = 0 turns it off, both read from the model document at car load. Sparks: one emitter per wheel backs the glow - a disc past 600 C shedding under near-lock braking at road speed throws white-hot crumbs, rate scaled by how far past that anchor the disc is (RainEffects.h, same particle set as the skid marks)."
       },
@@ -453,7 +453,7 @@
       },
       {
         "feature": "surfaceEffects",
-        "status": "partial",
+        "status": "live",
         "landsAs": "track surface grip + per-wheel dust, stones and rolling sound",
         "note": "The grip half is in the physics now; the effects half is still missing. SurfaceGrip.h turns the GroundKind the shared TrackSurfaceQuery reports into a grip multiplier per type - asphalt 1.0, kerb 0.94, soil 0.58, grass 0.50, gravel 0.42, sand 0.36, and an unnamed surface keeps the road's grip unless the track declares the point off the track, in which case it takes the off-track value - clamped so nothing asks a tyre for more than 1.5 or less than 0.02. SimulationLoop::updateWheelSurfaceGrip samples the contact patch of each wheel (the pivot lowered by the tyre's current radius, the same point the blob shadow sits on) once per physics step and hands the four multipliers to VehicleSimulator::setWheelSurfaceGrip; KsTireModel grew a batch overload that takes a mu per wheel, so one wheel on the grass slides while the other three keep the road, and the friction-circle usage reads the wheel's own mu. With no wheel nodes bound, or a track with no racing line, every multiplier stays 1 and the car drives exactly as before. The numbers are the authored starting point, not a measurement: nothing has been calibrated against a real car or lap time yet, and the per-track surfaces.ini FRICTION still only reaches the base grip through TrackSurface, not these per-kind values. Evidence: surface_grip_test (the ordering road > kerb > soil > grass > gravel > sand, clamping, an unnamed surface on and off the track, a car with each wheel on a different surface, all four on the road leaving everything at 1, no racing line leaving everything at 1, and grass worse than kerb on the same track). The effects half now lands too. SurfaceEffects.h turns the same per-wheel GroundKind into rates, and SimulationLoop parks one dust emitter and one stone emitter at each wheel's contact point (particle indexes 11..18, under the same video.particles gate as the rest): grass makes dust, sand the most dust, soil dust and a few stones, gravel dust and the most stones, while a kerb or the asphalt makes neither. Nothing is thrown below 2 m/s, the rate builds to full at 25 m/s, and wet ground holds what it has - above 0.35 wetness both emitters stay off, so a soaked gravel trap neither dusts nor spits. The sound follows the measurement instead of the old grip-deficit guess: the rolling layer is tinted with the loudest ground the four wheels report (gravel, then soil, sand, grass, kerb, asphalt), so two wheels in the gravel sound like gravel; soil and sand ride the grass layer because the mixer has no layer of their own, and a car with no contact point sampled keeps the effectiveMu fallback. Evidence: surface_effects_test (the rates per kind, the speed and wetness gates, one wheel in the gravel beside three on the road, the dominance order, the sprite budget, the emitter drive functions). Still missing: the per-track surfaces.ini FRICTION still only reaches the base grip through TrackSurface and not these per-kind values, none of the numbers has been calibrated against a real car or lap time, and the stones are billboard quads like every other particle, so they read as chips rather than as gravel bouncing."
       }
