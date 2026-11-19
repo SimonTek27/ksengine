@@ -4,7 +4,7 @@ Inventario dei gap (status `partial`/`missing`) nei documenti di `system/cfg/`.
 Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + side tiles),
 busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
 camera (free/chase/cockpit/cameraViews), coloredShadows, materialMapping, gameplayTweaks
-(mechanicalFailures + damageAffectsDriving).
+(mechanicalFailures + damageAffectsDriving), settings.entries (ui).
 
 ## Stato attuale
 
@@ -26,13 +26,13 @@ Cluster C — Controlli / input:
 
 Cluster D — Gameplay / sessione / rete / UI / contenuti: ~33 gap.
 Molti sono già implementati nel codice (gameplayTweaks, surfaceEffects, standings, showrooms,
-materialMapping, spectatorMode, photoMode) ma marcati partial per dettagli mancanti.
+materialMapping, spectatorMode, photoMode, carFilters) ma marcati partial per dettagli mancanti.
 Gli altri richiedono implementazione ex novo.
 
 ## Gap chiusi in questa sessione (doc audit + implementazione)
 headPhysics, brakeGlow, surfaceEffects, upgrades, pitService, camera (free/chase/cockpit/cameraViews),
 busMix, ssgi, SSR, localLights, windscreenEffects, mirrors, coloredShadows, materialMapping,
-gameplayTweaks (mechanicalFailures + damageAffectsDriving), settings.entries (aggiunto "ui").
+gameplayTweaks (mechanicalFailures + damageAffectsDriving), settings.entries (ui).
 
 ## Priorità suggerite
 1. Cluster B: bloomAndFlare lens flare (implementare flare pass) — medio, verificabile con screenshot.
