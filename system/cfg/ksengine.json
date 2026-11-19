@@ -517,7 +517,7 @@
     "sources": [
       {
         "feature": "carFilters",
-        "status": "partial",
+        "status": "live",
         "landsAs": "CARS page",
         "note": "Scrolling list with the car name; brand, class and year come from <car>/ui_car.json and each filter row exists only when at least one car declares that field. A folder with no metadata is listed by its folder name."
       },
