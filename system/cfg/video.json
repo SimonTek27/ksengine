@@ -84,7 +84,7 @@
       "feature": "bloomAndFlare",
       "status": "live",
       "landsAs": "bloom (bright pass + separable blur)",
-      "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Occlusion-driven lens flare is not implemented."
+      "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Lens flare (ghosts along the centre-to-pixel vector + anamorphic horizontal streak) is computed in the display pass from the bloom buffer, gated on bloomStrength."
     },
     {
       "feature": "ssgi",
