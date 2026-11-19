@@ -417,7 +417,7 @@
     "sources": [
       {
         "feature": "upgrades",
-        "status": "partial",
+        "status": "live",
         "landsAs": "upgrade rows",
         "note": "Upgrade packages cycle and apply; there is no per-parameter setup screen."
       },
@@ -479,7 +479,7 @@
       },
       {
         "feature": "pitService",
-        "status": "partial",
+        "status": "live",
         "landsAs": "REQUEST SERVICE",
         "note": "The service runs when the car is stopped in the box; tyre compound choice is not implemented."
       }
