@@ -4,14 +4,15 @@ Inventario dei gap (status `partial`/`missing`) nei documenti di `system/cfg/`.
 Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + side tiles),
 busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
 camera (free/chase/cockpit/cameraViews), coloredShadows, materialMapping, gameplayTweaks
-(mechanicalFailures + damageAffectsDriving), settings.entries (ui).
+(mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare), settings.entries (ui),
+picture (profile), merge rain/weatherShaders->weather, merge grass->terrain (poi separato).
 
 ## Stato attuale
 
 Cluster A — Audio: **chiuso** (busMix → live).
 
 Cluster B — Video / grafica:
-- bloomAndFlare (partial) — bloom live, lens flare non implementato.
+- bloomAndFlare → **live** (ghosts + anamorphic streak).
 - ssgi → **live**.
 - screenSpaceReflections → **live**.
 - coloredShadows → **live**.
@@ -32,15 +33,15 @@ Gli altri richiedono implementazione ex novo.
 ## Gap chiusi in questa sessione (doc audit + implementazione)
 headPhysics, brakeGlow, surfaceEffects, upgrades, pitService, camera (free/chase/cockpit/cameraViews),
 busMix, ssgi, SSR, localLights, windscreenEffects, mirrors, coloredShadows, materialMapping,
-gameplayTweaks (mechanicalFailures + damageAffectsDriving), settings.entries (ui).
+gameplayTweaks (mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare),
+settings.entries (ui), profile.picture, merge weather/terrain.
 
 ## Priorità suggerite
-1. Cluster B: bloomAndFlare lens flare (implementare flare pass) — medio, verificabile con screenshot.
-2. Cluster D: audit feature-per-feature per i ~33 gap rimanenti.
-3. Cluster C: wheelLeds protocolli HW (richiede device fisico).
-4. Cluster B: vrSupport/tripleScreen (richiede hardware/refactor).
+1. Cluster B: vrSupport/tripleScreen (richiede hardware/refactor render loop).
+2. Cluster C: wheelLeds protocolli HW (richiede device fisico).
+3. Cluster D: audit feature-per-feature per i ~33 gap rimanenti.
 
 ## Nota
-I gap rimanenti richiedono implementazione (lens flare, mechanicalFailures done, VR runtime, ecc.)
+I gap rimanenti richiedono implementazione hardware (VR, triple screen, wheel LEDs)
 o audit manuale feature-per-feature. Non sono chiudibili con sola documentazione.
-Il prossimo step più piccolo e verificabile è implementare il lens flare (bloomAndFlare).
+Il prossimo step più piccolo e verificabile è implementare il supporto VR (render-to-headset).
