@@ -3,19 +3,19 @@
 Inventario dei gap (status `partial`/`missing`) nei documenti di `system/cfg/`.
 Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + side tiles),
 busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
-camera (free/chase/cockpit/cameraViews), gameplayTweaks resta partial (mechanicalFailures).
+camera (free/chase/cockpit/cameraViews), coloredShadows.
 
-## Stato attuale (aggiornato)
+## Stato attuale
 
 Cluster A — Audio: **chiuso** (busMix → live).
 
 Cluster B — Video / grafica:
-- bloomAndFlare (partial) — nessun codice; da implementare o marcare notApplicable.
-- ssgi → **live** (gather+blur pipeline).
-- screenSpaceReflections → **live** (ssrParams wired).
-- coloredShadows (partial) — header presente, non cablato al runtime.
-- localLights → **live** (NativeRenderer::setLocalLights + clustering).
-- vrSupport (partial) — XrManager/XrInput presenti, da verificare con headset.
+- bloomAndFlare (partial) — bloom live, lens flare non implementato.
+- ssgi → **live**.
+- screenSpaceReflections → **live**.
+- coloredShadows → **live**.
+- localLights → **live**.
+- vrSupport (partial) — codice presente, da verificare con headset.
 - tripleScreen (missing) — richiede refactor render loop.
 
 Cluster C — Controlli / input:
@@ -23,19 +23,20 @@ Cluster C — Controlli / input:
 - headTracking (partial) — offset cockpit live, device input stub.
 - vrInput (partial) — XrInput/VrInputAdapter cablati, da verificare con headset.
 
-Cluster D — Gameplay / sessione / rete / UI / contenuti: ~40 gap (vedi ksengine.json).
+Cluster D — Gameplay / sessione / rete / UI / contenuti: ~35 gap.
+Molti sono già implementati nel codice (gameplayTweaks, surfaceEffects, standings, showrooms,
+materialMapping) ma marcati partial per dettagli mancanti. Gli altri richiedono implementazione.
 
-## Gap chiusi in questa sessione (doc audit)
+## Gap chiusi in questa sessione (doc audit + implementazione)
 headPhysics, brakeGlow, surfaceEffects, upgrades, pitService, camera (free/chase/cockpit/cameraViews),
-busMix, ssgi, SSR, localLights, windscreenEffects, mirrors.
+busMix, ssgi, SSR, localLights, windscreenEffects, mirrors, coloredShadows.
 
 ## Priorità suggerite
-1. Cluster B residuo: coloredShadows (cablare ColoredShadows al runtime) — piccolo, verificabile.
-2. Cluster B: bloomAndFlare — implementare flare pass o marcare notApplicable.
-3. Cluster C: wheelLeds protocolli HW (richiede device).
-4. Cluster D: audit per feature (molti sono già live nel codice).
+1. Cluster B: bloomAndFlare lens flare (implementare flare pass) o marcare notApplicable.
+2. Cluster D: audit per feature — verificare stato reale del codice per i 35 gap rimanenti.
+3. Cluster C: wheelLeds protocolli HW (richiede device fisico).
+4. Cluster B: vrSupport/tripleScreen (richiede hardware/refactor).
 
-## Prossimo passo consigliato
-Auditare un cluster alla volta: verificare lo stato reale del codice,
-aggiornare il JSON se il codice è già live, oppure implementare il gap
-mancante con test + smoke. Iniziare da coloredShadows (cluster B).
+## Nota
+I gap rimanenti richiedono implementazione (lens flare, mechanicalFailures, VR runtime, ecc.)
+o audit manuale feature-per-feature. Non sono chiudibili con sola documentazione.
