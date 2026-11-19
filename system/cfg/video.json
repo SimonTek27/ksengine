@@ -1,0 +1,211 @@
+{
+  "note": "The video section of the simulator's config: ksengine.json points here with \"video\": \"system/cfg/video.json\". What this file drives at start-up: resolution, renderMode/renderModes (named bundles over deferred and forward), exposure, tonemap, ssao, ssr, ssgi with ssgiRadius and ssgiIntensity, motionBlur, vsync, frameLimit, anisotropicFiltering, mirrors with mirrorResolution, particles, headPhysics, shadowMapSize and shadowCascades. saturation and contrast control the post-processing colour grading; live values override the ppfilter preset. The VIDEO (OPTIONS) page carries the same rows the launcher's own video page has - resolution, fullscreen, vsync, frame limit, anisotropic filtering, ssao, ssr, ssgi, mirrors, motion blur, particles, head physics, exposure, saturation, contrast, tonemap - applies them live and writes each one back into the settings file, so the next start reads the value the player chose; shadowMapSize, shadowCascades and mirrorResolution are stored by the page and applied at the next start, because they build GPU state once. The page is grouped in foldable sections (VIDEO, QUALITY, IMAGE, SOUND, GAMEPLAY: the header row opens and closes its own rows, and opening the page from AUDIO or GAMEPLAY unfolds the section of the row it lands on); which sections were folded is stored in ui.collapsedSections and applied on the next start; ssao and ssr default to on: they cost nothing measurable in the showroom (82.6-83.5 fps with them on and off at 2560x1392) and they are what makes a car sit on the floor, so the image the menus sit over has contact shadows and reflections; turning them off is the player's call on the VIDEO page; msaa, postProcessFilter and hdrOutput document that state instead of setting it - the pipelines are built with one sample, the ppfilter preset is the display pass's, and the swapchain decides HDR output.",
+  "saturation": 1.0,
+  "contrast": 1.0,
+  "resolution": "auto",
+  "resolutions": [
+    "1920x1080",
+    "1600x900",
+    "1280x720"
+  ],
+  "fullscreen": false,
+  "vsync": true,
+  "frameLimit": 0,
+  "renderMode": "auto",
+  "renderModes": {
+    "note": "Named bundles over ssao/ssr/ssgi/motionBlur. renderMode picks one; \"auto\" or an unknown name leaves the individual keys as the authority. A mode may name only the fields it changes: the rest keep the built-in value of the same name (or false for a new name).",
+    "forward": {
+      "deferred": false,
+      "ssao": false,
+      "ssr": false,
+      "ssgi": false,
+      "motionBlur": false
+    },
+    "deferred": {
+      "deferred": true,
+      "ssao": true,
+      "ssr": true,
+      "ssgi": false,
+      "motionBlur": false
+    },
+    "deferred-full": {
+      "deferred": true,
+      "ssao": true,
+      "ssr": true,
+      "ssgi": true,
+      "motionBlur": true
+    }
+  },
+  "gbufferOverrides": [],
+  "ssao": true,
+  "ssr": true,
+  "motionBlur": true,
+  "exposure": 0.72,
+  "tonemap": "ACES",
+  "tonemaps": [
+    "NONE",
+    "REINHARD",
+    "ACES",
+    "UNCHARTED2",
+    "FILMIC"
+  ],
+  "postProcessFilter": "Normal",
+  "hdrOutput": false,
+  "msaa": 1,
+  "anisotropicFiltering": 8,
+  "shadowMapSize": 2048,
+  "shadowCascades": 3,
+  "mirrors": false,
+  "mirrorResolution": "512x128",
+  "particles": true,
+  "ssgi": false,
+  "ssgiRadius": 0.05,
+  "ssgiIntensity": 1.0,
+  "sources": [
+    {
+      "feature": "windowOutput",
+      "status": "live",
+      "landsAs": "resolution, fullscreen, vsync, frame limit, anisotropic, shadow map, AA samples",
+      "note": "Resolution, fullscreen and vsync switch the window and the swapchain; the frame limit paces the loop (0 = vsync only) and the anisotropy number caps the material samplers at the device limit. All of it comes from this file."
+    },
+    {
+      "feature": "displayTuning",
+      "status": "live",
+      "landsAs": "exposure, tonemap",
+      "note": "Exposure and the tone curve are read from this file at startup, applied after the post preset, and the page reads them back from the renderer."
+    },
+    {
+      "feature": "albedoColorSpace",
+      "status": "live",
+      "landsAs": "sRGB decode of the material albedo in every lit path",
+      "note": "The albedo textures upload as UNORM (their file bytes), so the lit paths decoded nothing: the sRGB values were shaded as if scene-linear, which made every surface ~2.3x brighter than authored and the tone curve then squeezed the frame into a near-white band (grey trees, snow-white paddock, fog-coloured sky at 224/231/233). gbuffer.frag and native_forward.frag now pow(2.2) the material albedo (photographic backdrops keep their encoded values, they are display-referred by design), vegetation.frag and terrain.frag decode their diffuse layers, and the weather haze tint SimulationLoop feeds to setFog is converted display->linear at the call site. Measured on the mugello chase capture: frame mean 195->157, sky (224,231,233)->(179,208,227), near asphalt (200,207,212)->(113,116,121). Showroom rooms keep their own light/exposure calibration, which predates the decode and now reads darker - per-room retune is still open. Evidence: test_renderer (IBL metal margin and the P4 clip exposure recalibrated to the linear domain)."
+    },
+    {
+      "feature": "bloomAndFlare",
+      "status": "partial",
+      "landsAs": "bloom (bright pass + separable blur)",
+      "note": "Bloom is a real half-resolution pass - glare extract, blur H, blur V - feeding the display pass. Occlusion-driven lens flare is not implemented."
+    },
+    {
+      "feature": "ssgi",
+      "status": "live",
+      "landsAs": "half-res gather + gaussian denoise",
+      "note": "The bounce is gathered at half resolution by ssgiGather.frag into its own target and denoised with two gaussian axes before the deferred lighting pass samples it as binding 8 - that filter is what keeps a wide video.ssgiRadius smooth. video.ssgi turns it on (and switches the render path to deferred, because the forward path never runs that shader, off by default); video.ssgiRadius and video.ssgiIntensity tune footprint and strength. The two engine-side ssgi compute shaders build but nothing dispatches them."
+    },
+    {
+      "feature": "screenSpaceReflections",
+      "status": "live",
+      "landsAs": "ssr",
+      "note": "Screen-space reflections exist; planar and mirror reflections do not."
+    },
+    {
+      "feature": "shadowMap",
+      "status": "live",
+      "landsAs": "shadowMapSize, shadowCascades",
+      "note": "Cascaded directional shadows. video.shadowCascades picks 1..3 layers and video.shadowMapSize the depth resolution; SimulatorApp applies both at start-up (setCascadeCount/setResolution rebuild the attachments). The old 'without per-frame retargeting' note was stale: NativeRenderer::recordFrame calls CascadedShadowMap::update(m_view, m_proj, m_camNear, m_camFar, m_sun.direction) every frame, which unprojects the live camera frustum, recomputes the practical split distances from the camera's actual near/far, and refits each cascade's light-space matrix to that slice (the fitted radius is quantised to 1/16 m so the edge does not shimmer as the camera moves). The same pass then draws every castShadow mesh once per live cascade into the sampler2DArray both lighting paths read, selecting the cascade from the fragment's view depth. Evidence: the update and draw path in NativeRenderer.cpp; colored_shadows_test covers the shadow colour rule and wheel_shadow_test the contact rule."
+    },
+    {
+      "feature": "wheelShadowing",
+      "status": "live",
+      "landsAs": null,
+      "note": "On screen. The transparent pass is not new and was not added here: NativeRenderer's Pass 3 ('transparent geometry') already draws every NativeMesh::blended after the opaque pass, depth-tested read-only against the GBuffer, far to near, with premultiplied alpha (ONE / ONE_MINUS_SRC_ALPHA), so a blob needed geometry, not a pipeline. WheelShadow.h builds it: a 5x5 grid on the XZ plane, black, with the alpha falling off from the centre (full opacity there) to the rim (transparent), which is what makes a soft patch instead of a black square without a texture. SimulationLoop::updateWheelShadows places one under each wheel every frame: the contact point is the body matrix times the wheel pivot lowered by the tyre's effective radius, 20 mm above the road, yaw only so the blob lies flat; the mesh is rebuilt when the opacity level changes and not per frame, because the alpha rides in the vertices (eight levels, and an invisible wheel is scaled to nothing instead of drawn transparent). Opacity and radius come from WheelShadowing::evaluate through wheelShadowQuad, and the height they fade over comes from TrackSurfaceQuery - the same sample the track limits read - so the floor is the racing line's height at the nearest point and a car in the air fades all four blobs. (Measuring against the lowest of the four contacts was the first version, before the query existed; it now only covers a track with no racing line.) Still approximate, and the query says so: the floor is the line, not the track mesh, so banking and kerb heights are not in it. Only the player's car has shadows, and the entities and their meshes are destroyed with the car visuals. Evidence: wheel_shadow_test (the model, the quad's size and opacity, the grid's falloff, the ground plane, the indices, and nothing built when the shadow is invisible). A capture baseline now watches it too: ksim writes the frame's signature with KS_VISUAL_DIGEST (FrameDigest.h: an FNV hash plus a 12x10 luma grid), tools/visual_baseline.ps1 drives the run, and visual_baseline_test compares the signature to tests/visual/<scenario>.baseline within a 0.06 grid distance, reporting the hash even when the tolerance lets a difference through. The showroom scenario is recorded; the driving ones need track content installed."
+    },
+    {
+      "feature": "coloredShadows",
+      "status": "partial",
+      "landsAs": "the shadow residual in both lighting paths (native_forward.frag, deferred_lighting.frag)",
+      "note": "The grey unlit floor moved out of sampleShadow() and into the call sites, where it became a colour: a shadowed surface keeps the atmosphere's own tint (frame.fogColor normalised to unit luminance) at the same 0.35 energy, so a shadow keeps the brightness it always had and changes hue - cool in daylight, warm at sunset. Both paths share the rule, and the constant is named once per shader (KS_SHADOW_FLOOR). Not verified on screen: the only 3D scene available locally is the industrial showroom, which carries no directional sun - forcing the sun term to magenta there changes no pixel, so there is no sun-lit shadow to look at. A scene with the sun up (a loadable track) is what the visual check needs."
+    },
+    {
+      "feature": "localLights",
+      "status": "live",
+      "landsAs": "deferred lighting pass (tiled), showroom local lights",
+      "note": "Point and spot lights in world space, shaded by the deferred lighting pass. The CPU bins them into 16 px screen tiles (simulator/LocalLights.h, conservative 2D binning bounded by KS_LIGHT_MAX_PER_TILE) and the pass reads only its tile's list, so per-pixel cost is the lights that reach the pixel, not the scene's. The showroom stage builds the lamp list from its config (cfg.localLights) and feeds setLocalLights each frame; the track path still passes an empty list, which is the missing half of CSP [DYNAMIC_LIGHTS] (schedule on track extensions). Evidence: local_lights_test."
+    },
+    {
+      "feature": "localLightShadows",
+      "status": "live",
+      "landsAs": "KS_LIGHT_SHADOWS shadow atlas",
+      "note": "One perspective layer per spot lamp, six cube faces per point light (simulator/LocalLightShadows.h), packed into a layer atlas (simulator/LocalShadowAtlas.h) rendered with the engine's ksShadow pipeline and sampled as sampler2DArray by the lighting pass. SimulatorApp initializes the atlas at startup and attaches it to the renderer; KS_LIGHT_SHADOWS=0 keeps the lamps unshadowed. Evidence: local_shadows_test."
+    },
+    {
+      "feature": "autoExposure",
+      "status": "live",
+      "landsAs": "showroom exposure (metering, adaptation)",
+      "note": "Scene metering over a downsampled luminance read (rect or full frame, simulator/AutoExposure.h) with adaptation toward the target and clamp limits; the showroom loop owns the stop (SimulationLoop::updateShowroomAutoExposure) and the console grade exposure rides on top of it. The driving path keeps its fixed video.exposure. Evidence: auto_exposure_test."
+    },
+    {
+      "feature": "shaderSettingsImport",
+      "status": "live",
+      "landsAs": "model.json shaderSettings (CSP [SHADER_REPLACEMENT_*] import)",
+      "note": "The car's own model document carries the content's CSP shader-replacement sections folded into a shaderSettings block (engine/Graphics/ShaderSettings.h); the loader applies them to the .kn5's materials in place. Precedence is fixed: PBR the .kn5 authors wins, then the material database, then the preset default. Import only - no engine feature is expressed as an AC section. Evidence: shader_settings_test."
+    },
+    {
+      "feature": "materialDatabase",
+      "status": "live",
+      "landsAs": "system/cfg/carmaterial.json, locationmaterial.json, charactermaterial.json",
+      "note": "Per-domain knowledge base collected from real AC content: what each material name means (classification patterns), the property ranges measured over the KN5s, and the 'look' column that says how to reproduce the type with the engine's own shaders. engine/Graphics/MaterialDatabase.h loads it and infers PBR (roughness = 1 - pbSmoothness) for legacy content that never declared any; a silent miss changes nothing. Staged next to the binaries by cmake/KsInstallLayout.cmake. Evidence: material_database_test."
+    },
+    {
+      "feature": "modelMaterialsEditing",
+      "status": "live",
+      "landsAs": "console material commands writing model.json",
+      "note": "The console lists the car's material entries (readModelMaterials) and set/remove rewrite the one entry in the car's model.json (simulator/ModelMaterials.h), which is the same block the loader applies at the next load - the console and the loader share one format. Values arrive as text ('0.9', '255,255,255,0.5') and parse through the same JSON reader. Evidence: model_materials_test."
+    },
+    {
+      "feature": "kn5ImportParameters",
+      "status": "live",
+      "landsAs": "model.json kn5 block (model, skin, scale, rotation) + the MODEL and SKIN rows on CARS",
+      "note": "A .kn5 is imported with a set of choices around the file, the job FBXImportSettings does for an .fbx; they live in the car's own model document under a kn5 block, beside lods, materials and shaderSettings (simulator/Kn5ModelParameters.h): model (the file the car is built from), skin (the texture set under skins/<id>, empty = the first one), scale (import scale, omitted when 1) and rotation ([x, y, z] degrees about the model's origin, right-handed, applied X then Y then Z, omitted at zero). Read order is the document first and the old heuristics only behind it - model: kn5.model, then lods, then file size; skin: KS_SKIN (a one-off override), then kn5.skin, then the first folder by name - so a car no longer opens on a distance copy or on the wrong skin because a heuristic guessed differently. The loader records what it resolved the first time a car is opened without a block, and never rewrites a block that exists: the write is read-modify-write, keeps every other key of the document where it was and keeps the file's own indentation, and a document that does not parse is refused rather than overwritten. scale and rotation are applied to the model's vertices and normals as they are read, so the bounds, the lift onto the showroom floor and every camera see the same car; a value that cannot be read (a scale of 0, a rotation that is not three numbers) is not used. On screen the block is reachable: CONTENT -> CARS carries a MODEL row and a SKIN row that cycle the choices the folder really offers and write them back, and CONTENT -> SKINS lists the skins with the recorded one marked. Evidence: kn5_model_parameters_test, car_import_menu_test, skin_select_test."
+    },
+    {
+      "feature": "modelDocumentPersistent",
+      "status": "live",
+      "landsAs": "model.json as the model's own persistent (materials baseline + the kn5 import parameters)",
+      "note": "A converted car's model document carries its main .kn5's own materials as baseline shaderSettings entries (shader, preset classification, the surface-model properties verbatim: ksDiffuse/ksSpecular/ksSpecularEXP/ksAlphaRef/fresnel*/detail/pb*), so the loader reads the file's description from the document instead of re-deriving it per load. Content-authored entries (the CSP fold) outrank the baseline and a re-run refreshes a baseline it wrote before (source 'kn5'). The loader picks the car's model file from the document in this order: the kn5 block's model (kn5.model - the file a load recorded, or the one CONTENT set; simulator/Kn5ModelParameters.h), then the lods block's closest LOD (the FILE of the smallest IN, simulator/ModelSource.h), then the size heuristic - so an explicit choice outranks the table, and content that ships lods still decides for a car that states no model of its own. Geometry stays binary (.kn5 embedded). Evidence: model_source_test."
+    },
+    {
+      "feature": "digitalDashboards",
+      "status": "live",
+      "landsAs": "CAR DASH panel: the display the loaded car declares in its data/data.json",
+      "note": "A car's own digital cluster (CSP's digital instruments) is declared in its data/data.json as dash / ledStrip / digits / bars / lights: position, size, backlight, LED count and colours, the rpm the strip starts at, the blink at the limiter, and one channel per digit, bar or light. DigitalDash parses the document and answers a frame, DigitalDashRenderer turns that frame into primitives, and ui/DigitalDashPanel places them in the CAR DASH panel at the bottom right, painted through the same draw list as the rest of the HUD. The frame is the one the HUD and the wheel strip are handed - the fuel share converted from the HUD's percentage to the display's fraction, the handbrake from the demand the rear axle is actually getting - so the car display, the H-DASH and the strip cannot disagree. A car that declares nothing draws nothing: the cockpit stays the content's. The LED strip reads position and size like the other elements, so a bar of LEDs across the display is the document's decision, not the engine's. KS_CAR_DASH=<file> points the panel at a document of its own for a capture. Evidence: digital_dash_test (parse and channels), digital_dash_renderer_test (the primitive list), digital_dash_panel_test (read from the car folder, the HUD frame, the placement on screen) and a capture of the running app with KS_CAR_DASH (99 km/h, gear 2, 7k rpm, eight of twelve LEDs lit, a 66% fuel bar). Not done: the display is a panel over the view, not a texture on the car's own LCD in the cockpit - the room draws whatever geometry the car's .kn5 carries - and the lights channel has no headlight state to read yet."
+    },
+    {
+      "feature": "showroomInspector",
+      "status": "live",
+      "landsAs": "inspector panel (mesh/material under the pointer) + white balance",
+      "note": "CSP's part picker: the pointer is picked against the showroom scene (simulator/ShowroomInspector.h) and the panel (ui/InspectorPanel.h) shows the mesh, its material and its live shader properties; the same console can edit them. The room's white balance (simulator/ShowroomColor.h) measures the balance against a neutral 6500 K so a grey stays grey. Evidence: showroom_inspector_test, showroom_color_test."
+    },
+    {
+      "feature": "renderModes",
+      "status": "live",
+      "landsAs": "video.renderMode + video.renderModes over the deferred/forward switches",
+      "note": "Forward and deferred paths exist; a render mode is a named bundle over the switches that select between them. SimulatorApp loads video.renderModes over the built-in table (forward, deferred, deferred-full), and video.renderMode picks one: the chosen bundle overwrites ssao/ssr/ssgi/motionBlur and can open the deferred path on its own, while \"auto\" or an unknown name leaves the individual keys exactly as before. A document can add a mode or override a field of a built-in one. The options page still edits the individual switches, which then win for that run. Evidence: render_modes_test."
+    },
+    {
+      "feature": "gbufferLayout",
+      "status": "live",
+      "landsAs": "deferred G-buffer plus video.gbufferOverrides",
+      "note": "The deferred path has its own G-buffer layout. video.gbufferOverrides is an array of per-material objects: {\"material\": \"sky\", \"disable\": true} keeps that material out of the opaque targets (the transparent pass still draws it over the lit image), and {\"material\": \"glass\", \"channels\": [\"albedo\", \"emissive\"]} states the subset of albedo/normal/roughness/metallic/emissive/depth the material needs. SimulatorApp loads the array into GBufferLayoutManager and hands it to NativeRenderer; the draw list skips a disabled material only in the G-buffer pass, so forward rendering and the shadow casters are unaffected. Channel subsets are carried by the manager but the shared G-buffer pipeline still writes every attachment, so a subset does not change a pixel yet. Evidence: gbuffer_layout_test."
+    },
+    {
+      "feature": "postChain",
+      "status": "live",
+      "landsAs": "postProcessFilter",
+      "note": "The deferred frame ends in a native display pass, and that pass is the whole post chain by design - there is no external middleware to plug in. NativeRenderer records: G-buffer, deferred lighting with volumetric fog, half-res SSGI gather plus two-axis denoise, transparent geometry, TAA resolve, bloom bright-pass plus both blur axes, the auto-exposure ladder into an R8 target, then the display pass. That last pass applies exposure, the selected tone curve (none/Reinhard/ACES/Uncharted2/Filmic), HDR10 PQ/Rec.2020 output when asked, the ppfilter grading LUT (or the [COLOR] hue/sepia pair), saturation and contrast, the TAA-only unsharp mask, the bloom fold-in weight and the preset/metered depth of field. video.postProcessFilter names the preset, and the LUT plus its switches come from it. Evidence: the pass list in NativeRenderer.cpp and the TonemapPC contract it shares with tonemap.frag."
+    },
+    {
+      "feature": "vrSupport",
+      "status": "partial",
+      "landsAs": "OpenXR bootstrap and XrManager integration",
+      "note": "OpenXR instance/system/session bootstrap and Vulkan extension wiring exist; render-to-headset and full input are not enabled yet."
+    },
+    {
+      "feature": "tripleScreen",
+      "status": "missing",
+      "landsAs": null,
+      "note": "One window, one swapchain: no triple-head splitting or side-angle correction."
+    }
+  ],
+  "headPhysics": true
+}
