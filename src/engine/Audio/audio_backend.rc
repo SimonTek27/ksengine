@@ -1,0 +1,4 @@
+#include "audio_backend_resource.h"
+
+IDR_AUDIO_BACKEND_64 RCDATA "fmod64.dll"
+IDR_AUDIO_BACKEND_STUDIO_64 RCDATA "fmodstudio64.dll"

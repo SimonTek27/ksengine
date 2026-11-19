@@ -21,7 +21,7 @@ find_package(Vulkan REQUIRED)
 
 set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorApp.cpp
-	${CMAKE_SOURCE_DIR}/src/engine/Audio/fmod.rc
+	${CMAKE_SOURCE_DIR}/src/engine/Audio/audio_backend.rc
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_NetSync.cpp
 	# roadmap 2.7 — box service (plan -> PitLaneRepair -> refuel/damage)

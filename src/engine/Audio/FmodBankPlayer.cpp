@@ -4,7 +4,7 @@
 // Corsa, and every behaviour (init flags, sample pump, common.bank) was
 // proven against the ferrari_499p bank before being written down.
 #include "FmodBankPlayer.h"
-#include "resource.h"
+#include "audio_backend_resource.h"
 
 #include <cstdio>
 #include <cstring>
@@ -171,8 +171,8 @@ bool FmodBankPlayer::initialize(const std::string& dllDirectory) {
             return true;
         };
 
-        if (extractResource(IDR_FMOD64, "fmod64.dll") &&
-            extractResource(IDR_FMODSTUDIO64, "fmodstudio64.dll")) {
+        if (extractResource(IDR_AUDIO_BACKEND_64, "fmod64.dll") &&
+            extractResource(IDR_AUDIO_BACKEND_STUDIO_64, "fmodstudio64.dll")) {
             dir = extractDir;
         } else {
             m_lastError = "FMOD DLLs not found and could not be extracted from resources";

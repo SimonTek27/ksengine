@@ -1,2 +1,0 @@
-#define IDR_FMOD64 101
-#define IDR_FMODSTUDIO64 102
