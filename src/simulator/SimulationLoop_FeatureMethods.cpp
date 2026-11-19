@@ -340,12 +340,6 @@ void SimulationLoop::spawnAiGrid(int count) {
 void SimulationLoop::applyDamageEffects() {
 #if HAS_VEHICLE_SIM
     if (!m_vehicle) return;
-    const auto& tweaks = ks::engine::sim::GameplayTweaks::instance().getTweakSet();
-    if (tweaks.damageAffectsDriving) {
-        m_vehicle->setEnginePower(260.0 * std::max(0.15, (double)m_vehicle->damage().powerMultiplier()));
-    } else {
-        m_vehicle->setEnginePower(260.0);
-    }
 #endif
 }
 
