@@ -635,9 +635,9 @@
       },
       {
         "feature": "photoMode",
-        "status": "partial",
+        "status": "live",
         "landsAs": "photo mode",
-        "note": "Photo mode hands the camera to the orbital free camera of simulator/FreeCamera.h, driven through CameraController::setPhotoOrbit: the orbit is seeded where the driver's view already was, so the frame it opens on is the frame before it. The session stops while it is open (W/S/A/D move the orbit's point, so they would otherwise throttle and brake the car under the shot), the dashboard and the menu hide, the mouse orbits the car, the wheel zooms (radius clamped to the model's 1-50 m), Q/E lower and raise the point, and leaving it gives the previous camera mode back and resumes the session. The display pass applies the preset's colour grading, its configurable bloom strength and the real depth of field from the depthOfField block (focal length, aperture, metering); the photo-mode frame is saved through the same readback, after which the mode exits. F12 toggles it unless KS_PHOTOMODE names the mode itself. Evidence: photo_camera_test (seed without a jump, orbit, zoom clamps, pan in the camera's own frame, restore), free_camera_test."
+        "note": "Photo mode hands the camera to the orbital free camera of simulator/FreeCamera.h, driven through CameraController::setPhotoOrbit: the orbit is seeded where the driver's view already was, so the frame it opens on is the frame before it. The session stops while it is open (W/S/A/D move the orbit's point, so they would otherwise throttle and brake the car under the shot), the dashboard and the menu hide, the mouse orbits the car, the wheel zooms (radius clamped to the model's 1-50 m), Q/E lower and raise the point, and leaving it gives the previous camera mode back and resumes the session. The display pass applies the preset's colour grading, its configurable bloom strength, hue, sepia and the real depth of field from the depthOfField block (focal length, aperture, metering); the photo-mode frame is saved through the same readback, after which the mode exits. F12 toggles it unless KS_PHOTOMODE names the mode itself. Evidence: photo_camera_test (seed without a jump, orbit, zoom clamps, pan in the camera's own frame, restore), free_camera_test."
       }
     ]
   },

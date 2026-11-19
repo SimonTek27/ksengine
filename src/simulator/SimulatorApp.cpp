@@ -5,20 +5,28 @@
 
 #include "simulator/SimulationLoop.h"
 #include "simulator/CameraController.h"
+#include "simulator/AppPausePolicy.h"
 #include "simulator/DashboardOverlay.h"
 #include "simulator/TelemetryOverlay.h"
 #include "simulator/GameMenuOverlay.h"
 #include "simulator/ShowroomConfig.h"
 #include "simulator/PitStrategyBridge.h" // roadmap 2.7: menu pit plan -> loop state
 #include "simulator/InputManager.h"
+#include "simulator/HotkeyMap.h"
+#include "simulator/RenderModes.h"
 #include "simulator/SetupGarage.h"
 #include "simulator/NetworkManager.h"
 #include "simulator/ShadowSystem.h"
 #include "simulator/NativeRenderer.h"
+#include "simulator/FrameDigest.h" // KS_VISUAL_DIGEST: the capture's signature
+#include "simulator/TrackMaterialInventory.h" // KS_MATERIALS_REPORT: what the track is made of
+#include "simulator/LocationMaterialDocument.h" // ... and where its document lives
+#include "simulator/ModuleLoader.h" // native modules: the ABI and its loader
 #include "simulator/SimulatorAudio.h" // setMasterVolume (settings.json audio)
 // Phase 3 — per-player data folder + the two JSON settings files
 // (user/<player>/stats.json lives here too).
 #include "simulator/UserStats.h"
+#include "simulator/DriverProfileStore.h" // first-run driver.json
 // Roadmap 2.4/2.5 — KS_SCREENSHOT writes the readback with this Qt-free
 // encoder (same PNG writer the material module uses).
 #include "engine/material/PngCodec.h"
@@ -28,6 +36,10 @@
 #include "engine/assets/Paths.h"         // system/ppfilters/<id>.json
 #include "engine/Config/EngineSettings.h"
 #include "engine/Engine.h"
+#include "engine/input/WheelLedControl.h" // shift flash rate from wheelLeds.shiftFlashHz
+#include "engine/archive/ContentUnpacking.h" // CONTENT: installing a package
+#include "engine/sim/GameplayTweaks.h"    // gameplay.fuelConsumption -> the car's burn rate
+#include "GameplayOptionsBridge.h"       // GAMEPLAY page -> tweak set + settings
 #include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
 #include "devices/vr/XrManager.h"
@@ -38,11 +50,13 @@
 #include "engine/Config/Json.h"
 #include <iterator>
 #include <fstream>
+#include <sstream>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
+#include "LocalShadowAtlas.h"
 
 static const char* AC_PATH = "F:/SteamLibrary/steamapps/common/assettocorsa";
 // Installed layout: SPIR-V lives in system/shaders next to ksim.exe
@@ -86,6 +100,9 @@ static VkInstance g_vkInstance = VK_NULL_HANDLE;
 static VkSurfaceKHR g_surface = VK_NULL_HANDLE;
 static ks::sim::NativeRenderer* g_nativeRenderer = nullptr;
 static ks::sim::CascadedShadowMap g_shadowMap;
+// Local-light shadow layers (one per spot lamp, six per point light), rendered
+// with the same ksShadow pipeline and sampled by the deferred lighting pass.
+static ks::sim::LocalShadowAtlas g_localShadowAtlas;
 static std::unique_ptr<ks::sim::SimulationLoop> g_simulation;
 // --track <dir> from WinMain: same setting as KS_TRACK, see initSimulation().
 static std::string g_cliTrack;
@@ -96,6 +113,8 @@ static std::string g_cliTrack;
 // scope because the teardown path writes both back after the frame loop is
 // gone; see engine/Config/EngineSettings.h and engine/assets/UserData.h.
 static ks::engine::assets::UserLayout g_userLayout;
+// user/<player>/driver.json: the first-run profile and its completion flag.
+static std::string g_driverProfilePath;
 static ks::engine::config::EngineSettings g_engineSettings;
 
 static bool g_throttle = false, g_brake = false;
@@ -117,11 +136,19 @@ static double g_headlessSeconds = 0.0;
 // (there is no renderer to read back from).
 static std::string g_shotPath;
 static int g_shotDelay = 60;
+// KS_VISUAL_DIGEST: the frame's signature, written next to the screenshot so a
+// capture run leaves something a test can compare instead of an image nobody
+// looks at.
+static std::string g_visualDigestPath;
+// Native modules, loaded once at start-up and unloaded at exit (see WinMain).
+static ks::sim::ModuleLoader g_nativeModules;
 static bool g_shotRequested = false;
 static int g_shotFrame = 0;
 static double g_headlessElapsed = 0.0;
 static bool g_photoMode = false;
-static char g_photoModeKey = 0;
+// Global hotkeys from system/cfg/controls.json (controls.hotkeys). The
+// defaults in the struct are the keys the handler used to hardcode.
+static ks::sim::HotkeyMap g_hotkeys;
 
 // Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
 // scopes and the GPU markers read) and dumped on the way out; KS_PROFILE_CSV
@@ -273,16 +300,26 @@ static void handleKeyDown(int vk) {
         if (im) im->setKeyDown(vk);
         return;
     }
-    // Roadmap 4.x — photo mode toggle (F12 by default, or KS_PHOTOMODE=<key>).
-    if (g_photoMode && vk == g_photoModeKey) {
-        g_simulation->setCameraMode(ks::sim::CameraController::Mode::Free);
+    // Roadmap 4.x — photo mode toggle. controls.hotkeys.photoMode names the
+    // key (F12 by default); KS_PHOTOMODE=<key> overrides it for a run.
+    if (vk == g_hotkeys.photoMode) {
+        // The orbit of camera/FreeCamera.h, seeded where the driver's view was
+        // so the frame photo mode opens on is the frame before it.
+        g_simulation->setPhotoOrbit(true);
+        // The car stops while the camera flies: the orbit's pan keys are W/S/A/D,
+        // which would otherwise throttle and brake the car under the shot. The
+        // exit path already resumed the session, so this is the half that was
+        // missing.
+        if (g_simulation->isRunning()) g_simulation->stop();
         g_simulation->ui().dashboard().setVisible(false);
         g_simulation->ui().menu().setVisible(false);
         g_photoMode = !g_photoMode; // toggle: first press enters, second exits
-        printf("[photo] %sphoto mode %s (key %c)\n", g_photoMode ? "entered" : "exited", g_photoModeKey ? "press again to exit" : "", g_photoModeKey);
+        printf("[photo] %sphoto mode (key %s)\n", g_photoMode ? "entered " : "exited ",
+               ks::sim::keyName(g_hotkeys.photoMode).c_str());
         if (!g_photoMode) {
             g_simulation->ui().dashboard().setVisible(true);
             g_simulation->ui().menu().setVisible(true);
+            g_simulation->setPhotoOrbit(false); // back to the view it had
             g_simulation->start(); // resume simulation
             // Disabilita DOF quando si esce dalla photo mode, tornando allo
             // stato "senza DOF" (il renderer mantiene l'ultimo setDepthOfField
@@ -321,51 +358,43 @@ static void handleKeyDown(int vk) {
     if (vk == kb.shiftDown) { if (im) im->setKeyDown(vk); return; }
     if (vk == kb.handbrake) { g_handbrake = true; return; }
 
-    switch (vk) {
-    case 'C': {
-        if (!g_simulation->camera()) break;
-        auto mode = g_simulation->camera()->mode();
-        if (mode == ks::sim::CameraController::Mode::Cockpit)
-            g_simulation->setCameraMode(ks::sim::CameraController::Mode::Chase);
-        else
-            g_simulation->setCameraMode(ks::sim::CameraController::Mode::Cockpit);
-        break;
-    }
-    case 'R': g_simulation->reset(); break;
-    case 'H':
-        if (auto* d = g_simulation->dashboard()) d->setVisible(!d->isVisible());
-        break;
-    case 'G':
-        if (auto* sg = g_simulation->setupGarage()) {
-            sg->toggleVisible();
-            if (sg->isVisible() && g_simulation->dashboard())
-                g_simulation->dashboard()->setVisible(false);
+    // Global hotkeys, read from controls.hotkeys in system/cfg/controls.json.
+    // Driving bindings returned above, so a player who binds an action to one
+    // of these keys keeps the action; an empty or unknown name in the document
+    // leaves the historic key in place.
+    if (vk == g_hotkeys.cameraCycle) {
+        if (g_simulation->camera()) {
+            auto mode = g_simulation->camera()->mode();
+            if (mode == ks::sim::CameraController::Mode::Cockpit)
+                g_simulation->setCameraMode(ks::sim::CameraController::Mode::Chase);
+            else
+                g_simulation->setCameraMode(ks::sim::CameraController::Mode::Cockpit);
         }
-        break;
-    case 'T':
+        return;
+    }
+    if (vk == g_hotkeys.resetSession) { g_simulation->reset(); return; }
+    if (vk == g_hotkeys.dashboard) {
+        if (auto* d = g_simulation->dashboard()) d->setVisible(!d->isVisible());
+        return;
+    }
+    if (vk == g_hotkeys.telemetry) {
         if (g_simulation->telemetry()) g_simulation->telemetry()->toggleVisible();
-        break;
-    case 'P':
+        return;
+    }
+    if (vk == g_hotkeys.pit) {
         // Roadmap 2.7: smart garage/pit toggle. Held in the box -> roll out
         // (pit limiter); on track -> head back to the box, where stopping
         // inside arms the box service. Elsewhere it is a no-op.
         if (g_simulation->isHeldInGarage()) g_simulation->requestLeaveGarage();
         else g_simulation->requestReturnToBox();
-        break;
-    case VK_F5:
-        if (shift) { g_simulation->stop(); printf("Stopped.\n"); }
-        else       { g_simulation->start(); printf("Driving started!\n"); }
-        break;
-    // GAP_MATRIX P0.5 — replay keys. F6 records, F7 pauses/resumes, ',' and
-    // '.' scrub by two seconds and '-'/'=' change the playback speed; the HUD
-    // line already reports where the playhead is. All of them are no-ops until
-    // a recording has been loaded, so they never shadow a driving key.
-    case VK_F6: {
+        return;
+    }
+    if (vk == g_hotkeys.replayRecord) {
         const std::string saved = g_simulation->toggleReplayRecording();
         if (!saved.empty()) printf("Replay saved: %s\n", saved.c_str());
-        break;
+        return;
     }
-    case VK_F7:
+    if (vk == g_hotkeys.replayPause) {
         if (g_simulation->replayPlaying()) {
             g_simulation->pauseReplayPlayback();
             printf("Replay paused.\n");
@@ -373,22 +402,9 @@ static void handleKeyDown(int vk) {
             g_simulation->resumeReplayPlayback();
             printf("Replay resumed.\n");
         }
-        break;
-    case VK_OEM_COMMA:
-        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(-2.0f);
-        break;
-    case VK_OEM_PERIOD:
-        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(2.0f);
-        break;
-    case VK_OEM_MINUS:
-        if (g_simulation->replayLoaded())
-            g_simulation->setReplaySpeed(g_simulation->replaySpeed() - 0.5f);
-        break;
-    case VK_OEM_PLUS:
-        if (g_simulation->replayLoaded())
-            g_simulation->setReplaySpeed(g_simulation->replaySpeed() + 0.5f);
-        break;
-    case VK_F11: {
+        return;
+    }
+    if (vk == g_hotkeys.fullscreen) {
         DWORD style = GetWindowLongW(g_hWnd, GWL_STYLE);
         if (style & WS_OVERLAPPEDWINDOW) {
             SetWindowLongW(g_hWnd, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
@@ -409,8 +425,39 @@ static void handleKeyDown(int vk) {
                          restore.rcMonitor.bottom - restore.rcMonitor.top,
                          SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE);
         }
-        break;
+        return;
     }
+
+    switch (vk) {
+    case 'G':
+        if (auto* sg = g_simulation->setupGarage()) {
+            sg->toggleVisible();
+            if (sg->isVisible() && g_simulation->dashboard())
+                g_simulation->dashboard()->setVisible(false);
+        }
+        break;
+    case VK_F5:
+        if (shift) { g_simulation->stop(); printf("Stopped.\n"); }
+        else       { g_simulation->start(); printf("Driving started!\n"); }
+        break;
+    // GAP_MATRIX P0.5 — replay keys. ',' and '.' scrub by two seconds and
+    // '-'/'=' change the playback speed; the HUD line already reports where
+    // the playhead is. All of them are no-ops until a recording has been
+    // loaded, so they never shadow a driving key. F6/F7 are hotkeys above.
+    case VK_OEM_COMMA:
+        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(-2.0f);
+        break;
+    case VK_OEM_PERIOD:
+        if (g_simulation->replayLoaded()) g_simulation->seekReplayBy(2.0f);
+        break;
+    case VK_OEM_MINUS:
+        if (g_simulation->replayLoaded())
+            g_simulation->setReplaySpeed(g_simulation->replaySpeed() - 0.5f);
+        break;
+    case VK_OEM_PLUS:
+        if (g_simulation->replayLoaded())
+            g_simulation->setReplaySpeed(g_simulation->replaySpeed() + 0.5f);
+        break;
     default: break;
     }
 }
@@ -449,7 +496,36 @@ static void handleKeyUp(int vk) {
     if (vk == kb.handbrake) g_handbrake = false;
 }
 
+// Losing focus with a session running pauses it, so the car does not keep
+// driving behind another window (AppPausePolicy.h carries the rule). A network
+// session keeps running, and a menu that is already up is already a pause.
+// KS_PAUSE_ON_FOCUS_LOSS=0 turns it off, for a capture or an unattended run.
+static void applyFocusPause(bool windowActive) {
+    if (!g_simulation) return;
+    ks::sim::FocusPauseInput in;
+    if (const char* env = std::getenv("KS_PAUSE_ON_FOCUS_LOSS"); env && env[0] == '0')
+        in.enabled = false;
+    in.multiplayer = g_simulation->networkManager() != nullptr &&
+                     g_simulation->networkManager()->isConnected();
+    in.sessionRunning = g_simulation->isRunning();
+    auto& menu = g_simulation->ui().menu();
+    in.menuOpen = menu.isVisible();
+    in.windowActive = windowActive;
+    if (ks::sim::shouldPauseOnFocusLoss(in)) {
+        menu.openPauseMenu();
+        std::printf("[app] window lost focus: session paused\n");
+        return;
+    }
+    if (windowActive && ks::sim::shouldResumeOnFocusGain(in)) menu.setVisible(false);
+}
+
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    // Focus is the one message the app answers before anything else: it is not
+    // input for the car, it is whether the car should be running at all.
+    if (msg == WM_ACTIVATEAPP) {
+        applyFocusPause(wParam != 0);
+        return 0;
+    }
     switch (msg) {
     case WM_KEYDOWN:
         handleKeyDown((int)wParam);
@@ -581,6 +657,26 @@ static void initWindow() {
 }
 
 static void initSimulation();
+
+// The pointer image the theme names, handed to the window class so every state
+// that does not set a cursor of its own wears it. Only .cur/.ani load this way:
+// a PNG pointer would need its alpha mask built by hand, and a file the system
+// refuses leaves the arrow and says so rather than changing nothing quietly.
+static void installThemeCursor() {
+    if (g_headless || g_hWnd == nullptr) return;
+    const std::string& path = ks::sim::ui::NativeUiHub::themeCursorImage;
+    if (path.empty()) return;
+    HCURSOR cursor = static_cast<HCURSOR>(LoadImageA(nullptr, path.c_str(), IMAGE_CURSOR, 0, 0,
+                                                     LR_LOADFROMFILE | LR_DEFAULTSIZE));
+    if (cursor == nullptr) {
+        fprintf(stderr, "[ui] cursor '%s' not loaded (only .cur/.ani): the arrow stays\n",
+                path.c_str());
+        return;
+    }
+    SetClassLongPtrA(g_hWnd, GCLP_HCURSOR, reinterpret_cast<LONG_PTR>(cursor));
+    SetCursor(cursor);
+    printf("[ui] cursor installed from %s\n", path.c_str());
+}
 
 static void initVulkanAndSimulation() {
     if (g_headless) {
@@ -717,13 +813,19 @@ static void initVulkanAndSimulation() {
             if (preset.colorGradingDeclared) {
                 g_nativeRenderer->setSaturation(preset.colorGrading.saturation);
                 g_nativeRenderer->setContrast(preset.colorGrading.contrast);
+                g_nativeRenderer->setGradeHue(preset.colorGrading.hue);
+                g_nativeRenderer->setGradeSepia(preset.colorGrading.sepia);
             }
             const float brightness = preset.colorGradingDeclared
                                          ? (preset.colorGrading.brightness > 0.0f
                                                 ? preset.colorGrading.brightness
                                                 : 1.0f)
                                          : 1.0f;
-            if (preset.display.exposure > 0.0f) {
+            // A showroom carries its own ppeffects.ini and AC applies it in the
+            // room: the baseline ppfilter must not stomp the exposure there.
+            const float roomExposure =
+                g_simulation ? g_simulation->showroomExposure() : 0.0f;
+            if (preset.display.exposure > 0.0f && roomExposure <= 0.0f) {
                 // Brightness is a pre-curve linear gain: the same place the
                 // display pass applies exposure, so the two multiply here
                 // rather than double-encoding.
@@ -924,6 +1026,20 @@ static void initVulkanAndSimulation() {
         } else {
             printf("[INIT] Shadow map init FAILED - continuing unshadowed\n");
         }
+        // KS_LIGHT_SHADOWS=0 keeps the local lights unshadowed, which is the
+        // A/B baseline for the layered shadow cost.
+        const char* localShadowsEnv = std::getenv("KS_LIGHT_SHADOWS");
+        const bool localShadowsEnabled =
+            localShadowsEnv == nullptr || std::strcmp(localShadowsEnv, "0") != 0;
+        if (!localShadowsEnabled) {
+            printf("[INIT] Local light shadows: off (KS_LIGHT_SHADOWS=0)\n");
+        } else if (g_localShadowAtlas.initialize(g_nativeRenderer->physicalDevice(),
+                                                g_nativeRenderer->device(), shaderDir.c_str())) {
+            g_nativeRenderer->attachLocalShadowAtlas(&g_localShadowAtlas);
+            printf("[INIT] Local light shadows OK (%d layers)\n", g_localShadowAtlas.layerCount());
+        } else {
+            printf("[INIT] Local light shadows FAILED - local lights stay unshadowed\n");
+        }
     } else {
         printf("[INIT] Vulkan device creation FAILED\n");
         delete g_nativeRenderer;
@@ -934,6 +1050,35 @@ static void initVulkanAndSimulation() {
     initSimulation();
 }
 
+// The cockpit knobs the driver left last session (TC, ABS, brake bias). All
+// three go through the light setters the console uses, never applySetup(), so
+// this is safe to run after a car has been loaded - and it is, from
+// applyRuntimeSettings() below, which follows every loadCar(). A stored value
+// outside what the car can do stays the car's business: the setters clamp, and
+// a level on an aid the car declares absent still drops to zero.
+static void applyCockpitSettings() {
+    if (!g_simulation) return;
+    ks::sim::SimulationLoop::CockpitKnobs knobs;
+    knobs.hasTc = g_engineSettings.hasCockpitTcLevel;
+    knobs.hasAbs = g_engineSettings.hasCockpitAbsLevel;
+    knobs.hasBias = g_engineSettings.hasCockpitBrakeBiasPct;
+    knobs.tcLevel = g_engineSettings.cockpitTcLevel;
+    knobs.absLevel = g_engineSettings.cockpitAbsLevel;
+    knobs.brakeBiasPct = g_engineSettings.cockpitBrakeBiasPct;
+    // The loop applies them to the car in the garage now, and again at the end
+    // of every loadCar() - the one point where the car's own electronics, setup
+    // and upgrades are final, so a stored level is not wiped by the load.
+    g_simulation->setCockpitKnobs(knobs);
+    auto* vehicle = g_simulation->vehicle();
+    if (vehicle && (knobs.hasTc || knobs.hasAbs || knobs.hasBias)) {
+        // What the car actually took: a level on an aid it declares absent comes
+        // back as zero, which is the answer worth printing.
+        printf("[INIT] Cockpit: TC %d ABS %d BB %d%% (settings)\n", vehicle->tcLevel(),
+               vehicle->absLevel(),
+               static_cast<int>(vehicle->brakeBias() * 100.f + 0.5f));
+    }
+}
+
 // --- settings.json -> engine -----------------------------------------------
 // Fixed step + master audio: safe to push at any time (idempotent, and audio
 // may not exist yet — SimulationLoop builds it lazily on the first car load,
@@ -941,8 +1086,16 @@ static void initVulkanAndSimulation() {
 static void applyRuntimeSettings() {
     if (!g_simulation) return;
     ks::Engine::instance().setFixedDt(g_engineSettings.physicsFixedDt);
-    if (auto* audio = g_simulation->audio())
+    if (auto* audio = g_simulation->audio()) {
         audio->setMasterVolume(g_engineSettings.audioMaster);
+        audio->setPlayerCarVolume(g_engineSettings.audioPlayerCar);
+        audio->setOpponentCarVolume(g_engineSettings.audioOpponentCar);
+        audio->setLocationVolume(g_engineSettings.audioLocation);
+        audio->setSpotterVolume(g_engineSettings.audioSpotter);
+        audio->setMusicVolume(g_engineSettings.audioMusic);
+        audio->setUiVolume(g_engineSettings.audioUi);
+    }
+    applyCockpitSettings(); // only once the car exists, so no-op before a load
 }
 
 // Assist levels can only reach physics through VehicleSimulator::applySetup(),
@@ -1000,16 +1153,64 @@ static void initSimulation() {
     g_engineSettings.load(g_userLayout.settings);
     applyRuntimeSettings();
     applyAssistSettings();
+    // The session's telemetry lands beside the player's other dumps: one CSV per
+    // session, in user/<player>/telemetry (see SessionTelemetryCsv.h).
+    g_simulation->setTelemetryCsvDirectory(g_userLayout.telemetry);
+    // telemetry.csvHz: the row rate the CSV is sampled at (default 20 Hz).
+    g_simulation->setTelemetryCsvRateHz(g_engineSettings.telemetryCsvHz);
+    // The two in-race panels open where the driver left them last time.
+    if (g_engineSettings.hasUiPanelOffsets) {
+        g_simulation->ui().setOverlayOffsets(
+            {static_cast<float>(g_engineSettings.uiHdashX),
+             static_cast<float>(g_engineSettings.uiHdashY),
+             static_cast<float>(g_engineSettings.uiInputsX),
+             static_cast<float>(g_engineSettings.uiInputsY)});
+    }
+    if (g_simulation) {
+        g_simulation->features().replay.setMaxSizeMb(g_engineSettings.replayMaxSizeMb);
+        g_simulation->features().replay.setQualityLevel(g_engineSettings.replayQualityLevel);
+    }
+    // The wheel LED strip's shift flash: the rate lives in the settings files,
+    // the module holds it, so the HUD and a wheel flash together.
+    ks::engine::input::WheelLedControl::instance().setShiftFlashFrequency(
+        g_engineSettings.wheelLedsShiftFlashHz);
+    // Gameplay tweaks: the set keeps its compiled defaults and takes the fuel
+    // burn multiplier from the settings. SimulationLoop applies it to the car
+    // (and logs it), so the file is the only place this value is chosen.
+    {
+        auto& tweaks = ks::engine::sim::GameplayTweaks::instance();
+        ks::engine::sim::GameplayTweakSet set = tweaks.getTweakSet();
+        set.fuelConsumption = static_cast<float>(g_engineSettings.gameplayFuelConsumption);
+        set.tireDamageRate = static_cast<float>(g_engineSettings.gameplayTireDamageRate);
+        set.racingRulesStrict = g_engineSettings.gameplayRacingRulesStrict;
+        // devMode: KS_FUEL_CONSUMPTION=<x> drains the tank at x times the car's
+        // rate. A session that starts on a full tank never gets near the low-fuel
+        // warning in a capture; x200 does it in about a minute, without touching
+        // settings.json. The car keeps the multiplier, so it is a whole-session
+        // choice, not a one-off splash.
+        if (const char* envFuel = std::getenv("KS_FUEL_CONSUMPTION");
+            envFuel != nullptr && envFuel[0] != '\0') {
+            const float demoFuel = std::strtof(envFuel, nullptr);
+            if (demoFuel > 0.0f && demoFuel <= 1000.0f) { // a NaN fails both
+                set.fuelConsumption = demoFuel;
+                std::printf("[TWEAKS] fuel consumption x%.1f (KS_FUEL_CONSUMPTION)\n",
+                            static_cast<double>(demoFuel));
+            }
+        }
+        tweaks.setTweakSet(set);
+    }
     const auto where = [](bool user, bool system) -> const char* {
         return user ? " (settings.json)" : (system ? " (system/cfg)" : "");
     };
-    printf("[INIT] Settings: fixedDt=%.6f%s audio=%.2f%s assist TC=%d ABS=%d%s\n",
+    printf("[INIT] Settings: fixedDt=%.6f%s audio=%.2f%s assist TC=%d ABS=%d%s ledFlash=%.2fHz%s\n",
            g_engineSettings.physicsFixedDt,
            where(g_engineSettings.hasPhysicsFixedDt, sysFixedDt),
            static_cast<double>(g_engineSettings.audioMaster),
            where(g_engineSettings.hasAudioMaster, sysAudio), g_engineSettings.assistTc,
            g_engineSettings.assistAbs,
-           where(g_engineSettings.hasAssistTc || g_engineSettings.hasAssistAbs, sysAssist));
+           where(g_engineSettings.hasAssistTc || g_engineSettings.hasAssistAbs, sysAssist),
+           g_engineSettings.wheelLedsShiftFlashHz,
+           where(g_engineSettings.hasWheelLedsShiftFlashHz, false));
 
     // Career stats (wins/poles/podiums/races/best lap + PB record count)
     // seed the profile; they are written back on change and at exit.
@@ -1019,6 +1220,81 @@ static void initSimulation() {
             ks::sim::applyDriverStats(stats, g_simulation->ui().menu().profile());
     }
 
+    // Who the driver is, and whether the first run is behind us: driver.json
+    // carries both. A folder without it opens the wizard instead of a menu
+    // under an unnamed driver. Never in a capture or an autostart run, where
+    // the menu is suppressed anyway.
+    g_driverProfilePath = g_userLayout.player + "/driver.json";
+    {
+        ks::sim::StoredDriverProfile stored;
+        const bool loaded = ks::sim::loadDriverProfile(g_driverProfilePath, stored);
+        if (loaded) {
+            g_simulation->ui().menu().profile() = stored.profile;
+            g_simulation->ui().menu().setSetupComplete(stored.setupComplete);
+            printf("[INIT] Driver: %s (%s) #%d%s\n", stored.profile.name.c_str(),
+                   stored.profile.nationality.c_str(), stored.profile.raceNumber,
+                   stored.setupComplete ? ", setup complete" : ", setup incomplete");
+        }
+        const bool suppressMenu = std::getenv("KS_HIDE_MENU") != nullptr ||
+                                 std::getenv("KS_AUTOSTART") != nullptr;
+        if (!loaded || !stored.setupComplete) {
+            if (!suppressMenu) g_simulation->ui().menu().openFirstRun();
+            else printf("[INIT] First run skipped (menu suppressed)\n");
+        }
+    }
+
+    // The content the environment points at, loaded through the same paths
+    // SELECT CAR, SELECT TRACK and TEAM use. Headless reads them too: a run
+    // without a window drives the car and the track it was pointed at instead
+    // of an empty default scene, which is what a pit-box start needs to have
+    // anything to place.
+    auto folderName = [](const char* path) {
+        std::string text = path ? path : "";
+        while (!text.empty() && (text.back() == '/' || text.back() == '\\')) text.pop_back();
+        const std::string::size_type cut = text.find_last_of("/\\");
+        return cut == std::string::npos ? text : text.substr(cut + 1);
+    };
+    auto loadEnvContent = [&folderName]() {
+        // KS_CAR=<dir>: start with a real car instead of the placeholder box —
+        // the committed reference bake content/cars/refcar turns this into the
+        // scriptable way to photograph a cached car (roadmap 2.4).
+        if (const char* car = std::getenv("KS_CAR"); car && car[0]) {
+            if (g_simulation->loadCar(car)) {
+                applyRuntimeSettings(); // audio is created with the car
+                // The menu names the content it is driving: loaded from here
+                // it never went through the CARS page, and a session card
+                // reading "NOT CHOSEN" beside a running car is a lie.
+                g_simulation->ui().menu().setCarName(folderName(car));
+                g_simulation->ui().menu().setCarDir(car);
+            } else {
+                printf("[INIT] KS_CAR load failed: %s\n", car);
+            }
+        }
+        // KS_TRACK=<dir> or --track <dir>: pick a track before the first frame
+        // (a folder without a bake keeps the current scene, and the
+        // ai/fast_lane.ai spline inside it feeds the grid). The command line
+        // wins over the environment, so a shortcut can override it.
+        std::string startTrack = g_cliTrack;
+        if (startTrack.empty()) {
+            if (const char* track = std::getenv("KS_TRACK"); track && track[0])
+                startTrack = track;
+        }
+        if (!startTrack.empty()) {
+            if (g_simulation->loadTrackFolder(startTrack)) {
+                printf("[INIT] Track loaded: %s\n", startTrack.c_str());
+                g_simulation->ui().menu().setTrackName(folderName(startTrack.c_str()));
+            } else {
+                printf("[INIT] track load failed: %s\n", startTrack.c_str());
+            }
+        }
+        // KS_TEAM=<dir>: load a team roster (team.ini) so drivers, race numbers,
+        // liveries, garage boxes and grid slots come from it (roadmap 2.8).
+        if (const char* team = std::getenv("KS_TEAM"); team && team[0]) {
+            if (!g_simulation->loadTeam(team))
+                printf("[INIT] KS_TEAM load failed: %s\n", team);
+        }
+    };
+
     if (!g_headless) {
     const int bakedMeshes = g_simulation->loadBakedScene("content/baked");
     printf("[INIT] Loaded %d baked mesh(es) into %zu scene entit%s\n", bakedMeshes,
@@ -1026,37 +1302,7 @@ static void initSimulation() {
     // Roadmap 1.2: a car visual exists from the first frame (solid box
     // placeholder until SELECT CAR loads baked meshes, if any).
     g_simulation->ensureCarVisual(std::string());
-    // KS_CAR=<dir>: start with a real car instead of the placeholder box —
-    // the committed reference bake content/cars/refcar turns this into the
-    // scriptable way to photograph a cached car (roadmap 2.4). Same loadCar()
-    // path SELECT CAR uses; headless mode never reaches this block.
-    if (const char* car = std::getenv("KS_CAR"); car && car[0]) {
-        if (g_simulation->loadCar(car))
-            applyRuntimeSettings(); // audio is created with the car
-        else
-            printf("[INIT] KS_CAR load failed: %s\n", car);
-    }
-    // KS_TRACK=<dir> or --track <dir>: pick a track before the first frame
-    // (same path SELECT TRACK uses; a folder without a bake keeps the current
-    // scene, and the ai/fast_lane.ai spline inside it feeds the grid). The
-    // command line wins over the environment, so a shortcut can override it.
-    std::string startTrack = g_cliTrack;
-    if (startTrack.empty()) {
-        if (const char* track = std::getenv("KS_TRACK"); track && track[0])
-            startTrack = track;
-    }
-    if (!startTrack.empty()) {
-        if (g_simulation->loadTrackFolder(startTrack))
-            printf("[INIT] Track loaded: %s\n", startTrack.c_str());
-        else
-            printf("[INIT] track load failed: %s\n", startTrack.c_str());
-    }
-    // KS_TEAM=<dir>: load a team roster (team.ini) so drivers, race numbers,
-    // liveries, garage boxes and grid slots come from it (roadmap 2.8).
-    if (const char* team = std::getenv("KS_TEAM"); team && team[0]) {
-        if (!g_simulation->loadTeam(team))
-            printf("[INIT] KS_TEAM load failed: %s\n", team);
-    }
+    loadEnvContent();
 
     // The game always opens in a showroom: content/showrooms/<id>/showroom.json
     // describes it (KS_SHOWROOM picks one, otherwise the first folder that has
@@ -1065,7 +1311,18 @@ static void initSimulation() {
     {
         ks::sim::ShowroomConfig showroom;
         std::string showroomError;
-        if (ks::sim::loadStartupShowroom(showroom, &showroomError)) {
+        // showroom.default (CONTENT page) picks the room; KS_SHOWROOM still
+        // overrides it, and an empty choice keeps the first one on disk.
+        const std::string preferredRoom =
+            g_engineSettings.hasShowroomDefault ? g_engineSettings.showroomDefault
+                                                : std::string();
+        if (!preferredRoom.empty())
+            printf("[INIT] Showroom default from settings: %s\n", preferredRoom.c_str());
+        // Same root the CONTENT page lists, so the mark on the page is the room
+        // that opens (libraryRoot resolves the install prefix for a build-folder
+        // launch, which a bare "content/showrooms" did not).
+        if (ks::sim::loadStartupShowroom(showroom, &showroomError, preferredRoom,
+                                         ks::sim::showroomLibraryRoot())) {
             g_simulation->openShowroom(showroom.directory);
             printf("[INIT] Showroom '%s' (%s) camera %.1f m, %.0f deg/s\n",
                    showroom.name.c_str(), showroom.id.c_str(),
@@ -1154,21 +1411,29 @@ static void initSimulation() {
     {
         const std::vector<std::pair<std::string, std::vector<std::string>>> known = {
             {"physics", {"fixedDt", "note"}},
-            {"audio", {"master", "note", "engineVolume", "environmentVolume",
-             "showroomAmbience", "showroomMusic", "sources"}},
+            {"audio", {"master", "note", "playerCar", "opponentCar", "location",
+             "spotter", "music", "ui", "sources"}},
             {"assist", {"tc", "abs", "note"}},
+            {"telemetry", {"csvHz", "note"}},
             {"video",
              {"note", "resolution", "resolutions", "fullscreen", "vsync", "frameLimit", "ssao",
               "ssr", "ssgi", "ssgiRadius", "ssgiIntensity", "motionBlur", "exposure",
-              "saturation", "contrast",
+              "saturation", "contrast", "renderMode", "renderModes",
+              "gbufferOverrides",
               "tonemap", "tonemaps", "postProcessFilter", "hdrOutput", "msaa",
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
               "mirrors", "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
             {"singleplayer", {"modes", "note", "sources", "defaults"}},
         };
-        for (const std::string& file :
-             {ks::engine::assets::Paths::systemCfgFile("ksengine.json"),
-              g_userLayout.settings}) {
+        std::vector<std::string> files = {
+            ks::engine::assets::Paths::systemCfgFile("ksengine.json"),
+            g_userLayout.settings};
+        // A section may point at its own document ("video":
+        // "system/cfg/video.json", "audio": "system/cfg/audio.json"): the file
+        // it names is checked here too, so a typo in it is reported exactly
+        // like one in ksengine.json.
+        for (size_t i = 0; i < files.size(); ++i) {
+            const std::string file = files[i];
             std::ifstream in(file, std::ios::binary);
             if (!in) continue;
             const std::string text((std::istreambuf_iterator<char>(in)),
@@ -1176,6 +1441,12 @@ static void initSimulation() {
             ks::engine::json::Value root;
             std::string error;
             if (!ks::engine::json::parse(text, root, &error)) continue; // reported above
+            for (const char* member : {"video", "audio", "controls"}) {
+                const ks::engine::json::Value* section = root.find(member);
+                if (section && section->isString() && !section->asString().empty() &&
+                    std::find(files.begin(), files.end(), section->asString()) == files.end())
+                    files.push_back(section->asString());
+            }
             std::string unread;
             size_t unreadCount = 0;
             for (const auto& section : known) {
@@ -1201,7 +1472,20 @@ static void initSimulation() {
     };
     uiMenu->onStartDrivingRequested = [](ks::sim::GameSessionMode mode, const ks::sim::SessionStartParams& params) {
         g_simulation->ui().menu().setVisible(false);
+        // The sky the WEATHER page chose is what the session runs with: the
+        // loop's own WeatherControl holds it, and the physics and the lighting
+        // read that.
+        auto& weather = g_simulation->features().weatherCtrl;
+        weather.weather() = ks::sim::presetFor(params.weather);
+        weather.setTimeOfDay(params.weather.hourOfDay);
+        printf("Weather: %s (%s) %.1f C, rain %.2f, wetness %.2f\n",
+               ks::sim::weatherKindName(params.weather.kind),
+               ks::sim::weatherSourceName(params.weather.source), params.weather.ambientC,
+               params.weather.rain, params.weather.wetness);
         g_simulation->startSession(mode, params);
+        // The header's clipboard opens the session planner from here on: it
+        // has a session to describe, and a start that failed has nothing.
+        g_simulation->ui().menu().setSessionActive(g_simulation->isRunning());
         printf("Session started: %s\n", ks::sim::sessionModeName(mode));
     };
     uiMenu->onPaintChosen = [](float r, float g, float b) {
@@ -1209,6 +1493,7 @@ static void initSimulation() {
     };
     uiMenu->onTrackChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
+        g_simulation->ui().menu().setSessionActive(false);
         if (g_simulation->loadTrackFolder(dir))
             printf("Track loaded: %s\n", dir.c_str());
         else
@@ -1216,12 +1501,30 @@ static void initSimulation() {
     };
     uiMenu->onCarChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
+        g_simulation->ui().menu().setSessionActive(false);
         if (g_simulation->loadCar(dir)) {
             applyRuntimeSettings(); // audio only exists from the first car on
+            g_simulation->ui().menu().setCarDir(dir);
             printf("Car loaded: %s\n", dir.c_str());
         } else {
             printf("Car load failed: %s\n", dir.c_str());
         }
+    };
+    // The session planner changed the car or the track of a session that is
+    // up: the content is already loaded above, so the same session starts
+    // again on it with the sky and the numbers the card shows.
+    uiMenu->onSessionRestartRequested = [](const ks::sim::SessionStartParams& params) {
+        if (!g_simulation) return;
+        const ks::sim::GameSessionMode mode = g_simulation->features().sessionMode;
+        auto& weather = g_simulation->features().weatherCtrl;
+        weather.weather() = ks::sim::presetFor(params.weather);
+        weather.setTimeOfDay(params.weather.hourOfDay);
+        printf("[MENU] session planner: restarting %s\n", ks::sim::sessionModeName(mode));
+        g_simulation->startSession(mode, params);
+        auto& menu = g_simulation->ui().menu();
+        menu.closeSessionPlanner();
+        menu.setSessionActive(g_simulation->isRunning());
+        menu.setVisible(false); // back into the car, like a restart from pause
     };
     // Roadmap 2.8: TEAM row -> load the roster (applies immediately; the next
     // beginRaceSession builds the field from it).
@@ -1235,6 +1538,16 @@ static void initSimulation() {
     // selects the next level and re-applies physics/nodes/livery/sound.
     uiMenu->upgradeRowLabels = []() { return g_simulation->upgradeRowLabels(); };
     uiMenu->onUpgradeRowCycled = [](int row) { g_simulation->cycleUpgradeRow(row); };
+    // CONTENT lists the loaded .kn5's own record (model.json's kn5 block): the
+    // file it is built from and the skin it wears. Cycling writes the document
+    // and rebuilds the car through the loop.
+    uiMenu->carImportRowLabels = []() { return g_simulation->carImportRowLabels(); };
+    uiMenu->onCarImportRowCycled = [](int row) { g_simulation->cycleCarImportRow(row); };
+    // CONTENT -> SKINS: the texture sets of the loaded car, and the choice that
+    // is recorded in its model.json and rebuilt on the spot.
+    uiMenu->carSkinChoices = []() { return g_simulation->carSkinChoices(); };
+    uiMenu->activeCarSkin = []() { return g_simulation->activeCarSkin(); };
+    uiMenu->onCarSkinChosen = [](const std::string& id) { g_simulation->setCarSkin(id); };
     // Roadmap 2.7: PIT STRATEGY menu -> loop state. CONFIRM PLAN writes the
     // player's fuel/job choices into m_pitStrategy; the service itself only
     // runs when the player explicitly requests it (REQUEST SERVICE) while
@@ -1259,6 +1572,22 @@ static void initSimulation() {
     uiMenu->onTextInputRequested = [](const std::string& field, const std::string&) {
         printf("Text input requested for %s\n", field.c_str());
     };
+    // First run finished: the wizard reports the driver, the app writes it
+    // into the player's folder. The menu continues on its own to CARS.
+    uiMenu->onFirstRunFinished = [](const ks::sim::DriverProfile& p) {
+        g_driverProfilePath = g_userLayout.player + "/driver.json";
+        if (ks::sim::saveDriverProfile(g_driverProfilePath, p, true))
+            printf("[INIT] Driver saved: %s (%s) #%d (%s)\n", p.name.c_str(),
+                   p.nationality.c_str(), p.raceNumber, g_driverProfilePath.c_str());
+        else
+            printf("[INIT] Driver save failed: %s\n", g_driverProfilePath.c_str());
+        if (ks::sim::saveDriverStats(
+                g_userLayout.stats,
+                ks::sim::driverStatsFromProfile(
+                    p, static_cast<int>(g_simulation->features().pb.size())))) {
+            printf("[INIT] Stats written for %s\n", p.name.c_str());
+        }
+    };
     uiMenu->onNationalityInputRequested = []() {
         printf("Nationality picker requested\n");
     };
@@ -1274,6 +1603,63 @@ static void initSimulation() {
     uiMenu->onRecordReplayRequested = [sim = g_simulation.get()]() {
         const std::string saved = sim->toggleReplayRecording();
         if (!saved.empty()) printf("Replay saved: %s\n", saved.c_str());
+    };
+    // CONTENT: the launcher's two moving parts. The page lists the ZIPs waiting
+    // in <content>/packages, and installing one unpacks it into the tree the
+    // loader scans, so the new cars/tracks are listable without a restart.
+    uiMenu->contentPackages = []() {
+        namespace fs = std::filesystem;
+        std::vector<std::pair<std::string, std::string>> out;
+        std::error_code ec;
+        const fs::path inbox = fs::path(ks::sim::carLibraryRoot()).parent_path() / "packages";
+        if (!fs::is_directory(inbox, ec)) return out;
+        for (const auto& entry : fs::directory_iterator(inbox, ec)) {
+            if (!entry.is_regular_file(ec)) continue;
+            std::string lower = entry.path().filename().string();
+            for (char& c : lower)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (lower.size() < 5 || lower.compare(lower.size() - 4, 4, ".zip") != 0) continue;
+            out.push_back({entry.path().filename().string(), entry.path().string()});
+        }
+        std::sort(out.begin(), out.end());
+        if (!out.empty()) printf("[CONTENT] %zu package(s) waiting in %s\n", out.size(), inbox.string().c_str());
+        return out;
+    };
+    // CONTENT -> SHOWROOMS: the room the game opens in. Choosing one stores it
+    // in the settings (written back on exit) and shows it at once while no
+    // session is up, so the menu background is the answer.
+    uiMenu->showroomDefault = []() {
+        return g_engineSettings.hasShowroomDefault ? g_engineSettings.showroomDefault
+                                                   : std::string();
+    };
+    uiMenu->onShowroomChosen = [](const std::string& id, const std::string& path) {
+        g_engineSettings.showroomDefault = id;
+        g_engineSettings.hasShowroomDefault = true;
+        printf("[CONTENT] default showroom: %s\n", id.c_str());
+        if (g_simulation && !g_simulation->isRunning()) {
+            g_simulation->openShowroom(path);
+            printf("[CONTENT] showroom opened: %s\n", path.c_str());
+        }
+    };
+    uiMenu->onContentInstallRequested = [](const std::string& archive) -> std::string {
+        namespace fs = std::filesystem;
+        const fs::path contentRoot = fs::path(ks::sim::carLibraryRoot()).parent_path();
+        const ks::engine::archive::ContentInstall result =
+            ks::engine::archive::ContentUnpacking::instance().installPackage(archive,
+                                                                            contentRoot.string());
+        if (!result.ok) {
+            printf("[CONTENT] install refused (%s): %s\n", archive.c_str(), result.error.c_str());
+            return "REFUSED: " + result.error;
+        }
+        std::string line = result.library + ": ";
+        for (size_t i = 0; i < result.items.size(); ++i) {
+            if (i) line += ", ";
+            line += result.items[i];
+        }
+        if (result.items.empty()) line += "files";
+        if (result.files > 1) line += " (" + std::to_string(result.files) + " files)";
+        printf("[CONTENT] installed %s -> %s\n", archive.c_str(), line.c_str());
+        return line;
     };
     // Roadmap 1.3: RESULTS renders the live standings as menu rows.
     uiMenu->onShowResultsRequested = []() {
@@ -1292,14 +1678,49 @@ static void initSimulation() {
             } else {
                 r.detail = "lap " + std::to_string(s.currentLap);
             }
+            // The export's own columns: a token instead of the sentence, the
+            // lap in seconds instead of "best 92.480", and the lap count on its
+            // own. DriverStanding::currentLap is the laps *finished*, not the
+            // lap in progress: RaceSessionManager increments it as the car
+            // crosses the timing line (the AI's AIController::lapCount does the
+            // same behind a half-spline guard), so a driver who has not yet
+            // completed one reads 0 - a real answer the writer keeps. A best lap
+            // the driver has not set also stays 0, which the writer turns into
+            // an empty cell rather than a fake time.
+            r.status = s.disqualified ? "dsq" : (s.finished ? "finished" : "running");
+            r.bestLapTime = s.bestLapTime < 1e8f ? s.bestLapTime : 0.0f;
+            r.completedLaps = s.currentLap;
             rows.push_back(std::move(r));
         }
         g_simulation->ui().menu().showResults(std::move(rows));
+    };
+    // RESULTS -> EXPORT CLASSIFICATION: the rows the page is showing land in the
+    // player's folder as a CSV (ResultsExport.h). The menu owns the rows, the
+    // app owns the folder, so the page hands its rows over and prints the
+    // answer it gets back - the path, or the reason nothing was written.
+    uiMenu->onExportResults = [](const std::vector<ks::sim::ResultExportRow>& rows) -> std::string {
+        std::string path;
+        std::string error;
+        if (!ks::sim::writeResultsCsv(g_userLayout.player + "/results", rows, path, error)) {
+            printf("[RESULTS] export failed: %s\n", error.c_str());
+            return "EXPORT FAILED: " + error;
+        }
+        printf("[RESULTS] exported %zu row(s) -> %s\n", rows.size(), path.c_str());
+        return "Exported " + std::to_string(rows.size()) + " row(s): " + path;
     };
     uiMenu->onOpenSettingsPanelRequested = [](const std::string& panel) {
         if (panel == "keyboard") {
             g_simulation->ui().menu().setVisible(false);
             g_simulation->ui().keyRebind().setVisible(true);
+            return;
+        }
+        if (panel == "pad") {
+            auto* im = g_simulation->inputManager();
+            if (!im) return;
+            g_simulation->ui().menu().setVisible(false);
+            im->takeCapturedButton(); // drop a press from before the panel opened
+            g_simulation->ui().padRebind().setMapping(im->mapping());
+            g_simulation->ui().padRebind().setVisible(true);
             return;
         }
         if (panel == "controller") {
@@ -1376,22 +1797,62 @@ static void initSimulation() {
     // EngineSettings already does for physics.fixedDt and audio.master.
     {
         ks::engine::json::Value videoConfig = ks::engine::json::Value::object();
-        const auto mergeVideo = [](const std::string& path,
-                                   ks::engine::json::Value& out) {
+        const auto readDocument = [](const std::string& path,
+                                     ks::engine::json::Value& root) {
             std::string text;
-            if (!ks::engine::assets::UserData::readFile(path, text)) return;
-            ks::engine::json::Value root;
+            if (!ks::engine::assets::UserData::readFile(path, text)) return false;
             std::string error;
             if (!ks::engine::json::parse(text, root, &error)) {
                 printf("[INIT] %s: %s\n", path.c_str(), error.c_str());
-                return;
+                return false;
             }
-            const ks::engine::json::Value* video = root.find("video");
-            if (!video || !video->isObject()) return;
-            for (const std::string& key : video->keys()) {
-                if (const ks::engine::json::Value* value = video->find(key))
+            return true;
+        };
+        const auto applyVideo = [](const ks::engine::json::Value& video,
+                                   ks::engine::json::Value& out) {
+            if (!video.isObject()) return;
+            for (const std::string& key : video.keys()) {
+                if (const ks::engine::json::Value* value = video.find(key))
                     out.set(key, *value);
             }
+        };
+        // The video section lives in its own document: ksengine.json carries
+        // "video": "system/cfg/video.json" instead of the object. The player's
+        // settings.json may still inline the object, so both forms are read.
+        // A referenced document is either the video object itself or one that
+        // wraps it in a "video" member.
+        const auto mergeVideo = [&readDocument, &applyVideo](
+                                    const std::string& path,
+                                    ks::engine::json::Value& out) {
+            ks::engine::json::Value root;
+            if (!readDocument(path, root)) return;
+            const ks::engine::json::Value* video = root.find("video");
+            if (!video) return;
+            if (video->isObject()) {
+                applyVideo(*video, out);
+                return;
+            }
+            if (!video->isString() || video->asString().empty()) return;
+            const std::string reference = video->asString();
+            ks::engine::json::Value referenced;
+            if (!readDocument(reference, referenced)) {
+                // A bare name resolves beside the file that named it.
+                const size_t slash = path.find_last_of("/\\");
+                const std::string sibling =
+                    (slash == std::string::npos ? std::string() : path.substr(0, slash + 1)) +
+                    reference;
+                if (sibling == reference || !readDocument(sibling, referenced)) {
+                    printf("[INIT] %s: video file '%s' not readable\n", path.c_str(),
+                           reference.c_str());
+                    return;
+                }
+            }
+            if (const ks::engine::json::Value* inner = referenced.find("video");
+                inner && inner->isObject()) {
+                applyVideo(*inner, out);
+                return;
+            }
+            applyVideo(referenced, out);
         };
         mergeVideo(ks::engine::assets::Paths::systemCfgFile("ksengine.json"), videoConfig);
         mergeVideo(g_userLayout.settings, videoConfig);
@@ -1399,12 +1860,23 @@ static void initSimulation() {
         const double saturation = videoConfig.numberAt("saturation", -1.0);
         const double contrast = videoConfig.numberAt("contrast", -1.0);
         const std::string tonemap = videoConfig.stringAt("tonemap");
-        const int ssao = videoConfig.boolAt("ssao", false) ? 1 : 0;
-        const int ssr = videoConfig.boolAt("ssr", false) ? 1 : 0;
-        const int ssgi = videoConfig.boolAt("ssgi", false) ? 1 : 0;
+        bool ssao = videoConfig.boolAt("ssao", false);
+        bool ssr = videoConfig.boolAt("ssr", false);
+        bool ssgi = videoConfig.boolAt("ssgi", false);
         const double ssgiRadius = videoConfig.numberAt("ssgiRadius", 0.05);
         const double ssgiIntensity = videoConfig.numberAt("ssgiIntensity", 1.0);
-        const int motionBlur = videoConfig.boolAt("motionBlur", false) ? 1 : 0;
+        bool motionBlur = videoConfig.boolAt("motionBlur", false);
+        // video.renderMode is a named bundle over those switches ("forward",
+        // "deferred", "deferred-full"); "auto" or an unknown name leaves the
+        // individual keys as the authority, so older documents are unchanged.
+        bool modeDeferred = false;
+        std::vector<ks::sim::RenderMode> renderModes;
+        const int customModes = ks::sim::loadRenderModes(videoConfig, renderModes);
+        const std::string renderMode = videoConfig.stringAt("renderMode");
+        if (ks::sim::applyRenderMode(renderModes, renderMode, modeDeferred, ssao, ssr,
+                                     ssgi, motionBlur))
+            printf("[INIT] Render mode: %s (%d mode(s) from video.renderModes)\n",
+                   renderMode.c_str(), customModes);
         const int vsync = videoConfig.boolAt("vsync", true) ? 1 : 0;
         const bool headPhysics = videoConfig.boolAt("headPhysics", true);
         const int frameLimit = static_cast<int>(videoConfig.numberAt("frameLimit", 0.0));
@@ -1452,12 +1924,26 @@ static void initSimulation() {
                        g_shadowMap.cascadeCount());
             }
 
-            renderer->setSsao(ssao != 0);
-            renderer->setSsr(ssr != 0);
-            renderer->setSsgi(ssgi != 0,
+            // video.gbufferOverrides: per-material channel lists / opt-outs.
+            // Only a disable changes the pass today (the shared G-buffer
+            // pipeline cannot drop a single channel); the rest is carried for
+            // the material-aware variants.
+            ks::sim::GBufferLayoutManager gbufferLayouts;
+            const int gbufferOverrides =
+                ks::sim::loadGBufferOverrides(videoConfig, gbufferLayouts);
+            if (gbufferOverrides > 0) {
+                renderer->setGBufferLayouts(gbufferLayouts);
+                printf("[INIT] G-buffer overrides: %d material(s)\n", gbufferOverrides);
+            }
+            // A named mode that asks for the deferred path opens it even when
+            // no deferred-only effect is on, so "deferred" means what it says.
+            if (modeDeferred) renderer->setDeferred(true);
+            renderer->setSsao(ssao);
+            renderer->setSsr(ssr);
+            renderer->setSsgi(ssgi,
                               ssgiRadius > 0.0 ? static_cast<float>(ssgiRadius) : 0.05f,
                               ssgiIntensity > 0.0 ? static_cast<float>(ssgiIntensity) : 1.0f);
-            if (ssgi != 0) {
+            if (ssgi) {
                 // SSGI is gathered by the deferred lighting shader, which the
                 // forward path never runs: asking for it means asking for that
                 // path, exactly like the KS_SSAO / KS_SSR env switches above.
@@ -1467,7 +1953,7 @@ static void initSimulation() {
                        ssgiRadius, ssgiIntensity);
             }
 
-            renderer->setMotionBlur(motionBlur != 0);
+            renderer->setMotionBlur(motionBlur);
             if (motionBlur) renderer->setDeferred(true);
             renderer->setVsync(vsync != 0);
             if (auto* camera = g_simulation->camera())
@@ -1534,8 +2020,48 @@ static void initSimulation() {
             options.ssr = renderer->isSsr();
             options.mirror = renderer->virtualMirror();
         }
+        // The mixer only exists from the first car on. Until then the settings
+        // are what the volume is, so a change on another row never invents an
+        // audio.master the player did not choose.
+        options.masterVolume = g_engineSettings.audioMaster;
         if (auto* audio = g_simulation->audio())
             options.masterVolume = audio->masterVolume();
+        // VIDEO rows without a renderer getter come from the merged settings:
+        // that is what the next start reads, so the page shows the value the
+        // file holds instead of a compiled-in guess.
+        {
+            using menu = ks::sim::GameMenuOverlay;
+            const auto& s = g_engineSettings;
+            options.frameLimitIndex = menu::nearestIndex(
+                menu::kFrameLimitValues, menu::kFrameLimitCount, s.videoFrameLimit);
+            options.anisoIndex = menu::nearestIndex(
+                menu::kAnisoValues, menu::kAnisoCount, s.videoAnisotropicFiltering);
+            options.shadowSizeIndex = menu::nearestIndex(
+                menu::kShadowSizeValues, menu::kShadowSizeCount, s.videoShadowMapSize);
+            options.cascadeIndex = menu::nearestIndex(
+                menu::kCascadeValues, menu::kCascadeCount, s.videoShadowCascades);
+            options.saturationIndex = menu::nearestIndex(
+                menu::kSaturationValues, menu::kSaturationCount, s.videoSaturation);
+            options.contrastIndex = menu::nearestIndex(
+                menu::kContrastValues, menu::kContrastCount, s.videoContrast);
+            options.mirrorResIndex = 1; // 512x128, the config's own default pair
+            for (int i = 0; i < menu::kMirrorResCount; ++i)
+                if (s.videoMirrorResolution == menu::kMirrorResValues[i])
+                    options.mirrorResIndex = i;
+            options.ssgi = s.videoSsgi;
+            options.particles = s.videoParticles;
+            options.headPhysics = s.videoHeadPhysics;
+        }
+        // GAMEPLAY rows show what the session applies: the tweak set is the
+        // live truth (a settings file seeded it at start-up).
+        {
+            const auto& gameplay = ks::engine::sim::GameplayTweaks::instance().getTweakSet();
+            options.fuelIndex =
+                ks::sim::GameMenuOverlay::gameplayIndexFor(gameplay.fuelConsumption);
+            options.tireIndex =
+                ks::sim::GameMenuOverlay::gameplayIndexFor(gameplay.tireDamageRate);
+            options.strictRules = gameplay.racingRulesStrict;
+        }
         // The window style is the truth for fullscreen: F11 changes it too.
         const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
         options.fullscreen = (style & WS_OVERLAPPEDWINDOW) == 0;
@@ -1571,26 +2097,144 @@ static void initSimulation() {
         printf("[MENU] video: window %dx%d requested\n", width, height);
     };
     uiMenu->onOptionsChanged = [](const ks::sim::GameMenuOverlay::MenuOptions& options) {
+        using menu = ks::sim::GameMenuOverlay;
+        // The values the page shows, resolved once: the same numbers are
+        // applied to the image and written into the settings file.
+        const int frameLimit = menu::kFrameLimitValues[std::min(options.frameLimitIndex, menu::kFrameLimitCount - 1)];
+        const int anisotropy = menu::kAnisoValues[std::min(options.anisoIndex, menu::kAnisoCount - 1)];
+        const float saturation = menu::kSaturationValues[std::min(options.saturationIndex, menu::kSaturationCount - 1)];
+        const float contrast = menu::kContrastValues[std::min(options.contrastIndex, menu::kContrastCount - 1)];
+        const int shadowSize = menu::kShadowSizeValues[std::min(options.shadowSizeIndex, menu::kShadowSizeCount - 1)];
+        const int shadowCascades = menu::kCascadeValues[std::min(options.cascadeIndex, menu::kCascadeCount - 1)];
+        const char* mirrorRes = menu::kMirrorResValues[std::min(options.mirrorResIndex, menu::kMirrorResCount - 1)];
+        const std::string tonemapName = menu::tonemapName(options.tonemap);
+        const float exposure = menu::exposureValue(options.exposureIndex);
         if (auto* renderer = g_simulation->renderer()) {
-            renderer->setExposure(
-                ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex));
+            renderer->setExposure(exposure);
             renderer->setTonemapMode(options.tonemap);
             renderer->setSsao(options.ssao);
             renderer->setSsr(options.ssr);
+            renderer->setSsgi(options.ssgi, g_engineSettings.videoSsgiRadius,
+                              g_engineSettings.videoSsgiIntensity);
+            if (options.ssgi) renderer->setDeferred(true);
+            renderer->setSaturation(saturation);
+            renderer->setContrast(contrast);
             renderer->setVirtualMirror(options.mirror);
             renderer->setMotionBlur(options.motionBlur);
             if (options.motionBlur) renderer->setDeferred(true); // resolve pass only
             renderer->setVsync(options.vsync);
+            renderer->setAnisotropicFiltering(anisotropy);
         }
+        g_simulation->setFrameLimit(frameLimit);
+        g_simulation->setParticlesEnabled(options.particles);
+        if (auto* camera = g_simulation->camera()) camera->setHeadPhysics(options.headPhysics);
         if (auto* audio = g_simulation->audio())
             audio->setMasterVolume(options.masterVolume);
-        printf("[MENU] video: vsync %d, motion blur %d, ssao %d, ssr %d, mirror %d, exposure %.2f, tonemap %s, volume %.0f\n",
-               options.vsync ? 1 : 0, options.motionBlur ? 1 : 0,
-               options.ssao ? 1 : 0, options.ssr ? 1 : 0, options.mirror ? 1 : 0,
-               static_cast<double>(
-                   ks::sim::GameMenuOverlay::exposureValue(options.exposureIndex)),
-               ks::sim::GameMenuOverlay::tonemapName(options.tonemap),
-               static_cast<double>(options.masterVolume * 100.f));
+        // Every key the page can change is written back, so the option the
+        // player set is what the next start reads: the launcher's own settings
+        // page behaves the same way. Shadows and the mirror tile build GPU
+        // state once, so those three are stored and applied at next start.
+        {
+            auto& s = g_engineSettings;
+            // Only the keys this change actually moved are written: a row the
+            // player never touched stays out of the file, exactly like the
+            // other settings, so a round trip invents nothing.
+            const auto moved = [](auto before, auto after) { return before != after; };
+            const auto keep = [&s](const char* key, bool changed) {
+                if (changed) s.videoPresence.insert(key);
+            };
+            keep("exposure", moved(s.videoExposure, exposure));
+            s.videoExposure = exposure;
+            keep("saturation", moved(s.videoSaturation, saturation));
+            s.videoSaturation = saturation;
+            keep("contrast", moved(s.videoContrast, contrast));
+            s.videoContrast = contrast;
+            keep("tonemap", moved(s.videoTonemap, tonemapName));
+            s.videoTonemap = tonemapName;
+            keep("vsync", moved(s.videoVsync, options.vsync));
+            s.videoVsync = options.vsync;
+            keep("ssao", moved(s.videoSsao, options.ssao));
+            s.videoSsao = options.ssao;
+            keep("ssr", moved(s.videoSsr, options.ssr));
+            s.videoSsr = options.ssr;
+            keep("ssgi", moved(s.videoSsgi, options.ssgi));
+            s.videoSsgi = options.ssgi;
+            keep("mirrors", moved(s.videoMirrors, options.mirror));
+            s.videoMirrors = options.mirror;
+            keep("motionBlur", moved(s.videoMotionBlur, options.motionBlur));
+            s.videoMotionBlur = options.motionBlur;
+            keep("particles", moved(s.videoParticles, options.particles));
+            s.videoParticles = options.particles;
+            keep("headPhysics", moved(s.videoHeadPhysics, options.headPhysics));
+            s.videoHeadPhysics = options.headPhysics;
+            keep("frameLimit", moved(s.videoFrameLimit, frameLimit));
+            s.videoFrameLimit = frameLimit;
+            keep("anisotropicFiltering", moved(s.videoAnisotropicFiltering, anisotropy));
+            s.videoAnisotropicFiltering = anisotropy;
+            keep("shadowMapSize", moved(s.videoShadowMapSize, shadowSize));
+            s.videoShadowMapSize = shadowSize;
+            keep("shadowCascades", moved(s.videoShadowCascades, shadowCascades));
+            s.videoShadowCascades = shadowCascades;
+            keep("mirrorResolution", s.videoMirrorResolution != std::string(mirrorRes));
+            s.videoMirrorResolution = mirrorRes;
+            if (moved(s.audioMaster, options.masterVolume)) {
+                s.audioMaster = options.masterVolume;
+                s.hasAudioMaster = true;
+            }
+        }
+        // GAMEPLAY: the tweak set is what the loop applies to the car, and the
+        // settings carry the chosen values into the next start. The translation
+        // lives in GameplayOptionsBridge.h so gameplay_settings_test drives the
+        // same code this handler runs.
+        {
+            auto& tweaks = ks::engine::sim::GameplayTweaks::instance();
+            if (ks::sim::applyGameplayOptionsFromMenu(options, tweaks, g_engineSettings)) {
+                printf("[MENU] gameplay: fuel x%.1f, tyres x%.1f, racing rules %s\n",
+                       static_cast<double>(ks::sim::GameMenuOverlay::gameplayValue(
+                           options.fuelIndex)),
+                       static_cast<double>(ks::sim::GameMenuOverlay::gameplayValue(
+                           options.tireIndex)),
+                       options.strictRules ? "strict" : "lenient");
+            }
+        }
+        printf("[MENU] video: vsync %d, frame limit %d, aniso %dx, particles %d, head physics %d, "
+               "motion blur %d, ssao %d, ssr %d, ssgi %d, mirror %d (%s), shadows %d/%d, "
+               "exposure %.2f, saturation %.2f, contrast %.2f, tonemap %s, volume %.0f\n",
+               options.vsync ? 1 : 0, frameLimit, anisotropy, options.particles ? 1 : 0,
+               options.headPhysics ? 1 : 0, options.motionBlur ? 1 : 0, options.ssao ? 1 : 0,
+               options.ssr ? 1 : 0, options.ssgi ? 1 : 0, options.mirror ? 1 : 0, mirrorRes,
+               shadowSize, shadowCascades, static_cast<double>(exposure),
+               static_cast<double>(saturation), static_cast<double>(contrast),
+               tonemapName.c_str(), static_cast<double>(options.masterVolume * 100.f));
+    };
+    // The VIDEO page remembers which sections were folded: the layout is part
+    // of ui.collapsedSections, so the page opens the way it was left.
+    {
+        for (const std::string& name : g_engineSettings.uiCollapsedSections) {
+            const int index = ks::sim::GameMenuOverlay::sectionIndexFor(name);
+            if (index >= 0) uiMenu->setSectionCollapsed(index, true);
+        }
+        if (g_engineSettings.hasUiCollapsedSections)
+            printf("[INIT] VIDEO sections folded: %s\n",
+                   g_engineSettings.uiCollapsedSections.empty()
+                       ? "none"
+                       : [&]() {
+                             std::string listed;
+                             for (const std::string& name : g_engineSettings.uiCollapsedSections) {
+                                 if (!listed.empty()) listed += ", ";
+                                 listed += name;
+                             }
+                             return listed;
+                         }().c_str());
+    }
+    uiMenu->onSectionsChanged = []() {
+        auto& settings = g_engineSettings;
+        auto& menu = g_simulation->ui().menu();
+        settings.uiCollapsedSections.clear();
+        for (int i = 0; i < ks::sim::GameMenuOverlay::kSectionCount; ++i)
+            if (menu.sectionCollapsed(i))
+                settings.uiCollapsedSections.insert(ks::sim::GameMenuOverlay::sectionKey(i));
+        settings.hasUiCollapsedSections = true;
     };
     uiMenu->onDevModeRequested = []() {
         printf("Dev mode request\n");
@@ -1612,12 +2256,42 @@ static void initSimulation() {
     // migrate what it held), and send every rebind to controls.json only.
     if (auto* im = g_simulation->inputManager()) {
         ks::sim::KeyboardMapping kb;
+        // Install-wide bindings first: controls.vehicle in the document that
+        // ksengine.json points at (system/cfg/controls.json) is the system
+        // default, key by key. The player's own controls.json overrides only
+        // the actions it actually carries, and the legacy user/keyboard.ini
+        // migration runs after both.
+        {
+            std::ifstream in(ks::engine::assets::Paths::systemCfgFile("controls.json"),
+                             std::ios::binary);
+            if (in) {
+                std::ostringstream ss;
+                ss << in.rdbuf();
+                ks::engine::json::Value root;
+                std::string error;
+                if (ks::engine::json::parse(ss.str(), root, &error) && root.isObject()) {
+                    const ks::engine::json::Value* controls = root.find("controls");
+                    if (controls && controls->isObject()) {
+                        // The bindings live under controls.vehicle (AC-style). Fall
+                        // back to controls.keyboard for older files.
+                        const ks::engine::json::Value* kbj = controls->find("vehicle");
+                        if (!kbj || !kbj->isObject()) kbj = controls->find("keyboard");
+                        if (kbj && kbj->isObject() &&
+                            ks::sim::applyKeyboardMappingObject(*kbj, kb) > 0)
+                            printf("[INIT] keyboard: system defaults\n");
+                    }
+                }
+            }
+        }
         if (ks::sim::loadKeyboardMappingJson(g_userLayout.controls, kb)) {
             im->setKeyboardMapping(kb);
         } else if (ks::sim::loadKeyboardMapping("user/keyboard.ini", kb)) {
             im->setKeyboardMapping(kb);
             if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, kb))
                 printf("Migrated user/keyboard.ini -> %s\n", g_userLayout.controls.c_str());
+        } else {
+            // System defaults (or hardcoded fallbacks) still apply.
+            im->setKeyboardMapping(kb);
         }
         g_simulation->ui().keyRebind().setMapping(im->keyboardMapping());
 
@@ -1685,6 +2359,14 @@ static void initSimulation() {
         if (ks::sim::saveKeyboardMappingJson(g_userLayout.controls, m))
             printf("Keyboard bindings saved (%s)\n", g_userLayout.controls.c_str());
     };
+    g_simulation->ui().padRebind().onMappingChanged = [](const ks::sim::JoystickMapping& m) {
+        auto* im = g_simulation->inputManager();
+        if (!im) return;
+        im->setMapping(m);
+        if (im->saveJoystickJson(g_userLayout.player + "/joystick.json"))
+            printf("Pad/wheel bindings saved (%s/joystick.json)\n",
+                   g_userLayout.player.c_str());
+    };
     // Controller panel: edits apply to the live mapping immediately, but only
     // Save writes settings.json; Revert/Esc restore the opening document.
     g_simulation->ui().controllerSettings().onChanged =
@@ -1712,6 +2394,7 @@ static void initSimulation() {
         const ks::sim::GameSessionMode mode = g_simulation->features().sessionMode;
         std::printf("[MENU] restart session: %s\n", ks::sim::sessionModeName(mode));
         g_simulation->startSession(mode);
+        g_simulation->ui().menu().setSessionActive(g_simulation->isRunning());
     };
 
     // --- Roadmap 3.1: menu <-> transport ---------------------------------
@@ -1785,11 +2468,46 @@ static void initSimulation() {
                aiCars, g_simulation->aiCarCount());
     }
 
+    // KS_START_IN_GARAGE=1: the session starts with the car in its pit box
+    // instead of on the grid - the start MODE SETUP asks for, and the one a
+    // restart from the session planner takes. It needs a track that ships a
+    // garage row; the loop says so when there is none.
+    const bool startInGarageEnv = [] {
+        const char* v = std::getenv("KS_START_IN_GARAGE");
+        if (v == nullptr || v[0] == '\0') return false;
+        return v[0] == '1' || v[0] == 't' || v[0] == 'T' || v[0] == 'y' || v[0] == 'Y';
+    }();
+    // The mode a bare session would run: KS_SESSION picks it, practice is what
+    // start() does when nothing does.
+    auto envSessionMode = []() {
+        if (const char* sess = std::getenv("KS_SESSION"); sess && sess[0])
+            return ks::sim::modeFromMenuEntry(sess);
+        return ks::sim::GameSessionMode::Practice;
+    };
+    // The parameters of that session: the mode's own defaults, a race still
+    // promising the grid startSession(mode) would have given it.
+    auto envSessionParams = [](ks::sim::GameSessionMode mode) {
+        ks::sim::SessionStartParams p = ks::sim::defaultsForMode(mode);
+        if (mode == ks::sim::GameSessionMode::Race && p.aiCars == 0) p.aiCars = 5;
+        return p;
+    };
+
     // KS_HEADLESS runs the session with no menu and no renderer at all; the
     // windowed KS_AUTOSTART=1 path skips the menu but still renders.
     if (g_headless) {
         printf("[INIT] KS_HEADLESS -> starting session (no menu, no renderer)\n");
-        g_simulation->start();
+        loadEnvContent();
+        if (startInGarageEnv) {
+            const ks::sim::GameSessionMode mode = envSessionMode();
+            ks::sim::SessionStartParams params = envSessionParams(mode);
+            params.startInGarage = true;
+            printf("[INIT] KS_START_IN_GARAGE=1 -> %s from the pit box\n",
+                   ks::sim::sessionModeName(mode));
+            g_simulation->ui().menu().adoptSessionConfig(mode, params);
+            g_simulation->startSession(mode, params);
+        } else {
+            g_simulation->start();
+        }
     } else if (const char* autostart = std::getenv("KS_AUTOSTART");
         autostart && autostart[0] == '1') {
         printf("[INIT] KS_AUTOSTART=1 -> starting drive session, menu suppressed\n");
@@ -1799,11 +2517,57 @@ static void initSimulation() {
         if (const char* sess = std::getenv("KS_SESSION"); sess && sess[0]) {
             const ks::sim::GameSessionMode mode = ks::sim::modeFromMenuEntry(sess);
             printf("[INIT] KS_SESSION=%s -> %s\n", sess, ks::sim::sessionModeName(mode));
-            g_simulation->startSession(mode); // startSession() calls start()
+            if (startInGarageEnv) {
+                ks::sim::SessionStartParams params = envSessionParams(mode);
+                params.startInGarage = true;
+                printf("[INIT] KS_START_IN_GARAGE=1 -> from the pit box\n");
+                g_simulation->ui().menu().adoptSessionConfig(mode, params);
+                g_simulation->startSession(mode, params);
+            } else {
+                // The card reports what the app started, env paths included.
+                g_simulation->ui().menu().adoptSessionConfig(mode, envSessionParams(mode));
+                g_simulation->startSession(mode); // startSession() calls start()
+            }
+        } else if (startInGarageEnv) {
+            const ks::sim::GameSessionMode mode = ks::sim::GameSessionMode::Practice;
+            ks::sim::SessionStartParams params = envSessionParams(mode);
+            params.startInGarage = true;
+            printf("[INIT] KS_START_IN_GARAGE=1 -> practice from the pit box\n");
+            g_simulation->ui().menu().adoptSessionConfig(mode, params);
+            g_simulation->startSession(mode, params);
         } else {
             g_simulation->start();
         }
+        g_simulation->ui().menu().setSessionActive(g_simulation->isRunning());
         g_simulation->ui().menu().setVisible(false);
+    }
+
+    // KS_MATERIALS_REPORT=<path>: what the track is made of, written before the
+    // first frame. It runs for a headless session as well - that is the point:
+    // with no renderer there is nothing to look at, and the report is the only
+    // answer a run can give about the content's materials.
+    if (const char* reportPath = std::getenv("KS_MATERIALS_REPORT");
+        reportPath != nullptr && reportPath[0] != 0) {
+        const char* trackEnv = std::getenv("KS_TRACK");
+        const std::string source = (trackEnv != nullptr && trackEnv[0] != 0)
+                                       ? std::string(trackEnv)
+                                       : std::string("content");
+        std::string reportError;
+        // The document is looked for next to the binary and under the content
+        // roots too, so a staged install reports like a repository launch.
+        std::vector<std::string> tried;
+        const std::string document =
+            ks::sim::findLocationMaterialDocument(ks::sim::executableDirectory(), &tried);
+        if (document.empty()) {
+            fprintf(stderr, "[materials] no report for %s: %s\n", source.c_str(),
+                    ks::sim::locationMaterialNotFoundMessage(tried).c_str());
+        } else if (ks::sim::writeTrackMaterialReport(source, reportPath, &reportError, document)) {
+            printf("[materials] report for %s written to %s (vocabulary from %s)\n",
+                   source.c_str(), reportPath, document.c_str());
+        } else {
+            fprintf(stderr, "[materials] no report for %s: %s\n", source.c_str(),
+                    reportError.c_str());
+        }
     }
 
     // KS_CAM=<cockpit|chase|free> forces the camera the session starts in.
@@ -1878,6 +2642,19 @@ static bool saveScreenshotToFile(const std::string& path) {
         printf("[shot] encode failed: %s\n", err.c_str());
         return false;
     }
+    // The same frame, reduced to a signature: the hash plus a 12x10 luma grid,
+    // which is what the visual baseline compares.
+    if (!g_visualDigestPath.empty()) {
+        const ks::sim::FrameSignature sig =
+            ks::sim::frameSignature(px.data(), int(ext.width), int(ext.height));
+        std::string sigError;
+        if (ks::sim::writeFrameSignature(g_visualDigestPath, sig, &sigError))
+            printf("[shot] digest %s hash=%llu mean=%.2f\n", g_visualDigestPath.c_str(),
+                   static_cast<unsigned long long>(sig.hash), sig.meanLuma);
+        else
+            printf("[shot] digest FAILED %s: %s\n", g_visualDigestPath.c_str(),
+                   sigError.c_str());
+    }
     return true;
 }
 
@@ -1904,14 +2681,57 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
     if (const char* ss = std::getenv("KS_SCREENSHOT"); ss && ss[0]) {
         g_shotPath = ss;
     }
+    if (const char* vd = std::getenv("KS_VISUAL_DIGEST"); vd && vd[0]) {
+        g_visualDigestPath = vd;
+        printf("[INIT] KS_VISUAL_DIGEST=%s\n", vd);
+    }
     if (const char* sd = std::getenv("KS_SCREENSHOT_DELAY")) {
         const int d = std::atoi(sd);
         if (d >= 0) g_shotDelay = d;
     }
+    // Native modules: every *.dll in system/modules (KS_MODULES_DIR overrides),
+    // in file-name order. They speak KsModuleApi.h; one built for another ABI, or
+    // missing an entry, is reported and skipped instead of being called. A
+    // directory that does not exist is the normal case and says so once.
+    {
+        g_nativeModules.setLog([](const std::string& line) {
+            printf("[modules] %s\n", line.c_str());
+        });
+        const char* modulesEnv = std::getenv("KS_MODULES_DIR");
+        const std::string modulesDir = (modulesEnv != nullptr && modulesEnv[0] != 0)
+                                           ? std::string(modulesEnv)
+                                           : std::string("system/modules");
+        const auto modules = g_nativeModules.loadDirectory(modulesDir);
+        if (!modules.empty()) {
+            int refused = 0;
+            for (const auto& module : modules)
+                if (!module.loaded) ++refused;
+            printf("[modules] %s: %d loaded, %d refused\n", modulesDir.c_str(),
+                   g_nativeModules.loadedCount(), refused);
+        }
+    }
+    // Global hotkeys: controls.hotkeys in the install-wide document. The
+    // struct's defaults are the keys the handler used to hardcode, so a
+    // document without the block behaves exactly as before.
+    {
+        std::ifstream in(ks::engine::assets::Paths::systemCfgFile("controls.json"),
+                         std::ios::binary);
+        if (in) {
+            std::ostringstream ss;
+            ss << in.rdbuf();
+            ks::engine::json::Value root;
+            std::string error;
+            if (ks::engine::json::parse(ss.str(), root, &error) &&
+                ks::sim::loadHotkeysFromControls(root, g_hotkeys) > 0)
+                printf("[INIT] hotkeys: controls.hotkeys\n");
+        }
+    }
     // Roadmap 4.x — photo mode: free camera, HUD hidden, screenshot on key.
     if (const char* pm = std::getenv("KS_PHOTOMODE")) {
-        g_photoMode = true;
-        g_photoModeKey = pm[0];
+        // The env names the toggle key; the mode still starts off, so the
+        // first press enters and the next leaves, like the document's key.
+        const int vk = ks::sim::keyFromName(pm);
+        if (vk > 0) g_hotkeys.photoMode = vk;
     }
     // Roadmap 2.14 — timed profile run (see globals).
     // --track <dir>: the KS_TRACK setting, from the command line. WinMain gets
@@ -1955,6 +2775,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
 
     if (!g_headless) initWindow();
     initVulkanAndSimulation();
+    // After the UI exists: the theme is read while the hub is constructed, and
+    // the pointer it names belongs on the window that was just made.
+    installThemeCursor();
 
     // KS_MENU_SCREEN=<page>: open a menu page before the capture frames run, so
     // the screens behind the tiles can be judged without driving the window by
@@ -1973,6 +2796,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             {"SETTINGS", ks::sim::MenuState::Settings},
             {"VIDEO", ks::sim::MenuState::Options},
             {"CONTENT", ks::sim::MenuState::ContentManager},
+            // The showroom list under CONTENT, so a capture can show the mark
+            // on the current default without driving the window by hand.
+            {"SHOWROOMS", ks::sim::MenuState::ShowroomSelect},
+            // The skin list of the loaded car, under CONTENT as well.
+            {"SKINS", ks::sim::MenuState::Skins},
+            // The two driver-gear libraries, listed from the content tree.
+            {"SUITS", ks::sim::MenuState::Suits},
+            {"HELMETS", ks::sim::MenuState::Helmets},
             // The page calls itself DRIVER, like its tile: both names work, so
             // a capture is never lost to the section's two spellings.
             {"DRIVER", ks::sim::MenuState::Profile},
@@ -1981,12 +2812,28 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             // The track list scans content/tracks on the way in, so it goes
             // through its own opener instead of a bare page switch.
             {"TRACKS", ks::sim::MenuState::TrackSelect},
+            // The weather step is normally reached by choosing a track; the
+            // name opens it on its dry default for a capture.
+            {"WEATHER", ks::sim::MenuState::TrackWeather},
+            // The in-car pause bar (ESC over the session), the screen that wears
+            // the header bar as well as its own: a capture of it used to need a
+            // hand on the keyboard mid-run.
+            {"PAUSE", ks::sim::MenuState::Pause},
+            // The walk's first step and the wizard it can follow: both build
+            // their list as they open, so they go through their openers too.
+            {"CARS", ks::sim::MenuState::CarSelect},
+            {"CAR DATA", ks::sim::MenuState::CarData},
+            {"FIRST RUN", ks::sim::MenuState::FirstRun},
         };
         bool opened = false;
         for (const Page& page : kPages) {
             if (name != page.name) continue;
             if (page.state == ks::sim::MenuState::TrackSelect)
                 g_simulation->ui().menu().openTrackSelect();
+            else if (page.state == ks::sim::MenuState::CarSelect)
+                g_simulation->ui().menu().beginSessionSetup();
+            else if (page.state == ks::sim::MenuState::FirstRun)
+                g_simulation->ui().menu().openFirstRun();
             else
                 g_simulation->ui().menu().openScreen(page.state);
             printf("[menu] KS_MENU_SCREEN=%s -> %s\n", screenEnv,
@@ -1999,6 +2846,75 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             std::exit(2);
         }
     }
+    // KS_MENU_WEATHER=<DRY|CUSTOM|TODAY|DATE>: the sky the WEATHER page shows
+    // in a capture, on a track from the library so the real modes have
+    // coordinates to ask about. KS_TRACK names the track; the first one stands
+    // in when it does not.
+    if (const char* skyEnv = std::getenv("KS_MENU_WEATHER"); skyEnv && skyEnv[0]) {
+        std::string sky(skyEnv);
+        for (char& c : sky)
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        ks::sim::WeatherSource source = ks::sim::WeatherSource::Dry;
+        int dayOffset = 0;
+        bool known = true;
+        if (sky == "DRY") source = ks::sim::WeatherSource::Dry;
+        else if (sky == "CUSTOM") source = ks::sim::WeatherSource::Custom;
+        else if (sky == "TODAY") source = ks::sim::WeatherSource::Today;
+        else if (sky == "DATE") {
+            source = ks::sim::WeatherSource::RealDate;
+            dayOffset = -4; // a past day has a reading, not a forecast
+        } else {
+            known = false;
+        }
+        if (!known) {
+            printf("[menu] KS_MENU_WEATHER=%s: unknown sky\n", skyEnv);
+        } else {
+            std::string trackName;
+            if (const char* trackPath = std::getenv("KS_TRACK"); trackPath && trackPath[0]) {
+                trackName = trackPath;
+                const std::string::size_type cut = trackName.find_last_of("/\\");
+                if (cut != std::string::npos) trackName = trackName.substr(cut + 1);
+            }
+            auto& menu = g_simulation->ui().menu();
+            if (menu.openWeatherPreview(trackName, source, dayOffset))
+                printf("[menu] KS_MENU_WEATHER=%s -> %s on %s\n", skyEnv,
+                       ks::sim::weatherKindName(menu.weather().kind),
+                       menu.trackName().c_str());
+            else
+                printf("[menu] KS_MENU_WEATHER=%s: no tracks in the library\n", skyEnv);
+        }
+    }
+    // KS_MENU_PLANNER=1: open the session planner card in a capture. With
+    // KS_AUTOSTART and KS_SESSION the card describes a session that is really
+    // running; on its own it is the card of the setup the menu holds.
+    if (const char* plannerEnv = std::getenv("KS_MENU_PLANNER");
+        plannerEnv && plannerEnv[0] == '1') {
+        auto& menu = g_simulation->ui().menu();
+        menu.setVisible(true);
+        menu.setSessionActive(true);
+        if (!menu.sessionPlannerOpen()) menu.toggleSessionPlanner();
+        printf("[menu] KS_MENU_PLANNER=1 -> session planner card\n");
+    }
+
+    // KS_MENU_PLAN_CYCLE=<CAR|TRACK>: press that row of the session planner
+    // before the capture. A click there restarts the session, which is what
+    // the log then shows without a hand on the mouse.
+    if (const char* cycleEnv = std::getenv("KS_MENU_PLAN_CYCLE"); cycleEnv && cycleEnv[0]) {
+        std::string what(cycleEnv);
+        for (char& c : what)
+            if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+        int field = -1;
+        if (what == "CAR") field = ks::sim::GameMenuOverlay::PlanCar;
+        else if (what == "TRACK") field = ks::sim::GameMenuOverlay::PlanTrack;
+        if (field < 0) {
+            printf("[menu] KS_MENU_PLAN_CYCLE=%s: unknown row\n", cycleEnv);
+        } else {
+            const bool cycled = g_simulation->ui().menu().cycleSessionPlanField(field);
+            printf("[menu] KS_MENU_PLAN_CYCLE=%s -> %s\n", cycleEnv,
+                   cycled ? "cycled" : "no content to cycle");
+        }
+    }
+
     // KS_PROFILE_NAME / KS_PROFILE_NATIONALITY: fill the driver page before the
     // capture, so a long name or a chosen country can be judged on screen - the
     // defaults never show either.
@@ -2020,6 +2936,78 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             g_simulation->ui().menu().setSelectedIndex(row);
             printf("[menu] selected row %d of %d on %s\n", row, count,
                    g_simulation->ui().menu().sectionTitle().c_str());
+        }
+    }
+
+    // KS_HIDE_MENU=1: leave the menu overlay out, so a capture shows the scene
+    // (the showroom turntable and the car on it) instead of the tiles over it.
+    if (const char* hide = std::getenv("KS_HIDE_MENU");
+        hide != nullptr && hide[0] && std::strcmp(hide, "0") != 0) {
+        g_simulation->ui().menu().setVisible(false);
+        std::puts("[menu] overlay hidden by KS_HIDE_MENU");
+    }
+
+    // KS_CONSOLE=1: the showroom with an empty stage and the developer console
+    // already up, where TEMPERATURE / BRIGHTNESS / CONTRAST tune the display
+    // live. KS_CONSOLE_CMD="TEMPERATURE 4500; CONTRAST 1.15" runs lines at
+    // start-up, so a captured frame can show a tuned room without the window
+    // being driven by hand.
+    if (const char* consoleEnv = std::getenv("KS_CONSOLE");
+        consoleEnv != nullptr && consoleEnv[0] && consoleEnv[0] != '0') {
+        g_simulation->ui().console().setVisible(true);
+        g_simulation->ui().console().startTyping();
+        std::puts("[console] open: TEMPERATURE / BRIGHTNESS / CONTRAST tune the display");
+    }
+    // KS_SETUP=1: the car's setup screen already up, so a capture shows it
+    // without the window being driven by hand.
+    if (const char* setupEnv = std::getenv("KS_SETUP");
+        setupEnv != nullptr && setupEnv[0] && setupEnv[0] != '0') {
+        if (auto* garage = g_simulation->setupGarage()) garage->setVisible(true);
+        const std::string tab = setupEnv;
+        if (tab != "1") g_simulation->setupGarage()->selectTabByName(tab);
+        std::puts("[setup] screen open");
+    }
+    // KS_SETUP_SYMMETRIC=0: open with the checkbox off, so a capture can show
+    // the per-corner mode as well as the symmetric one.
+    if (const char* symEnv = std::getenv("KS_SETUP_SYMMETRIC");
+        symEnv != nullptr && symEnv[0] && g_simulation->setupGarage() != nullptr) {
+        g_simulation->setupGarage()->setSymmetric(std::strcmp(symEnv, "0") != 0);
+    }
+    // KS_SETUP_EDIT="ARB_FRONT=34000;FUEL=30": rows moved before the first
+    // frame, so a capture shows the screen with its offsets from the car.
+    if (const char* editEnv = std::getenv("KS_SETUP_EDIT");
+        editEnv != nullptr && editEnv[0] && g_simulation->setupGarage() != nullptr) {
+        const std::string lines(editEnv);
+        std::size_t start = 0;
+        while (start <= lines.size()) {
+            const std::size_t end = lines.find(';', start);
+            const std::string line =
+                lines.substr(start, end == std::string::npos ? std::string::npos
+                                                             : end - start);
+            const std::size_t eq = line.find('=');
+            if (eq != std::string::npos) {
+                const std::string key = line.substr(0, eq);
+                const float value = static_cast<float>(std::atof(line.c_str() + eq + 1));
+                if (g_simulation->setupGarage()->setRowValue(key, value))
+                    std::printf("[setup] %s = %.2f\n", key.c_str(),
+                                static_cast<double>(value));
+            }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+    }
+    if (const char* cmdEnv = std::getenv("KS_CONSOLE_CMD"); cmdEnv != nullptr && cmdEnv[0]) {
+        // The lines run whether or not the panel is up: KS_CONSOLE decides
+        // that, so a capture of a tuned room is not covered by the overlay.
+        const std::string lines(cmdEnv);
+        std::size_t start = 0;
+        while (start <= lines.size()) {
+            const std::size_t end = lines.find(';', start);
+            const std::string line =
+                lines.substr(start, end == std::string::npos ? std::string::npos : end - start);
+            if (!line.empty()) g_simulation->ui().console().execute(line);
+            if (end == std::string::npos) break;
+            start = end + 1;
         }
     }
 
@@ -2108,6 +3096,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             g_photoMode = false;
             g_simulation->ui().dashboard().setVisible(true);
             g_simulation->ui().menu().setVisible(true);
+            g_simulation->setPhotoOrbit(false); // back to the view it had
             g_simulation->start(); // resume simulation
         }
 
@@ -2180,14 +3169,45 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             ks::sim::driverStatsFromProfile(
                 g_simulation->ui().menu().profile(),
                 static_cast<int>(g_simulation->features().pb.size())));
+        // What the driver left in the car and on screen follows him into the
+        // next session: the cockpit knobs and the two panel positions.
+        if (auto* vehicle = g_simulation->vehicle()) {
+            g_engineSettings.cockpitTcLevel = vehicle->tcLevel();
+            g_engineSettings.cockpitAbsLevel = vehicle->absLevel();
+            g_engineSettings.cockpitBrakeBiasPct =
+                static_cast<int>(vehicle->brakeBias() * 100.f + 0.5f);
+            g_engineSettings.hasCockpitTcLevel = true;
+            g_engineSettings.hasCockpitAbsLevel = true;
+            g_engineSettings.hasCockpitBrakeBiasPct = true;
+        }
+        {
+            const auto offsets = g_simulation->ui().overlayOffsets();
+            g_engineSettings.uiHdashX = offsets.hdashX;
+            g_engineSettings.uiHdashY = offsets.hdashY;
+            g_engineSettings.uiInputsX = offsets.inputsX;
+            g_engineSettings.uiInputsY = offsets.inputsY;
+            g_engineSettings.hasUiPanelOffsets = true;
+        }
         g_engineSettings.save(g_userLayout.settings);
+        // driver.json follows the same rule: the profile the menu carries is
+        // what the next launch reads, completion flag included.
+        if (!g_driverProfilePath.empty()) {
+            ks::sim::saveDriverProfile(g_driverProfilePath,
+                                       g_simulation->ui().menu().profile(),
+                                       g_simulation->ui().menu().setupComplete());
+        }
     }
     g_simulation.reset();
+    g_localShadowAtlas.shutdown();
     g_shadowMap.shutdown();
     delete g_nativeRenderer;
     g_nativeRenderer = nullptr;
     if (g_surface) vkDestroySurfaceKHR(g_vkInstance, g_surface, nullptr);
     if (g_vkInstance) vkDestroyInstance(g_vkInstance, nullptr);
+
+    // Modules outlive the session on purpose (they load before it and unload
+    // after it): their shutdown runs here, in reverse load order.
+    g_nativeModules.unloadAll();
 
     return 0;
 }
