@@ -2,7 +2,8 @@
 
 Inventario dei gap (status `partial`/`missing`) nei documenti di `system/cfg/`.
 Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + side tiles),
-busMix (audio), ssgi, SSR e localLights (video).
+busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
+camera (free/chase/cockpit/cameraViews), gameplayTweaks resta partial (mechanicalFailures).
 
 ## Stato attuale (aggiornato)
 
@@ -23,6 +24,10 @@ Cluster C — Controlli / input:
 - vrInput (partial) — XrInput/VrInputAdapter cablati, da verificare con headset.
 
 Cluster D — Gameplay / sessione / rete / UI / contenuti: ~40 gap (vedi ksengine.json).
+
+## Gap chiusi in questa sessione (doc audit)
+headPhysics, brakeGlow, surfaceEffects, upgrades, pitService, camera (free/chase/cockpit/cameraViews),
+busMix, ssgi, SSR, localLights, windscreenEffects, mirrors.
 
 ## Priorità suggerite
 1. Cluster B residuo: coloredShadows (cablare ColoredShadows al runtime) — piccolo, verificabile.
