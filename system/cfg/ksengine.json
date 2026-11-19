@@ -385,6 +385,7 @@
       "nationality",
       "raceNumber",
       "bio",
+      "picture",
       "helmetDesign"
     ],
     "statsFile": "user/<player>/stats.json",
