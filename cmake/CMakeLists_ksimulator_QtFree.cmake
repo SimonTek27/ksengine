@@ -21,6 +21,7 @@ find_package(Vulkan REQUIRED)
 
 set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulatorApp.cpp
+	${CMAKE_SOURCE_DIR}/src/engine/Audio/fmod.rc
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SimulationLoop_NetSync.cpp
 	# roadmap 2.7 — box service (plan -> PitLaneRepair -> refuel/damage)
@@ -42,12 +43,16 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/ShadowSystem.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/DashboardOverlay.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SetupGarage.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/DevScripting.cpp
+	# native modules: the ABI a DLL speaks and the loader that runs it
+	${CMAKE_SOURCE_DIR}/src/simulator/ModuleLoader.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/TelemetryOverlay.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/TrackLoader.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/TrackLayout.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/AIController.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/RaceSessionManager.cpp
-	${CMAKE_SOURCE_DIR}/src/simulator/MultiCarManager.cpp
+	    ${CMAKE_SOURCE_DIR}/src/simulator/MultiCarManager.cpp
+    ${CMAKE_SOURCE_DIR}/src/simulator/TrackGroundModel.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/PostProcessing.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/ReplayRecorder.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/GameMenuOverlay.cpp
@@ -80,11 +85,19 @@ set_target_properties(SimulatorApp PROPERTIES
 	OUTPUT_NAME ksim
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+# Content fallback: where cmake/KsInstallLayout.cmake installs the shipped
+# layout. ContentLibrary.h lists content/<kind> from the run folder first and
+# falls back to <install prefix>/content, so a launch from out/build/... shows
+# the installation's cars and tracks without copying them anywhere. Forward
+# slashes, because the value reaches a C string literal.
+set(KSIM_CONTENT_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
+string(REPLACE "\\" "/" KSIM_CONTENT_INSTALL_PREFIX "${KSIM_CONTENT_INSTALL_PREFIX}")
 target_compile_definitions(SimulatorApp PRIVATE
 	KSENGINE_QT_FREE=1
 	HAS_VEHICLE_SIM=1
 	HAS_FFB=1
 	KSASSETTOCORSA_EXPORTS
+	KS_INSTALL_PREFIX="${KSIM_CONTENT_INSTALL_PREFIX}"
 )
 target_include_directories(SimulatorApp PRIVATE
 	${CMAKE_SOURCE_DIR}/src
@@ -99,7 +112,7 @@ if(HAS_MIKKTSPACE)
 endif()
 if(WIN32)
 	target_link_libraries(SimulatorApp PRIVATE dinput8 dxguid xinput ole32 user32 gdi32 ws2_32 winmm
-		mfplat mfreadwrite mfuuid)
+		mfplat mfreadwrite mfuuid winhttp)
 endif()
 
 # ---------------------------------------------------------------------------

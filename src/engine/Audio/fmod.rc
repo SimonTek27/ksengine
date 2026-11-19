@@ -1,0 +1,4 @@
+#include "resource.h"
+
+IDR_FMOD64 RCDATA "fmod64.dll"
+IDR_FMODSTUDIO64 RCDATA "fmodstudio64.dll"
