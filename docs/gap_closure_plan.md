@@ -42,3 +42,4 @@ o audit manuale feature-per-feature. Non sono chiudibili con sola documentazione
 Il lavoro di doc audit è essenzialmente completo: i partial rimanenti sono accurati.
 Per implementare i gap hardware, servono sessioni dedicate con i dispositivi.
 Per i gap gameplay/UI/contenuti, servono audit uno per uno.
+Il prossimo step più piccolo e verificabile è implementare il supporto VR (render-to-headset).
