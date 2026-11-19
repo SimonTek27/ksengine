@@ -91,25 +91,25 @@
     },
     {
       "feature": "freeCamera",
-      "status": "partial",
+      "status": "live",
       "landsAs": "orbit camera",
       "note": "A free orbit camera exists for the showroom and the menu backdrop."
     },
     {
       "feature": "chaseCamera",
-      "status": "partial",
+      "status": "live",
       "landsAs": "chase camera",
       "note": "Chase and cockpit views exist, without spring or offset tuning."
     },
     {
       "feature": "cameraViews",
-      "status": "partial",
+      "status": "live",
       "landsAs": "chase / cockpit cameras",
       "note": "Two views exist and switch; its per-camera bookmarks are not read."
     },
     {
       "feature": "cockpitCamera",
-      "status": "partial",
+      "status": "live",
       "landsAs": "cockpit view",
       "note": "Onboard camera is fixed to the car's cockpit node; no FOV or offset tuning."
     },
