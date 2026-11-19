@@ -7,7 +7,11 @@ namespace sim {
 
 bool GameplayTweaks::initialize() {
 	auto& logger = sys::LogManager::instance();
-	logger.info("GameplayTweaks", "Initializing Gameplay Tweaks module (STUB)");
+	logger.info("GameplayTweaks", "Initializing Gameplay Tweaks module");
+	logger.info("GameplayTweaks", "The session applies fuelConsumption and tireDamageRate to the car, "
+				 "mechanicalFailures to the damage model's enabled flag, "
+				 "the AI pace/aggression pair and racingRulesStrict to the track-limits ladder; "
+				 "damageAffectsDriving is stored but not wired");
 	resetToDefaults();
 	return true;
 }
