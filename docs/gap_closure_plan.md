@@ -41,3 +41,4 @@ I gap rimanenti richiedono implementazione hardware (VR, triple screen, wheel LE
 o audit manuale feature-per-feature. Non sono chiudibili con sola documentazione.
 Il lavoro di doc audit è essenzialmente completo: i partial rimanenti sono accurati.
 Per implementare i gap hardware, servono sessioni dedicate con i dispositivi.
+Per i gap gameplay/UI/contenuti, servono audit uno per uno.
