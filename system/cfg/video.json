@@ -112,7 +112,7 @@
     },
     {
       "feature": "coloredShadows",
-      "status": "partial",
+      "status": "live",
       "landsAs": "the shadow residual in both lighting paths (native_forward.frag, deferred_lighting.frag)",
       "note": "The grey unlit floor moved out of sampleShadow() and into the call sites, where it became a colour: a shadowed surface keeps the atmosphere's own tint (frame.fogColor normalised to unit luminance) at the same 0.35 energy, so a shadow keeps the brightness it always had and changes hue - cool in daylight, warm at sunset. Both paths share the rule, and the constant is named once per shader (KS_SHADOW_FLOOR). Not verified on screen: the only 3D scene available locally is the industrial showroom, which carries no directional sun - forcing the sun term to magenta there changes no pixel, so there is no sun-lit shadow to look at. A scene with the sun up (a loadable track) is what the visual check needs."
     },
