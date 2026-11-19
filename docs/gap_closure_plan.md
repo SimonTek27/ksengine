@@ -5,7 +5,7 @@ Aggiornato dopo la chiusura di windscreenEffects (4 stage), mirror (stage 3 + si
 busMix, ssgi, SSR, localLights, headPhysics, brakeGlow, surfaceEffects, upgrades, pitService,
 camera (free/chase/cockpit/cameraViews), coloredShadows, materialMapping, gameplayTweaks
 (mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare), settings.entries (ui),
-picture (profile), merge rain/weatherShaders->weather, merge grass->terrain (poi separato).
+picture (profile), merge weather/terrain.
 
 ## Stato attuale
 
@@ -17,7 +17,7 @@ Cluster B — Video / grafica:
 - screenSpaceReflections → **live**.
 - coloredShadows → **live**.
 - localLights → **live**.
-- vrSupport (partial) — codice presente, da verificare con headset.
+- vrSupport (partial) — OpenXR bootstrap esiste, render-to-headset non cablato.
 - tripleScreen (missing) — richiede refactor render loop.
 
 Cluster C — Controlli / input:
@@ -36,12 +36,8 @@ busMix, ssgi, SSR, localLights, windscreenEffects, mirrors, coloredShadows, mate
 gameplayTweaks (mechanicalFailures + damageAffectsDriving), bloomAndFlare (lens flare),
 settings.entries (ui), profile.picture, merge weather/terrain.
 
-## Priorità suggerite
-1. Cluster B: vrSupport/tripleScreen (richiede hardware/refactor render loop).
-2. Cluster C: wheelLeds protocolli HW (richiede device fisico).
-3. Cluster D: audit feature-per-feature per i ~33 gap rimanenti.
-
 ## Nota
-I gap rimanenti richiedono implementazione hardware (VR, triple screen, wheel LEDs)
+I gap rimanenti richiedono implementazione hardware (VR, triple screen, wheel LEDs, head tracking)
 o audit manuale feature-per-feature. Non sono chiudibili con sola documentazione.
-Il prossimo step più piccolo e verificabile è implementare il supporto VR (render-to-headset).
+Il lavoro di doc audit è essenzialmente completo: i partial rimanenti sono accurati.
+Per implementare i gap hardware, servono sessioni dedicate con i dispositivi.
