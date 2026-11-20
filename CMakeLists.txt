@@ -273,6 +273,16 @@ if(KS_QT_FREE_BUILD)
 		set_target_properties(ks_trackmodules PROPERTIES
 			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 	endif()
+	# AC-compatible readers (SimHub's AC plugin above all) pick the game by the
+	# process name acs.exe and only then read Local\acpmf_*. The sim publishes
+	# those pages itself, so this launcher exists to carry the name: it starts
+	# ksim.exe next to it with the same arguments and forwards its exit code.
+	if(WIN32 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/acshim/main.cpp")
+		add_executable(acs "${CMAKE_CURRENT_SOURCE_DIR}/tools/acshim/main.cpp")
+		set_target_properties(acs PROPERTIES
+			RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+			RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Release")
+	endif()
 	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tools/cartool/main.cpp")
     # AC car content conversion: writes the single data/data.json manifest
     # from a stock .ini car folder (content pipeline).
@@ -312,6 +322,12 @@ endif()
 	include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KsInstallLayout.cmake")
 	ks_install_layout()
 	ks_add_dist_target()
+	# `sync-install`: build the simulator, then copy ksim.exe and the engine DLL
+	# into the installed folder (KS_INSTALL_SYNC_DIR, default E:/ksimulator) and
+	# print what changed, so a play test never starts an older build.
+	#   cmake --build <build> --config Release --target sync-install
+	include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KsSyncInstall.cmake")
+	ks_add_sync_install_target()
 	enable_testing()
 	add_subdirectory(tests/ksengine)
 	return()
@@ -346,7 +362,12 @@ message(STATUS "KSEngine included as subdirectory")
 # ============================================================================
 # Examples
 # ============================================================================
-add_subdirectory(examples/MinimalSimulator EXCLUDE_FROM_ALL)
+# The example was removed from the repository; a checkout that still carries
+# one (or a worktree that has not pulled the removal yet) keeps building it,
+# and one without it no longer fails to configure.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/examples/MinimalSimulator/CMakeLists.txt")
+	add_subdirectory(examples/MinimalSimulator EXCLUDE_FROM_ALL)
+endif()
 
 # ============================================================================
 # Dear ImGui - Qt6 backend for Driving Simulator UI
@@ -624,5 +645,12 @@ set_target_properties(SimulatorApp PROPERTIES
 set_target_properties(kseditor PROPERTIES
 	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+
+# `sync-install`: build the simulator, then copy ksim.exe and the engine DLL
+# into the installed folder (KS_INSTALL_SYNC_DIR, default E:/ksimulator) and
+# print what changed, so a play test never starts an older build.
+#   cmake --build <build> --config Release --target sync-install
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/KsSyncInstall.cmake")
+ks_add_sync_install_target()
 
 message(STATUS "ksEditor v${PROJECT_VERSION} configured successfully - Driving Simulator Engine")
