@@ -2,6 +2,7 @@
 #include "SessionController.h" // GameSessionMode + SessionStartParams
 
 #include "ShowroomScene.h"
+#include "LocalLights.h"      // the room's own lamps, kept for a session inside the hall
 
 /**
  * SimulationLoop — fixed-timestep sim + NativeUiHub + GPU UI pass.
@@ -202,6 +203,9 @@ public:
     float updateShowroomAutoExposure();
     void buildShowroomVenue();
     void closeShowroom();
+    /** The scene is no longer the hall: the sun it baked and the lamps it lit
+     *  stop answering for it (a track's own light takes over). */
+    void releaseShowroomScene();
     // Auto exposure state of the open room (see updateShowroomAutoExposure).
     std::string m_roomMeterRoom;      // the room this state belongs to
     float m_roomExposure = 0.f;       // adapted exposure, 0 = not started
@@ -238,6 +242,25 @@ public:
      *  the room lights itself, the track behind it still uses the sky. */
     bool m_showroomIblSaved = false;
     bool m_showroomSkyBaked = false; // the room's sun made the environment once
+    /** The sun the room declared, kept after the room closes: a drive session
+     *  started inside the hall keeps the hall on screen, and its direct light
+     *  has to be the same sun the environment was baked for, or shading and
+     *  reflections disagree. A room that declares intensity 0 (lamps and IBL
+     *  only) keeps that too. */
+    float m_roomSunDirection[3] = {0.3f, -0.8f, 0.2f};
+    float m_roomSunColor[3] = {1.f, 0.95f, 0.9f};
+    float m_roomSunIntensity = 1.f;
+    /** Did the room carry a [LIGHT] block? ShowroomConfig forces sun_intensity
+     *  to 0 when it did not, and "nothing was declared" is not "no sun": an
+     *  undeclared level leaves the engine's daylight in place. */
+    bool m_roomSunDeclared = false;
+    bool m_roomSunValid = false;
+    /** The room's own lamps (empty when it declares none). Kept with the sun
+     *  because closeShowroom() hands the light slot to the track's dynamic
+     *  lights and a session started in the hall must get both back. */
+    std::vector<ks::sim::LocalLight> m_roomLamps;
+    /// True while the hall is what the scene shows (cleared when a track loads).
+    bool m_showroomHallInScene = false;
     bool m_showroomIblWasOn = true;
     /** True when the open hall is a photo of a place (its surfaces are the
      *  reflection probe): it keeps the probe as its IBL, unlike a hall whose

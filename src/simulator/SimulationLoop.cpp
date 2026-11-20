@@ -713,6 +713,7 @@ bool SimulationLoop::loadTrack(const std::string& kn5Path) {
     // (a drive session started in the showroom keeps the hall on screen, and
     // the sky maps must keep coming from the room's sun there).
     if (m_vulkanRenderer) m_vulkanRenderer->setSkyIblFrozen(false);
+    releaseShowroomScene();
     m_trackData = SimTrackData{};
     m_trackData.kn5Path = kn5Path;
     m_trackData.name = std::filesystem::path(kn5Path).stem().string();
@@ -732,6 +733,7 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
     // né continuare a pilotare camera/luce/meteo mentre si guida in pista.
     if (!m_showroomHallLoading && m_showroom.active()) closeShowroom();
     if (m_vulkanRenderer) m_vulkanRenderer->setSkyIblFrozen(false);
+    releaseShowroomScene();
     if (!fs::is_directory(trackDirectory)) return false;
     loadContentMods(trackDirectory); // Lua Mod SDK: <track>/scripts/*.lua
     m_trackData.directory = trackDirectory;
@@ -1271,6 +1273,9 @@ bool SimulationLoop::openShowroom(const std::string& directory, std::string* err
     // Nothing else will: the menu sits in the idle branch of tick(), which
     // returns before the weather update ever runs.
     applyShowroomLight();
+    // From here the hall is the scene, and it stays the scene through the
+    // session a player starts inside it: the room's sun is what lights it.
+    m_showroomHallInScene = true;
     return true;
 }
 
@@ -3095,6 +3100,18 @@ void SimulationLoop::spawnTrackDynamicLights(const std::string& layoutFolder,
     }
 }
 
+// The hall stopped being the scene: the two spawners below are the only places
+// that put a track's visuals on screen in its place, and they cannot tell (the
+// public loaders do) whether the room's light is still answering for it. Leaving
+// the sun and the lamps set is how a car ended up lit by the last room it was
+// previewed in.
+void SimulationLoop::releaseShowroomScene() {
+    m_showroomHallInScene = false;
+    m_roomSunValid = false;
+    m_roomSunDeclared = false;
+    m_roomLamps.clear();
+}
+
 void SimulationLoop::closeShowroom() {
     // Capture before close(): whether a room was actually open decides what
     // "leaving the room" means below. startSession() calls this defensively
@@ -4597,6 +4614,21 @@ void SimulationLoop::applyShowroomLight() {
                            -cfg.sunDirection[2]};
         light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
         light.intensity = cfg.sunIntensity;
+        // Kept after the room's own frames: a drive session started inside the
+        // hall leaves the hall on screen (closeShowroom keeps the meshes), and
+        // its direct light has to stay this sun — see updateWeather().
+        m_roomSunDirection[0] = light.direction.x;
+        m_roomSunDirection[1] = light.direction.y;
+        m_roomSunDirection[2] = light.direction.z;
+        m_roomSunColor[0] = light.color.x;
+        m_roomSunColor[1] = light.color.y;
+        m_roomSunColor[2] = light.color.z;
+        m_roomSunIntensity = light.intensity;
+        // An AC room carries no [LIGHT] block at all, and the loader turns that
+        // into sunIntensity 0 (ShowroomConfig.h): 0 here means "the room said
+        // nothing", not "the room wants no sun", so it must not mute the level.
+        m_roomSunDeclared = cfg.lightDeclared;
+        m_roomSunValid = true;
         // The room's own sun bakes the room's environment once, then the maps
         // are frozen: the menu keeps running the weather branch behind the
         // showroom, and its 65.7-degree track sun used to re-bake the sky under
@@ -4631,7 +4663,10 @@ void SimulationLoop::applyShowroomLight() {
                 }
                 lamps.push_back(lampLight);
             }
-            m_vulkanRenderer->setLocalLights(lamps);
+            // Kept past closeShowroom(): the room's lamps are part of what the
+            // hall looks like, and a session started inside it is still the hall.
+            m_roomLamps = lamps;
+            m_vulkanRenderer->setLocalLights(m_roomLamps);
         }
         // AC lights a showroom from the hall's own baked materials and a
         // fixed room light; its reflection probe exists for what the
@@ -4802,8 +4837,20 @@ void SimulationLoop::updateWeather(float dt) {
     auto& rs = ks::engine::graphics::RenderSystem::instance();
     const float phase = (m_timeOfDay - 12.0f) / 12.0f * 3.14159265f;
     const float c = std::cos(phase), s = std::sin(phase);
-    const ks::engine::graphics::Vec3 sunDir{0.3f * c - 0.2f * s, -0.8f, 0.2f * c + 0.3f * s};
-    rs.setSun(sunDir, {1.0f, 0.95f, 0.9f});
+    ks::engine::graphics::Vec3 sunDir{0.3f * c - 0.2f * s, -0.8f, 0.2f * c + 0.3f * s};
+    ks::engine::graphics::Vec3 sunColor{1.0f, 0.95f, 0.9f};
+    // A hall the camera is inside keeps the sun it declared: the environment
+    // maps were baked for that one (applyShowroomLight + setSkyIblFrozen), so
+    // lighting the hall with the track's weather sun made shading and
+    // reflections disagree. Its intensity comes along only when the room
+    // declared one (see below): a room that says nothing keeps the engine's
+    // daylight, a room that writes 0 is honoured.
+    const bool roomOwnsTheSun = m_showroomHallInScene && m_roomSunValid;
+    if (roomOwnsTheSun) {
+        sunDir = {m_roomSunDirection[0], m_roomSunDirection[1], m_roomSunDirection[2]};
+        sunColor = {m_roomSunColor[0], m_roomSunColor[1], m_roomSunColor[2]};
+    }
+    rs.setSun(sunDir, sunColor);
     // The haze tint is authored as a display-space colour (it reads like the
     // pale blue the sky shows), but every place it lands — the sky background
     // write, the fog mix against scene-linear lit values, the clear colour —
@@ -4820,7 +4867,25 @@ void SimulationLoop::updateWeather(float dt) {
     ks::physics::TrackSurface::instance().syncFromWeather(m_weather.trackWetness, m_weather.trackTemp);
     if (m_vulkanRenderer) {
         DirectionalLight light; light.direction = {sunDir.x, sunDir.y, sunDir.z};
+        if (roomOwnsTheSun) {
+            light.color = {sunColor.x, sunColor.y, sunColor.z};
+            // Direction and colour are the room's; the level is its own when it
+            // declared one, and the engine's daylight when it did not. The asr
+            // hall has no [LIGHT] block (so the loader's sun_intensity is 0,
+            // not an authored 0) — taking that literally left a drive session
+            // inside the hall with no key light at all (measured: walls 185 ->
+            // 125, floor 91 -> 59, and the blue of the sky ambient everywhere).
+            // The sky takes the colour and not the intensity for the same reason
+            // (see deferred_lighting.frag); a room that really writes
+            // sun_intensity = 0 is still honoured.
+            light.intensity = m_roomSunDeclared ? m_roomSunIntensity : 1.0f;
+        }
         m_vulkanRenderer->setSun(light);
+        // The hall keeps its lamps as well as its sun: closeShowroom() cleared
+        // this slot for the track's dynamic lights, which is what a session
+        // started in the room would otherwise drive under (no room lamps at
+        // all, only the sun and whatever the sky ambient says).
+        if (roomOwnsTheSun) m_vulkanRenderer->setLocalLights(m_roomLamps);
         // Weather-driven atmosphere. RenderSystem::setFog() above only stores
         // the values (it has no GPU work behind it), so the shader-facing fog
         // has to be fed here as well: density rises with cloud cover, while a
@@ -6438,6 +6503,7 @@ void SimulationLoop::applyTrackVisuals(const std::string& trackDir) {
     }
     spawnSceneEntities(baked);
     m_spawnedSceneDir = baked;
+    releaseShowroomScene();
     std::fprintf(stderr, "[scene] track visuals from %s (%d entities)\n",
                  baked.c_str(), static_cast<int>(m_sceneEntities.size()));
     // The baked world is not centred on the engine origin (vallelunga spans
@@ -6496,6 +6562,7 @@ bool SimulationLoop::loadTrackKn5Visuals(const std::string& kn5Path) {
     if (!m_trackPitMarkers.empty())
         std::printf("[scene] %zu AC pit marker(s) in the .kn5\n", m_trackPitMarkers.size());
     m_spawnedSceneDir = kn5Path;
+    releaseShowroomScene();
     std::printf("[scene] track %s loaded from its .kn5 (%d meshes)\n", kn5Path.c_str(),
                 meshes);
 
