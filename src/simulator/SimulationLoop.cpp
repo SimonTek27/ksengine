@@ -3106,10 +3106,22 @@ void SimulationLoop::spawnTrackDynamicLights(const std::string& layoutFolder,
 // the sun and the lamps set is how a car ended up lit by the last room it was
 // previewed in.
 void SimulationLoop::releaseShowroomScene() {
+    const bool hadRoom = m_showroomHallInScene || m_roomSunValid;
     m_showroomHallInScene = false;
     m_roomSunValid = false;
     m_roomSunDeclared = false;
     m_roomLamps.clear();
+    // The hall load goes through loadTrackFolder() with this set: it is the
+    // room arriving, not the room leaving, and saying otherwise in the log
+    // would be the one thing a debug run cannot afford.
+    m_roomDisplayLogged = false;
+    // A photo hall installed its own probe as the environment, and the track's
+    // sky cannot be baked over it: give the environment back before the track
+    // is drawn, or the circuit drives under the room's reflections.
+    if (m_vulkanRenderer) m_vulkanRenderer->releaseProbeEnvironment();
+    if (hadRoom && !m_showroomHallLoading)
+        std::printf("[showroom] the hall left the scene: sun, lamps, fog, exposure and IBL "
+                    "are the track's again\n");
 }
 
 void SimulationLoop::closeShowroom() {
@@ -4613,7 +4625,12 @@ void SimulationLoop::applyShowroomLight() {
         light.direction = {-cfg.sunDirection[0], -cfg.sunDirection[1],
                            -cfg.sunDirection[2]};
         light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
-        light.intensity = cfg.sunIntensity;
+        // The same rule updateWeather() applies to a session inside the hall: a
+        // room that declared no [LIGHT] block keeps the engine's daylight, a
+        // declared level is its own. Without this the menu drew the room with
+        // no sun at all and the session with one, which is the one difference
+        // the two views cannot explain away.
+        light.intensity = cfg.lightDeclared ? cfg.sunIntensity : 1.0f;
         // Kept after the room's own frames: a drive session started inside the
         // hall leaves the hall on screen (closeShowroom keeps the meshes), and
         // its direct light has to stay this sun — see updateWeather().
@@ -4629,6 +4646,9 @@ void SimulationLoop::applyShowroomLight() {
         // nothing", not "the room wants no sun", so it must not mute the level.
         m_roomSunDeclared = cfg.lightDeclared;
         m_roomSunValid = true;
+        // While the room owns the frame the session line has not been written
+        // yet; a new room (or a new session) writes it again.
+        m_roomDisplayLogged = false;
         // The room's own sun bakes the room's environment once, then the maps
         // are frozen: the menu keeps running the weather branch behind the
         // showroom, and its 65.7-degree track sun used to re-bake the sky under
@@ -4683,6 +4703,10 @@ void SimulationLoop::applyShowroomLight() {
         // environment: the probe upload replaced the sky with it, and that is
         // what the paint of the car reflects.
         if (!m_hallIsPhoto) m_vulkanRenderer->setIblEnabled(false);
+        // Whether the room wants the IBL is part of its look: closeShowroom()
+        // restores the track's, and a session in the hall has to get the room's
+        // back (a hall that lights itself keeps the sky off).
+        m_roomIblOn = m_vulkanRenderer->isIblEnabled();
         // Fog belongs to the room's size: these values were written for the
         // 24 m in-memory hall, and at 0.002 a real venue 84 m across dissolves
         // into its ambient colour before the far wall is reached.
@@ -4690,6 +4714,13 @@ void SimulationLoop::applyShowroomLight() {
         const float fogScale = 12.0f / hallRadius;
         m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
                                  0.0001f * fogScale, 0.002f * fogScale);
+        // Kept for a session started inside the hall: the weather branch would
+        // otherwise draw the same room under a track's haze.
+        m_roomFogColor[0] = cfg.ambientColor[0];
+        m_roomFogColor[1] = cfg.ambientColor[1];
+        m_roomFogColor[2] = cfg.ambientColor[2];
+        m_roomFogDensity = 0.0001f * fogScale;
+        m_roomFogFalloff = 0.002f * fogScale;
         // A photographed room is bright: without the extra stop the concrete and
         // the trees read as if the sun were going down. A post-processing
         // preset, when one is loaded (KS_PPFILTER), owns the display exposure
@@ -4725,6 +4756,9 @@ void SimulationLoop::applyShowroomLight() {
             }
             m_vulkanRenderer->setExposure(exposure);
         }
+        // Kept for a session inside the hall: the track's 1.0 stop would draw
+        // the very same room with a different exposure.
+        m_roomDisplayExposure = exposure;
         std::fprintf(stderr, "[showroom] exposure %.2f (room %.2f, preset %.2f)",
                      static_cast<double>(exposure), static_cast<double>(cfg.exposure),
                      static_cast<double>(presetExposure));
@@ -4881,19 +4915,45 @@ void SimulationLoop::updateWeather(float dt) {
             light.intensity = m_roomSunDeclared ? m_roomSunIntensity : 1.0f;
         }
         m_vulkanRenderer->setSun(light);
-        // The hall keeps its lamps as well as its sun: closeShowroom() cleared
-        // this slot for the track's dynamic lights, which is what a session
-        // started in the room would otherwise drive under (no room lamps at
-        // all, only the sun and whatever the sky ambient says).
-        if (roomOwnsTheSun) m_vulkanRenderer->setLocalLights(m_roomLamps);
+        if (roomOwnsTheSun) {
+            // The hall keeps its lamps as well as its sun: closeShowroom()
+            // cleared this slot for the track's dynamic lights, which is what a
+            // session started in the room would otherwise drive under.
+            m_vulkanRenderer->setLocalLights(m_roomLamps);
+            // And the rest of its display state, which closeShowroom() handed
+            // to the track: the room's own stop and its IBL choice.
+            m_vulkanRenderer->setExposure(m_roomDisplayExposure);
+            m_vulkanRenderer->setIblEnabled(m_roomIblOn);
+            if (!m_roomDisplayLogged) {
+                m_roomDisplayLogged = true;
+                const float elev = std::asin(std::max(
+                    -1.0f, std::min(1.0f, -m_roomSunDirection[1]))) * 57.29578f;
+                std::printf("[showroom] the session keeps the room's display: sun %.1f deg "
+                            "(x%.2f), exposure %.2f, fog %.2e/%.2e, IBL %s, %zu lamp(s)\n",
+                            static_cast<double>(elev),
+                            static_cast<double>(m_roomSunDeclared ? m_roomSunIntensity : 1.0f),
+                            static_cast<double>(m_roomDisplayExposure),
+                            static_cast<double>(m_roomFogDensity),
+                            static_cast<double>(m_roomFogFalloff),
+                            m_roomIblOn ? "on" : "off", m_roomLamps.size());
+            }
+        }
         // Weather-driven atmosphere. RenderSystem::setFog() above only stores
         // the values (it has no GPU work behind it), so the shader-facing fog
         // has to be fed here as well: density rises with cloud cover, while a
         // small base haze keeps distant geometry from looking unnaturally
         // crisp on a clear day.
         const float fogDensity = 0.0004f + m_weather.cloudCover * 0.004f;
-        m_vulkanRenderer->setFog({hazeLinear[0], hazeLinear[1], hazeLinear[2]},
-                                 fogDensity, 0.018f);
+        if (roomOwnsTheSun) {
+            // Fog belongs to the scene: the hall's haze was written for its
+            // radius (a 27 m room under a track's 0.018 falloff tints the far
+            // wall), so the room keeps its own while it is what is on screen.
+            m_vulkanRenderer->setFog({m_roomFogColor[0], m_roomFogColor[1], m_roomFogColor[2]},
+                                     m_roomFogDensity, m_roomFogFalloff);
+        } else {
+            m_vulkanRenderer->setFog({hazeLinear[0], hazeLinear[1], hazeLinear[2]},
+                                     fogDensity, 0.018f);
+        }
         // The track's own look follows the wetness the grip model reads, so a
         // soaked surface is dark and glossy and dries back to matte as the
         // weather clears (videoSources.weatherShaders). Wetness 0 leaves the

@@ -259,6 +259,18 @@ public:
      *  because closeShowroom() hands the light slot to the track's dynamic
      *  lights and a session started in the hall must get both back. */
     std::vector<ks::sim::LocalLight> m_roomLamps;
+    /** The rest of the display state the room was drawn with. A session that
+     *  keeps the hall on screen must keep these too, or the same room is lit by
+     *  one set of numbers and drawn with another (its haze is written for its
+     *  radius — 12/27 of the track's — and its stop is its own). */
+    float m_roomFogColor[3] = {0.34f, 0.36f, 0.40f};
+    float m_roomFogDensity = 0.0001f;
+    float m_roomFogFalloff = 0.002f;
+    float m_roomDisplayExposure = 1.f;
+    bool m_roomIblOn = true;
+    /// One line per room, the first frame the session draws it: what the
+    /// session took from the room instead of the track.
+    bool m_roomDisplayLogged = false;
     /// True while the hall is what the scene shows (cleared when a track loads).
     bool m_showroomHallInScene = false;
     bool m_showroomIblWasOn = true;

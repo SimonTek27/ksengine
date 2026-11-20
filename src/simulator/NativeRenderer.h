@@ -323,6 +323,23 @@ public:
     }
     // False only while the maps do not exist yet (the caller retries).
     bool bakeSkyForSun(const DirectionalLight& light);
+    // The room's reflection probe was the environment while the hall was on
+    // screen, and setSun() refuses to re-bake over it: the track that replaces
+    // the hall has to get the sky back. Clearing the bake stamp lifts the rate
+    // limit too, so the first sun the track sets bakes at once instead of
+    // leaving the track under the room's probe for ~120 frames.
+    void releaseProbeEnvironment() {
+        if (!m_iblFromProbe) return;
+        std::fprintf(stderr, "[ibl] the room's probe released: the sky is the environment again");
+        std::fputc(10, stderr);
+        m_iblFromProbe = false;
+        m_iblSkyBakedAt = 0;
+        // The probe's maps are what the textures hold, and setSun() skips a
+        // bake when the sun matches the last one baked (a track started on the
+        // default hour does): no direction matches this, so the next sun the
+        // track sets really rebuilds them.
+        m_iblSunToward = vec3{0.0f, 0.0f, 0.0f};
+    }
 
     // --- Native local lights (the engine's own Lighting FX) ---------------
     // Point and spot lights beyond the sun and the IBL. Every frame the renderer
