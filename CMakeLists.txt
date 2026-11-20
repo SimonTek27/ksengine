@@ -461,6 +461,9 @@ target_include_directories(kslib PUBLIC
 	"${CMAKE_CURRENT_SOURCE_DIR}/src"
 	"${CMAKE_CURRENT_SOURCE_DIR}/src/sdk/kseditor/modules"
 	"${CMAKE_CURRENT_SOURCE_DIR}/external/eigen"
+	# The one stb_vorbis.c in the tree: AudioFormatConverter.cpp includes it by
+	# bare name, and the editor no longer carries its own copy under external/.
+	"${CMAKE_CURRENT_SOURCE_DIR}/src/engine/external/stb"
 )
 
 # Add Qt6 private headers (for qzipreader_p.h etc.)

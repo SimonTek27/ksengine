@@ -5,7 +5,7 @@
 #include <QFileInfo>
 #include <QtEndian>
 #define STB_VORBIS_HEADER_ONLY
-#include "../../../external/stb/stb_vorbis.c"
+#include "../../../../engine/external/stb/stb_vorbis.c"
 
 namespace ks { namespace fileformat {
 
