@@ -4,8 +4,9 @@
 > scena di riferimento; nessun KPI inventato".
 > **Run:** 2026-10-14, build Debug Qt-free condivisa (VS 18 2026,
 > `KSENGINE_QT_FREE=ON`, `KSIMULATOR_QT_FREE=ON`, `KSENGINE_SHARED=ON`).
-> **Artefatti:** cartella [`gate_2_14/`](gate_2_14/) — `profile_2_14_report.txt`,
-> `profile_2_14.csv`, `gate2_14_stdout.txt`, `gate2_14_scene.png`.
+> **Artefatti:** cartella [`gate_2_14/`](gate_2_14/) — `profile_2_14.csv`,
+> `gate2_14_scene.png`. Il report (`profile_2_14_report.txt`) e il log del run
+> (`gate2_14_stdout.txt`) sono output dell'esecuzione e non sono versionati.
 
 ## Ambiente di misura
 
@@ -19,7 +20,7 @@
 | Comandi | `KS_PROFILE=1 KS_PROFILE_SECONDS=45 KS_PROFILE_CSV=profile_2_14.csv KS_PROFILE_REPORT=profile_2_14_report.txt KS_AUTOSTART=1 KS_CAR=content/cars/refcar KS_TRACK=<repo>/content/tracks/mugello KS_AI_CARS=8` (bat: `run_gate214_a.bat`, run di sola scena: `run_gate214_b.bat` con `KS_SCREENSHOT`) |
 
 > **Correzione (gate 2.12, 2026-10-14):** il log del run
-> (`gate2_14_stdout.txt`) mostra `SimulationLoop: spawned 0 AI cars` —
+> mostra `SimulationLoop: spawned 0 AI cars` —
 > `content/tracks/mugello` non ha `ai/fast_lane.ai`, quindi `spawnGrid()` non
 > ha spawnato nessuna auto (il field da 9 slot in `[team]` era costruito, mai
 > popolato). Il run 2.14 ha quindi profilato **1 auto (giocatore)**, non 9:

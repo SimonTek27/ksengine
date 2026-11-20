@@ -17,9 +17,9 @@ giocatore, meteo, danni, telemetria) che termina con:
    `VehicleSimulator::updatePhysics()` conta ogni evento (`nanRecoveries()`)
    e scrive una riga `[nan] VehicleSimulator recovery #N: ...` su stderr; il
    log del soak si greppa per `[nan]` e si conta **0**;
-2. **log ispettabile** — `soak_2_12_stdout.txt` (stdout+stderr del build
-   WIN32 via redirezione diretta del bat, pattern gate 2.14) con le righe
-   `[render]` (fps + gpu), `[INIT]`, `[team]`, `[nan]`;
+2. **log ispettabile** — lo stdout+stderr del build WIN32, redirezione
+   diretta del bat (pattern gate 2.14; il log non è più versionato) con le
+   righe `[render]` (fps + gpu), `[INIT]`, `[team]`, `[nan]`;
 3. **telemetria ispettabile** — sink UDP su `127.0.0.1:20777`
    (`UdpTelemPacket` v2, magic `"KSIM"`, 244 byte/pacchetto) che registra
    pacchetti decodificati: simTime, velocità, giri, best, road/air temp,
