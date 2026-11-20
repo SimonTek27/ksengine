@@ -709,6 +709,10 @@ bool SimulationLoop::loadTrack(const std::string& kn5Path) {
     // Caricare una pista chiude lo showroom: la sala non deve restare in scena
     // né continuare a pilotare camera/luce/meteo mentre si guida in pista.
     if (!m_showroomHallLoading && m_showroom.active()) closeShowroom();
+    // Only a track gives the sky its sun back: closing the room is not enough
+    // (a drive session started in the showroom keeps the hall on screen, and
+    // the sky maps must keep coming from the room's sun there).
+    if (m_vulkanRenderer) m_vulkanRenderer->setSkyIblFrozen(false);
     m_trackData = SimTrackData{};
     m_trackData.kn5Path = kn5Path;
     m_trackData.name = std::filesystem::path(kn5Path).stem().string();
@@ -727,6 +731,7 @@ bool SimulationLoop::loadTrackFolder(const std::string& trackDirectory) {
     // Caricare una pista chiude lo showroom: la sala non deve restare in scena
     // né continuare a pilotare camera/luce/meteo mentre si guida in pista.
     if (!m_showroomHallLoading && m_showroom.active()) closeShowroom();
+    if (m_vulkanRenderer) m_vulkanRenderer->setSkyIblFrozen(false);
     if (!fs::is_directory(trackDirectory)) return false;
     loadContentMods(trackDirectory); // Lua Mod SDK: <track>/scripts/*.lua
     m_trackData.directory = trackDirectory;
@@ -995,22 +1000,24 @@ SetupGarage* SimulationLoop::setupGarage() {
         // ENTER / L on the screen: the setup file lives beside the car, in AC's
         // own format, so the same numbers read back row for row.
         m_setupGarage->onSave = [this]() -> std::string {
-            if (m_carDir.empty()) return "no car: nowhere to write the setup";
+            if (m_carDir.empty()) return m_setupGarage->noCarSaveStatus();
             const std::string path =
                 (std::filesystem::path(m_carDir) / "ksim.setup").string();
             std::string error;
-            if (!m_setupGarage->saveSetupFile(path, &error)) return error;
+            if (!m_setupGarage->saveSetupFile(path, &error))
+                return m_setupGarage->saveFailedStatus(error);
             std::fprintf(stderr, "[setup] written to %s\n", path.c_str());
-            return "saved " + path;
+            return m_setupGarage->savedStatus(path);
         };
         // The hub draws it: the loop owns the screen, the UI layer paints it.
         m_ui.setSetupScreen(m_setupGarage.get());
         m_setupGarage->onLoad = [this](const std::string& path) -> std::string {
             std::string error;
-            if (!m_setupGarage->loadSetupFile(path, &error)) return error;
+            if (!m_setupGarage->loadSetupFile(path, &error))
+                return m_setupGarage->loadFailedStatus(error);
             applySetupToVehicle(m_setupGarage->currentSetup());
             std::fprintf(stderr, "[setup] read back from %s\n", path.c_str());
-            return "loaded " + path;
+            return m_setupGarage->loadedStatus(path);
         };
     }
     // The screen is created at different points on different paths, so the car's
@@ -3107,6 +3114,7 @@ void SimulationLoop::closeShowroom() {
             spawnTrackDynamicLights(m_trackData.layoutFolder, m_trackData.directory);
     }
     m_showroomIblSaved = false;
+    m_showroomSkyBaked = false; // a room opened after this bakes its sun again
     if (m_vulkanRenderer) m_vulkanRenderer->setExposure(1.0f); // the track's own
     m_showroomAudioLoaded = false;
     if (m_audio) {
@@ -4126,8 +4134,9 @@ void SimulationLoop::applyInput() {
     // prove a session moves (a capture cannot hold W). Only the demand is
     // forced; the engine, clutch and gears behave exactly as with a pedal.
     float throttleDemand = static_cast<float>(m_input->throttle());
-    if (const char* forceThrottle = std::getenv("KS_THROTTLE");
-        forceThrottle != nullptr && *forceThrottle != '\0') {
+    const char* forceThrottle = std::getenv("KS_THROTTLE");
+    const bool throttleForced = forceThrottle != nullptr && *forceThrottle != '\0';
+    if (throttleForced) {
         throttleDemand = std::min(
             std::max(static_cast<float>(std::atof(forceThrottle)), 0.f), 1.f);
     }
@@ -4146,10 +4155,22 @@ void SimulationLoop::applyInput() {
     // headless run has no window but the devices are still there, and a wheel
     // resting off-centre would otherwise steer every measured run. Straight-line
     // work (a launch, a stop) needs the input to be the number the test asks for.
-    if (const char* forceSteer = std::getenv("KS_STEER");
-        forceSteer != nullptr && *forceSteer != '\0') {
+    const char* forceSteer = std::getenv("KS_STEER");
+    if (forceSteer != nullptr && *forceSteer != '\0') {
         steerValue = std::clamp(
             static_cast<float>(std::atof(forceSteer)), -1.f, 1.f);
+    } else if (throttleForced) {
+        // Throttle alone means "drive the car forward": the same resting axis
+        // that would ruin a measured run would otherwise send a capture into
+        // the wall. Straight ahead is the only sane default, and it is loud
+        // enough to find in the log when someone expected the wheel.
+        steerValue = 0.f;
+        static bool announced = false;
+        if (!announced) {
+            announced = true;
+            printf("[input] KS_THROTTLE set without KS_STEER: steering forced to 0 "
+                   "(a wheel/pad axis at rest would steer the capture)\n");
+        }
     }
     m_vehicle->setSteering(steerValue);
     m_vehicle->setHandbrake(m_input->handbrake());
@@ -4576,6 +4597,14 @@ void SimulationLoop::applyShowroomLight() {
                            -cfg.sunDirection[2]};
         light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
         light.intensity = cfg.sunIntensity;
+        // The room's own sun bakes the room's environment once, then the maps
+        // are frozen: the menu keeps running the weather branch behind the
+        // showroom, and its 65.7-degree track sun used to re-bake the sky under
+        // the room a couple of seconds in.
+        if (!m_showroomSkyBaked && m_vulkanRenderer->bakeSkyForSun(light)) {
+            m_showroomSkyBaked = true;
+            m_vulkanRenderer->setSkyIblFrozen(true);
+        }
         m_vulkanRenderer->setSun(light);
         // The room's own lamps, when the document declares any: they become the
         // renderer's local lights, shaded by the deferred lighting pass with the
@@ -5395,6 +5424,40 @@ void SimulationLoop::updateWheelLeds(float stepSeconds) {
 
 void SimulationLoop::syncUiFromVehicle(float dtSeconds) {
 #if HAS_VEHICLE_SIM
+    // Spectator classification (ui/SpectatorScoreboard.h): the panel draws the
+    // session's own standings, the same rows RESULTS and the control API
+    // report, and it is filled without a player car too - a spectator may have
+    // none of his own. Leaving the mode hides it.
+    {
+        auto& spectator = ks::engine::sim::SpectatorMode::instance();
+        auto& board = m_ui.spectatorScoreboard();
+        if (spectator.isSpectating()) {
+            std::string followedName;
+            if (m_multiCar) {
+                if (CarEntry* watched = m_multiCar->getCar(spectator.followedDriver()))
+                    followedName = watched->driverName;
+            }
+            std::vector<ui::SpectatorScoreboardRow> rows;
+            rows.reserve(m_raceSession.standings().size());
+            for (const auto& d : m_raceSession.standings()) {
+                ui::SpectatorScoreboardRow row;
+                row.position = d.position;
+                row.driver = !d.driverName.empty() ? d.driverName : d.carName;
+                row.laps = d.currentLap;
+                row.bestLapSeconds =
+                    (d.bestLapTime > 0.f && d.bestLapTime < 1.0e8f) ? d.bestLapTime : -1.f;
+                if (d.disqualified) row.status = "DSQ";
+                else if (d.finished) row.status = "FIN";
+                row.followed = !followedName.empty() && d.driverName == followedName;
+                rows.push_back(std::move(row));
+            }
+            board.setFollowedName(followedName);
+            board.setRows(std::move(rows));
+            board.setVisible(spectator.scoreboardVisible());
+        } else {
+            board.setVisible(false);
+        }
+    }
     // In-car pause overlay gate (see inCarMenuAllowed): a live network session
     // counts as multiplayer, otherwise the driver is alone on track.
     const bool multiplayer =
@@ -5406,6 +5469,30 @@ void SimulationLoop::syncUiFromVehicle(float dtSeconds) {
     const auto st = m_vehicle->getState();
     m_ui.setInCarMenuAllowed(
         inCarMenuAllowed(multiplayer, static_cast<float>(st.speed) * 3.6f));
+    // SETTINGS -> GAMEPLAY: the spotter. Its calls are text in the notice list
+    // (the voice channel exists but has no recordings yet), and only while the
+    // race is green: a car waiting on the grid is not alongside anything.
+    {
+        const auto& tweaks = ks::engine::sim::GameplayTweaks::instance().getTweakSet();
+        if (!tweaks.spotterEnabled || m_sessionPhase != PHASE_GREEN_FLAG) {
+            m_spotter.reset();
+        } else {
+            m_spotterCars.clear();
+            if (m_multiCar) {
+                for (const auto& entry : m_multiCar->cars()) {
+                    if (!entry || !entry->isActive || entry->isPlayer || !entry->vehicle)
+                        continue;
+                    const auto cs = entry->vehicle->getState();
+                    m_spotterCars.push_back({static_cast<float>(cs.position.x),
+                                             static_cast<float>(cs.position.z)});
+                }
+            }
+            const std::string call = m_spotter.update(
+                static_cast<float>(st.position.x), static_cast<float>(st.position.z),
+                static_cast<float>(st.heading), m_spotterCars, dtSeconds);
+            if (!call.empty()) m_ui.notify(call, ui::NoticeKind::Info);
+        }
+    }
     m_ui.telemetry().update(st.speed, m_vehicle->rpm(), st.throttle, st.brake, st.steering, 0.f, 0.f);
     // Roadmap 2.10 — single source of truth for the session display: the
     // player's row is read from RaceSessionManager (the same standings the
@@ -5540,6 +5627,54 @@ void SimulationLoop::syncUiFromVehicle(float dtSeconds) {
     s.powerMult = dmg.powerMult;
     s.damageWarning = dmg.warningLevel;
     s.engineSeized = dmg.engineSeized;
+    // Kinetika apps: the same live data the native panels draw, filled once here so
+    // every app sees the step the HUD is about to show.
+    {
+        namespace fs = std::filesystem;
+        std::snprintf(s.carName, sizeof(s.carName), "%s",
+                      fs::path(m_carDir).filename().string().c_str());
+        std::snprintf(s.trackName, sizeof(s.trackName), "%s", m_trackData.name.c_str());
+        s.aeroDownforceN = st.aeroDownforce;
+        s.aeroDragN = st.aeroDrag;
+        s.rideHeightFrontM = st.rideHeightFrontM;
+        s.rideHeightRearM = st.rideHeightRearM;
+        s.aeroBalanceFront = st.aeroBalanceFront;
+        s.drsActive = st.drsActive;
+        s.drsAvailable = st.drsAvailable;
+        s.fps = dtSeconds > 1.0e-5f ? 1.f / dtSeconds : 0.f;
+        s.frameMs = dtSeconds * 1000.f;
+        s.timeOfDay = m_timeOfDay;
+        s.cameraMode = m_camera ? static_cast<int>(m_camera->mode()) : -1;
+        s.replayLoaded = m_features.replay.isLoaded();
+        s.replayPlaying = m_features.replay.isPlaying();
+        s.replayTime = m_features.replay.playbackTime();
+        s.replayDuration = m_features.replay.duration();
+        s.aiCars = m_multiCar ? std::max(0, m_multiCar->carCount() - 1) : 0;
+        for (int i = 0; i < 4; ++i) {
+            s.brakeTempC[i] = st.brakeDiscTemp[i];
+            s.brakeFade[i] = st.brakeFade[i];
+            s.camberDeg[i] = st.tireCamber[i] * 57.2957795f;
+            const auto& corner = m_vehicle->suspension().corner(i);
+            s.suspCompressionM[i] = corner.compression;
+            s.suspVelocity[i] = corner.velocity;
+            s.suspLoadN[i] = corner.normalLoad;
+        }
+        const auto& rows = m_raceSession.standings();
+        s.standingCount = std::min(ui::RaceHudSample::kHudStandings,
+                                   static_cast<int>(rows.size()));
+        for (int i = 0; i < s.standingCount; ++i) {
+            const DriverStanding& d = rows[static_cast<std::size_t>(i)];
+            ui::HudStanding& out = s.standings[i];
+            out.position = d.position;
+            out.laps = d.currentLap;
+            out.bestLapSeconds =
+                (d.bestLapTime > 0.f && d.bestLapTime < 1.0e8f) ? d.bestLapTime : -1.f;
+            out.player = ps != nullptr && d.carIndex == ps->carIndex;
+            out.disqualified = d.disqualified;
+            std::snprintf(out.driver, sizeof(out.driver), "%s",
+                          !d.driverName.empty() ? d.driverName.c_str() : d.carName.c_str());
+        }
+    }
     // Dev-mode scripting: the frame the script sees is the same one the HUD is
     // about to be handed, so a script cannot read numbers the driver does not.
     if (m_scripts.active()) {
@@ -5577,6 +5712,9 @@ bool SimulationLoop::setSpectating(bool on) {
     auto& spectator = ks::engine::sim::SpectatorMode::instance();
     if (on == spectator.isSpectating()) return spectator.isSpectating();
     if (!on) {
+        // The classification belongs to the spectated session, not to the next
+        // one: leaving the mode puts it away with the camera.
+        spectator.showScoreboard(false);
         spectator.exitSpectatorMode();
         std::fprintf(stderr, "[spectate] off (the camera is back on the player)\n");
         return false;
@@ -5986,7 +6124,8 @@ void SimulationLoop::render(float dt) {
         // KS_HIDE_MENU hides the game interface, not the developer tools: the
         // console and the showroom inspector are what a capture exists to show.
         if (std::getenv("KS_HIDE_MENU") == nullptr || m_ui.console().isVisible() ||
-            m_ui.inspector().isVisible() || setupScreenVisible()) {
+            m_ui.inspector().isVisible() || setupScreenVisible() ||
+            std::getenv("KS_APPS") != nullptr || std::getenv("KS_APPS_VISIBLE") != nullptr) {
             m_vulkanRenderer->drawUi(m_ui.renderer());
         }
         m_vulkanRenderer->endFrame();
@@ -5995,7 +6134,8 @@ void SimulationLoop::render(float dt) {
         // showroom views exist to judge materials, and the menu sits right
         // on top of the car.
         if (std::getenv("KS_HIDE_MENU") == nullptr || m_ui.console().isVisible() ||
-            m_ui.inspector().isVisible() || setupScreenVisible()) {
+            m_ui.inspector().isVisible() || setupScreenVisible() ||
+            std::getenv("KS_APPS") != nullptr || std::getenv("KS_APPS_VISIBLE") != nullptr) {
             m_uiGpu->uploadFrame(m_ui.renderer());
             m_uiGpu->draw();
         }

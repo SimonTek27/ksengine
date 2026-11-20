@@ -1,6 +1,8 @@
 #include "NativeRenderer.h"
+#include <chrono> // the sky bake reports what it cost (refreshSkyIbl)
 #include "engine/material/PngCodec.h" // grading strip decode
 #include "ShadowSystem.h"
+#include "LocalShadowAtlas.h"
 #include "TextureRuntime.h"
 // Roadmap 2.3: materials.txt reader (header-only) — pairs baked meshes with
 // their P1 roughness/metalness maps and PBR properties in
@@ -16,6 +18,8 @@
 // below consumes (kFloatsPerVertex) — the constants are shared with
 // particle.vert, which cannot include this header, so the shader's offsets
 // are asserted against them at the pipeline instead.
+#include "engine/Graphics/LocationMaterialApply.h" // the track's location presets, behind KS_LOCATION_MATERIALS
+#include "simulator/LocationMaterialDocument.h" // where that document lives, install included
 #include "engine/Graphics/ParticleSystem.h"
 // E9 / gate 2.14: the resolved GPU frame time is published here so one
 // PhysicsProfiler report covers CPU sections and the GPU frame path.
@@ -466,7 +470,14 @@ bool NativeRenderer::createSwapChain(VkSurfaceKHR surface, uint32_t width, uint3
     sCi.imageColorSpace = chosen.colorSpace;
     sCi.imageExtent = extent;
     sCi.imageArrayLayers = 1;
-    sCi.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    // The screenshot path copies the presented image into a buffer: that needs
+    // TRANSFER_SRC on the swapchain image, and asking for a layout it was not
+    // created with is a validation error (and a driver-dependent bet). Asked
+    // for only when the surface says it carries it.
+    m_swapChainTransferSrc =
+        (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+    sCi.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+        (m_swapChainTransferSrc ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0u);
     sCi.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sCi.preTransform = caps.currentTransform;
     sCi.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -739,12 +750,28 @@ bool NativeRenderer::createForwardPipelineObjects() {
     pcRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     pcRange.size = sizeof(float) * 16 * 2; // model + mvp
 
-    // Set 0 = frame (both geometry passes), set 1 = per-mesh material
-    // (bound inside recordDrawList() for every instance).
-    VkDescriptorSetLayout setLayouts[2] = {m_frameSetLayout, m_materialSetLayout};
+    // Set 0 = frame (both geometry passes), set 1 = per-mesh material (bound
+    // inside recordDrawList() for every instance), set 2 = the per-draw
+    // previous transform the velocity target needs (dynamic offset; the GBuffer
+    // pipeline is the only one whose shaders declare it).
+    if (!m_velocitySetLayout) {
+        VkDescriptorSetLayoutBinding velBinding{};
+        velBinding.binding = 0;
+        velBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        velBinding.descriptorCount = 1;
+        velBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        VkDescriptorSetLayoutCreateInfo velLayout{};
+        velLayout.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        velLayout.bindingCount = 1;
+        velLayout.pBindings = &velBinding;
+        if (vkCreateDescriptorSetLayout(m_device, &velLayout, nullptr, &m_velocitySetLayout) != VK_SUCCESS) {
+            return false;
+        }
+    }
+    VkDescriptorSetLayout setLayouts[3] = {m_frameSetLayout, m_materialSetLayout, m_velocitySetLayout};
     VkPipelineLayoutCreateInfo layoutCi{};
     layoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutCi.setLayoutCount = 2;
+    layoutCi.setLayoutCount = 3;
     layoutCi.pSetLayouts = setLayouts;
     layoutCi.pushConstantRangeCount = 1;
     layoutCi.pPushConstantRanges = &pcRange;
@@ -931,8 +958,23 @@ struct FrameDataUBO {
     // both lighting shaders. Appended at the END (add-only rule), yzw unused.
     float brakeGlow[4];
     float ssgiParams[4];      // x = screen radius (uv), y = intensity, w = 1 when enabled (video.ssgi)
+    // Native local lights, appended at the END (add-only rule): x/y = the tile
+    // grid the CPU binned this frame's lights into, z = how many lights, w = the
+    // float index the per-tile cells start at inside the light buffer (the light
+    // records come first, then the cells, then the index list). z = 0 means "no
+    // local lights" and leaves the lighting shader's loop unentered.
+    float lightParams[4];
+    // Weather, appended at the END (add-only rule): x = track wetness [0..1]
+    // (NativeRenderer::setWetness), y/z/w unused. Both scene shaders read it to
+    // darken and gloss the surfaces a wet track has soaked (WetLook.h).
+    float wetParams[4];
+    // The inverse of viewProj, appended at the END (add-only rule): the
+    // deferred lighting shader turns a pixel's uv back into the world-space
+    // ray it was shot along, which is how a background pixel knows which part
+    // of the sky it is looking at (deferred_lighting.frag, skyColor).
+    float invViewProj[16];
 };
-static_assert(sizeof(FrameDataUBO) == 528, "FrameDataUBO is read as a std140 uniform block");
+static_assert(sizeof(FrameDataUBO) == 624, "FrameDataUBO is read as a std140 uniform block");
 
 // Per-mesh material block of descriptor set 1 (set 1 binding 2), read as
 // `MaterialData` in native_forward.frag and gbuffer.frag. std140 packs five
@@ -981,8 +1023,41 @@ struct MaterialUBO {
     float fresnelC = 0.0f;  // fresnelC base reflection at normal incidence
     float fresnelExp = 5.0f;
     float fresnelMax = 0.0f; // fresnelMaxLevel; 0 = no authored fresnel
+    float unlit = 0.0f;
+    // Authored ksAmbient, in the pad slot the block never needed (add-only:
+    // the struct stays 96 bytes and every offset above is unchanged).
+    float ksAmbient = 0.25f;
+    float unlitPad[2] = {0.0f, 0.0f};
 };
-static_assert(sizeof(MaterialUBO) == 80, "MaterialUBO is read as a std140 uniform block");
+static_assert(sizeof(MaterialUBO) == 96, "MaterialUBO is read as a std140 uniform block");
+
+// The material block as a mesh declares it: one place maps NativeMesh onto the
+// std140 layout, shared by descriptor creation and the in-place tint updates
+// (the showroom's selection wash), so the two can never drift apart.
+static void fillMaterialBlock(const NativeMesh& mesh, MaterialUBO& ubo) {
+    ubo.roughness = mesh.roughness;
+    ubo.metalness = mesh.metalness;
+    ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
+    ubo.clearcoat = mesh.clearcoat;
+    ubo.brakeDisc = mesh.brakeDisc; // brief P6, name heuristic in setMesh()
+    ubo.alphaTest = mesh.alphaTested ? 1.0f : 0.0f;
+    ubo.alphaRef = mesh.alphaRef;
+    ubo.emissive = mesh.emissive;
+    ubo.opacity = mesh.opacity;
+    ubo.glassiness = mesh.glassiness;
+    ubo.tint[0] = mesh.tint[0];
+    ubo.tint[1] = mesh.tint[1];
+    ubo.tint[2] = mesh.tint[2];
+    ubo.paintSolid = mesh.paintSolid;
+    ubo.detailScale = mesh.detailTexture.empty() ? 0.0f : mesh.detailScale;
+    ubo.detailGain = mesh.detailGain;
+    ubo.specular = mesh.specular;
+    ubo.fresnelC = mesh.fresnelC;
+    ubo.fresnelExp = mesh.fresnelExp;
+    ubo.fresnelMax = mesh.fresnelMax;
+    ubo.unlit = mesh.unlit;
+    ubo.ksAmbient = mesh.ksAmbient;
+}
 
 // Push constants of the display pass. Byte layout must match `ToneMapPC` in
 // tonemap.frag (std430-like: the leading vec3 takes 12 bytes, everything
@@ -990,6 +1065,15 @@ static_assert(sizeof(MaterialUBO) == 80, "MaterialUBO is read as a std140 unifor
 // Brief P4 appends the sharpen fields at the END (same add-only rule as
 // FrameData); the display layout's push-constant range is sizeof(TonemapPC),
 // so it grows with the struct.
+// Grass blades: the mvp, the sun it is lit by and the clock the wind runs on.
+// 112 bytes, inside the 128 every Vulkan implementation must provide.
+struct GrassPushConstants {
+    mat4 mvp;
+    float sunDirection[4] = {0.f, -1.f, 0.f, 0.f};
+    float sunColor[4] = {1.f, 1.f, 1.f, 1.f};
+    float wind[4] = {0.f, 1.f, 0.35f, 0.f}; // seconds, sway scale, wave scale
+};
+
 struct TonemapPC {
     float colorFilter[3]; // 0
     float exposure;       // 12
@@ -1009,7 +1093,10 @@ struct TonemapPC {
     float sharpenTexelX;  // 48
     float sharpenTexelY;  // 52
     float sharpenAmount;  // 56  0 = off
-    float sharpenPad;     // 60
+    // [COLOR] hue / sepia of the room's own ppeffects.ini, packed into the
+    // bytes the display block never used: the pad at 60, and the four left
+    // over before the 128-byte push-constant guarantee. Both 0 = off.
+    float gradeHue;       // 60  hue rotation, degrees
     // Post-processing preset grading, appended at the END (add-only rule).
     float lutStrength;    // 64  0 = off
     int32_t lutEnabled;   // 68  1 = sample the bound grading strip
@@ -1031,8 +1118,9 @@ struct TonemapPC {
     float dofMeterHalfY;  // 112
     float dofFrontPx;     // 116 blur radius caps (px), near / far side
     float dofBackPx;      // 120
+    float gradeSepia;     // 124 0 = off, 1 = full sepia
 };
-static_assert(sizeof(TonemapPC) == 124, "TonemapPC must match tonemap.frag's ToneMapPC");
+static_assert(sizeof(TonemapPC) == 128, "TonemapPC must match tonemap.frag's ToneMapPC");
 
 // Bright-pass push constants (glareExtract.frag): threshold + soft knee in
 // scene-linear units, i.e. 1.0 is "already brighter than SDR paper white".
@@ -1411,6 +1499,80 @@ bool NativeRenderer::uploadIblPixels(VkImage image, uint32_t width, uint32_t hei
     return true;
 }
 
+namespace {
+// The environment a sun puts around the scene: the physical atmosphere the
+// deferred pass draws the sky with (PhysicalSky.h), scaled by the sun's own
+// colour and intensity exactly as deferred_lighting.frag scales the visible
+// sky — so the reflection of the sky carries the radiance the sky itself has.
+// No sun disc: see the note in PhysicalSky.h.
+ibl::Image skyEnvironmentFor(const DirectionalLight& sun) {
+    const vec3 toward = (-sun.direction).normalized();
+    const float dir[3] = {toward.x, toward.y, toward.z};
+    ibl::Image env = ibl::generateSky(dir);
+    // The sun's colour tints the atmosphere; its intensity does not scale it.
+    // sunColor.a is an artistic knob (a showroom sets 0 and lights the room
+    // with the IBL and its lamps), and scaling the sky by it blacked the whole
+    // environment out. deferred_lighting.frag keeps the same rule.
+    const float r = sun.color.x;
+    const float g = sun.color.y;
+    const float b = sun.color.z;
+    for (size_t i = 0; i < env.texelCount(); ++i) {
+        env.rgba[i * 4 + 0] *= r;
+        env.rgba[i * 4 + 1] *= g;
+        env.rgba[i * 4 + 2] *= b;
+    }
+    return env;
+}
+} // namespace
+
+void NativeRenderer::setSun(const DirectionalLight& light) {
+    m_sun = light;
+    ++m_sunCalls;
+    if (!m_iblReady || m_iblFromProbe || m_iblFrozen) return;
+    const vec3 toward = (-light.direction).normalized();
+    if (toward.dot(m_iblSunToward) > 0.9994f) return; // under ~2 deg: same sky
+    // A re-bake is a CPU prefilter chain plus an upload, and the sun walks with
+    // the time of day: rate-limit it. The first sun a session sets always goes
+    // through, so a track never starts on the start-up default sun.
+    if (m_iblSkyBakedAt != 0 && m_sunCalls - m_iblSkyBakedAt < 120) return;
+    refreshSkyIbl(light);
+}
+
+bool NativeRenderer::bakeSkyForSun(const DirectionalLight& light) {
+    if (!m_iblReady || m_iblFromProbe) return false;
+    refreshSkyIbl(light);
+    return true;
+}
+
+void NativeRenderer::refreshSkyIbl(const DirectionalLight& light) {
+    const std::chrono::steady_clock::time_point bakeStart = std::chrono::steady_clock::now();
+    const ibl::Image env = skyEnvironmentFor(light);
+    const ibl::Image prefilter = ibl::generatePrefilteredEnv(env);
+    const ibl::Image irradiance = ibl::generateIrradiance(env);
+    const double bakeMs = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - bakeStart).count();
+    if (!uploadIblPixels(m_iblImages[0], ibl::kSkyWidth, ibl::kSkyHeight,
+                         ibl::kPrefilterMips, ibl::toRgba16F(prefilter),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ||
+        !uploadIblPixels(m_iblImages[1], ibl::kIrradianceWidth, ibl::kIrradianceHeight, 1,
+                         ibl::toRgba16F(irradiance),
+                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)) {
+        std::fprintf(stderr,
+                     "[ibl] sky re-bake upload failed, keeping the previous environment\n");
+        return;
+    }
+    m_iblSunToward = (-light.direction).normalized();
+    m_iblSkyBakedAt = m_sunCalls;
+    const float elevation = std::asin(std::max(-1.0f, std::min(1.0f, m_iblSunToward.y))) *
+                            180.0f / 3.14159265f;
+    const float azimuth = std::atan2(m_iblSunToward.x, m_iblSunToward.z) * 180.0f / 3.14159265f;
+    std::printf("[ibl] sky re-baked for the sun: elevation %.1f deg, azimuth %.1f deg "
+                "(%.1f ms of CPU, %.1f ms including the upload)\n",
+                static_cast<double>(elevation), static_cast<double>(azimuth), bakeMs,
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - bakeStart).count());
+}
+
 bool NativeRenderer::setCarReflectionEnvironment(const std::vector<unsigned char>& rgba8,
                                                 int width, int height) {
     if (!m_iblReady || rgba8.empty() || width <= 0 || height <= 0) return false;
@@ -1426,6 +1588,9 @@ bool NativeRenderer::setCarReflectionEnvironment(const std::vector<unsigned char
         fprintf(stderr, "[NativeRenderer] ibl: car reflection probe upload failed\n");
         return false;
     }
+    // From here the probe is the environment: a sky re-bake must not overwrite
+    // it while the showroom is what the camera is in.
+    m_iblFromProbe = true;
     std::printf("[NativeRenderer] ibl: car reflection probe %dx%d -> %dx%d prefilter + "
                 "%dx%d irradiance\n",
                 width, height, ibl::kSkyWidth, ibl::kSkyHeight, ibl::kIrradianceWidth,
@@ -1435,7 +1600,7 @@ bool NativeRenderer::setCarReflectionEnvironment(const std::vector<unsigned char
 
 bool NativeRenderer::createIblResources() {
     // ---- CPU precomputation (deterministic, a few ms). ----
-    const ibl::Image env = ibl::generateSky();
+    const ibl::Image env = skyEnvironmentFor(m_sun);
     const ibl::Image prefilter = ibl::generatePrefilteredEnv(env);
     const ibl::Image irradiance = ibl::generateIrradiance(env);
     const ibl::Image brdfLut = ibl::generateBrdfLut();
@@ -1467,11 +1632,16 @@ bool NativeRenderer::createIblResources() {
         m_iblReady = false;
     } else {
         m_iblReady = true;
+        m_iblSunToward = (-m_sun.direction).normalized();
+        m_iblSkyBakedAt = m_sunCalls;
+        m_iblFromProbe = false;
         std::printf("[NativeRenderer] ibl: %dx%d prefilter x%u + %dx%d irradiance + "
-                    "%dx%d brdf lut uploaded\n",
+                    "%dx%d brdf lut uploaded (physical sky, exposure %.0f, turbidity %.1f)\n",
                     ibl::kSkyWidth, ibl::kSkyHeight, ibl::kPrefilterMips,
                     ibl::kIrradianceWidth, ibl::kIrradianceHeight,
-                    ibl::kBrdfLutSize, ibl::kBrdfLutSize);
+                    ibl::kBrdfLutSize, ibl::kBrdfLutSize,
+                    static_cast<double>(ks::sim::sky::kExposure),
+                    static_cast<double>(ks::sim::sky::kTurbidity));
     }
 
     // ---- Samplers: equirect addressing (wrap U, clamp V, mip chain) for
@@ -1520,7 +1690,7 @@ bool NativeRenderer::createFrameDescriptorResources() {
     // never gets built (loadPipelines() returns before creating it).
     // Bindings 2..4 (brief P2): irradiance, GGX prefilter chain, BRDF LUT.
     // Appended after the shadow array, never reordered (old-cache rule).
-    VkDescriptorSetLayoutBinding bindings[6]{};
+    VkDescriptorSetLayoutBinding bindings[7]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount = 1;
@@ -1535,10 +1705,21 @@ bool NativeRenderer::createFrameDescriptorResources() {
         bindings[b].descriptorCount = 1;
         bindings[b].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // Binding 5: the local-light tile table. Binding 6: the local shadow atlas.
+    // Both are what the forward path gained from the deferred pass, appended
+    // after the IBL trio so nothing before them moved.
+    bindings[5].binding = 5;
+    bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[5].descriptorCount = 1;
+    bindings[5].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo dslCi{};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 5;
+    dslCi.bindingCount = 7;
     dslCi.pBindings = bindings;
     VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_frameSetLayout);
     if (res != VK_SUCCESS) {
@@ -1546,16 +1727,20 @@ bool NativeRenderer::createFrameDescriptorResources() {
         return false;
     }
 
-    VkDescriptorPoolSize poolSizes[2]{};
+    VkDescriptorPoolSize poolSizes[3]{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = 1;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = 4; // shadow array + 3 IBL samplers
+    poolSizes[1].descriptorCount = 5; // cascade array + 3 IBL samplers + local shadow array
+    // The forward path reads the same local-light tile table the deferred
+    // lighting pass does, so its frame set carries the storage buffer too.
+    poolSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[2].descriptorCount = 1;
 
     VkDescriptorPoolCreateInfo poolCi{};
     poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolCi.maxSets = 1;
-    poolCi.poolSizeCount = 2;
+    poolCi.poolSizeCount = 3;
     poolCi.pPoolSizes = poolSizes;
     res = vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_descriptorPool);
     if (res != VK_SUCCESS) {
@@ -1591,11 +1776,197 @@ bool NativeRenderer::createFrameDescriptorResources() {
         return false;
     }
 
+    // The local-light table buffer has to exist before the frame set is
+    // written: the forward path reads it from this set (binding 5), and it is
+    // not the deferred pass that creates it any more. Zeroed = no lights.
+    uploadLocalLights(nullptr, 0, 0, nullptr);
     // Bind the dummy shadow texture initially; writeFrameDescriptorSet() is
     // called again with the real cascade view once a CascadedShadowMap is
     // attached and initialized (see endFrame()).
     writeFrameDescriptorSet(m_dummyShadowView, m_dummyShadowSampler);
     return true;
+}
+
+void NativeRenderer::setLocalLights(const std::vector<ks::sim::LocalLight>& lights) {
+    m_localLights = lights;
+    // One line per change, not per frame: a lamp set stays put for a while.
+    if (m_localLights.size() != m_localLightLogged) {
+        m_localLightLogged = m_localLights.size();
+        std::printf("[lights] %zu local light(s), %.0f px tiles\n", m_localLights.size(),
+                    static_cast<double>(KS_LIGHT_TILE_PIXELS));
+    }
+}
+
+bool NativeRenderer::ensureLocalLightBuffer(VkDeviceSize bytes) {
+    // A capacity floor with doubling growth. The table's size follows the
+    // camera, so a tightly sized buffer would be destroyed and recreated on
+    // most frames - and the one thing worse than a resize is a resize of a
+    // buffer a submitted frame may still be reading. 2 MiB covers a full
+    // 2560x1392 table (about 140 KB) many times over.
+    const VkDeviceSize floorBytes = 2u * 1024u * 1024u;
+    if (bytes < floorBytes) bytes = floorBytes;
+    if (m_lightBuffer != VK_NULL_HANDLE && m_lightCapacity >= bytes) return true;
+    if (m_lightBuffer != VK_NULL_HANDLE) {
+        if (m_lightMapped) vkUnmapMemory(m_device, m_lightMemory);
+        m_lightMapped = nullptr;
+        m_lightBoundBuffer = VK_NULL_HANDLE;
+        vkDestroyBuffer(m_device, m_lightBuffer, nullptr);
+        vkFreeMemory(m_device, m_lightMemory, nullptr);
+        m_lightBuffer = VK_NULL_HANDLE;
+        m_lightMemory = VK_NULL_HANDLE;
+        m_lightCapacity = 0;
+    }
+    VkDeviceSize capacity = floorBytes;
+    while (capacity < bytes) capacity *= 2;
+    if (!createBuffer(m_physicalDevice, m_device, capacity, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      m_lightBuffer, m_lightMemory)) {
+        std::fprintf(stderr, "[NativeRenderer] local lights: table buffer failed\n");
+        m_lightBuffer = VK_NULL_HANDLE;
+        m_lightMemory = VK_NULL_HANDLE;
+        m_lightCapacity = 0;
+        return false;
+    }
+    m_lightCapacity = capacity;
+    // Mapped for the life of the allocation: the table is rewritten every
+    // frame, so mapping per frame would buy nothing.
+    if (vkMapMemory(m_device, m_lightMemory, 0, capacity, 0, &m_lightMapped) != VK_SUCCESS)
+        m_lightMapped = nullptr;
+    return true;
+}
+
+void NativeRenderer::uploadLocalLights(const float* viewProj, int pixelWidth, int pixelHeight,
+                                       float lightParams[4]) {
+    ks::sim::LightClusterTable table;
+    if (viewProj != nullptr && !m_localLights.empty() && pixelWidth > 0 && pixelHeight > 0)
+        table = ks::sim::buildLightClusters(m_localLights.data(),
+                                           static_cast<int>(m_localLights.size()), viewProj,
+                                           pixelWidth, pixelHeight);
+    applyShadowRecords(table);
+    m_lightTilesX = table.tilesX;
+    m_lightTilesY = table.tilesY;
+    m_lightBase = table.tileBase;
+    if (lightParams != nullptr) {
+        lightParams[0] = static_cast<float>(table.tilesX);
+        lightParams[1] = static_cast<float>(table.tilesY);
+        lightParams[2] = static_cast<float>(table.lightCount);
+        lightParams[3] = static_cast<float>(table.tileBase);
+    }
+    if (m_device == VK_NULL_HANDLE) return;
+
+    const VkDeviceSize floats = static_cast<VkDeviceSize>(table.data.empty() ? 1 : table.data.size());
+    const VkDeviceSize bytes = floats * sizeof(float);
+    if (!ensureLocalLightBuffer(bytes)) return;
+
+    if (m_lightMapped == nullptr) return;
+    if (table.data.empty()) std::memset(m_lightMapped, 0, static_cast<std::size_t>(bytes));
+    else std::memcpy(m_lightMapped, table.data.data(), static_cast<std::size_t>(bytes));
+
+    // Binding 9 changes only when the allocation does.
+    if (m_lightingSet != VK_NULL_HANDLE && m_lightBoundBuffer != m_lightBuffer) {
+        VkDescriptorBufferInfo info{};
+        info.buffer = m_lightBuffer;
+        info.offset = 0;
+        info.range = VK_WHOLE_SIZE;
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_lightingSet;
+        write.dstBinding = 9;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        write.pBufferInfo = &info;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+        m_lightBoundBuffer = m_lightBuffer;
+    }
+}
+
+/** Shadow layers and matrices ride in the light records: the lighting shader
+ *  clips each fragment through the lamp's own matrix, so every table has to be
+ *  rewritten after the atlas decided who owns which layer this frame. */
+void NativeRenderer::applyShadowRecords(ks::sim::LightClusterTable& table) const {
+    if (!m_localShadowAtlas || !m_localShadowAtlas->isInitialized() || table.lightCount <= 0) return;
+    const int stride = static_cast<int>(KS_LIGHT_FLOATS_PER_RECORD);
+    for (int i = 0; i < table.lightCount; ++i) {
+        float* record = table.data.data() +
+                        static_cast<std::size_t>(i) * static_cast<std::size_t>(stride);
+        const ks::sim::LightShadowSlot& slot = m_localShadowAtlas->slot(i);
+        record[14] = static_cast<float>(slot.firstLayer);
+        record[15] = static_cast<float>(slot.faces);
+        record[16] = m_localShadowAtlas->shadowNear(i);
+        record[17] = m_localShadowAtlas->shadowFar(i);
+        for (int f = 0; f < slot.faces; ++f) {
+            const float* matrix = m_localShadowAtlas->lightMatrix(i, f);
+            if (matrix) std::memcpy(record + 24 + f * 16, matrix, sizeof(float) * 16);
+        }
+    }
+}
+
+bool NativeRenderer::ensureMirrorLightBuffer(int mirrorSlot, VkDeviceSize bytes) {
+    if (mirrorSlot < 0 || mirrorSlot >= kMirrorLightViews) return false;
+    // A tile is a fraction of the screen (512x128 by default: 32x8 tiles), so a
+    // much smaller floor than the main table's is plenty.
+    const VkDeviceSize floorBytes = 256u * 1024u;
+    if (bytes < floorBytes) bytes = floorBytes;
+    MirrorLightTable& target = m_mirrorLightTables[mirrorSlot];
+    if (target.buffer != VK_NULL_HANDLE && target.capacity >= bytes) return true;
+    if (target.buffer != VK_NULL_HANDLE) {
+        if (target.mapped) vkUnmapMemory(m_device, target.memory);
+        target.mapped = nullptr;
+        vkDestroyBuffer(m_device, target.buffer, nullptr);
+        vkFreeMemory(m_device, target.memory, nullptr);
+        target = MirrorLightTable{};
+    }
+    VkDeviceSize capacity = floorBytes;
+    while (capacity < bytes) capacity *= 2;
+    if (!createBuffer(m_physicalDevice, m_device, capacity, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      target.buffer, target.memory)) {
+        std::fprintf(stderr, "[NativeRenderer] mirror lights: table buffer failed\n");
+        target = MirrorLightTable{};
+        return false;
+    }
+    target.capacity = capacity;
+    if (vkMapMemory(m_device, target.memory, 0, capacity, 0, &target.mapped) != VK_SUCCESS)
+        target.mapped = nullptr;
+    return target.mapped != nullptr;
+}
+
+void NativeRenderer::uploadMirrorLocalLights(int mirrorSlot, const float* viewProj,
+                                             int pixelWidth, int pixelHeight,
+                                             float lightParams[4]) {
+    ks::sim::LightClusterTable table;
+    if (viewProj != nullptr && !m_localLights.empty() && pixelWidth > 0 && pixelHeight > 0)
+        table = ks::sim::buildLightClusters(m_localLights.data(),
+                                           static_cast<int>(m_localLights.size()), viewProj,
+                                           pixelWidth, pixelHeight);
+    // The lamp layers are light-space, so they are valid for any camera: the
+    // tile gets the same shadows the main view has.
+    applyShadowRecords(table);
+    if (lightParams != nullptr) {
+        lightParams[0] = static_cast<float>(table.tilesX);
+        lightParams[1] = static_cast<float>(table.tilesY);
+        lightParams[2] = static_cast<float>(table.lightCount);
+        lightParams[3] = static_cast<float>(table.tileBase);
+    }
+    // One line per change of the tile's own grid: the proof that this eye is
+    // binned for its own camera and extent rather than reusing the main table.
+    if (mirrorSlot >= 0 && mirrorSlot < kMirrorLightViews) {
+        const int signature = (table.tilesX << 16) ^ (table.tilesY << 8) ^ table.lightCount;
+        if (m_mirrorLightSignature[mirrorSlot] != signature) {
+            m_mirrorLightSignature[mirrorSlot] = signature;
+            std::printf("[lights] mirror view %d: %dx%d tiles, %d light(s)\n", mirrorSlot,
+                        table.tilesX, table.tilesY, table.lightCount);
+        }
+    }
+    if (m_device == VK_NULL_HANDLE) return;
+    const VkDeviceSize floats =
+        static_cast<VkDeviceSize>(table.data.empty() ? 1 : table.data.size());
+    const VkDeviceSize bytes = floats * sizeof(float);
+    if (!ensureMirrorLightBuffer(mirrorSlot, bytes)) return;
+    MirrorLightTable& target = m_mirrorLightTables[mirrorSlot];
+    if (target.mapped == nullptr) return;
+    if (table.data.empty()) std::memset(target.mapped, 0, static_cast<std::size_t>(bytes));
+    else std::memcpy(target.mapped, table.data.data(), static_cast<std::size_t>(bytes));
 }
 
 void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler shadowSampler) {
@@ -1625,8 +1996,24 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
         iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 
-    VkWriteDescriptorSet writes[5]{};
-    for (int i = 0; i < 5; ++i) {
+    // Binding 5: the local-light tile table (the same allocation the deferred
+    // lighting set reads at its binding 9). Binding 6: the local shadow atlas,
+    // or the dummy array view when no atlas is attached, so the binding is
+    // always valid to bind and every lamp reads as unshadowed.
+    VkDescriptorBufferInfo lightInfo{};
+    lightInfo.buffer = m_lightBuffer;
+    lightInfo.offset = 0;
+    lightInfo.range = VK_WHOLE_SIZE;
+    const bool hasLocalAtlas = m_localShadowAtlas && m_localShadowAtlas->isInitialized();
+    VkDescriptorImageInfo localShadowInfo{};
+    localShadowInfo.sampler = hasLocalAtlas ? m_localShadowAtlas->sampler() : shadowSampler;
+    localShadowInfo.imageView = hasLocalAtlas ? m_localShadowAtlas->arrayView() : shadowView;
+    localShadowInfo.imageLayout = (localShadowInfo.imageView == m_dummyShadowView)
+                                       ? VK_IMAGE_LAYOUT_GENERAL
+                                       : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet writes[7]{};
+    for (int i = 0; i < 7; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = m_frameSet;
         writes[i].dstBinding = uint32_t(i);
@@ -1639,8 +2026,11 @@ void NativeRenderer::writeFrameDescriptorSet(VkImageView shadowView, VkSampler s
     writes[2].pImageInfo = &iblInfo[0];
     writes[3].pImageInfo = &iblInfo[1];
     writes[4].pImageInfo = &iblInfo[2];
+    writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[5].pBufferInfo = &lightInfo;
+    writes[6].pImageInfo = &localShadowInfo;
 
-    vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 7, writes, 0, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -1922,15 +2312,17 @@ bool NativeRenderer::ensureMirrorResources() {
         return false;
     }
 
-    VkDescriptorPoolSize mirrorPool[2]{};
+    VkDescriptorPoolSize mirrorPool[3]{};
     mirrorPool[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     mirrorPool[0].descriptorCount = 1;   // the frame UBO set
     mirrorPool[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    mirrorPool[1].descriptorCount = 5;   // shadow array + IBL trio + the overlay tile
+    mirrorPool[1].descriptorCount = 6;   // cascade + local shadow arrays + IBL trio + tile
+    mirrorPool[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    mirrorPool[2].descriptorCount = 1;   // the local-light tile table
     VkDescriptorPoolCreateInfo mpCi{};
     mpCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     mpCi.maxSets = 2; // the mirror frame set + the overlay tile set
-    mpCi.poolSizeCount = 2;
+    mpCi.poolSizeCount = 3;
     mpCi.pPoolSizes = mirrorPool;
     if (vkCreateDescriptorPool(m_device, &mpCi, nullptr, &m_mirrorOverlayPool) != VK_SUCCESS) {
         fprintf(stderr, "[NativeRenderer] mirror: descriptor pool failed\n");
@@ -2014,6 +2406,13 @@ void NativeRenderer::destroyMirrorResources() {
     if (m_mirrorImage) vkDestroyImage(m_device, m_mirrorImage, nullptr);
     if (m_mirrorMemory) vkFreeMemory(m_device, m_mirrorMemory, nullptr);
     if (m_mirrorOverlayPool) vkDestroyDescriptorPool(m_device, m_mirrorOverlayPool, nullptr);
+    // Each mirror view owns a local-light table of its own.
+    for (MirrorLightTable& table : m_mirrorLightTables) {
+        if (table.mapped) vkUnmapMemory(m_device, table.memory);
+        if (table.buffer) vkDestroyBuffer(m_device, table.buffer, nullptr);
+        if (table.memory) vkFreeMemory(m_device, table.memory, nullptr);
+        table = MirrorLightTable{};
+    }
     m_mirrorSampler = VK_NULL_HANDLE;
     m_mirrorFramebuffer = VK_NULL_HANDLE;
     m_mirrorRenderPass = VK_NULL_HANDLE;
@@ -2091,6 +2490,12 @@ void NativeRenderer::recordMirrorScene(
     frameData.iblParams[0] = (m_iblWanted && m_iblReady) ? 1.0f : 0.0f;
     frameData.iblParams[1] = static_cast<float>(ibl::kPrefilterMips - 1);
     frameData.brakeGlow[0] = m_brakeGlow;
+    frameData.wetParams[0] = m_wetness;
+    frameData.wetParams[1] = 0.0f;
+    frameData.wetParams[2] = 0.0f;
+    frameData.wetParams[3] = 0.0f;
+    const mat4 invViewProjMirror = mirrorViewProj.inverse();
+    std::memcpy(frameData.invViewProj, invViewProjMirror.data(), sizeof(float) * 16);
 
     // Cascades: the same array the main pass binds (shadows are sun-space,
     // not camera-space, so the tile reads the same map).
@@ -2108,6 +2513,17 @@ void NativeRenderer::recordMirrorScene(
         shadowSampler = m_shadowMap->sampler();
     }
 
+    // Which tile this is (rear / left / right): each keeps its own local-light
+    // table, because the tile grid is binned against this eye's projection and
+    // its own, much smaller, extent.
+    int mirrorSlot = 0;
+    if (m_mirrorLeftImage != VK_NULL_HANDLE && colorImage == m_mirrorLeftImage) mirrorSlot = 1;
+    else if (m_mirrorRightImage != VK_NULL_HANDLE && colorImage == m_mirrorRightImage) mirrorSlot = 2;
+    // Local lights for this eye, binned against exactly the matrices this pass
+    // draws with (drawMesh() tested the list against the same frame pair).
+    uploadMirrorLocalLights(mirrorSlot, mirrorViewProj.data(), static_cast<int>(width),
+                            static_cast<int>(height), frameData.lightParams);
+
     {
         VkDescriptorBufferInfo bufInfo{};
         bufInfo.buffer = m_mirrorUBO;
@@ -2124,8 +2540,22 @@ void NativeRenderer::recordMirrorScene(
             iblInfo[i].imageView = m_iblViews[i] ? m_iblViews[i] : m_dummyShadowView;
             iblInfo[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
-        VkWriteDescriptorSet writes[5]{};
-        for (int i = 0; i < 5; ++i) {
+        // The tile's own frame set carries the same seven bindings as the main
+        // one: its own light table (binned for this eye) and the local shadow
+        // atlas, whose layers are light-space and therefore camera-independent.
+        const MirrorLightTable& lightTable = m_mirrorLightTables[mirrorSlot];
+        VkDescriptorBufferInfo lightInfo{};
+        lightInfo.buffer = lightTable.buffer != VK_NULL_HANDLE ? lightTable.buffer : m_lightBuffer;
+        lightInfo.offset = 0;
+        lightInfo.range = VK_WHOLE_SIZE;
+        const bool hasLocalAtlas = m_localShadowAtlas && m_localShadowAtlas->isInitialized();
+        VkDescriptorImageInfo localShadowInfo{};
+        localShadowInfo.sampler = hasLocalAtlas ? m_localShadowAtlas->sampler() : m_dummyShadowSampler;
+        localShadowInfo.imageView = hasLocalAtlas ? m_localShadowAtlas->arrayView() : m_dummyShadowView;
+        localShadowInfo.imageLayout = hasLocalAtlas ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                                                    : VK_IMAGE_LAYOUT_GENERAL;
+        VkWriteDescriptorSet writes[7]{};
+        for (int i = 0; i < 7; ++i) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[i].dstSet = m_mirrorFrameSet;
             writes[i].dstBinding = uint32_t(i);
@@ -2138,7 +2568,10 @@ void NativeRenderer::recordMirrorScene(
         writes[2].pImageInfo = &iblInfo[0];
         writes[3].pImageInfo = &iblInfo[1];
         writes[4].pImageInfo = &iblInfo[2];
-        vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+        writes[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        writes[5].pBufferInfo = &lightInfo;
+        writes[6].pImageInfo = &localShadowInfo;
+        vkUpdateDescriptorSets(m_device, 7, writes, 0, nullptr);
     }
     std::memcpy(m_mirrorUBOMapped, &frameData, sizeof(FrameDataUBO));
 
@@ -2662,8 +3095,9 @@ bool NativeRenderer::createMaterialDescriptorResources() {
     // Set layout: binding 0 = albedo sampler, binding 1 = normal sampler,
     // binding 2 = MaterialUBO, binding 3/4 = roughness/metalness map
     // samplers (brief P1). Must match MaterialData/sampler declarations in
-    // native_forward.frag (bindings 0..2 only) and gbuffer.frag (0..4).
-    VkDescriptorSetLayoutBinding bindings[6]{};
+    // native_forward.frag (bindings 0..5 plus the emissive map at 6) and
+    // gbuffer.frag (0..4).
+    VkDescriptorSetLayoutBinding bindings[7]{};
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[0].descriptorCount = 1;
@@ -2688,10 +3122,14 @@ bool NativeRenderer::createMaterialDescriptorResources() {
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[4].descriptorCount = 1;
     bindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[6].binding = 6;
+    bindings[6].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[6].descriptorCount = 1;
+    bindings[6].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo dslCi{};
     dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    dslCi.bindingCount = 6;
+    dslCi.bindingCount = 7;
     dslCi.pBindings = bindings;
     VkResult res = vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_materialSetLayout);
     if (res != VK_SUCCESS) {
@@ -2701,12 +3139,12 @@ bool NativeRenderer::createMaterialDescriptorResources() {
 
     // One set per mesh plus headroom for reload cycles; FREE bit so
     // destroyMesh() can hand sets back on track switch instead of leaking
-    // them until pool reset. 5 samplers per set (albedo, normal, rough,
-    // metal, detail).
+    // them until pool reset. 6 samplers per set (albedo, normal, rough,
+    // metal, detail, emissive).
     constexpr uint32_t kMaxMaterialSets = 4096;
     VkDescriptorPoolSize poolSizes[3]{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[0].descriptorCount = kMaxMaterialSets * 5;
+    poolSizes[0].descriptorCount = kMaxMaterialSets * 6;
     poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[1].descriptorCount = kMaxMaterialSets;
 
@@ -2735,7 +3173,7 @@ bool NativeRenderer::createMaterialDescriptorResources() {
     // Default = no textures (white albedo / flat normal / white PBR maps),
     // heuristic roughness — i.e. exactly the pre-2.3 look for unauthored
     // meshes, with the P1 map multipliers at identity.
-    if (!writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {}, {})) {
+    if (!writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {}, {}, {})) {
         fprintf(stderr, "[NativeRenderer] material descriptors: texture fallback unavailable "
                         "(TextureRuntime white fallback not ready)\n");
         return false;
@@ -2757,7 +3195,8 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
                                                 const std::string& normalPath,
                                                 const std::string& roughnessPath,
                                                 const std::string& metalnessPath,
-                                                const std::string& detailPath) {
+                                                const std::string& detailPath,
+                                                const std::string& emissivePath) {
     if (!set || !m_textureRuntime) return false;
 
     VkSampler albedoSampler = VK_NULL_HANDLE;
@@ -2765,6 +3204,7 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     VkSampler roughSampler = VK_NULL_HANDLE;
     VkSampler metalSampler = VK_NULL_HANDLE;
     VkSampler detailSampler = VK_NULL_HANDLE;
+    VkSampler emissiveSampler = VK_NULL_HANDLE;
     // Empty or missing paths resolve to TextureRuntime's fallbacks (white
     // albedo, flat normal, white PBR maps), so the descriptor is always
     // valid to bind and a lost map degrades to the authored scalar.
@@ -2774,9 +3214,10 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     const VkImageView roughView = m_textureRuntime->get(roughnessPath, roughSampler);
     const VkImageView metalView = m_textureRuntime->get(metalnessPath, metalSampler);
     const VkImageView detailView = m_textureRuntime->get(detailPath, detailSampler);
+    const VkImageView emissiveView = m_textureRuntime->get(emissivePath, emissiveSampler);
     if (!albedoView || !normalView || !roughView || !metalView || !detailView ||
-        !albedoSampler || !normalSampler || !roughSampler || !metalSampler ||
-        !detailSampler) return false;
+        !emissiveView || !albedoSampler || !normalSampler || !roughSampler ||
+        !metalSampler || !detailSampler || !emissiveSampler) return false;
 
     VkDescriptorImageInfo albedoInfo{};
     albedoInfo.sampler = albedoSampler;
@@ -2794,6 +3235,10 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     detailInfo.sampler = detailSampler;
     detailInfo.imageView = detailView;
     detailInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkDescriptorImageInfo emissiveInfo{};
+    emissiveInfo.sampler = emissiveSampler;
+    emissiveInfo.imageView = emissiveView;
+    emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     VkDescriptorImageInfo metalInfo{};
     metalInfo.sampler = metalSampler;
     metalInfo.imageView = metalView;
@@ -2831,6 +3276,14 @@ bool NativeRenderer::writeMaterialDescriptorSet(VkDescriptorSet set,
     writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[4].pImageInfo = &detailInfo;
     vkUpdateDescriptorSets(m_device, 5, writes, 0, nullptr);
+    VkWriteDescriptorSet emissiveWrite{};
+    emissiveWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    emissiveWrite.dstSet = set;
+    emissiveWrite.dstBinding = 6;
+    emissiveWrite.descriptorCount = 1;
+    emissiveWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    emissiveWrite.pImageInfo = &emissiveInfo;
+    vkUpdateDescriptorSets(m_device, 1, &emissiveWrite, 0, nullptr);
     return true;
 }
 
@@ -2843,26 +3296,7 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     // identity 1.0 there (shader: scalar * map.r, white fallback = *1), so
     // the scalar and the map paths need no branch here.
     MaterialUBO ubo;
-    ubo.roughness = mesh.roughness;
-    ubo.metalness = mesh.metalness;
-    ubo.normalScale = mesh.normalTexture.empty() ? 0.0f : 1.0f;
-    ubo.clearcoat = mesh.clearcoat;
-    ubo.brakeDisc = mesh.brakeDisc; // brief P6, name heuristic in setMesh()
-    ubo.alphaTest = mesh.alphaTested ? 1.0f : 0.0f;
-    ubo.alphaRef = mesh.alphaRef;
-    ubo.emissive = mesh.emissive;
-    ubo.opacity = mesh.opacity;
-    ubo.glassiness = mesh.glassiness;
-    ubo.tint[0] = mesh.tint[0];
-    ubo.tint[1] = mesh.tint[1];
-    ubo.tint[2] = mesh.tint[2];
-    ubo.paintSolid = mesh.paintSolid;
-    ubo.detailScale = mesh.detailTexture.empty() ? 0.0f : mesh.detailScale;
-    ubo.detailGain = mesh.detailGain;
-    ubo.specular = mesh.specular;
-    ubo.fresnelC = mesh.fresnelC;
-    ubo.fresnelExp = mesh.fresnelExp;
-    ubo.fresnelMax = mesh.fresnelMax;
+    fillMaterialBlock(mesh, ubo);
     if (!createBuffer(m_physicalDevice, m_device, sizeof(MaterialUBO),
                       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -2896,7 +3330,8 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     // incomplete, so drop it entirely and let the draw path bind the default.
     if (!writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture,
                                     mesh.normalTexture, mesh.roughnessTexture,
-                                    mesh.metalnessTexture, mesh.detailTexture)) {
+                                    mesh.metalnessTexture, mesh.detailTexture,
+                                    mesh.emissiveTexture)) {
         destroyMaterialDescriptor(mesh);
         return false;
     }
@@ -2915,6 +3350,28 @@ bool NativeRenderer::createMaterialDescriptor(NativeMesh& mesh) {
     return true;
 }
 
+bool NativeRenderer::setMeshTint(const std::string& name, const float tint[3], float paintSolid) {
+    auto it = m_meshes.find(name);
+    if (it == m_meshes.end()) return false;
+    NativeMesh& mesh = it->second;
+    for (int i = 0; i < 3; ++i) mesh.tint[i] = tint[i];
+    mesh.paintSolid = paintSolid;
+    if (mesh.materialUbo == VK_NULL_HANDLE || mesh.materialUboMemory == VK_NULL_HANDLE)
+        return false; // no material block (descriptors never built for it)
+    // Host-visible and coherent (see createMaterialDescriptor): rewriting the
+    // block is enough, the buffers and the descriptor set stay untouched.
+    MaterialUBO ubo;
+    fillMaterialBlock(mesh, ubo);
+    void* mapped = nullptr;
+    if (vkMapMemory(m_device, mesh.materialUboMemory, 0, sizeof(MaterialUBO), 0, &mapped) !=
+            VK_SUCCESS ||
+        mapped == nullptr)
+        return false;
+    std::memcpy(mapped, &ubo, sizeof(MaterialUBO));
+    vkUnmapMemory(m_device, mesh.materialUboMemory);
+    return true;
+}
+
 void NativeRenderer::destroyMaterialDescriptor(NativeMesh& mesh) {
     if (mesh.materialSet && m_materialPool) {
         vkFreeDescriptorSets(m_device, m_materialPool, 1, &mesh.materialSet);
@@ -2930,12 +3387,13 @@ void NativeRenderer::rewriteMaterialDescriptors() {
     // clearTextureCache() destroyed images whose views are still written
     // into live sets: re-resolve (DDS reloads lazily on the next get()) so
     // no descriptor points at a freed image.
-    if (m_defaultMaterialSet) writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {}, {});
+    if (m_defaultMaterialSet) writeMaterialDescriptorSet(m_defaultMaterialSet, {}, {}, {}, {}, {}, {});
     for (auto& [name, mesh] : m_meshes) {
         if (mesh.materialSet) {
             writeMaterialDescriptorSet(mesh.materialSet, mesh.albedoTexture,
                                        mesh.normalTexture, mesh.roughnessTexture,
-                                       mesh.metalnessTexture, mesh.detailTexture);
+                                       mesh.metalnessTexture, mesh.detailTexture,
+                                       mesh.emissiveTexture);
         }
     }
 }
@@ -3020,6 +3478,14 @@ bool NativeRenderer::loadMeshFromFile(const std::string& name, const std::string
             MaterialCache::resolveTexturePath(textureDir, material->roughnessMap);
         mesh.metalnessTexture =
             MaterialCache::resolveTexturePath(textureDir, material->metalnessMap);
+        // Optional 7th..9th cells: a sign or a grass card that must cut its
+        // alpha, and a lamp that emits. Absent in every legacy row, so those
+        // meshes keep alphaTested false and emissive 0.
+        mesh.alphaTested = material->alphaRef > 0.0f;
+        mesh.alphaRef = material->alphaRef;
+        mesh.emissive = material->emissive;
+        mesh.emissiveTexture =
+            MaterialCache::resolveTexturePath(textureDir, material->emissiveMap);
     }
 
     setMesh(name, mesh);
@@ -3046,16 +3512,81 @@ int NativeRenderer::loadMeshesFromManifest(const std::string& dir) {
                 materials.size(), note.c_str());
     }
     const std::string textureDir = dir + "/textures";
+
+    // The location document, read once per scene and only when the switch says
+    // so: off by default, so every existing bake and the capture baseline render
+    // exactly as they did before this was wired in. It is looked for next to the
+    // binary and under the content roots as well, not only in the working
+    // directory: a staged install is not launched from the repository root.
+    graphics::LocationMaterialApplier location;
+    bool locationOn = graphics::locationMaterialsEnabled();
+    if (locationOn) {
+        std::string error;
+        std::vector<std::string> tried;
+        const std::string document =
+            ks::sim::findLocationMaterialDocument(ks::sim::executableDirectory(), &tried);
+        if (document.empty()) {
+            fprintf(stderr, "[location] %s; track presets stay off\n",
+                    ks::sim::locationMaterialNotFoundMessage(tried).c_str());
+            locationOn = false;
+        } else {
+            locationOn = location.load(document, &error);
+            if (!locationOn)
+                fprintf(stderr, "[location] %s; track presets stay off\n", error.c_str());
+        }
+    }
+
+    // KS_MATERIAL_DEBUG already means "say why this surface looks the way it
+    // does" for a car; the same question gets the same answer for a track.
+    const bool locationDebug = std::getenv("KS_MATERIAL_DEBUG") != nullptr;
     int loaded = 0;
     std::string name;
     while (std::getline(manifest, name)) {
         if (!name.empty() && name.back() == '\r') name.pop_back();
         if (name.empty()) continue;
         const MeshMaterial* material = hasMaterials ? materials.find(name) : nullptr;
+        // The preset only touches the three surface values, never the textures:
+        // the bake says what the surface looks like, the document says what it
+        // is, and the blend between them is the preset's authoredWeight.
+        MeshMaterial adjusted;
+        if (locationOn && material != nullptr) {
+            adjusted = *material;
+            // A field with a map is not a value: the bake wrote 1.0 there on
+            // purpose (the map carries the absolute values and the scalar only
+            // multiplies it), so a preset written into it would rescale the map
+            // instead of stating the surface. Those fields are left alone.
+            const graphics::LocationMaterialApplier::Surface target = graphics::presetWritableSurface(
+                !adjusted.roughnessMap.empty(), !adjusted.metalnessMap.empty(), adjusted.roughness,
+                adjusted.metalness, adjusted.clearcoat);
+            if (location.apply(name, target)) {
+                if (locationDebug) {
+                    std::string fields = "rough";
+                    if (target.roughness == nullptr) fields = "(rough mapped)";
+                    std::string metal = "metal";
+                    if (target.metalness == nullptr) metal = "(metal mapped)";
+                    fprintf(stderr, "[location] %-18s %-9s %s %.3f -> %.3f %s %.2f -> %.2f\n",
+                            name.c_str(), location.classifier().classify(name).c_str(),
+                            fields.c_str(), static_cast<double>(material->roughness),
+                            static_cast<double>(adjusted.roughness), metal.c_str(),
+                            static_cast<double>(material->metalness),
+                            static_cast<double>(adjusted.metalness));
+                }
+                material = &adjusted;
+            }
+        }
         if (loadMeshFromFile(name, dir + "/" + name + ".nmsh", material, textureDir)) {
             ++loaded;
             m_staticSceneMeshNames.push_back(name);
         }
+    }
+    if (locationOn) {
+        const graphics::LocationMaterialCounts& counts = location.counts();
+        fprintf(stderr,
+                "[location] %d of %d track material(s) classified (%d unnamed by any pattern), "
+                "%d preset(s) applied\n",
+                counts.classified, counts.seen, counts.other, counts.applied);
+        for (const auto& entry : counts.perCategory)
+            fprintf(stderr, "  %-9s %d mesh(es)\n", entry.first.c_str(), entry.second);
     }
     return loaded;
 }
@@ -3213,6 +3744,15 @@ bool NativeRenderer::ensureScreenshotBuffer() {
 // backbuffer is in PRESENT_SRC here on both the forward path (render pass
 // finalLayout) and the deferred path (display pass finalLayout).
 void NativeRenderer::recordScreenshotCopy() {
+    if (!m_swapChainTransferSrc) {
+        // The surface cannot hand its image over: better a missing capture than
+        // an invalid copy the driver happens to survive.
+        std::fprintf(stderr,
+                     "[NativeRenderer] screenshot: this surface cannot copy the "
+                     "swapchain image (no TRANSFER_SRC usage)\n");
+        m_screenshotPending = false;
+        return;
+    }
     if (!ensureScreenshotBuffer()) {
         m_screenshotPending = false;
         return;
@@ -3332,6 +3872,17 @@ bool NativeRenderer::beginFrame() {
 
     m_drawList.clear();
     m_mainDrawList.clear();
+    // Motion vectors: slots are handed out in draw order while the frame is
+    // recorded, so the counter starts at zero with the list.
+    m_velocitySlot = 0;
+    // Last frame's draws, grouped by mesh name, and this frame's match counters:
+    // a draw continues the nearest unused instance of its own name.
+    m_prevInstances.clear();
+    for (const auto& prev : m_prevMainDrawList) {
+        m_prevInstances[prev.meshName].push_back({prev.model, false});
+    }
+    m_velocityDraws = 0;
+    m_velocityMatched = 0;
     m_mirrorList.clear();
     m_mirrorLeftList.clear();
     m_mirrorRightList.clear();
@@ -3643,6 +4194,49 @@ void NativeRenderer::endFrame() {
             m_shadowMap->endCascadePass(m_commandBuffer);
         }
     }
+    // ---- Local light shadows: same draw list once per live atlas layer, with
+    // the lamp's own light-space matrix. Layers that this frame's lights did
+    // not claim are skipped, so an empty room costs nothing. The atlas ran
+    // update() above, which is why the table uploaded later already carries
+    // these layer indices.
+    if (m_localShadowAtlas && m_localShadowAtlas->isInitialized()) {
+        // First frame: clear every layer so even the ones no lamp ever
+        // owns leave the UNDEFINED layout behind (the lighting pass samples
+        // the whole array view; an UNDEFINED subresource there is a
+        // VUID-vkCmdDraw-None-09600).
+        if (!m_localShadowAtlas->allLayersCleared()) {
+            for (int l = 0; l < m_localShadowAtlas->layerCount(); ++l) {
+                m_localShadowAtlas->beginLayerPass(m_commandBuffer, l);
+                m_localShadowAtlas->endLayerPass(m_commandBuffer);
+            }
+            m_localShadowAtlas->markAllLayersCleared();
+        }
+        // Layer assignment and matrices first: the layers rendered below and
+        // the light records uploaded after both read this frame's result. The
+        // camera position is what makes the atlas prefer the lamps this view
+        // actually sees when there are more lamps than layers.
+        m_localShadowAtlas->update(m_localLights, m_camPosWS);
+        for (int layer : m_localShadowAtlas->liveLayers()) {
+            m_localShadowAtlas->beginLayerPass(m_commandBuffer, layer);
+            for (const auto& draw : m_drawList) {
+                auto it = m_meshes.find(draw.meshName);
+                if (it == m_meshes.end() || !it->second.vertexBuffer) continue;
+                const NativeMesh& mesh = it->second;
+                VkBuffer vBufs[] = {mesh.vertexBuffer};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, vBufs, offsets);
+                if (!mesh.castShadow) continue;
+                m_localShadowAtlas->pushLightSpaceMatrix(m_commandBuffer, layer, draw.model);
+                if (mesh.indexBuffer) {
+                    vkCmdBindIndexBuffer(m_commandBuffer, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                    vkCmdDrawIndexed(m_commandBuffer, static_cast<uint32_t>(mesh.indices.size()), 1, 0, 0, 0);
+                } else {
+                    vkCmdDraw(m_commandBuffer, static_cast<uint32_t>(mesh.vertices.size()), 1, 0, 0);
+                }
+            }
+            m_localShadowAtlas->endLayerPass(m_commandBuffer);
+        }
+    }
     // Shadow marker: FrameBegin -> Shadow is the cascade cost (0 with no
     // shadow map attached).
     m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::Shadow);
@@ -3670,6 +4264,73 @@ void NativeRenderer::endFrame() {
 
     const mat4 viewProjUnjit = m_proj * m_view;
     const mat4 prevViewProjUnjit = m_prevViewProjValid ? m_prevViewProj : viewProjUnjit;
+
+    // ---- Frame-generation / super-resolution input seam -------------------
+    // FrameGenInputs.h is what a provider (ANR FG, DLSS-G, FSR) is handed; this
+    // publishes the part the engine owns today, every frame, on both paths.
+    // The jitter is read back out of the two projections instead of being
+    // remembered from the Halton sample above, so its sign can never drift from
+    // what the geometry pass actually used. Motion is not produced yet - the
+    // GBuffer has three targets and the draw path carries no previous model
+    // matrix - and motionAvailable says so, so framegen::ready() refuses the
+    // frame instead of letting a provider reconstruct from nothing.
+    m_frameGenInputs.camera.nearPlane = m_camNear;
+    m_frameGenInputs.camera.farPlane = m_camFar;
+    m_frameGenInputs.camera.fovY = framegen::fovYFromProjection(m_proj);
+    m_frameGenInputs.camera.aspect = framegen::aspectFromProjection(m_proj);
+    m_frameGenInputs.camera.view = m_view;
+    m_frameGenInputs.camera.proj = m_proj;
+    m_frameGenInputs.camera.viewProj = viewProjUnjit;
+    m_frameGenInputs.camera.prevViewProj = prevViewProjUnjit;
+    m_frameGenInputs.camera.prevValid = m_prevViewProjValid;
+    m_frameGenInputs.camera.prevView = m_prevView;
+    m_frameGenInputs.camera.clipToPrevClip = prevViewProjUnjit * viewProjUnjit.inverse();
+    m_frameGenInputs.camera.prevClipToClip = viewProjUnjit * prevViewProjUnjit.inverse();
+    framegen::updateBasis(m_frameGenInputs.camera);
+    // A camera cut is not "no previous frame": the pair is real, it is the
+    // history that cannot be trusted. Measured on the poses, so a teleport
+    // between rooms is told apart from a fast pan, then published as reset - and
+    // the velocity target is written as zero for this frame (recordDrawList)
+    // rather than as a vector across the cut. The garage entry that used to
+    // report a 95.9 px vector is exactly this case.
+    const framegen::PoseJump cameraJump =
+        m_prevViewProjValid ? framegen::poseJump(m_view, m_prevView) : framegen::PoseJump{};
+    // The lens counts as much as the pose: the showroom and the garage run
+    // different fields of view, so entering the garage rescales the image while
+    // the eye barely moves. That was the measured 95.9 px frame - a 0.00 m /
+    // 0.0 deg pose jump - which is why the projection is tested too.
+    const framegen::LensJump lensJump =
+        m_prevViewProjValid ? framegen::lensJump(m_proj, m_prevProj) : framegen::LensJump{};
+    m_lastPoseJumpMetres = cameraJump.translation;
+    m_lastPoseJumpDegrees = cameraJump.rotationDegrees;
+    m_lastLensJumpDegrees = lensJump.fovYDegrees;
+    const int renderWidth = static_cast<int>(m_swapChainExtent.width);
+    const int renderHeight = static_cast<int>(m_swapChainExtent.height);
+    const bool resized = m_prevFrameGenWidth != renderWidth || m_prevFrameGenHeight != renderHeight;
+    m_frameGenInputs.reset =
+        !m_prevViewProjValid || resized || framegen::isCameraCut(cameraJump, lensJump);
+
+    m_prevFrameGenWidth = renderWidth;
+    m_prevFrameGenHeight = renderHeight;
+    const framegen::PixelOffset jitterPx = framegen::projectionJitterPixels(
+        m_proj, projRender, static_cast<int>(m_swapChainExtent.width),
+        static_cast<int>(m_swapChainExtent.height));
+    m_frameGenInputs.jitter.xPx = jitterPx.x;
+    m_frameGenInputs.jitter.yPx = jitterPx.y;
+    m_frameGenInputs.renderWidth = static_cast<int>(m_swapChainExtent.width);
+    m_frameGenInputs.renderHeight = static_cast<int>(m_swapChainExtent.height);
+    m_frameGenInputs.outputWidth = m_frameGenInputs.renderWidth;
+    m_frameGenInputs.outputHeight = m_frameGenInputs.renderHeight;
+    // The HUD is its own pass drawn over the backbuffer, so on the deferred
+    // path the lit scene exists without it (the history slot) for a provider to
+    // read; the forward path draws the scene straight into the backbuffer and
+    // has no such image. Both the depth and the hudless colour only exist there.
+    m_frameGenInputs.hudlessAvailable = deferred;
+    m_frameGenInputs.depthAvailable = deferred;
+    // Motion vectors are the GBuffer's fourth target, so they exist exactly
+    // when the deferred path is what drew this frame; the forward path has no
+    // velocity and says so (a provider asks ready() and is refused).
+    m_frameGenInputs.motionAvailable = deferred;
 
     // ---- Frame-global lighting data, shared by whichever geometry pass
     // runs below (forward or GBuffer). ----
@@ -3730,6 +4391,12 @@ void NativeRenderer::endFrame() {
     // Brief P6 — brake glow heat (0 = cold/off, drives the emissive on
     // brake-disc-flagged meshes in both lighting shaders).
     frameData.brakeGlow[0] = m_brakeGlow;
+    frameData.wetParams[0] = m_wetness;
+    frameData.wetParams[1] = 0.0f;
+    frameData.wetParams[2] = 0.0f;
+    frameData.wetParams[3] = 0.0f;
+    const mat4 invViewProjMain = viewProjUnjit.inverse();
+    std::memcpy(frameData.invViewProj, invViewProjMain.data(), sizeof(float) * 16);
 
     // Either the real shadow cascade array or the 1x1 dummy (always-lit)
     // texture if no shadow map is attached/initialized yet.
@@ -3746,6 +4413,14 @@ void NativeRenderer::endFrame() {
         frameData.cascadeSplits[3] = static_cast<float>(liveCascades);
         shadowView = m_shadowMap->arrayView();
         shadowSampler = m_shadowMap->sampler();
+    }
+    // Native local lights: bin this frame's lamps against the same projection
+    // the geometry pass uses, and hand the table to the lighting pass. An empty
+    // list leaves lightParams at zero, which is the shader's "no loop".
+    {
+        const mat4 lightViewProj = projRender * m_view;
+        uploadLocalLights(lightViewProj.data(), static_cast<int>(m_swapChainExtent.width),
+                          static_cast<int>(m_swapChainExtent.height), frameData.lightParams);
     }
     writeFrameDescriptorSet(shadowView, shadowSampler);
     std::memcpy(m_frameUBOMapped, &frameData, sizeof(FrameDataUBO));
@@ -3767,10 +4442,21 @@ void NativeRenderer::endFrame() {
                               const mat4& proj, bool skipBlended = false) {
         static bool s_recordDebug = getenv("KS_RECORD_DEBUG") != nullptr;
         const bool canBlend = !deferred; // the GBuffer pass has no blending
-        auto drawOne = [&](const QueuedDraw& draw) {
+        // Motion vectors are written by the main eye's opaque pass only: it is
+        // the one pass whose target has a velocity attachment, and its list is
+        // the one copied into m_prevMainDrawList at the end of the frame.
+        const bool writeVelocity = deferred && skipBlended && &list == &m_mainDrawList;
+        auto drawOne = [&](const QueuedDraw& draw, size_t drawIndex = 0) {
             auto it = m_meshes.find(draw.meshName);
             if (it == m_meshes.end()) return;
             const NativeMesh& mesh = it->second;
+            // video.gbufferOverrides: a material whose override empties the
+            // channel list does not write into the opaque targets (the
+            // transparent pass, if any, still draws it over the lit image).
+            if (deferred && skipBlended && !mesh.materialName.empty() &&
+                m_gbufferLayouts.hasOverride(mesh.materialName) &&
+                m_gbufferLayouts.layoutFor(mesh.materialName).channelCount() == 0)
+                return;
             if (!mesh.vertexBuffer) {
                 // Passed CPU-side frustum culling (so it counts as "drawn")
                 // but never made it to the GPU — an upload that failed or was
@@ -3790,6 +4476,73 @@ void NativeRenderer::endFrame() {
                     mesh.materialSet ? mesh.materialSet : m_defaultMaterialSet;
                 vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                         m_pipelineLayout, 1, 1, &materialSet, 0, nullptr);
+            }
+
+            // Frame generation: the slot this draw's velocity needs. The
+            // previous model comes from the index-aligned copy of last frame's
+            // main list, which is what makes a car - or one of its wheels -
+            // differ from the static scene, and what a mesh shared by several
+            // instances needs: one slot per DRAW, never one per mesh. A draw
+            // with no counterpart last frame (a new instance) falls back to its
+            // own model, i.e. zero motion, rather than to a stale transform.
+            if (writeVelocity && m_velocitySet && m_velocityMapped) {
+                const mat4 curUnjit = m_proj * m_view;
+                const mat4 prevUnjit = m_prevViewProjValid ? m_prevViewProj : curUnjit;
+                // Continue the nearest unused instance of this mesh from last
+                // frame - not the draw at the same index. Culling reorders the
+                // list, several cars share a mesh, and a scene swap reuses the
+                // names with transforms tens of metres apart; the last two are
+                // what the name+pose match is for. A draw with no plausible
+                // predecessor is new, and its honest motion is zero.
+                (void)drawIndex;
+                const mat4* prevModelPtr = nullptr;
+                auto instances = m_prevInstances.find(draw.meshName);
+                if (instances != m_prevInstances.end()) {
+                    size_t best = instances->second.size();
+                    float bestDistance = 0.0f;
+                    for (size_t i = 0; i < instances->second.size(); ++i) {
+                        const PrevInstance& candidate = instances->second[i];
+                        if (candidate.used) continue;
+                        if (!framegen::isSameInstance(draw.model, candidate.model)) continue;
+                        const float distance =
+                            framegen::translationDistance(draw.model, candidate.model);
+                        if (best == instances->second.size() || distance < bestDistance) {
+                            best = i;
+                            bestDistance = distance;
+                        }
+                    }
+                    if (best < instances->second.size()) {
+                        instances->second[best].used = true;
+                        prevModelPtr = &instances->second[best].model;
+                    }
+                }
+                const mat4 prevModel = prevModelPtr ? *prevModelPtr : draw.model;
+                ++m_velocityDraws;
+                if (prevModelPtr) ++m_velocityMatched;
+
+                if (m_velocitySlot < kVelocitySlots) {
+                    float* slot = static_cast<float*>(m_velocityMapped) +
+                                  static_cast<size_t>(m_velocitySlot) * (kVelocitySlotBytes / sizeof(float));
+                    const mat4 curMvp = curUnjit * draw.model;
+                    // On a cut frame every vector is zero: with reset published,
+                    // the provider throws its history away, and a reprojection
+                    // across the cut would be a lie. The next frame is
+                    // contiguous again and gets real vectors.
+                    const mat4 prevMvp =
+                        m_frameGenInputs.reset ? curMvp : prevUnjit * prevModel;
+                    std::memcpy(slot, curMvp.data(), sizeof(float) * 16);
+                    std::memcpy(slot + 16, prevMvp.data(), sizeof(float) * 16);
+                    slot[32] = static_cast<float>(m_swapChainExtent.width);
+                    slot[33] = static_cast<float>(m_swapChainExtent.height);
+                    slot[34] = 0.0f;
+                    slot[35] = 0.0f;
+                    const uint32_t dynamicOffset =
+                        static_cast<uint32_t>(m_velocitySlot) * kVelocitySlotBytes;
+                    vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            m_pipelineLayout, 2, 1, &m_velocitySet, 1,
+                                            &dynamicOffset);
+                    ++m_velocitySlot;
+                }
             }
 
             struct { mat4 model; mat4 mvp; } pc;
@@ -3816,11 +4569,17 @@ void NativeRenderer::endFrame() {
         };
 
         // Opaque first: everything that owns the pixel it covers.
-        for (const auto& draw : list) {
+        for (size_t drawIndex = 0; drawIndex < list.size(); ++drawIndex) {
+            const QueuedDraw& draw = list[drawIndex];
             auto it = m_meshes.find(draw.meshName);
             if (it == m_meshes.end()) continue;
+            if (it->second.grass) continue; // its own pipeline, after the blended ones
             if (it->second.blended && (canBlend || skipBlended)) continue;
-            drawOne(draw);
+            // The GBuffer has no channel for ksEmissive, so a self-lit surface
+            // would lose its light there: leave it to the transparent pass,
+            // which draws with the forward shader over the lit image.
+            if (skipBlended && it->second.emissive > 0.0f) continue;
+            drawOne(draw, drawIndex);
         }
 
         // Then the see-through surfaces, far to near, so each one blends
@@ -3890,16 +4649,16 @@ void NativeRenderer::endFrame() {
         // ---- Pass 1: GBuffer — geometry attributes into three colour
         // targets plus a private depth buffer (kept separate from
         // m_depthImage so the forward path's depth layout is untouched). ----
-        VkClearValue gClears[4];
-        for (int i = 0; i < 3; ++i) gClears[i].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-        gClears[3].depthStencil = {1.0f, 0};
+        VkClearValue gClears[5];
+        for (int i = 0; i < 4; ++i) gClears[i].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+        gClears[4].depthStencil = {1.0f, 0};
 
         VkRenderPassBeginInfo gBegin{};
         gBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         gBegin.renderPass = m_gbufferRenderPass;
         gBegin.framebuffer = m_gbufferFramebuffers[m_currentImageIndex];
         gBegin.renderArea.extent = m_swapChainExtent;
-        gBegin.clearValueCount = 4;
+        gBegin.clearValueCount = 5;
         gBegin.pClearValues = gClears;
         vkCmdBeginRenderPass(m_commandBuffer, &gBegin, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -3909,11 +4668,81 @@ void NativeRenderer::endFrame() {
         vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout,
                                 0, 1, &m_frameSet, 0, nullptr);
         recordDrawList(m_mainDrawList, m_view, projRender, true);
+        // Scene discontinuity: nothing in the main list continued a draw from
+        // the previous frame, so the history describes another scene. Those
+        // draws already got zero vectors (no predecessor), and the provider is
+        // told to start over. This is the frame that used to carry the 95.9 px
+        // vector at the menu -> garage swap, where the camera never moved and
+        // only the meshes did.
+        // What the diagnostic will print next frame, when it reads this frame's
+        // target back (see m_dumpedMotionClass): taken after the pass, so the
+        // match counts and any reset the discontinuity check added are final.
+        m_dumpedMotionClass = {m_frameGenInputs.reset, m_lastPoseJumpMetres,
+                               m_lastPoseJumpDegrees, m_lastLensJumpDegrees, m_velocityMatched,
+                               m_velocityDraws};
+        if (m_velocityDraws > 0 && m_velocityMatched == 0 && !m_prevMainDrawList.empty()) {
+            m_frameGenInputs.reset = true;
+            static bool loggedSceneSwap = false;
+            if (!loggedSceneSwap) {
+                loggedSceneSwap = true;
+                std::fprintf(stderr,
+                             "[motion] scene discontinuity (%d draws, no predecessor): reset "
+                             "published\n",
+                             m_velocityDraws);
+            }
+        }
         // Roadmap P1: sprite quads into the same GBuffer, so the lighting
         // pass below lights them exactly like geometry (they carry a
         // camera-facing normal and a real world position).
         recordParticles(projRender * m_view, deferred);
         vkCmdEndRenderPass(m_commandBuffer);
+
+        // Diagnostic: KS_FG_MOTION_DUMP copies the velocity target out once,
+        // after the GBuffer pass has handed it over as a sampled image.
+        // Only once there is a previous frame to compare against: on the first
+        // deferred frame prevViewProj is this frame and there is no earlier
+        // draw list, so every vector is zero by construction and the dump would
+        // say nothing about the shader.
+        // Every frame of the first 150 while the diagnostic is on: the point is
+        // to catch the frame that used to carry the absurd vectors, wherever it
+        // is, together with the jump that classified it. The printout below is
+        // the one that filters (reset frames, big vectors, every 30th frame).
+        const bool dumpNow = m_velocityDumpRequested && !m_velocityDumpCopied &&
+                             m_velocityReadback && m_prevViewProjValid &&
+                             !m_prevMainDrawList.empty() && m_velocityDumpFrame < 150;
+        if (dumpNow) {
+            VkImageMemoryBarrier barrier{};
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = m_velocityImage;
+            barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            barrier.subresourceRange.levelCount = 1;
+            barrier.subresourceRange.layerCount = 1;
+            barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+                                 &barrier);
+
+            VkBufferImageCopy region{};
+            region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+            region.imageExtent = {m_swapChainExtent.width, m_swapChainExtent.height, 1};
+            vkCmdCopyImageToBuffer(m_commandBuffer, m_velocityImage,
+                                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_velocityReadback, 1,
+                                   &region);
+
+            barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+            barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr,
+                                 1, &barrier);
+            m_velocityDumpCopied = true;
+        }
 
         m_gpuProfiler.writeTimestamp(m_commandBuffer, GpuProfiler::Pass::GBuffer);
         // ---- Pass 2: fullscreen lighting + volumetric fog into an
@@ -3998,7 +4827,9 @@ void NativeRenderer::endFrame() {
             std::vector<const QueuedDraw*> seeThrough;
             for (const auto& draw : m_mainDrawList) {
                 auto it = m_meshes.find(draw.meshName);
-                if (it == m_meshes.end() || !it->second.blended) continue;
+                if (it == m_meshes.end()) continue;
+                if (it->second.grass) continue;
+                if (!it->second.blended && it->second.emissive <= 0.0f) continue;
                 if (!it->second.vertexBuffer) continue;
                 seeThrough.push_back(&draw);
             }
@@ -4050,6 +4881,61 @@ void NativeRenderer::endFrame() {
                     } else {
                         vkCmdDraw(m_commandBuffer, static_cast<uint32_t>(mesh.vertices.size()),
                                   1, 0, 0);
+                    }
+                }
+                // ---- Grass: after the blended surfaces, with its own pipeline.
+                // The blades are already in world space, so the instance matrix
+                // only places them and the clock drives the sway.
+                if (m_grassPipeline != VK_NULL_HANDLE && m_grassLayout != VK_NULL_HANDLE) {
+                    std::vector<const QueuedDraw*> grassDraws;
+                    for (const auto& draw : m_mainDrawList) {
+                        auto it = m_meshes.find(draw.meshName);
+                        if (it == m_meshes.end() || !it->second.grass) continue;
+                        if (!it->second.vertexBuffer) continue;
+                        grassDraws.push_back(&draw);
+                    }
+                    if (!grassDraws.empty()) {
+                        static const auto grassClock = std::chrono::steady_clock::now();
+                        const float seconds = std::chrono::duration<float>(
+                            std::chrono::steady_clock::now() - grassClock).count();
+                        vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                          m_grassPipeline);
+                        for (const QueuedDraw* draw : grassDraws) {
+                            auto it = m_meshes.find(draw->meshName);
+                            if (it == m_meshes.end()) continue;
+                            const NativeMesh& mesh = it->second;
+                            GrassPushConstants gpc;
+                            gpc.mvp = projRender * m_view * draw->model;
+                            gpc.sunDirection[0] = m_sun.direction.x;
+                            gpc.sunDirection[1] = m_sun.direction.y;
+                            gpc.sunDirection[2] = m_sun.direction.z;
+                            gpc.sunColor[0] = m_sun.color.x;
+                            gpc.sunColor[1] = m_sun.color.y;
+                            gpc.sunColor[2] = m_sun.color.z;
+                            gpc.sunColor[3] = m_sun.intensity;
+                            gpc.wind[0] = seconds;
+                            gpc.wind[1] = 1.0f;
+                            gpc.wind[2] = 0.35f;
+                            vkCmdPushConstants(m_commandBuffer, m_grassLayout,
+                                               VK_SHADER_STAGE_VERTEX_BIT |
+                                                   VK_SHADER_STAGE_FRAGMENT_BIT,
+                                               0, sizeof(gpc), &gpc);
+                            VkBuffer gBufs[] = {mesh.vertexBuffer};
+                            VkDeviceSize gOffsets[] = {0};
+                            vkCmdBindVertexBuffers(m_commandBuffer, 0, 1, gBufs, gOffsets);
+                            if (mesh.indexBuffer) {
+                                vkCmdBindIndexBuffer(m_commandBuffer, mesh.indexBuffer, 0,
+                                                     VK_INDEX_TYPE_UINT32);
+                                vkCmdDrawIndexed(m_commandBuffer,
+                                                 static_cast<uint32_t>(mesh.indices.size()),
+                                                 1, 0, 0, 0);
+                            } else {
+                                vkCmdDraw(m_commandBuffer,
+                                          static_cast<uint32_t>(mesh.vertices.size()), 1, 0, 0);
+                            }
+                        }
+                        vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                          m_transparentScenePipeline);
                     }
                 }
                 vkCmdEndRenderPass(m_commandBuffer);
@@ -4302,7 +5188,9 @@ void NativeRenderer::endFrame() {
                                     0, 1, &m_displaySet, 0, nullptr);
 
             TonemapPC t{};
-            t.colorFilter[0] = t.colorFilter[1] = t.colorFilter[2] = 1.0f;
+            t.colorFilter[0] = m_colorFilter[0];
+            t.colorFilter[1] = m_colorFilter[1];
+            t.colorFilter[2] = m_colorFilter[2];
             t.exposure = m_exposure;
             // The shader already ends with an exact sRGB OETF, so the extra
             // pow(1/2.2) must be a no-op: feeding 2.2 here double-encoded the
@@ -4358,7 +5246,10 @@ void NativeRenderer::endFrame() {
             t.sharpenTexelX = 1.0f / float(m_swapChainExtent.width);
             t.sharpenTexelY = 1.0f / float(m_swapChainExtent.height);
             t.sharpenAmount = m_taa ? 0.2f : 0.0f;
-            t.sharpenPad = 0.0f;
+            // The room's own [COLOR] block: hue and sepia ride the two bytes
+            // the display block never used, so nothing else moved.
+            t.gradeHue = m_gradeHue;
+            t.gradeSepia = m_gradeSepia;
             vkCmdPushConstants(m_commandBuffer, m_displayLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(t), &t);
             vkCmdDraw(m_commandBuffer, 3, 1, 0, 0);
@@ -4474,12 +5365,19 @@ void NativeRenderer::endFrame() {
             m_screenshotPending = false; // unsupported format (e.g. HDR10)
     }
 
+    ++m_velocityDumpFrame;
     if (deferred) {
         m_historyValid = true;
         m_historyIndex ^= 1;
     }
     m_prevViewProj = viewProjUnjit;
+    m_prevView = m_view;
+    m_prevProj = m_proj;
     m_prevViewProjValid = true;
+    // Next frame's velocity pairs each draw with the model this frame drew it
+    // at: index-aligned, name-checked, so a wheel, a car and the static scene
+    // are all answered without the renderer needing an instance id.
+    m_prevMainDrawList = m_mainDrawList;
     // Same handshake for the tile: the grid copied above was rasterised with
     // this frame's mirror matrices, so next frame's test projects with them.
     m_prevMirrorViewProj = m_mirrorProjFrame * m_mirrorViewFrame;
@@ -4508,6 +5406,79 @@ void NativeRenderer::endFrame() {
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &m_renderFinished[m_currentImageIndex];
     vkQueueSubmit(m_graphicsQueue, 1, &submit, m_inFlightFence);
+
+    // Diagnostic summary: one stall, once, only when KS_FG_MOTION_DUMP was set.
+    if (m_velocityDumpCopied) {
+        m_velocityDumpCopied = false;
+        vkQueueWaitIdle(m_graphicsQueue);
+        void* mapped = nullptr;
+        if (vkMapMemory(m_device, m_velocityReadbackMemory, 0, m_velocityReadbackBytes, 0, &mapped) ==
+            VK_SUCCESS) {
+            const auto* halfs = static_cast<const uint16_t*>(mapped);
+            // RG16F as the GPU stored it: half -> float, so the numbers printed
+            // are the vectors a provider would read out of the texture.
+            const auto toFloat = [](uint16_t value) {
+                const uint32_t sign = (value & 0x8000u) << 16;
+                uint32_t exponent = (value >> 10) & 0x1fu;
+                uint32_t mantissa = value & 0x3ffu;
+                uint32_t bits = 0;
+                if (exponent == 0) {
+                    if (mantissa == 0) {
+                        bits = sign;
+                    } else {
+                        exponent = 127 - 15 + 1;
+                        while ((mantissa & 0x400u) == 0) {
+                            mantissa <<= 1;
+                            --exponent;
+                        }
+                        mantissa &= 0x3ffu;
+                        bits = sign | (exponent << 23) | (mantissa << 13);
+                    }
+                } else if (exponent == 31) {
+                    bits = sign | 0x7f800000u | (mantissa << 13);
+                } else {
+                    bits = sign | ((exponent - 15 + 127) << 23) | (mantissa << 13);
+                }
+                float out = 0.0f;
+                std::memcpy(&out, &bits, sizeof(out));
+                return out;
+            };
+            const uint32_t width = m_swapChainExtent.width;
+            const uint32_t height = m_swapChainExtent.height;
+            double sumX = 0.0, sumY = 0.0, maxLength = 0.0;
+            size_t moving = 0;
+            for (uint32_t y = 0; y < height; ++y) {
+                for (uint32_t x = 0; x < width; ++x) {
+                    const size_t i = (static_cast<size_t>(y) * width + x) * 2;
+                    const float vx = toFloat(halfs[i]);
+                    const float vy = toFloat(halfs[i + 1]);
+                    const double length = std::sqrt(static_cast<double>(vx) * vx +
+                                                    static_cast<double>(vy) * vy);
+                    sumX += std::fabs(vx);
+                    sumY += std::fabs(vy);
+                    if (length > maxLength) maxLength = length;
+                    if (length > 0.5) ++moving;
+                }
+            }
+            const double pixels = static_cast<double>(width) * static_cast<double>(height);
+            const size_t centre = (static_cast<size_t>(height / 2) * width + width / 2) * 2;
+            // The buffer holds the frame that ended before this one.
+            const int dataFrame = m_velocityDumpFrame - 1;
+            if (m_dumpedMotionClass.reset || maxLength > 5.0 || dataFrame % 30 == 0) {
+                std::printf("[motion] f%d %ux%u: mean |vx| %.3f px, mean |vy| %.3f px, max %.3f px, "
+                            "moving %.2f%%; centre (%.3f, %.3f); reset %d "
+                            "(camera jump %.2f m, %.1f deg; lens jump %.1f deg); matched %d/%d\n",
+                            dataFrame, width, height, sumX / pixels, sumY / pixels, maxLength,
+                            100.0 * static_cast<double>(moving) / pixels,
+                            toFloat(halfs[centre]), toFloat(halfs[centre + 1]),
+                            m_dumpedMotionClass.reset ? 1 : 0, m_dumpedMotionClass.metres,
+                            m_dumpedMotionClass.degrees, m_dumpedMotionClass.lensDegrees,
+                            m_dumpedMotionClass.matched, m_dumpedMotionClass.draws);
+                std::fflush(stdout);
+            }
+            vkUnmapMemory(m_device, m_velocityReadbackMemory);
+        }
+    }
     // The frame's queries are now in flight; advance the ring so the next
     // beginFrame() resolves this slot once m_inFlightFence has signalled.
     m_gpuProfiler.endFrame();
@@ -4570,6 +5541,8 @@ void NativeRenderer::shutdown() {
     // layout must outlive it (and its pool must outlive every set free
     // done in the mesh loop above).
     destroyMaterialDescriptorResources();
+    // After m_pipelineLayout, for the same reason: it embeds this layout.
+    if (m_velocitySetLayout) { vkDestroyDescriptorSetLayout(m_device, m_velocitySetLayout, nullptr); m_velocitySetLayout = VK_NULL_HANDLE; }
     if (m_vertModule) vkDestroyShaderModule(m_device, m_vertModule, nullptr);
     if (m_fragModule) vkDestroyShaderModule(m_device, m_fragModule, nullptr);
 
@@ -4586,6 +5559,14 @@ void NativeRenderer::shutdown() {
     m_textureRuntime.reset();
 
     if (m_frameUBOMapped) { vkUnmapMemory(m_device, m_frameUBOMemory); m_frameUBOMapped = nullptr; }
+    if (m_lightMapped) vkUnmapMemory(m_device, m_lightMemory);
+    m_lightMapped = nullptr;
+    m_lightBoundBuffer = VK_NULL_HANDLE;
+    if (m_lightBuffer) vkDestroyBuffer(m_device, m_lightBuffer, nullptr);
+    if (m_lightMemory) vkFreeMemory(m_device, m_lightMemory, nullptr);
+    m_lightBuffer = VK_NULL_HANDLE;
+    m_lightMemory = VK_NULL_HANDLE;
+    m_lightCapacity = 0;
     if (m_frameUBO) vkDestroyBuffer(m_device, m_frameUBO, nullptr);
     if (m_frameUBOMemory) vkFreeMemory(m_device, m_frameUBOMemory, nullptr);
     if (m_descriptorPool) vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr); // also frees m_frameSet
@@ -4608,7 +5589,10 @@ void NativeRenderer::shutdown() {
     // menu crashed on exit while one that drew nothing shut down cleanly.
     m_uiDisplay.reset();
     m_uiForward.reset();
+    m_uiDisplayImage.reset();
+    m_uiForwardImage.reset();
     m_uiPass.reset();
+    m_uiImageStore = nullptr;
     m_uiAtlasPass = nullptr;
 
     vkDestroyDevice(m_device, nullptr);
@@ -4628,6 +5612,9 @@ void NativeRenderer::drawUi(const ui::UiRenderer& ui) {
         m_uiAtlasPass = nullptr;
     }
     m_uiPass->uploadFrame(ui);
+    // The textures the frame's quads point at, read here so the draw never has
+    // to reach back into the UI: the store outlives the frame.
+    m_uiImageStore = ui.imageStore();
     m_uiLayoutW = static_cast<float>(ui.viewportWidth());
     m_uiLayoutH = static_cast<float>(ui.viewportHeight());
 }
@@ -4663,9 +5650,42 @@ ui::VulkanUiPipeline* NativeRenderer::uiPipelineFor(VkRenderPass pass) {
     return slot.get();
 }
 
-// Records the overlay inside the open colour pass: bind the pipeline, hand it
-// this frame's vertices, draw. Silent when there is nothing to draw, which is
-// the normal case for every frame without a HUD or a menu.
+// The texture-quad pipeline for this pass. Same layout as the atlas one, only
+// the shader pair differs, so a batch can switch between them mid-frame.
+ui::VulkanUiPipeline* NativeRenderer::uiImagePipelineFor(VkRenderPass pass) {
+    const bool display = (pass == m_displayRenderPass && m_displayRenderPass != VK_NULL_HANDLE);
+    std::unique_ptr<ui::VulkanUiPipeline>& slot = display ? m_uiDisplayImage : m_uiForwardImage;
+    bool& failed = display ? m_uiDisplayImageFailed : m_uiForwardImageFailed;
+    if (slot && slot->isReady()) return slot.get();
+    if (failed || pass == VK_NULL_HANDLE || m_device == VK_NULL_HANDLE) return nullptr;
+
+    auto pipe = std::make_unique<ui::VulkanUiPipeline>();
+    ui::VulkanUiPipeline::CreateInfo ci;
+    ci.physicalDevice = m_physicalDevice;
+    ci.device = m_device;
+    ci.queue = m_graphicsQueue;
+    ci.renderPass = pass;
+    ci.queueFamily = m_graphicsQueueFamily;
+    const std::string dir = m_shaderDir.empty() ? std::string("system/shaders") : m_shaderDir;
+    ci.vertSpvPath = dir + "/ui_image.vert.spv";
+    ci.fragSpvPath = dir + "/ui_image.frag.spv";
+    ci.imagePass = true;
+    if (!pipe->create(ci)) {
+        failed = true;
+        std::fprintf(stderr,
+                     "[NativeRenderer] UI image pipeline (%s pass) not built: theme images \
+ stay undrawn (system/shaders/ui_image.*.spv)\n",
+                     display ? "display" : "forward");
+        return nullptr;
+    }
+    slot = std::move(pipe);
+    return slot.get();
+}
+
+// Records the overlay inside the open colour pass: one draw per batch, in the
+// order the commands were added, so a ground image stays behind the text drawn
+// after it. Silent when there is nothing to draw, which is the normal case for
+// every frame without a HUD or a menu.
 void NativeRenderer::recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd) {
     if (!m_uiPass || !cmd) return;
     const auto& verts = m_uiPass->cpuVertices();
@@ -4683,15 +5703,49 @@ void NativeRenderer::recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd) {
     pipe->uploadDynamic(verts.data(), static_cast<uint32_t>(verts.size()),
                         indices.data(), static_cast<uint32_t>(indices.size()));
     pipe->setCommandBuffer(cmd);
-    // Vertices are laid out in the UI viewport; the draw covers the whole
-    // framebuffer (see recordDraw). Passing the swapchain extent as the layout
-    // space drew the overlay at ~39% size in the top-left corner on the DPI
-    // scaled window.
-    pipe->recordDraw(cmd, static_cast<uint32_t>(verts.size()),
-                     static_cast<uint32_t>(indices.size()),
-                     m_uiLayoutW, m_uiLayoutH,
-                     static_cast<float>(m_swapChainExtent.width),
-                     static_cast<float>(m_swapChainExtent.height));
+
+    const float fbW = static_cast<float>(m_swapChainExtent.width);
+    const float fbH = static_cast<float>(m_swapChainExtent.height);
+
+    // Textures: the same store the UI built the quads from. Only a decode moves
+    // the generation, so an unchanged theme costs no upload.
+    ui::VulkanUiPipeline* imagePipe = uiImagePipelineFor(pass);
+    const int which = (pass == m_displayRenderPass && m_displayRenderPass != VK_NULL_HANDLE) ? 0 : 1;
+    if (imagePipe && m_uiImageStore) {
+        if (m_uiImagesGeneration[which] != m_uiImageStore->generation()) {
+            for (int slot = 0; slot < m_uiImageStore->count(); ++slot) {
+                const ui::UiImage* image = m_uiImageStore->get(slot);
+                if (!image || !image->valid()) continue;
+                if (!imagePipe->uploadImage(slot, image->rgba.data(), image->width, image->height))
+                    std::fprintf(stderr, "[NativeRenderer] UI image %d (%dx%d) upload failed\n",
+                                 slot, image->width, image->height);
+            }
+            m_uiImagesGeneration[which] = m_uiImageStore->generation();
+        }
+        imagePipe->uploadDynamic(verts.data(), static_cast<uint32_t>(verts.size()),
+                                 indices.data(), static_cast<uint32_t>(indices.size()));
+        imagePipe->setCommandBuffer(cmd);
+    }
+
+    const auto& batches = m_uiPass->batches();
+    if (batches.empty()) {
+        pipe->recordDraw(cmd, static_cast<uint32_t>(verts.size()),
+                         static_cast<uint32_t>(indices.size()), m_uiLayoutW, m_uiLayoutH, fbW,
+                         fbH);
+        return;
+    }
+    for (const ui::UiRenderer::Batch& batch : batches) {
+        if (batch.imageSlot >= 0) {
+            // No image pipeline means no textured quad, not a white box: the
+            // batch is dropped and the theme layer has already said why.
+            if (!imagePipe) continue;
+            imagePipe->recordBatch(cmd, batch.firstIndex, batch.indexCount, m_uiLayoutW,
+                                   m_uiLayoutH, fbW, fbH, batch.imageSlot);
+        } else {
+            pipe->recordBatch(cmd, batch.firstIndex, batch.indexCount, m_uiLayoutW, m_uiLayoutH,
+                              fbW, fbH, -1);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5366,7 +6420,14 @@ VkPipeline createParticlePipeline(VkDevice device, VkPipelineLayout layout, VkRe
 
     // Straight-alpha over blend for the forward pass; the GBuffer variant
     // takes no blend state at all (it writes through to the lighting pass).
-    VkPipelineColorBlendAttachmentState blendAtts[3]{};
+    // The GBuffer pass writes four colour attachments (the fourth is the
+    // velocity target, which the particle_gbuffer shader fills); the forward
+    // pass writes one. This array has to hold the largest of the two: at three
+    // entries the deferred variant wrote one state past the end of the object,
+    // smashing the stack of the first frame that had a particle to draw.
+    VkPipelineColorBlendAttachmentState blendAtts[4]{};
+    const uint32_t maxAttachments = static_cast<uint32_t>(sizeof(blendAtts) / sizeof(blendAtts[0]));
+    if (colorAttachmentCount > maxAttachments) colorAttachmentCount = maxAttachments;
     for (uint32_t i = 0; i < colorAttachmentCount; ++i) {
         blendAtts[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                       VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -5528,7 +6589,7 @@ bool NativeRenderer::ensureParticlePipelines(bool deferred) {
                 return false;
             }
             m_particleGbufPipeline = createParticlePipeline(m_device, m_particleLayout, m_gbufferRenderPass,
-                                                            3, false, m_particleVertModule,
+                                                            4, false, m_particleVertModule,
                                                             m_particleGbufFragModule);
             if (!m_particleGbufPipeline) {
                 std::fprintf(stderr, "[NativeRenderer] GBuffer particle pipeline failed\n");
@@ -5739,6 +6800,84 @@ bool NativeRenderer::ensureDeferredResources() {
         if (vkCreateImageView(m_device, &vCi, nullptr, &m_gbufferDepthView) != VK_SUCCESS) { destroyDeferredResources(); return false; }
     }
 
+    // ---- Motion vectors: the GBuffer's fourth colour target (RG16F). Two
+    // channels hold the per-pixel displacement in render pixels - exact for any
+    // frame rate and lens the sim runs - and the target is cleared to zero, so a
+    // pixel no opaque geometry drew (sky, glass, a particle) reads as "did not
+    // move" instead of as stale data. FrameGenInputs.h is the consumer contract.
+    if (!createSampledTarget(m_physicalDevice, m_device, m_swapChainExtent.width,
+                             m_swapChainExtent.height, VK_FORMAT_R16G16_SFLOAT,
+                             m_velocityImage, m_velocityImageMemory, m_velocityView)) {
+        destroyDeferredResources();
+        return false;
+    }
+
+    // One 256-byte slot per draw: mat4 this frame's unjittered local->clip, mat4
+    // last frame's, vec4 render size. Host visible because the renderer rewrites
+    // a slot as it records each draw, and there is one frame in flight, so the
+    // frame being drawn is the only reader of this memory.
+    if (!createBuffer(m_physicalDevice, m_device, static_cast<VkDeviceSize>(kVelocitySlots) * kVelocitySlotBytes,
+                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                      m_velocityUbo, m_velocityUboMemory)) {
+        destroyDeferredResources();
+        return false;
+    }
+    if (vkMapMemory(m_device, m_velocityUboMemory, 0, VK_WHOLE_SIZE, 0, &m_velocityMapped) != VK_SUCCESS) {
+        destroyDeferredResources();
+        return false;
+    }
+    m_velocitySlot = 0;
+    {
+        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1};
+        VkDescriptorPoolCreateInfo poolCi{};
+        poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolCi.maxSets = 1;
+        poolCi.poolSizeCount = 1;
+        poolCi.pPoolSizes = &size;
+        if (vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_velocityPool) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+        VkDescriptorSetAllocateInfo setAi{};
+        setAi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        setAi.descriptorPool = m_velocityPool;
+        setAi.descriptorSetCount = 1;
+        setAi.pSetLayouts = &m_velocitySetLayout;
+        if (vkAllocateDescriptorSets(m_device, &setAi, &m_velocitySet) != VK_SUCCESS) {
+            destroyDeferredResources();
+            return false;
+        }
+        VkDescriptorBufferInfo info{};
+        info.buffer = m_velocityUbo;
+        info.offset = 0;
+        info.range = 144; // two mat4 + vec4; the slot itself is 256 for alignment
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = m_velocitySet;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        write.pBufferInfo = &info;
+        vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
+    }
+
+    // Diagnostic readback (KS_FG_MOTION_DUMP): one copy of the velocity target
+    // and a printed summary. Off unless asked for, and a failure here only costs
+    // the diagnostic - never the deferred path.
+    m_velocityDumpRequested = std::getenv("KS_FG_MOTION_DUMP") != nullptr;
+    m_velocityDumpFrame = 0;
+    if (m_velocityDumpRequested) {
+        m_velocityReadbackBytes = static_cast<VkDeviceSize>(m_swapChainExtent.width) *
+                                  m_swapChainExtent.height * 4;
+        if (!createBuffer(m_physicalDevice, m_device, m_velocityReadbackBytes,
+                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                          m_velocityReadback, m_velocityReadbackMemory)) {
+            m_velocityDumpRequested = false;
+        }
+    }
+
     // ---- Lighting output (RGBA16F so accumulated light and fog survive the
     // round trip) plus two ping-ponged temporal history slots. ----
     if (!createSampledTarget(m_physicalDevice, m_device, m_swapChainExtent.width, m_swapChainExtent.height,
@@ -5821,7 +6960,7 @@ bool NativeRenderer::ensureDeferredResources() {
     // dependency that hands the targets to the lighting pass as sampled
     // textures. ----
     {
-        VkAttachmentDescription atts[4]{};
+        VkAttachmentDescription atts[5]{};
         for (int i = 0; i < 3; ++i) {
             atts[i].format = m_gbufferFormats[i];
             atts[i].samples = VK_SAMPLE_COUNT_1_BIT;
@@ -5832,22 +6971,31 @@ bool NativeRenderer::ensureDeferredResources() {
             atts[i].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
             atts[i].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         }
-        atts[3].format = VK_FORMAT_D32_SFLOAT;
+        // Motion vectors: handed to whoever samples it as-is, in pixels.
+        atts[3].format = VK_FORMAT_R16G16_SFLOAT;
         atts[3].samples = VK_SAMPLE_COUNT_1_BIT;
         atts[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         atts[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         atts[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         atts[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         atts[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        atts[3].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        atts[3].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        atts[4].format = VK_FORMAT_D32_SFLOAT;
+        atts[4].samples = VK_SAMPLE_COUNT_1_BIT;
+        atts[4].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        atts[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        atts[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        atts[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        atts[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        atts[4].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference colorRefs[3];
-        for (int i = 0; i < 3; ++i) colorRefs[i] = {uint32_t(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-        VkAttachmentReference depthRef{3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        VkAttachmentReference colorRefs[4];
+        for (int i = 0; i < 4; ++i) colorRefs[i] = {uint32_t(i), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkAttachmentReference depthRef{4, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass.colorAttachmentCount = 3;
+        subpass.colorAttachmentCount = 4;
         subpass.pColorAttachments = colorRefs;
         subpass.pDepthStencilAttachment = &depthRef;
 
@@ -5870,7 +7018,7 @@ bool NativeRenderer::ensureDeferredResources() {
 
         VkRenderPassCreateInfo rpCi{};
         rpCi.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        rpCi.attachmentCount = 4;
+        rpCi.attachmentCount = 5;
         rpCi.pAttachments = atts;
         rpCi.subpassCount = 1;
         rpCi.pSubpasses = &subpass;
@@ -6091,11 +7239,12 @@ bool NativeRenderer::ensureDeferredResources() {
         const size_t swapCount = m_swapChainImageViews.size();
         m_gbufferFramebuffers.resize(swapCount);
         for (size_t i = 0; i < swapCount; ++i) {
-            VkImageView gAtts[4] = {m_gbufferViews[0], m_gbufferViews[1], m_gbufferViews[2], m_gbufferDepthView};
+            VkImageView gAtts[5] = {m_gbufferViews[0], m_gbufferViews[1], m_gbufferViews[2],
+                                    m_velocityView, m_gbufferDepthView};
             VkFramebufferCreateInfo fb{};
             fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
             fb.renderPass = m_gbufferRenderPass;
-            fb.attachmentCount = 4;
+            fb.attachmentCount = 5;
             fb.pAttachments = gAtts;
             fb.width = m_swapChainExtent.width;
             fb.height = m_swapChainExtent.height;
@@ -6426,25 +7575,35 @@ bool NativeRenderer::ensureDeferredResources() {
     // three GBuffer targets, and the three IBL samplers (brief P2, bindings
     // 5..7 — appended, never reordered). ----
     {
-        VkDescriptorSetLayoutBinding bindings[9]{};
+        VkDescriptorSetLayoutBinding bindings[11]{};
         bindings[0] = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         for (int i = 1; i < 9; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 9: the local-light tile table (appended after the SSGI
+        // sampler, never reordered). One flat float array: per-tile
+        // (offset,count), then the light indices the tiles point at, then the
+        // light records — see simulator/LocalLights.h.
+        bindings[9] = {9, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 10: the local-light shadow atlas (one layer per shadowed
+        // face: a spot's cone or one cube face of a point light). Appended
+        // after the tile table so nothing before it moves.
+        bindings[10] = {10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 9;
+        dslCi.bindingCount = 11;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_lightingSetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
-        VkDescriptorPoolSize poolSizes[2]{};
+        VkDescriptorPoolSize poolSizes[3]{};
         poolSizes[0] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
-        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8};
+        poolSizes[1] = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 9};
+        poolSizes[2] = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
 
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         poolCi.maxSets = 1;
-        poolCi.poolSizeCount = 2;
+        poolCi.poolSizeCount = 3;
         poolCi.pPoolSizes = poolSizes;
         if (vkCreateDescriptorPool(m_device, &poolCi, nullptr, &m_lightingPool) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
@@ -6466,6 +7625,9 @@ bool NativeRenderer::ensureDeferredResources() {
         sCi.maxLod = 1.0f;
         if (vkCreateSampler(m_device, &sCi, nullptr, &m_gbufferSampler) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
+        // The tile-table binding must be valid before the first bind; a zeroed
+        // table is exactly what a frame with no local lights means.
+        uploadLocalLights(nullptr, 0, 0, nullptr);
         writeLightingDescriptorSet(m_dummyShadowView, m_dummyShadowSampler);
     }
 
@@ -6576,7 +7738,7 @@ bool NativeRenderer::ensureDeferredResources() {
     // The frame half ping-pongs between history slots, so the set is written
     // every frame by writeDisplayDescriptorSets(). ----
     {
-        VkDescriptorSetLayoutBinding bindings[7]{};
+        VkDescriptorSetLayoutBinding bindings[8]{};
         for (int i = 0; i < 4; ++i)
             bindings[i] = {uint32_t(i), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         // Binding 4 (windscreenFX, tonemap.frag): the 4-float rain UBO the
@@ -6587,15 +7749,22 @@ bool NativeRenderer::ensureDeferredResources() {
         bindings[5] = {5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
         // Binding 6 (windscreen glass mask, stage 4): per-pixel mask (R8).
         bindings[6] = {6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        // Binding 7 (surface flags): the GBuffer world-position/coverage target,
+        // read for one thing only — the coverage magnitude tells the display
+        // pass that a pixel is a PHOTOGRAPHIC surface (see
+        // KS_MATERIAL_COVERAGE_UNLIT_BASE). Such a pixel is display-referred
+        // and must not be tone-mapped a second time. The forward path has no
+        // GBuffer and binds a view whose .w decodes as "no flag".
+        bindings[7] = {7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
 
         VkDescriptorSetLayoutCreateInfo dslCi{};
         dslCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        dslCi.bindingCount = 7;
+        dslCi.bindingCount = 8;
         dslCi.pBindings = bindings;
         if (vkCreateDescriptorSetLayout(m_device, &dslCi, nullptr, &m_displaySetLayout) != VK_SUCCESS) { destroyDeferredResources(); return false; }
 
         VkDescriptorPoolSize poolSizes[2]{
-            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 5},
+            {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 6},
             {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}};
         VkDescriptorPoolCreateInfo poolCi{};
         poolCi.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -6675,13 +7844,16 @@ bool NativeRenderer::ensureDeferredResources() {
         multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
         multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-        VkPipelineColorBlendAttachmentState blendAtts[3]{};
+        VkPipelineColorBlendAttachmentState blendAtts[4]{};
         for (int i = 0; i < 3; ++i)
             blendAtts[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
                                           VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        // The velocity target has two channels and is never blended: a motion
+        // vector is not something to mix with the clear value.
+        blendAtts[3].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT;
         VkPipelineColorBlendStateCreateInfo colorBlend{};
         colorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        colorBlend.attachmentCount = 3;
+        colorBlend.attachmentCount = 4;
         colorBlend.pAttachments = blendAtts;
 
         VkPipelineDepthStencilStateCreateInfo depthStencil{};
@@ -6969,6 +8141,132 @@ bool NativeRenderer::ensureDeferredResources() {
                     destroyDeferredResources();
                     return false;
                 }
+            }
+
+            // ---- Grass pipeline: same render pass and vertex layout as the
+            // forward scene, with a layout of its own because a blade needs the
+            // clock and the sun in the push constants and samples no material.
+            // Depth test and write are on (a blade is geometry, not a decal), no
+            // culling so a card is visible from both sides, no blending.
+            if (!m_shaderDir.empty()) {
+                m_grassVertModule = createShaderModule(
+                    m_device, readFile(m_shaderDir + "/grass.vert.spv"));
+                m_grassFragModule = createShaderModule(
+                    m_device, readFile(m_shaderDir + "/grass.frag.spv"));
+            }
+            if (m_grassVertModule != VK_NULL_HANDLE && m_grassFragModule != VK_NULL_HANDLE) {
+                VkPushConstantRange gRange{};
+                gRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+                gRange.offset = 0;
+                gRange.size = sizeof(GrassPushConstants);
+                VkPipelineLayoutCreateInfo gLayoutCi{};
+                gLayoutCi.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+                gLayoutCi.pushConstantRangeCount = 1;
+                gLayoutCi.pPushConstantRanges = &gRange;
+                if (vkCreatePipelineLayout(m_device, &gLayoutCi, nullptr, &m_grassLayout) != VK_SUCCESS) {
+                    m_grassLayout = VK_NULL_HANDLE;
+                    std::fprintf(stderr, "[NativeRenderer] grass layout failed; grass stays off\n");
+                } else {
+                    VkPipelineShaderStageCreateInfo gStages[2]{};
+                    gStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+                    gStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+                    gStages[0].module = m_grassVertModule;
+                    gStages[0].pName = "main";
+                    gStages[1] = gStages[0];
+                    gStages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+                    gStages[1].module = m_grassFragModule;
+
+                    VkVertexInputBindingDescription gBinding{};
+                    gBinding.binding = 0;
+                    gBinding.stride = sizeof(NativeVertex);
+                    gBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+                    VkVertexInputAttributeDescription gAttrs[4] = {
+                        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, px)},
+                        {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(NativeVertex, nx)},
+                        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(NativeVertex, u)},
+                        {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, offsetof(NativeVertex, r)},
+                    };
+                    VkPipelineVertexInputStateCreateInfo gVertexInput{};
+                    gVertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+                    gVertexInput.vertexBindingDescriptionCount = 1;
+                    gVertexInput.pVertexBindingDescriptions = &gBinding;
+                    gVertexInput.vertexAttributeDescriptionCount = 4;
+                    gVertexInput.pVertexAttributeDescriptions = gAttrs;
+
+                    VkPipelineInputAssemblyStateCreateInfo gInputAssembly{};
+                    gInputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+                    gInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+                    VkPipelineViewportStateCreateInfo gViewportState{};
+                    gViewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+                    gViewportState.viewportCount = 1;
+                    gViewportState.scissorCount = 1;
+
+                    VkPipelineRasterizationStateCreateInfo gRasterizer{};
+                    gRasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+                    gRasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+                    gRasterizer.lineWidth = 1.0f;
+                    gRasterizer.cullMode = VK_CULL_MODE_NONE;
+                    gRasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+                    VkPipelineMultisampleStateCreateInfo gMultisampling{};
+                    gMultisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+                    gMultisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+                    // Premultiplied over: the field's outer band fades its own
+                    // alpha, and the fragment writes colour times that alpha.
+                    VkPipelineColorBlendAttachmentState gBlend{};
+                    gBlend.blendEnable = VK_TRUE;
+                    gBlend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+                    gBlend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                    gBlend.colorBlendOp = VK_BLEND_OP_ADD;
+                    gBlend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+                    gBlend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+                    gBlend.alphaBlendOp = VK_BLEND_OP_ADD;
+                    gBlend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                            VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+                    VkPipelineColorBlendStateCreateInfo gColorBlend{};
+                    gColorBlend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+                    gColorBlend.attachmentCount = 1;
+                    gColorBlend.pAttachments = &gBlend;
+
+                    VkPipelineDepthStencilStateCreateInfo gDepthState{};
+                    gDepthState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+                    gDepthState.depthTestEnable = VK_TRUE;
+                    gDepthState.depthWriteEnable = VK_TRUE;
+                    gDepthState.depthCompareOp = VK_COMPARE_OP_LESS;
+
+                    VkDynamicState gDynStates[2] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                                    VK_DYNAMIC_STATE_SCISSOR};
+                    VkPipelineDynamicStateCreateInfo gDynState{};
+                    gDynState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+                    gDynState.dynamicStateCount = 2;
+                    gDynState.pDynamicStates = gDynStates;
+
+                    VkGraphicsPipelineCreateInfo gCi{};
+                    gCi.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+                    gCi.stageCount = 2;
+                    gCi.pStages = gStages;
+                    gCi.pVertexInputState = &gVertexInput;
+                    gCi.pInputAssemblyState = &gInputAssembly;
+                    gCi.pViewportState = &gViewportState;
+                    gCi.pRasterizationState = &gRasterizer;
+                    gCi.pMultisampleState = &gMultisampling;
+                    gCi.pColorBlendState = &gColorBlend;
+                    gCi.pDepthStencilState = &gDepthState;
+                    gCi.pDynamicState = &gDynState;
+                    gCi.layout = m_grassLayout;
+                    gCi.renderPass = m_transparentSceneRenderPass;
+                    gCi.subpass = 0;
+                    if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &gCi, nullptr,
+                                                  &m_grassPipeline) != VK_SUCCESS) {
+                        m_grassPipeline = VK_NULL_HANDLE;
+                        std::fprintf(stderr, "[NativeRenderer] grass pipeline failed; grass stays off\n");
+                    }
+                }
+            } else {
+                std::fprintf(stderr, "[NativeRenderer] grass shaders missing in %s; grass stays off\n",
+                             m_shaderDir.c_str());
             }
         }
 
@@ -7261,6 +8559,10 @@ void NativeRenderer::destroyDeferredResources() {
     destroyParticleGbufPipeline();
     if (m_lightingPipeline) { vkDestroyPipeline(m_device, m_lightingPipeline, nullptr); m_lightingPipeline = VK_NULL_HANDLE; }
     if (m_transparentScenePipeline) { vkDestroyPipeline(m_device, m_transparentScenePipeline, nullptr); m_transparentScenePipeline = VK_NULL_HANDLE; }
+    if (m_grassPipeline) { vkDestroyPipeline(m_device, m_grassPipeline, nullptr); m_grassPipeline = VK_NULL_HANDLE; }
+    if (m_grassLayout) { vkDestroyPipelineLayout(m_device, m_grassLayout, nullptr); m_grassLayout = VK_NULL_HANDLE; }
+    if (m_grassVertModule) { vkDestroyShaderModule(m_device, m_grassVertModule, nullptr); m_grassVertModule = VK_NULL_HANDLE; }
+    if (m_grassFragModule) { vkDestroyShaderModule(m_device, m_grassFragModule, nullptr); m_grassFragModule = VK_NULL_HANDLE; }
     if (m_resolvePipeline) { vkDestroyPipeline(m_device, m_resolvePipeline, nullptr); m_resolvePipeline = VK_NULL_HANDLE; }
     if (m_bloomExtractPipeline) { vkDestroyPipeline(m_device, m_bloomExtractPipeline, nullptr); m_bloomExtractPipeline = VK_NULL_HANDLE; }
     if (m_bloomBlurPipeline) { vkDestroyPipeline(m_device, m_bloomBlurPipeline, nullptr); m_bloomBlurPipeline = VK_NULL_HANDLE; }
@@ -7283,6 +8585,10 @@ void NativeRenderer::destroyDeferredResources() {
     // Destroying a pool frees every set allocated from it.
     if (m_lightingPool) { vkDestroyDescriptorPool(m_device, m_lightingPool, nullptr); m_lightingPool = VK_NULL_HANDLE; }
     m_lightingSet = VK_NULL_HANDLE;
+    // The reallocated set starts with every binding undefined, so the tile
+    // table has to be written into it again even though the buffer is the
+    // same one: the flag is per-set, not per-buffer.
+    m_lightBoundBuffer = VK_NULL_HANDLE;
     if (m_lightingSetLayout) { vkDestroyDescriptorSetLayout(m_device, m_lightingSetLayout, nullptr); m_lightingSetLayout = VK_NULL_HANDLE; }
     if (m_resolvePool) { vkDestroyDescriptorPool(m_device, m_resolvePool, nullptr); m_resolvePool = VK_NULL_HANDLE; }
     m_resolveSet = VK_NULL_HANDLE;
@@ -7331,6 +8637,22 @@ void NativeRenderer::destroyDeferredResources() {
     if (m_gbufferDepthView) { vkDestroyImageView(m_device, m_gbufferDepthView, nullptr); m_gbufferDepthView = VK_NULL_HANDLE; }
     if (m_gbufferDepthImage) { vkDestroyImage(m_device, m_gbufferDepthImage, nullptr); m_gbufferDepthImage = VK_NULL_HANDLE; }
     if (m_gbufferDepthMemory) { vkFreeMemory(m_device, m_gbufferDepthMemory, nullptr); m_gbufferDepthMemory = VK_NULL_HANDLE; }
+
+    // Motion vectors: the target, the per-draw slots and the set that names them.
+    if (m_velocityView) { vkDestroyImageView(m_device, m_velocityView, nullptr); m_velocityView = VK_NULL_HANDLE; }
+    if (m_velocityImage) { vkDestroyImage(m_device, m_velocityImage, nullptr); m_velocityImage = VK_NULL_HANDLE; }
+    if (m_velocityImageMemory) { vkFreeMemory(m_device, m_velocityImageMemory, nullptr); m_velocityImageMemory = VK_NULL_HANDLE; }
+    if (m_velocityMapped) { vkUnmapMemory(m_device, m_velocityUboMemory); m_velocityMapped = nullptr; }
+    if (m_velocityUbo) { vkDestroyBuffer(m_device, m_velocityUbo, nullptr); m_velocityUbo = VK_NULL_HANDLE; }
+    if (m_velocityUboMemory) { vkFreeMemory(m_device, m_velocityUboMemory, nullptr); m_velocityUboMemory = VK_NULL_HANDLE; }
+    m_velocitySet = VK_NULL_HANDLE;
+    if (m_velocityPool) { vkDestroyDescriptorPool(m_device, m_velocityPool, nullptr); m_velocityPool = VK_NULL_HANDLE; }
+    m_velocitySlot = 0;
+    if (m_velocityReadback) { vkDestroyBuffer(m_device, m_velocityReadback, nullptr); m_velocityReadback = VK_NULL_HANDLE; }
+    if (m_velocityReadbackMemory) { vkFreeMemory(m_device, m_velocityReadbackMemory, nullptr); m_velocityReadbackMemory = VK_NULL_HANDLE; }
+    m_velocityReadbackBytes = 0;
+    m_velocityDumpRequested = false;
+    m_velocityDumpCopied = false;
 
     if (m_hdrView) { vkDestroyImageView(m_device, m_hdrView, nullptr); m_hdrView = VK_NULL_HANDLE; }
     if (m_hdrImage) { vkDestroyImage(m_device, m_hdrImage, nullptr); m_hdrImage = VK_NULL_HANDLE; }
@@ -7414,13 +8736,30 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
     ssgiInfo.imageView = m_ssgiViews[0] ? m_ssgiViews[0] : shadowView;
     ssgiInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[9]{};
+    // Binding 10: the local shadow atlas. Without one, the dummy array view
+    // stands in and every lamp's face count is 0, so the sampling path is
+    // never entered.
+    const bool hasLocalAtlas = m_localShadowAtlas && m_localShadowAtlas->isInitialized();
+    VkDescriptorImageInfo localShadowInfo{};
+    localShadowInfo.sampler = hasLocalAtlas ? m_localShadowAtlas->sampler() : shadowSampler;
+    localShadowInfo.imageView = hasLocalAtlas ? m_localShadowAtlas->arrayView() : shadowView;
+    localShadowInfo.imageLayout = (localShadowInfo.imageView == m_dummyShadowView)
+                                       ? VK_IMAGE_LAYOUT_GENERAL
+                                       : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet writes[10]{};
     for (int i = 0; i < 9; ++i) {
         writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet = m_lightingSet;
         writes[i].dstBinding = uint32_t(i);
         writes[i].descriptorCount = 1;
     }
+    writes[9].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[9].dstSet = m_lightingSet;
+    writes[9].dstBinding = 10;
+    writes[9].descriptorCount = 1;
+    writes[9].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[9].pImageInfo = &localShadowInfo;
     writes[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writes[0].pBufferInfo = &bufInfo;
     for (int i = 1; i < 9; ++i) {
@@ -7431,7 +8770,7 @@ void NativeRenderer::writeLightingDescriptorSet(VkImageView shadowView, VkSample
                                         : &ssgiInfo;
     }
 
-    vkUpdateDescriptorSets(m_device, 9, writes, 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 10, writes, 0, nullptr);
 }
 
 void NativeRenderer::writeResolveDescriptorSet() {
@@ -7500,7 +8839,7 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     lutInfo.imageView = m_lutView;
     lutInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet writes[8]{};
+    VkWriteDescriptorSet writes[9]{};
     writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writes[0].dstSet = m_bloomExtractSet;
     writes[0].dstBinding = 0;
@@ -7598,7 +8937,25 @@ void NativeRenderer::writeDisplayDescriptorSets(VkImageView resolvedView,
     writes[7].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writes[7].pImageInfo = &maskInfo;
 
-    vkUpdateDescriptorSets(m_device, 8, writes, 0, nullptr);
+    // Binding 7: the GBuffer world-position/coverage target (see the layout).
+    // On the forward path there is no GBuffer, so the depth view stands in:
+    // its .w decodes as 1.0, below the photographic-surface base, which is
+    // exactly "no such pixel here".
+    VkDescriptorImageInfo flagsInfo{};
+    flagsInfo.sampler = m_gbufferSampler ? m_gbufferSampler : m_hdrSampler;
+    flagsInfo.imageView = m_gbufferViews[2] != VK_NULL_HANDLE
+                              ? m_gbufferViews[2]
+                              : (depthView ? depthView : m_dummyShadowView);
+    flagsInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    writes[8] = {};
+    writes[8].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[8].dstSet = m_displaySet;
+    writes[8].dstBinding = 7;
+    writes[8].descriptorCount = 1;
+    writes[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writes[8].pImageInfo = &flagsInfo;
+
+    vkUpdateDescriptorSets(m_device, 9, writes, 0, nullptr);
 }
 
 bool NativeRenderer::ensureWindscreenMaskResources() {

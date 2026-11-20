@@ -11,7 +11,8 @@
 //      sky of radiance L reproduces exactly the legacy `albedo * L` ambient)
 //   4. BRDF LUT                   128x128 RGBA16F  (split-sum scale/offset)
 //
-// The sky is a pure zenith -> horizon -> ground gradient with *no sun disc*:
+// The sky is the physical single-scattering atmosphere from PhysicalSky.h,
+// the same one the deferred pass draws behind the scene, with *no sun disc*:
 // the environment must stay stable when the sun direction changes at runtime,
 // and the sun keeps doing its job as the dominant hard light through the CSM
 // path. Everything here is Qt-free (raw float buffers; the renderer uploads
@@ -23,6 +24,8 @@
 // of GPU memory total.
 // ---------------------------------------------------------------------------
 #pragma once
+
+#include "PhysicalSky.h" // the atmosphere the sky (and this environment) is made of
 
 #include <algorithm>
 #include <cmath>
@@ -81,24 +84,6 @@ inline uint16_t floatToHalf(float f) {
     return static_cast<uint16_t>(sign | (static_cast<uint32_t>(exp) << 10) | (mant >> 13));
 }
 
-// The procedural sky. Horizon is a bright blue-white band, zenith deepens,
-// everything below the horizon blends into a neutral dark ground bounce.
-// Deliberately sun-disc free (see file header).
-inline void skyRadiance(float dx, float dy, float dz, float outRgb[3]) {
-    (void)dx; (void)dz; // gradient is elevation-only by design
-    const float horizon[3] = {0.62f, 0.68f, 0.80f};
-    const float zenith[3] = {0.22f, 0.36f, 0.66f};
-    const float ground[3] = {0.14f, 0.135f, 0.125f};
-    if (dy >= 0.0f) {
-        // Most of the brightening happens in the first stretch above the
-        // horizon, which is what reads as "sky" on car-body reflections.
-        const float t = std::pow(dy, 0.45f);
-        for (int c = 0; c < 3; ++c) outRgb[c] = horizon[c] + (zenith[c] - horizon[c]) * t;
-    } else {
-        const float t = std::pow(-dy, 0.5f);
-        for (int c = 0; c < 3; ++c) outRgb[c] = horizon[c] + (ground[c] - horizon[c]) * t;
-    }
-}
 
 // Direction at the centre of equirect texel (x, y). Row 0 is the zenith
 // (v = 0 -> theta = 0 -> +y), matching the shader's
@@ -178,8 +163,37 @@ inline void buildBasis(const float n[3], float t[3], float b[3]) {
     b[2] = -n[1];
 }
 
-// 1. Procedural equirect sky.
-inline Image generateSky(int width = kSkyWidth, int height = kSkyHeight) {
+// 1. The equirect sky, from the physical atmosphere in PhysicalSky.h — the
+// model the deferred pass draws the visible background with, so a reflection
+// and the pixel above it are the same sky. `sunToward` is the unit vector
+// pointing at the sun; null uses the renderer's default DirectionalLight, and
+// the sun's own disc is never part of the environment (PhysicalSky.h).
+inline void defaultSunToward(float out[3]) {
+    const float travel[3] = {0.3f, -0.8f, 0.2f}; // DirectionalLight's default direction
+    const float len = std::sqrt(travel[0] * travel[0] + travel[1] * travel[1] +
+                                travel[2] * travel[2]);
+    out[0] = -travel[0] / len;
+    out[1] = -travel[1] / len;
+    out[2] = -travel[2] / len;
+}
+
+inline Image generateSky(const float* sunToward = nullptr, int width = kSkyWidth,
+                         int height = kSkyHeight) {
+    float sun[3];
+    if (sunToward != nullptr) {
+        const float len = std::sqrt(sunToward[0] * sunToward[0] +
+                                    sunToward[1] * sunToward[1] +
+                                    sunToward[2] * sunToward[2]);
+        if (len > 1e-6f) {
+            sun[0] = sunToward[0] / len;
+            sun[1] = sunToward[1] / len;
+            sun[2] = sunToward[2] / len;
+        } else {
+            defaultSunToward(sun);
+        }
+    } else {
+        defaultSunToward(sun);
+    }
     Image img;
     img.width = width;
     img.height = height;
@@ -189,7 +203,7 @@ inline Image generateSky(int width = kSkyWidth, int height = kSkyHeight) {
             float d[3];
             dirFromTexel(x, y, width, height, d);
             float rgb[3];
-            skyRadiance(d[0], d[1], d[2], rgb);
+            ks::sim::sky::environment(d, sun, rgb);
             const size_t o = (static_cast<size_t>(y) * width + x) * 4;
             img.rgba[o + 0] = rgb[0];
             img.rgba[o + 1] = rgb[1];
@@ -212,7 +226,8 @@ inline Image generateEnvFromEquirect(const unsigned char* rgba8, int width, int 
     Image src;
     src.width = width;
     src.height = height;
-    if (rgba8 == nullptr || width <= 0 || height <= 0) return generateSky(outWidth, outHeight);
+    if (rgba8 == nullptr || width <= 0 || height <= 0)
+        return generateSky(nullptr, outWidth, outHeight);
     src.rgba.resize(src.texelCount() * 4);
     for (size_t i = 0; i < src.texelCount(); ++i) {
         for (int c = 0; c < 3; ++c) {

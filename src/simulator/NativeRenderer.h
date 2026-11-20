@@ -1,4 +1,11 @@
 #pragma once
+// LocalLight and the tile table the deferred lighting pass reads.
+#include "LocalLights.h"
+// Per-material G-buffer overrides (video.gbufferOverrides).
+#include "GBufferLayout.h"
+// The frame-generation / super-resolution input contract this renderer
+// publishes every frame (see frameGenInputs()).
+#include "FrameGenInputs.h"
 
 // Qt-free native Vulkan renderer for the SimulatorApp runtime.
 //
@@ -55,6 +62,7 @@
 namespace ks::sim {
 
 class CascadedShadowMap;
+class LocalShadowAtlas;
 class TextureRuntime;
 // Defined in MaterialCache.h (materials.txt sidecar reader); only ever used
 // through a pointer here so the header stays free of that dependency.
@@ -102,6 +110,11 @@ struct NativeMesh {
     // descriptor set 1 (albedo/normal/roughness/metalness samplers +
     // MaterialUBO) from these in setMesh(); empty texture paths bind
     // TextureRuntime's fallbacks.
+    // What the mesh was built from, kept for the showroom inspector: the KN5
+    // material name (several meshes can share one) and the shader the content
+    // gave it. Empty for runtime-generated meshes (solids, placeholders).
+    std::string materialName;
+    std::string shaderName;
     std::string albedoTexture;   // resolved path, "" = none authored
     std::string normalTexture;   // resolved path, "" = none authored
     // P1 — resolved PBR map paths ("" = the materials.txt cell held a
@@ -120,6 +133,10 @@ struct NativeMesh {
     float alphaRef = 0.5f;
     // ksEmissive, added unlit on top of the shaded result.
     float emissive = 0.0f;
+    // A photographic surface (a showroom hall that is one image of a place):
+    // its texture already holds the light of the room it shows, so the shader
+    // displays it as it is instead of shading the photograph again.
+    float unlit = 0.0f;
     // Glass: opacity scales the albedo alpha, glassiness (0..1) switches the
     // shading to the pane model (reflection instead of diffuse).
     float opacity = 1.0f;
@@ -132,9 +149,16 @@ struct NativeMesh {
     float fresnelC = 0.0f;
     float fresnelExp = 5.0f;
     float fresnelMax = 0.0f;
+    // ksAmbient: the multiplier AC's shader puts on the ambient light (see
+    // MaterialResponse.h). The legacy 0.25 neutral keeps un-authored content
+    // exactly as it rendered before this field existed.
+    float ksAmbient = 0.25f;
     // material.blend != 0 (glass, windscreen, decals): drawn after the
     // opaque pass, blended over what is already there, no depth write.
     bool blended = false;
+    // The grass field's blades: drawn by their own pipeline after the blended
+    // surfaces, with the wind evaluated in the vertex shader.
+    bool grass = false;
     // Bodywork paint tint (CARS colour): multiplies the albedo in both the
     // forward and the GBuffer shader. 1,1,1 = as baked.
     float tint[3] = {1.0f, 1.0f, 1.0f};
@@ -148,6 +172,9 @@ struct NativeMesh {
     // Multiplier for the detail map: 2.0 neutralises AC's 0.5 grain, 1.0 is
     // used when the detail slot carries an occlusion bake instead.
     float detailGain = 2.0f;
+    // AC txEmissive: the colour a self-lit surface emits ("" = none, which
+    // leaves the ksEmissive term exactly as the file authored it).
+    std::string emissiveTexture;
     // Brief P6 — brake-disc flag, derived from the mesh NAME in setMesh()
     // ("disc" appears, case-insensitive; fail-open: no match = no glow).
     // Static per mesh, same std140 block; the per-frame heat intensity is
@@ -192,6 +219,11 @@ public:
     // between beginFrame()/endFrame() is automatically also rendered into
     // each active cascade before the main color pass.
     void attachShadowMap(CascadedShadowMap* shadowMap) { m_shadowMap = shadowMap; }
+    // Local lights (point/spot) get the same treatment from their own atlas:
+    // one layer per shadowed face, rendered with the same ksShadow pipeline
+    // before the GBuffer pass, and sampled by the deferred lighting shader
+    // through the light records.
+    void attachLocalShadowAtlas(LocalShadowAtlas* atlas) { m_localShadowAtlas = atlas; }
 
     bool isInitialized() const { return m_device != VK_NULL_HANDLE; }
     void shutdown();
@@ -244,6 +276,20 @@ public:
     void drawStaticScene();
     void setMesh(const std::string& name, const NativeMesh& mesh);
     void destroyMesh(const std::string& name);
+    /** The mesh as it was uploaded, CPU side: geometry, bounds and the material
+     *  numbers. The showroom inspector reads it for the pick and for the
+     *  property sheet; null when no mesh of that name is registered. */
+    const NativeMesh* findMesh(const std::string& name) const {
+        const auto it = m_meshes.find(name);
+        return it == m_meshes.end() ? nullptr : &it->second;
+    }
+    /** The projection the current frame is drawn with (jitter excluded), for
+     *  screen-space picking. */
+    mat4 viewProjection() const { return m_proj * m_view; }
+    /** Re-tints one mesh in place: the per-mesh material block is host-visible,
+     *  so this rewrites its bytes instead of replacing the mesh's buffers, and
+     *  a frame already submitted keeps reading valid memory. */
+    bool setMeshTint(const std::string& name, const float tint[3], float paintSolid);
 
     // near/far are forwarded to the shadow cascade split computation so the
     // cascades cover exactly the depth range the camera renders.
@@ -260,7 +306,36 @@ public:
         // otherwise yield a frustum that culls nearly the whole scene.
         m_cameraValid = true;
     }
-    void setSun(const DirectionalLight& light) { m_sun = light; }
+    // The sun lights the frame and, since PhysicalSky.h, also *makes* the sky:
+    // the IBL environment is baked from the same atmosphere with the same sun,
+    // so a material change of direction re-bakes it (see refreshSkyIbl()).
+    void setSun(const DirectionalLight& light);
+    // A room owns the environment while it is open. The menu runs the weather
+    // branch even with a showroom on screen, and its sun is the track's, not the
+    // room's: freezing the maps here stops that sun from re-baking them, and
+    // bakeSkyForSun() is how the room's own light is baked once, before the
+    // freeze.
+    void setSkyIblFrozen(bool frozen) {
+        if (m_iblFrozen != frozen)
+            std::fprintf(stderr, "[ibl] sky maps %s\n",
+                         frozen ? "frozen: the room's sun owns them" : "live with the sun again");
+        m_iblFrozen = frozen;
+    }
+    // False only while the maps do not exist yet (the caller retries).
+    bool bakeSkyForSun(const DirectionalLight& light);
+
+    // --- Native local lights (the engine's own Lighting FX) ---------------
+    // Point and spot lights beyond the sun and the IBL. Every frame the renderer
+    // bins them into screen tiles on the CPU (LocalLights.h) and the deferred
+    // lighting pass walks only its own tile's list, so the per-pixel cost is the
+    // lights that can reach the pixel instead of every light in the scene. An
+    // empty list is a frame lit by the sun and the IBL alone, which is exactly
+    // how every frame was lit before this existed. The forward path
+    // (KS_RENDER=forward) still ignores them: only the deferred lighting pass
+    // reads the table.
+    void setLocalLights(const std::vector<ks::sim::LocalLight>& lights);
+    std::size_t localLightCount() const { return m_localLights.size(); }
+    int localLightTiles() const { return m_lightTilesX * m_lightTilesY; }
 
     // Linear height fog, applied by both the forward and the deferred path
     // (the deferred path previously hard-coded these constants in GLSL, so a
@@ -295,6 +370,28 @@ public:
     void setOcclusionCulling(bool enabled) { m_occlusionCulling = enabled; }
     bool occlusionCulling() const { return m_occlusionCulling; }
     const FrameStats& lastFrameStats() const { return m_stats; }
+
+    /** What a frame-generation or super-resolution provider is handed for the
+     *  frame just drawn (FrameGenInputs.h): camera and clip matrices, the
+     *  sub-pixel jitter, sizes, and which input textures exist. Filled in
+     *  endFrame() on both render paths; a provider adapter reads this, never
+     *  the renderer's private state, and asks framegen::ready() whether the
+     *  frame can be reconstructed at all. */
+    const ks::sim::framegen::Inputs& frameGenInputs() const { return m_frameGenInputs; }
+
+    /** How far the camera jumped between the last two frames, and whether the
+     *  last frame was published as a cut (frameGenInputs().reset). */
+    ks::sim::framegen::PoseJump lastCameraJump() const {
+        ks::sim::framegen::PoseJump jump;
+        jump.translation = m_lastPoseJumpMetres;
+        jump.rotationDegrees = m_lastPoseJumpDegrees;
+        return jump;
+    }
+
+    /** The GBuffer's velocity target (RG16F, render pixels, y down): the
+     *  `motion` role of the contract, sampleable while
+     *  frameGenInputs().motionAvailable is true. Null on the forward path. */
+    VkImageView velocityView() const { return m_velocityView; }
     // Names already reported as "queued but never uploaded", so the warning
     // is emitted once per mesh rather than once per frame.
     std::set<std::string> m_missingBufferLogged;
@@ -359,6 +456,14 @@ public:
     }
     bool isSsgi() const { return m_ssgi; }
 
+    /** Per-material G-buffer overrides loaded from video.gbufferOverrides.
+     *  A material with disableGBuffer is not drawn into the opaque targets;
+     *  the transparent pass still draws it over the lit image. */
+    void setGBufferLayouts(const GBufferLayoutManager& layouts) {
+        m_gbufferLayouts = layouts;
+    }
+    const GBufferLayoutManager& gbufferLayouts() const { return m_gbufferLayouts; }
+
     // Motion blur (roadmap ksengine-vs-cryengine P0), gathered inside the
     // deferred resolve pass from a motion vector reconstructed out of the
     // world positions and the previous view-projection, so no velocity buffer
@@ -409,6 +514,15 @@ public:
     // HDR values through this signal.
     void setBrakeGlow(float g) { m_brakeGlow = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g); }
     float brakeGlow() const { return m_brakeGlow; }
+    // Track wetness 0..1 (SimulationLoop mirrors the weather state here every
+    // frame). FrameData.wetParams.x, read by both scene shaders, which apply
+    // what WetLook.h describes: darker, glossier, with a sky sheen on the
+    // surfaces that face up. 0 leaves every surface byte-identical, so a dry
+    // or paused-weather frame is exactly the image it was before.
+    void setWetness(float wetness) {
+        m_wetness = !(wetness > 0.0f) ? 0.0f : (wetness > 1.0f ? 1.0f : wetness);
+    }
+    float wetness() const { return m_wetness; }
 
     // --- Mirrors, stage 1: one real-time rear view, rendered to its own
     // target every frame with the same forward draw list, and shown as a
@@ -451,9 +565,11 @@ public:
     void setWindscreenGlassMesh(const std::string& name) { m_windscreenGlassMeshName = name; }
     bool ensureWindscreenMaskResources();
 
-    // Colour grading of the display pass: the preset's colorGrading block and
-    // the video config's saturation/contrast ride these. The defaults keep
-    // the exact image the hardcoded push constants produced before them.
+    // Colour grading of the display pass: the preset's colorGrading block, the
+    // video config's saturation/contrast and a room's [COLOR] block ride these.
+    // Saturation and contrast are applied to the display-referred image (after
+    // the transfer function, mid-grey 0.5); the colour filter below is a light
+    // gain applied before the tone curve. Defaults keep the neutral image.
     void setSaturation(float s) {
         m_saturation = s < 0.0f ? 0.0f : (s > 3.0f ? 3.0f : s);
     }
@@ -462,6 +578,23 @@ public:
         m_contrast = c < 0.01f ? 0.01f : (c > 3.0f ? 3.0f : c);
     }
     float contrast() const { return m_contrast; }
+    /** The display pass multiplies the graded image with this filter: the
+     *  [COLOR] block's BRIGHTNESS and its white-balance gain, solved on the
+     *  CPU (simulator/ShowroomColor.h) so a grey stays grey. 1,1,1 = off. */
+    void setColorFilter(const float rgb[3]) {
+        for (int i = 0; i < 3; ++i)
+            m_colorFilter[i] = rgb[i] < 0.0f ? 0.0f : (rgb[i] > 8.0f ? 8.0f : rgb[i]);
+    }
+    const float* colorFilter() const { return m_colorFilter; }
+    /** [COLOR] HUE (degrees) and SEPIA (0..1): the room's own grading block.
+     *  Both at 0 keeps the shader's two branches skipped, i.e. the image a
+     *  room without a [COLOR] block draws. */
+    void setGradeHue(float degrees) { m_gradeHue = degrees; }
+    float gradeHue() const { return m_gradeHue; }
+    void setGradeSepia(float amount) {
+        m_gradeSepia = amount < 0.0f ? 0.0f : (amount > 1.0f ? 1.0f : amount);
+    }
+    float gradeSepia() const { return m_gradeSepia; }
     // Fold-in weight of the half-res bloom in the display pass (the shader's
     // old hardcoded 0.3). Clamped so a bad caller cannot dim or blow up the
     // frame from the config file.
@@ -656,6 +789,9 @@ private:
     VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
     VkFormat m_swapChainFormat = VK_FORMAT_B8G8R8A8_UNORM;
     VkExtent2D m_swapChainExtent{};
+    // A capture copies the presented image into a buffer, which the swapchain
+    // image can only do when the surface offered TRANSFER_SRC.
+    bool m_swapChainTransferSrc = false;
     VkSurfaceKHR m_surface = VK_NULL_HANDLE; // kept so setVsync can rebuild
     bool m_vsync = true;
     std::vector<VkImage> m_swapChainImages;
@@ -722,7 +858,8 @@ private:
                                     const std::string& normalPath,
                                     const std::string& roughnessPath,
                                     const std::string& metalnessPath,
-                                    const std::string& detailPath);
+                                    const std::string& detailPath,
+                                    const std::string& emissivePath = std::string());
     // After clearTextureCache() drops images that live descriptor sets still
     // reference: re-resolve every set (lazy DDS reload on next use).
     void rewriteMaterialDescriptors();
@@ -869,6 +1006,7 @@ private:
     static constexpr float kTaaFeedback = 0.9f;
 
     bool m_deferred = false;
+    GBufferLayoutManager m_gbufferLayouts;
     bool m_taa = false;
     bool m_deferredReady = false;
     bool m_deferredFailed = false;
@@ -877,6 +1015,19 @@ private:
     int m_jitterIndex = 0;
     int m_historyIndex = 0;
     mat4 m_prevViewProj;
+    // The previous frame's view matrix: only the cut test needs the pose itself
+    // (see framegen::poseJump), the passes use m_prevViewProj.
+    mat4 m_prevView;
+    // The previous frame's projection (unjittered): the showroom and the garage
+    // do not share a lens, and leaving the menu rescales the image with the pose
+    // hardly moving - a cut the view matrices alone cannot see.
+    mat4 m_prevProj;
+    // Render size of the frame that produced m_prevViewProj: a resize makes the
+    // pair incomparable even when the pose did not move.
+    int m_prevFrameGenWidth = 0;
+    int m_prevFrameGenHeight = 0;
+    // The seam's published state, refreshed every endFrame().
+    ks::sim::framegen::Inputs m_frameGenInputs;
     std::string m_shaderDir;
 
     // Display transform / HDR output (see setExposure/setHdrOutput).
@@ -887,6 +1038,7 @@ private:
     VkColorSpaceKHR m_swapChainColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     float m_exposure = 1.0f;
     float m_brakeGlow = 0.0f;              // brief P6: hottest-disc heat [0..1]
+    float m_wetness = 0.0f;                // videoSources.weatherShaders: track wetness [0..1]
     int m_tonemapMode = 2;              // 0 none, 1 Reinhard, 2 ACES, 3 Uncharted2, 4 Filmic
     static constexpr float kHdrPeakNits = 1000.0f; // highlight ceiling for the PQ shoulder
     // Nits given to the graded SDR-range signal (1.0) in the PQ encode. This
@@ -899,6 +1051,9 @@ private:
     // Colour grading of the display pass (see setSaturation/setContrast).
     float m_saturation = 1.0f;
     float m_contrast = 1.0f;
+    float m_colorFilter[3] = {1.0f, 1.0f, 1.0f}; // [COLOR] brightness x white balance
+    float m_gradeHue = 0.0f;                     // [COLOR] HUE, degrees
+    float m_gradeSepia = 0.0f;                   // [COLOR] SEPIA, 0..1
     // Bloom fold-in weight of the display pass (was the shader's hardcoded
     // 0.3 — see setBloomStrength).
     float m_bloomStrength = 0.3f;
@@ -955,6 +1110,42 @@ private:
     VkDeviceMemory m_gbufferDepthMemory = VK_NULL_HANDLE;
     VkImageView m_gbufferDepthView = VK_NULL_HANDLE;
 
+    // --- Motion vectors (FrameGenInputs.h, videoSources.frameGeneration) ---
+    // The GBuffer's fourth colour target: RG16F, current pixel minus previous
+    // pixel in render pixels, y down. Written by the main deferred eye only,
+    // cleared to zero elsewhere; handed to a provider through frameGenInputs()
+    // and velocityView().
+    VkImage m_velocityImage = VK_NULL_HANDLE;
+    VkDeviceMemory m_velocityImageMemory = VK_NULL_HANDLE;
+    VkImageView m_velocityView = VK_NULL_HANDLE;
+    // Set 2: one 256-byte slot per draw holding this frame's unjittered
+    // local->clip, last frame's, and the render size. A dynamic offset, not the
+    // per-mesh material block, because two instances of one mesh (the AI cars
+    // share a body) need different matrices in the same frame.
+    static constexpr int kVelocitySlots = 8192;
+    static constexpr uint32_t kVelocitySlotBytes = 256;
+    VkDescriptorSetLayout m_velocitySetLayout = VK_NULL_HANDLE;
+    VkDescriptorPool m_velocityPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_velocitySet = VK_NULL_HANDLE;
+    VkBuffer m_velocityUbo = VK_NULL_HANDLE;
+    VkDeviceMemory m_velocityUboMemory = VK_NULL_HANDLE;
+    void* m_velocityMapped = nullptr;
+    int m_velocitySlot = 0;
+    // Diagnostic (KS_FG_MOTION_DUMP): the velocity target copied back once and
+    // summarised on stdout, so the vectors can be checked on a real GPU.
+    bool m_velocityDumpRequested = false;
+    bool m_velocityDumpCopied = false;
+    VkBuffer m_velocityReadback = VK_NULL_HANDLE;
+    VkDeviceMemory m_velocityReadbackMemory = VK_NULL_HANDLE;
+    VkDeviceSize m_velocityReadbackBytes = 0;
+    // Three dumps, sixty frames apart: the first frame with history is usually
+    // a camera cut (menu -> garage), which says nothing about the steady state.
+    int m_velocityDumpFrame = 0;
+    // The pose jump of the last frame, kept for the dump line.
+    float m_lastPoseJumpMetres = 0.0f;
+    float m_lastPoseJumpDegrees = 0.0f;
+    float m_lastLensJumpDegrees = 0.0f;
+
     // Lighting output, sampled by the resolve pass, plus two ping-ponged
     // temporal history targets (RGBA16F so accumulated light survives).
     VkImage m_hdrImage = VK_NULL_HANDLE;
@@ -976,6 +1167,54 @@ private:
     VkDescriptorSet m_lightingSet = VK_NULL_HANDLE;
     VkSampler m_gbufferSampler = VK_NULL_HANDLE;
     VkPipelineLayout m_lightingLayout = VK_NULL_HANDLE;
+
+    // --- Native local lights ---------------------------------------------
+    // The list as the running session set it, and the table this frame's
+    // camera binned it into. The buffer is host-visible and coherent: the table
+    // depends on the camera, so it is rebuilt and rewritten every frame rather
+    // than staged.
+    void uploadLocalLights(const float* viewProj, int pixelWidth, int pixelHeight,
+                           float lightParams[4]);
+    bool ensureLocalLightBuffer(VkDeviceSize bytes);
+    std::vector<ks::sim::LocalLight> m_localLights;
+    std::size_t m_localLightLogged = 0;
+    int m_lightTilesX = 0;
+    int m_lightTilesY = 0;
+    int m_lightBase = 0;
+    VkBuffer m_lightBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_lightMemory = VK_NULL_HANDLE;
+    VkDeviceSize m_lightCapacity = 0;
+    void* m_lightMapped = nullptr;
+
+    /** The mirror tiles shade the same lamps but bin them against their own
+     *  camera and their much smaller extent, so each mirror view needs a table
+     *  of its own: a tile index covers a different piece of the world for every
+     *  camera. Same record layout and the same doubling rule as the main table.
+     *  Index 0 = rear view, 1 = left, 2 = right. */
+    struct MirrorLightTable {
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VkDeviceSize capacity = 0;
+        void* mapped = nullptr;
+    };
+    static constexpr int kMirrorLightViews = 3;
+    MirrorLightTable m_mirrorLightTables[kMirrorLightViews];
+    // Last tile grid reported per view, so the log speaks once per change.
+    int m_mirrorLightSignature[kMirrorLightViews] = {-1, -1, -1};
+
+    // Builds one mirror view's light table and copies it into that view's
+    // buffer; fills lightParams[4] for the tile's own frame UBO.
+    void uploadMirrorLocalLights(int mirrorSlot, const float* viewProj, int pixelWidth,
+                                 int pixelHeight, float lightParams[4]);
+    bool ensureMirrorLightBuffer(int mirrorSlot, VkDeviceSize bytes);
+    // Writes the atlas layer indices, near/far and matrices into a freshly built
+    // table's records: the main table and the mirror tables all need this.
+    void applyShadowRecords(ks::sim::LightClusterTable& table) const;
+    /** The buffer the lighting set's binding 9 currently points at. Written
+     *  only when the allocation changes, not every frame: the table's size
+     *  follows the camera, and rewriting a descriptor a submitted frame may
+     *  still be reading is churn with no upside. */
+    VkBuffer m_lightBoundBuffer = VK_NULL_HANDLE;
     VkPipeline m_gbufferPipeline = VK_NULL_HANDLE;
     VkPipeline m_lightingPipeline = VK_NULL_HANDLE;
     // Deferred transparent pass: blended surfaces (glass, decals) drawn with
@@ -984,6 +1223,12 @@ private:
     VkRenderPass m_transparentSceneRenderPass = VK_NULL_HANDLE;
     VkFramebuffer m_transparentSceneFramebuffer = VK_NULL_HANDLE;
     VkPipeline m_transparentScenePipeline = VK_NULL_HANDLE;
+    // Grass blades: same render pass and vertex layout as the scene, its own
+    // layout (mvp + sun + clock in the push constants), no descriptors.
+    VkPipeline m_grassPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_grassLayout = VK_NULL_HANDLE;
+    VkShaderModule m_grassVertModule = VK_NULL_HANDLE;
+    VkShaderModule m_grassFragModule = VK_NULL_HANDLE;
     VkShaderModule m_gbufferVertModule = VK_NULL_HANDLE;
     VkShaderModule m_gbufferFragModule = VK_NULL_HANDLE;
     VkShaderModule m_lightingVertModule = VK_NULL_HANDLE;
@@ -1073,6 +1318,35 @@ private:
     // ... while the camera passes render this one, which additionally
     // excludes what the previous-frame depth grid says is occluded.
     std::vector<QueuedDraw> m_mainDrawList;
+    // Last frame's main list, index-aligned and copied in endFrame(): the
+    // velocity of each draw is measured against the model at the same index, so
+    // a moving car or wheel needs no instance id and a shared mesh still gets
+    // one matrix per draw.
+    std::vector<QueuedDraw> m_prevMainDrawList;
+    // Last frame's draws grouped by mesh name, built in beginFrame(): a draw
+    // continues the nearest unused instance of its own name (see
+    // framegen::isSameInstance), so two AI cars sharing a body still get one
+    // matrix each and a scene swap matches nobody instead of matching walls.
+    struct PrevInstance {
+        mat4 model;
+        bool used = false;
+    };
+    std::unordered_map<std::string, std::vector<PrevInstance>> m_prevInstances;
+    int m_velocityDraws = 0;
+    int m_velocityMatched = 0;
+    // The diagnostic's readback is read one frame after the pass that wrote it,
+    // so the printout has to describe *that* frame: its classification is kept
+    // here as the frame ends, otherwise a 95 px vector would be labelled with
+    // the jump of the calm frame after it.
+    struct FrameMotionClass {
+        bool reset = false;
+        float metres = 0.0f;
+        float degrees = 0.0f;
+        float lensDegrees = 0.0f;
+        int matched = 0;
+        int draws = 0;
+    };
+    FrameMotionClass m_dumpedMotionClass;
     // and the rear-view tile renders this one: its own frustum picks what
     // its eye can see, including meshes the main camera turned its back on
     // (both lists can hold the same instance, a wall to the side says).
@@ -1087,6 +1361,7 @@ private:
     float m_camFar = 500.0f;
     DirectionalLight m_sun;
     CascadedShadowMap* m_shadowMap = nullptr;
+    LocalShadowAtlas* m_localShadowAtlas = nullptr;
 
     // Culling state. The frustum is rebuilt once per frame in beginFrame()
     // from whatever setCamera() last supplied.
@@ -1225,12 +1500,24 @@ private:
     // so UiGpuPass stayed a CPU mirror and no interface ever reached the
     // screen — see recordUiOverlay().
     ui::VulkanUiPipeline* uiPipelineFor(VkRenderPass pass);
+    /** The same pass, with the texture-quad shaders: theme images draw through
+     *  it, and it is null when the SPIR-V pair was not built. */
+    ui::VulkanUiPipeline* uiImagePipelineFor(VkRenderPass pass);
     void recordUiOverlay(VkRenderPass pass, VkCommandBuffer cmd);
     std::unique_ptr<ui::VulkanUiPipeline> m_uiForward;
     std::unique_ptr<ui::VulkanUiPipeline> m_uiDisplay;
+    std::unique_ptr<ui::VulkanUiPipeline> m_uiForwardImage;
+    std::unique_ptr<ui::VulkanUiPipeline> m_uiDisplayImage;
     bool m_uiForwardFailed = false;
     bool m_uiDisplayFailed = false;
+    bool m_uiForwardImageFailed = false;
+    bool m_uiDisplayImageFailed = false;
     void* m_uiAtlasPass = nullptr;   // pipeline the font atlas was uploaded to
+    /** What the two image pipelines already hold: the store's generation, one
+     *  entry per pass (0 = display, 1 = forward). A decode bumps it, and only
+     *  then is a texture copied to the GPU again. */
+    uint32_t m_uiImagesGeneration[2] = {0xFFFFFFFFu, 0xFFFFFFFFu};
+    const ui::UiImageStore* m_uiImageStore = nullptr;
     // Pixel space the current UI batch was laid out in (logical window px). The
     // swapchain may be larger on a HiDPI window; recordUiOverlay() maps this
     // space onto the whole framebuffer.
@@ -1260,9 +1547,24 @@ private:
     VkImageView m_iblViews[3] = {};
     VkSampler m_iblEnvSampler = VK_NULL_HANDLE; // repeat U / clamp V, mips
     VkSampler m_iblLutSampler = VK_NULL_HANDLE; // clamp, no mips
+    // The sun the maps above were baked for (unit vector towards the sun), how
+    // many setSun() calls have been seen, at which of them the maps were baked,
+    // and whether a car's reflection probe owns the environment instead (the
+    // showroom: its probe must not be overwritten by a sky re-bake).
+    vec3 m_iblSunToward{0.3f, 0.8f, 0.2f};
+    uint32_t m_sunCalls = 0;
+    uint32_t m_iblSkyBakedAt = 0;
+    bool m_iblFromProbe = false;
+    // True while a showroom owns the light: setSun() then leaves the maps alone.
+    bool m_iblFrozen = false;
 
     bool createIblResources();
     void destroyIblResources();
+    // Re-bakes the environment maps for `light`'s sun (environment, prefilter
+    // chain, irradiance) and uploads them into the images created by
+    // createIblResources(). Used when the time of day moves the sun far enough
+    // that the old sky no longer matches the light.
+    void refreshSkyIbl(const DirectionalLight& light);
     bool createIblTexture(uint32_t width, uint32_t height, uint32_t mipLevels,
                           const std::vector<uint16_t>& rgba16f,
                           VkImage& image, VkDeviceMemory& memory, VkImageView& view);

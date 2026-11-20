@@ -31,6 +31,7 @@
 #include "WheelShadow.h" // the blob under each tyre
 #include "VrHeadPose.h"      // the tracked head, in the cockpit camera's frame
 #include "VrHeadRecentre.h" // where the head is relative to where it recentred
+#include "Spotter.h"            // text race-engineer calls (SETTINGS -> GAMEPLAY)
 #include "SurfaceGrip.h"    // what the ground under each tyre does to its grip
 #include "VrInputAdapter.h" // the controllers, as InputManager understands them
 #include "NetworkConfig.h" // net::CarDamageMessage handled by applyRemoteCarDamage
@@ -236,6 +237,7 @@ public:
     /** IBL state saved when a room turns it off, restored when it closes:
      *  the room lights itself, the track behind it still uses the sky. */
     bool m_showroomIblSaved = false;
+    bool m_showroomSkyBaked = false; // the room's sun made the environment once
     bool m_showroomIblWasOn = true;
     /** True when the open hall is a photo of a place (its surfaces are the
      *  reflection probe): it keeps the probe as its IBL, unlike a hall whose
@@ -813,6 +815,9 @@ private:
     bool m_themeSoundsLoaded = false;
     std::unique_ptr<ks::physics::VehicleSimulator> m_vehicle;
     std::unique_ptr<MultiCarManager> m_multiCar;
+    // SETTINGS -> GAMEPLAY: the spotter's calls are text, in the notice list.
+    Spotter m_spotter;
+    std::vector<SpotterCar> m_spotterCars;
     FeatureHub m_features;
     netsync::CarStateSync m_carSync;
     double m_simTimeSec = 0.0;
