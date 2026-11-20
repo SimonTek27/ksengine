@@ -1,7 +1,0 @@
-cmake_minimum_required(VERSION 3.16)
-project(MinimalSimulator LANGUAGES CXX)
-set(CMAKE_CXX_STANDARD 17)
-find_package(Qt6 COMPONENTS Core REQUIRED)
-add_executable(MinimalSimulator main.cpp)
-target_link_libraries(MinimalSimulator PRIVATE ksengine Qt6::Core)
-target_include_directories(MinimalSimulator PRIVATE ../../src/core/engine ../../src)
