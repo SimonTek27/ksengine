@@ -1275,7 +1275,7 @@ bool SimulationLoop::openShowroom(const std::string& directory, std::string* err
     applyShowroomLight();
     // From here the hall is the scene, and it stays the scene through the
     // session a player starts inside it: the room's sun is what lights it.
-    m_showroomHallInScene = true;
+    m_roomSession.hallInScene = true;
     return true;
 }
 
@@ -3105,27 +3105,81 @@ void SimulationLoop::spawnTrackDynamicLights(const std::string& layoutFolder,
 // public loaders do) whether the room's light is still answering for it. Leaving
 // the sun and the lamps set is how a car ended up lit by the last room it was
 // previewed in.
+// The five values a [COLOR] block writes, as one piece of state: the room turns
+// them on, the session keeps them, and leaving the hall has to put back exactly
+// what the renderer carried.
+ShowroomGrade currentShowroomGrade(NativeRenderer* renderer) {
+    ShowroomGrade grade;
+    if (!renderer) return grade;
+    const float* filter = renderer->colorFilter();
+    grade.filter[0] = filter[0];
+    grade.filter[1] = filter[1];
+    grade.filter[2] = filter[2];
+    grade.saturation = renderer->saturation();
+    grade.contrast = renderer->contrast();
+    grade.hue = renderer->gradeHue();
+    grade.sepia = renderer->gradeSepia();
+    return grade;
+}
+
+// The six channels the room owns, on the real renderer. The state itself lives
+// in ShowroomSession.h, so the test can drive it with a sink that only records.
+class RendererShowroomSink : public ShowroomDisplaySink {
+public:
+    explicit RendererShowroomSink(NativeRenderer* renderer) : m_renderer(renderer) {}
+
+    void setSun(const float direction[3], const float color[3], float level) override {
+        if (!m_renderer) return;
+        DirectionalLight light;
+        light.direction = {direction[0], direction[1], direction[2]};
+        light.color = {color[0], color[1], color[2]};
+        light.intensity = level;
+        m_renderer->setSun(light);
+    }
+    void setLamps(const std::vector<ks::sim::LocalLight>& lamps) override {
+        if (m_renderer) m_renderer->setLocalLights(lamps);
+    }
+    void setFog(const float color[3], float density, float falloff) override {
+        if (m_renderer) m_renderer->setFog({color[0], color[1], color[2]}, density, falloff);
+    }
+    void setExposure(float exposure) override {
+        if (m_renderer) m_renderer->setExposure(exposure);
+    }
+    void setIbl(bool enabled) override {
+        if (m_renderer) m_renderer->setIblEnabled(enabled);
+    }
+    void setGrade(const ShowroomGrade& grade) override {
+        if (!m_renderer) return;
+        m_renderer->setColorFilter(grade.filter);
+        m_renderer->setSaturation(grade.saturation);
+        m_renderer->setContrast(grade.contrast);
+        m_renderer->setGradeHue(grade.hue);
+        m_renderer->setGradeSepia(grade.sepia);
+    }
+
+private:
+    NativeRenderer* m_renderer;
+};
+
 void SimulationLoop::releaseShowroomScene() {
-    const bool hadRoom = m_showroomHallInScene || m_roomSunValid;
-    m_showroomHallInScene = false;
-    m_roomSunValid = false;
-    m_roomSunDeclared = false;
-    m_roomLamps.clear();
+    const bool hadRoom = m_roomSession.touched();
     // The hall load goes through loadTrackFolder() with this set: it is the
-    // room arriving, not the room leaving, and saying otherwise in the log
-    // would be the one thing a debug run cannot afford.
+    // room arriving, not the room leaving.
     m_roomDisplayLogged = false;
     // A photo hall installed its own probe as the environment, and the track's
     // sky cannot be baked over it: give the environment back before the track
     // is drawn, or the circuit drives under the room's reflections.
     if (m_vulkanRenderer) m_vulkanRenderer->releaseProbeEnvironment();
-    // The room's [COLOR] block was applied to the display pass and nothing else
-    // put the track's grade back: the circuit drove on the room's saturation
-    // and sepia (measured: hue 10 / sat 0.70 / sepia 0.10 leaking into the
-    // session, the last 7.6/765 of difference between two rooms).
-    if (m_roomGradeApplied && m_roomGradeSaved) writeDisplayGrade(m_roomGradeWas);
-    m_roomGradeApplied = false;
-    m_roomGradeSaved = false;
+    // Everything the room turned on — its [COLOR] grade, the stop and the IBL it
+    // found — goes back to the track's. The sun, the lamps and the haze are the
+    // weather branch's from the next frame on: the state stops answering for
+    // the scene here, which is exactly what the regression test pins.
+    if (m_vulkanRenderer) {
+        RendererShowroomSink sink(m_vulkanRenderer);
+        m_roomSession.releaseTo(sink);
+    } else {
+        m_roomSession.reset();
+    }
     if (hadRoom && !m_showroomHallLoading)
         std::printf("[showroom] the hall left the scene: sun, lamps, fog, exposure, IBL and "
                     "[COLOR] grade are the track's again\n");
@@ -4593,32 +4647,6 @@ float SimulationLoop::updateShowroomAutoExposure() {
     return m_roomExposure;
 }
 
-// The five values a [COLOR] block writes, as one piece of state: the room
-// turns them on, the session keeps them, and leaving the hall has to put back
-// exactly what the renderer carried before (see releaseShowroomScene()).
-SimulationLoop::DisplayGrade SimulationLoop::readDisplayGrade() const {
-    DisplayGrade grade;
-    if (!m_vulkanRenderer) return grade;
-    const float* filter = m_vulkanRenderer->colorFilter();
-    grade.filter[0] = filter[0];
-    grade.filter[1] = filter[1];
-    grade.filter[2] = filter[2];
-    grade.saturation = m_vulkanRenderer->saturation();
-    grade.contrast = m_vulkanRenderer->contrast();
-    grade.hue = m_vulkanRenderer->gradeHue();
-    grade.sepia = m_vulkanRenderer->gradeSepia();
-    return grade;
-}
-
-void SimulationLoop::writeDisplayGrade(const DisplayGrade& grade) {
-    if (!m_vulkanRenderer) return;
-    m_vulkanRenderer->setColorFilter(grade.filter);
-    m_vulkanRenderer->setSaturation(grade.saturation);
-    m_vulkanRenderer->setContrast(grade.contrast);
-    m_vulkanRenderer->setGradeHue(grade.hue);
-    m_vulkanRenderer->setGradeSepia(grade.sepia);
-}
-
 void SimulationLoop::applyShowroomLight() {
     if (!m_showroom.active() || !m_vulkanRenderer) return;
     {
@@ -4667,18 +4695,17 @@ void SimulationLoop::applyShowroomLight() {
         // Kept after the room's own frames: a drive session started inside the
         // hall leaves the hall on screen (closeShowroom keeps the meshes), and
         // its direct light has to stay this sun — see updateWeather().
-        m_roomSunDirection[0] = light.direction.x;
-        m_roomSunDirection[1] = light.direction.y;
-        m_roomSunDirection[2] = light.direction.z;
-        m_roomSunColor[0] = light.color.x;
-        m_roomSunColor[1] = light.color.y;
-        m_roomSunColor[2] = light.color.z;
-        m_roomSunIntensity = light.intensity;
-        // An AC room carries no [LIGHT] block at all, and the loader turns that
-        // into sunIntensity 0 (ShowroomConfig.h): 0 here means "the room said
-        // nothing", not "the room wants no sun", so it must not mute the level.
-        m_roomSunDeclared = cfg.lightDeclared;
-        m_roomSunValid = true;
+        m_roomSession.room.sunDirection[0] = light.direction.x;
+        m_roomSession.room.sunDirection[1] = light.direction.y;
+        m_roomSession.room.sunDirection[2] = light.direction.z;
+        m_roomSession.room.sunColor[0] = light.color.x;
+        m_roomSession.room.sunColor[1] = light.color.y;
+        m_roomSession.room.sunColor[2] = light.color.z;
+        m_roomSession.room.sunLevel = light.intensity;
+        m_roomSession.roomLightValid = true;
+        // The stop a track replaces the hall with is the engine's own, which is
+        // what releaseShowroomScene() hands back.
+        m_roomSession.exposureBefore = 1.f;
         // While the room owns the frame the session line has not been written
         // yet; a new room (or a new session) writes it again.
         m_roomDisplayLogged = false;
@@ -4718,8 +4745,8 @@ void SimulationLoop::applyShowroomLight() {
             }
             // Kept past closeShowroom(): the room's lamps are part of what the
             // hall looks like, and a session started inside it is still the hall.
-            m_roomLamps = lamps;
-            m_vulkanRenderer->setLocalLights(m_roomLamps);
+            m_roomSession.room.lamps = lamps;
+            m_vulkanRenderer->setLocalLights(m_roomSession.room.lamps);
         }
         // AC lights a showroom from the hall's own baked materials and a
         // fixed room light; its reflection probe exists for what the
@@ -4739,7 +4766,8 @@ void SimulationLoop::applyShowroomLight() {
         // Whether the room wants the IBL is part of its look: closeShowroom()
         // restores the track's, and a session in the hall has to get the room's
         // back (a hall that lights itself keeps the sky off).
-        m_roomIblOn = m_vulkanRenderer->isIblEnabled();
+        m_roomSession.room.iblOn = m_vulkanRenderer->isIblEnabled();
+        m_roomSession.iblBefore = m_showroomIblWasOn;
         // Fog belongs to the room's size: these values were written for the
         // 24 m in-memory hall, and at 0.002 a real venue 84 m across dissolves
         // into its ambient colour before the far wall is reached.
@@ -4749,11 +4777,11 @@ void SimulationLoop::applyShowroomLight() {
                                  0.0001f * fogScale, 0.002f * fogScale);
         // Kept for a session started inside the hall: the weather branch would
         // otherwise draw the same room under a track's haze.
-        m_roomFogColor[0] = cfg.ambientColor[0];
-        m_roomFogColor[1] = cfg.ambientColor[1];
-        m_roomFogColor[2] = cfg.ambientColor[2];
-        m_roomFogDensity = 0.0001f * fogScale;
-        m_roomFogFalloff = 0.002f * fogScale;
+        m_roomSession.room.fogColor[0] = cfg.ambientColor[0];
+        m_roomSession.room.fogColor[1] = cfg.ambientColor[1];
+        m_roomSession.room.fogColor[2] = cfg.ambientColor[2];
+        m_roomSession.room.fogDensity = 0.0001f * fogScale;
+        m_roomSession.room.fogFalloff = 0.002f * fogScale;
         // A photographed room is bright: without the extra stop the concrete and
         // the trees read as if the sun were going down. A post-processing
         // preset, when one is loaded (KS_PPFILTER), owns the display exposure
@@ -4791,7 +4819,7 @@ void SimulationLoop::applyShowroomLight() {
         }
         // Kept for a session inside the hall: the track's 1.0 stop would draw
         // the very same room with a different exposure.
-        m_roomDisplayExposure = exposure;
+        m_roomSession.room.exposure = exposure;
         std::fprintf(stderr, "[showroom] exposure %.2f (room %.2f, preset %.2f)",
                      static_cast<double>(exposure), static_cast<double>(cfg.exposure),
                      static_cast<double>(presetExposure));
@@ -4823,12 +4851,9 @@ void SimulationLoop::applyShowroomLight() {
         // room that declares no block is left exactly as the user's filter
         // set it up, so this only ever turns the grading on.
         if (cfg.colorDeclared && !m_consoleGradeActive) {
-            // What the renderer carried before the room turned its block on:
-            // the ppfilter's grade, which the track behind the hall expects.
-            if (!m_roomGradeSaved) {
-                m_roomGradeWas = readDisplayGrade();
-                m_roomGradeSaved = true;
-            }
+            // What the renderer carries before the room turns its block on: the
+            // ppfilter's grade, which the track behind the hall expects back.
+            const ShowroomGrade gradeBefore = currentShowroomGrade(m_vulkanRenderer);
             float filter[3] = {1.f, 1.f, 1.f};
             showroomColorFilter(cfg.colorBrightness, cfg.colorTemp, cfg.whiteBalance,
                                 filter);
@@ -4839,8 +4864,7 @@ void SimulationLoop::applyShowroomLight() {
             m_vulkanRenderer->setGradeSepia(cfg.colorSepia);
             // Read back rather than copy the block: the setters clamp, and the
             // session has to re-apply exactly what the frame was drawn with.
-            m_roomGrade = readDisplayGrade();
-            m_roomGradeApplied = true;
+            m_roomSession.captureGrade(currentShowroomGrade(m_vulkanRenderer), gradeBefore);
             if (m_roomColorRoom != cfg.id) {
                 m_roomColorRoom = cfg.id;
                 std::fprintf(stderr,
@@ -4916,16 +4940,18 @@ void SimulationLoop::updateWeather(float dt) {
     const float c = std::cos(phase), s = std::sin(phase);
     ks::engine::graphics::Vec3 sunDir{0.3f * c - 0.2f * s, -0.8f, 0.2f * c + 0.3f * s};
     ks::engine::graphics::Vec3 sunColor{1.0f, 0.95f, 0.9f};
-    // A hall the camera is inside keeps the sun it declared: the environment
-    // maps were baked for that one (applyShowroomLight + setSkyIblFrozen), so
+    // A hall the camera is inside keeps the light it declared: the environment
+    // maps were baked for that sun (applyShowroomLight + setSkyIblFrozen), so
     // lighting the hall with the track's weather sun made shading and
-    // reflections disagree. Its intensity comes along only when the room
-    // declared one (see below): a room that says nothing keeps the engine's
-    // daylight, a room that writes 0 is honoured.
-    const bool roomOwnsTheSun = m_showroomHallInScene && m_roomSunValid;
-    if (roomOwnsTheSun) {
-        sunDir = {m_roomSunDirection[0], m_roomSunDirection[1], m_roomSunDirection[2]};
-        sunColor = {m_roomSunColor[0], m_roomSunColor[1], m_roomSunColor[2]};
+    // reflections disagree. ShowroomSessionState owns the whole display state —
+    // sun, lamps, haze, stop, IBL and grade — and answers only while the hall is
+    // what the camera is in.
+    const bool roomOwnsTheScene = m_roomSession.ownsTheScene();
+    if (roomOwnsTheScene) {
+        sunDir = {m_roomSession.room.sunDirection[0], m_roomSession.room.sunDirection[1],
+                  m_roomSession.room.sunDirection[2]};
+        sunColor = {m_roomSession.room.sunColor[0], m_roomSession.room.sunColor[1],
+                    m_roomSession.room.sunColor[2]};
     }
     rs.setSun(sunDir, sunColor);
     // The haze tint is authored as a display-space colour (it reads like the
@@ -4943,62 +4969,46 @@ void SimulationLoop::updateWeather(float dt) {
     rs.setRain(m_weather.rainIntensity, m_weather.trackWetness);
     ks::physics::TrackSurface::instance().syncFromWeather(m_weather.trackWetness, m_weather.trackTemp);
     if (m_vulkanRenderer) {
-        DirectionalLight light; light.direction = {sunDir.x, sunDir.y, sunDir.z};
-        if (roomOwnsTheSun) {
-            light.color = {sunColor.x, sunColor.y, sunColor.z};
-            // Direction and colour are the room's; the level is its own when it
-            // declared one, and the engine's daylight when it did not. The asr
-            // hall has no [LIGHT] block (so the loader's sun_intensity is 0,
-            // not an authored 0) — taking that literally left a drive session
-            // inside the hall with no key light at all (measured: walls 185 ->
-            // 125, floor 91 -> 59, and the blue of the sky ambient everywhere).
-            // The sky takes the colour and not the intensity for the same reason
-            // (see deferred_lighting.frag); a room that really writes
-            // sun_intensity = 0 is still honoured.
-            light.intensity = m_roomSunDeclared ? m_roomSunIntensity : 1.0f;
-        }
-        m_vulkanRenderer->setSun(light);
-        if (roomOwnsTheSun) {
-            // The hall keeps its lamps as well as its sun: closeShowroom()
-            // cleared this slot for the track's dynamic lights, which is what a
-            // session started in the room would otherwise drive under.
-            m_vulkanRenderer->setLocalLights(m_roomLamps);
-            // And the rest of its display state, which closeShowroom() handed
-            // to the track: the room's own stop and its IBL choice.
-            m_vulkanRenderer->setExposure(m_roomDisplayExposure);
-            m_vulkanRenderer->setIblEnabled(m_roomIblOn);
-            // The room's grading block belongs to the same display state.
-            if (m_roomGradeApplied) writeDisplayGrade(m_roomGrade);
+        RendererShowroomSink sink(m_vulkanRenderer);
+        if (roomOwnsTheScene) {
+            // One call for the six channels the room owns: the sun the
+            // environment was baked for, its lamps (closeShowroom handed the
+            // slot to the track's dynamic lights), its haze, its stop, its IBL
+            // choice and its [COLOR] grade. The level came with the sun: its
+            // own when the room declared one, the engine's daylight when it did
+            // not (ShowroomSessionState::levelFor — the asr hall has no [LIGHT]
+            // block, and taking that 0 literally left a session in it with no
+            // key light at all).
+            m_roomSession.applyTo(sink);
             if (!m_roomDisplayLogged) {
                 m_roomDisplayLogged = true;
                 const float elev = std::asin(std::max(
-                    -1.0f, std::min(1.0f, -m_roomSunDirection[1]))) * 57.29578f;
+                    -1.0f, std::min(1.0f, -m_roomSession.room.sunDirection[1]))) * 57.29578f;
                 std::printf("[showroom] the session keeps the room's display: sun %.1f deg "
                             "(x%.2f), exposure %.2f, fog %.2e/%.2e, IBL %s, %zu lamp(s)\n",
                             static_cast<double>(elev),
-                            static_cast<double>(m_roomSunDeclared ? m_roomSunIntensity : 1.0f),
-                            static_cast<double>(m_roomDisplayExposure),
-                            static_cast<double>(m_roomFogDensity),
-                            static_cast<double>(m_roomFogFalloff),
-                            m_roomIblOn ? "on" : "off", m_roomLamps.size());
+                            static_cast<double>(m_roomSession.room.sunLevel),
+                            static_cast<double>(m_roomSession.room.exposure),
+                            static_cast<double>(m_roomSession.room.fogDensity),
+                            static_cast<double>(m_roomSession.room.fogFalloff),
+                            m_roomSession.room.iblOn ? "on" : "off",
+                            m_roomSession.room.lamps.size());
             }
+        } else {
+            DirectionalLight light; light.direction = {sunDir.x, sunDir.y, sunDir.z};
+            m_vulkanRenderer->setSun(light);
         }
         // Weather-driven atmosphere. RenderSystem::setFog() above only stores
         // the values (it has no GPU work behind it), so the shader-facing fog
         // has to be fed here as well: density rises with cloud cover, while a
         // small base haze keeps distant geometry from looking unnaturally
-        // crisp on a clear day.
+        // crisp on a clear day. Fog belongs to the scene like the rest: the
+        // hall's haze was written for its radius (a 27 m room under a track's
+        // 0.018 falloff tints the far wall) and applyTo() already fed it.
         const float fogDensity = 0.0004f + m_weather.cloudCover * 0.004f;
-        if (roomOwnsTheSun) {
-            // Fog belongs to the scene: the hall's haze was written for its
-            // radius (a 27 m room under a track's 0.018 falloff tints the far
-            // wall), so the room keeps its own while it is what is on screen.
-            m_vulkanRenderer->setFog({m_roomFogColor[0], m_roomFogColor[1], m_roomFogColor[2]},
-                                     m_roomFogDensity, m_roomFogFalloff);
-        } else {
+        if (!roomOwnsTheScene)
             m_vulkanRenderer->setFog({hazeLinear[0], hazeLinear[1], hazeLinear[2]},
                                      fogDensity, 0.018f);
-        }
         // The track's own look follows the wetness the grip model reads, so a
         // soaked surface is dark and glossy and dries back to matte as the
         // weather clears (videoSources.weatherShaders). Wetness 0 leaves the
