@@ -268,6 +268,23 @@ public:
     float m_roomFogFalloff = 0.002f;
     float m_roomDisplayExposure = 1.f;
     bool m_roomIblOn = true;
+    /** The display grade as one value: the room's [COLOR] block writes all five
+     *  (NativeRenderer keeps them apart), and leaving the hall has to give back
+     *  exactly what the renderer had — the ppfilter's grade, not a neutral
+     *  guess. A room without [COLOR] never touches any of this. */
+    struct DisplayGrade {
+        float filter[3] = {1.f, 1.f, 1.f};
+        float saturation = 1.f;
+        float contrast = 1.f;
+        float hue = 0.f;
+        float sepia = 0.f;
+    };
+    DisplayGrade readDisplayGrade() const;
+    void writeDisplayGrade(const DisplayGrade& grade);
+    DisplayGrade m_roomGrade;          // what the room's [COLOR] turned on
+    DisplayGrade m_roomGradeWas;       // what it found when it opened
+    bool m_roomGradeApplied = false;   // the room turned a grade on
+    bool m_roomGradeSaved = false;     // m_roomGradeWas is the pre-room grade
     /// One line per room, the first frame the session draws it: what the
     /// session took from the room instead of the track.
     bool m_roomDisplayLogged = false;

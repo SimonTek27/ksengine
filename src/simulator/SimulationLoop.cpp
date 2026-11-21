@@ -3119,9 +3119,16 @@ void SimulationLoop::releaseShowroomScene() {
     // sky cannot be baked over it: give the environment back before the track
     // is drawn, or the circuit drives under the room's reflections.
     if (m_vulkanRenderer) m_vulkanRenderer->releaseProbeEnvironment();
+    // The room's [COLOR] block was applied to the display pass and nothing else
+    // put the track's grade back: the circuit drove on the room's saturation
+    // and sepia (measured: hue 10 / sat 0.70 / sepia 0.10 leaking into the
+    // session, the last 7.6/765 of difference between two rooms).
+    if (m_roomGradeApplied && m_roomGradeSaved) writeDisplayGrade(m_roomGradeWas);
+    m_roomGradeApplied = false;
+    m_roomGradeSaved = false;
     if (hadRoom && !m_showroomHallLoading)
-        std::printf("[showroom] the hall left the scene: sun, lamps, fog, exposure and IBL "
-                    "are the track's again\n");
+        std::printf("[showroom] the hall left the scene: sun, lamps, fog, exposure, IBL and "
+                    "[COLOR] grade are the track's again\n");
 }
 
 void SimulationLoop::closeShowroom() {
@@ -4586,6 +4593,32 @@ float SimulationLoop::updateShowroomAutoExposure() {
     return m_roomExposure;
 }
 
+// The five values a [COLOR] block writes, as one piece of state: the room
+// turns them on, the session keeps them, and leaving the hall has to put back
+// exactly what the renderer carried before (see releaseShowroomScene()).
+SimulationLoop::DisplayGrade SimulationLoop::readDisplayGrade() const {
+    DisplayGrade grade;
+    if (!m_vulkanRenderer) return grade;
+    const float* filter = m_vulkanRenderer->colorFilter();
+    grade.filter[0] = filter[0];
+    grade.filter[1] = filter[1];
+    grade.filter[2] = filter[2];
+    grade.saturation = m_vulkanRenderer->saturation();
+    grade.contrast = m_vulkanRenderer->contrast();
+    grade.hue = m_vulkanRenderer->gradeHue();
+    grade.sepia = m_vulkanRenderer->gradeSepia();
+    return grade;
+}
+
+void SimulationLoop::writeDisplayGrade(const DisplayGrade& grade) {
+    if (!m_vulkanRenderer) return;
+    m_vulkanRenderer->setColorFilter(grade.filter);
+    m_vulkanRenderer->setSaturation(grade.saturation);
+    m_vulkanRenderer->setContrast(grade.contrast);
+    m_vulkanRenderer->setGradeHue(grade.hue);
+    m_vulkanRenderer->setGradeSepia(grade.sepia);
+}
+
 void SimulationLoop::applyShowroomLight() {
     if (!m_showroom.active() || !m_vulkanRenderer) return;
     {
@@ -4790,6 +4823,12 @@ void SimulationLoop::applyShowroomLight() {
         // room that declares no block is left exactly as the user's filter
         // set it up, so this only ever turns the grading on.
         if (cfg.colorDeclared && !m_consoleGradeActive) {
+            // What the renderer carried before the room turned its block on:
+            // the ppfilter's grade, which the track behind the hall expects.
+            if (!m_roomGradeSaved) {
+                m_roomGradeWas = readDisplayGrade();
+                m_roomGradeSaved = true;
+            }
             float filter[3] = {1.f, 1.f, 1.f};
             showroomColorFilter(cfg.colorBrightness, cfg.colorTemp, cfg.whiteBalance,
                                 filter);
@@ -4798,6 +4837,10 @@ void SimulationLoop::applyShowroomLight() {
             m_vulkanRenderer->setContrast(cfg.colorContrast);
             m_vulkanRenderer->setGradeHue(cfg.colorHueDeg);
             m_vulkanRenderer->setGradeSepia(cfg.colorSepia);
+            // Read back rather than copy the block: the setters clamp, and the
+            // session has to re-apply exactly what the frame was drawn with.
+            m_roomGrade = readDisplayGrade();
+            m_roomGradeApplied = true;
             if (m_roomColorRoom != cfg.id) {
                 m_roomColorRoom = cfg.id;
                 std::fprintf(stderr,
@@ -4924,6 +4967,8 @@ void SimulationLoop::updateWeather(float dt) {
             // to the track: the room's own stop and its IBL choice.
             m_vulkanRenderer->setExposure(m_roomDisplayExposure);
             m_vulkanRenderer->setIblEnabled(m_roomIblOn);
+            // The room's grading block belongs to the same display state.
+            if (m_roomGradeApplied) writeDisplayGrade(m_roomGrade);
             if (!m_roomDisplayLogged) {
                 m_roomDisplayLogged = true;
                 const float elev = std::asin(std::max(
