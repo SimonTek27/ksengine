@@ -1,6 +1,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <vulkan/vulkan.h>
+#include <chrono>
+#include <cctype>
 #include <vulkan/vulkan_win32.h>
 
 #include "simulator/SimulationLoop.h"
@@ -35,11 +37,11 @@
 #include "engine/Config/PPFilterPreset.h" // KS_PPFILTER preset
 #include "engine/assets/Paths.h"         // system/ppfilters/<id>.json
 #include "engine/Config/EngineSettings.h"
+#include "engine/Config/Locale.h" // SETTINGS -> UI: system/i18n tables
 #include "engine/Engine.h"
 #include "engine/input/WheelLedControl.h" // shift flash rate from wheelLeds.shiftFlashHz
 #include "engine/archive/ContentUnpacking.h" // CONTENT: installing a package
 #include "engine/sim/GameplayTweaks.h"    // gameplay.fuelConsumption -> the car's burn rate
-#include "GameplayOptionsBridge.h"       // GAMEPLAY page -> tweak set + settings
 #include "engine/assets/UserData.h"
 #include "devices/DeviceManager.h"
 #include "devices/vr/XrManager.h"
@@ -115,7 +117,18 @@ static std::string g_cliTrack;
 static ks::engine::assets::UserLayout g_userLayout;
 // user/<player>/driver.json: the first-run profile and its completion flag.
 static std::string g_driverProfilePath;
+// user/<player>/scrlayout.json: the installed apps and where they sit (the
+// name AC uses for the same document). Empty until initSimulation() resolves
+// the player folder.
+static std::string g_scrLayoutPath;
+// False while a capture hook owns the shelf (KS_APPS_VISIBLE): the saved layout
+// is neither read nor written then, so a screenshot run cannot replace the
+// player's own layout with the state it was asked to show.
+static bool g_scrLayoutArmed = false;
 static ks::engine::config::EngineSettings g_engineSettings;
+// The menu's strings: loaded once the settings say which language to speak.
+// File scope like g_engineSettings, so the menu can borrow the pointer.
+static ks::engine::config::Locale g_locale;
 
 static bool g_throttle = false, g_brake = false;
 static bool g_steerLeft = false, g_steerRight = false;
@@ -131,11 +144,16 @@ static bool g_headless = false;
 static double g_headlessSeconds = 0.0;
 
 // Roadmap 2.4/2.5 — KS_SCREENSHOT=<path.png> captures one presented frame
-// KS_SCREENSHOT_DELAY frames in (default 60) and exits, so a windowed
-// session leaves verifiable image evidence behind. Ignored when headless
-// (there is no renderer to read back from).
+// KS_SCREENSHOT_DELAY milliseconds in (default 1000) and exits, so a windowed
+// session leaves verifiable image evidence behind. A bare number is
+// milliseconds; a "f"/"fr"/"frames" suffix asks for frames instead, for a
+// capture that has to land on the same frame whatever the frame rate. Ignored
+// when headless (there is no renderer to read back from).
 static std::string g_shotPath;
-static int g_shotDelay = 60;
+static int g_shotDelayMs = 1000;
+static int g_shotDelayFrames = -1; // >= 0 when the value carried a frames suffix
+static std::chrono::steady_clock::time_point g_shotClockStart;
+static bool g_shotClockStarted = false;
 // KS_VISUAL_DIGEST: the frame's signature, written next to the screenshot so a
 // capture run leaves something a test can compare instead of an image nobody
 // looks at.
@@ -278,6 +296,14 @@ static void handleKeyDown(int vk) {
     }
     if (auto* sg = g_simulation->setupGarage(); sg && sg->isVisible()) {
         if (sg->handleKeyPress(vk)) return;
+    }
+    // The showroom data screen (`edit physics`) owns the keys the same way
+    // while it is up. physicsScreenVisible() builds nothing: the panel only
+    // loads the car when the console command asks for it.
+    if (g_simulation->physicsScreenVisible()) {
+        if (auto* pg = g_simulation->physicsGarage(); pg && pg->isVisible()) {
+            if (pg->handleKeyPress(vk)) return;
+        }
     }
     // F1 devices / F2 server browser / chat composer / Esc opens the menu.
     if (g_simulation->handleUiKey(vk)) return;
@@ -647,7 +673,7 @@ static void initWindow() {
     queryWindowWorkArea(clientW, clientH);
     RECT framed{0, 0, clientW, clientH};
     AdjustWindowRect(&framed, WS_OVERLAPPEDWINDOW, FALSE);
-    g_hWnd = CreateWindowExW(0, WINDOW_CLASS, L"KinetiKa Simulator",
+    g_hWnd = CreateWindowExW(0, WINDOW_CLASS, L"\xD0\xBA\xD0\xB8\xD0\xBD\xD0\xB5\xD1\x82\xD0\xB8\xD0\xBA\xD0\xB0",
                              WS_OVERLAPPEDWINDOW,
                              CW_USEDEFAULT, CW_USEDEFAULT,
                              framed.right - framed.left, framed.bottom - framed.top,
@@ -657,6 +683,46 @@ static void initWindow() {
 }
 
 static void initSimulation();
+
+// The apps shelf's layout document. A missing file is not an error: it is what
+// a fresh player folder looks like, and the starting state is no app open at
+// all, so the first frame on track or in the showroom is the HUD alone.
+static void loadAppsLayout() {
+    if (!g_simulation || g_scrLayoutPath.empty()) return;
+    auto& apps = g_simulation->ui().kinetikaApps();
+    // The capture hooks own the shelf when they are set. Loading the saved
+    // layout here would undo KS_APPS_VISIBLE, which is the one thing a capture
+    // run asks for.
+    if (const char* vis = std::getenv("KS_APPS_VISIBLE"); vis && vis[0]) {
+        printf("[apps] KS_APPS_VISIBLE=%s: %s left untouched\n", vis,
+               g_scrLayoutPath.c_str());
+        return;
+    }
+    g_scrLayoutArmed = true;
+    std::string text;
+    if (!ks::engine::assets::UserData::readFile(g_scrLayoutPath, text)) {
+        printf("[apps] no %s: starting with no app open\n", g_scrLayoutPath.c_str());
+        // Write the empty layout once, so the document the game keeps is on
+        // disk from the first launch instead of only after the first change.
+        if (!ks::engine::assets::UserData::writeFile(g_scrLayoutPath, apps.layoutJson()))
+            fprintf(stderr, "[apps] %s could not be written\n", g_scrLayoutPath.c_str());
+        return;
+    }
+    std::string error;
+    if (!apps.loadLayoutJson(text, &error)) {
+        fprintf(stderr, "[apps] %s: %s (starting with no app open)\n",
+                g_scrLayoutPath.c_str(), error.c_str());
+        return;
+    }
+    printf("[apps] layout loaded from %s\n", g_scrLayoutPath.c_str());
+}
+
+static void saveAppsLayout() {
+    if (!g_simulation || g_scrLayoutPath.empty() || !g_scrLayoutArmed) return;
+    if (!ks::engine::assets::UserData::writeFile(
+            g_scrLayoutPath, g_simulation->ui().kinetikaApps().layoutJson()))
+        fprintf(stderr, "[apps] %s could not be written\n", g_scrLayoutPath.c_str());
+}
 
 // The pointer image the theme names, handed to the window class so every state
 // that does not set a cursor of its own wears it. Only .cur/.ani load this way:
@@ -1083,6 +1149,7 @@ static void applyCockpitSettings() {
 // Fixed step + master audio: safe to push at any time (idempotent, and audio
 // may not exist yet — SimulationLoop builds it lazily on the first car load,
 // which is why this runs again after every loadCar()).
+static void applyUiOverlays();
 static void applyRuntimeSettings() {
     if (!g_simulation) return;
     ks::Engine::instance().setFixedDt(g_engineSettings.physicsFixedDt);
@@ -1094,8 +1161,76 @@ static void applyRuntimeSettings() {
         audio->setSpotterVolume(g_engineSettings.audioSpotter);
         audio->setMusicVolume(g_engineSettings.audioMusic);
         audio->setUiVolume(g_engineSettings.audioUi);
+        // The player car's nine channels, under the playerCar group.
+        audio->setEngineLevel(g_engineSettings.audioEngine);
+        audio->setTurboLevel(g_engineSettings.audioTurbo);
+        audio->setGearShiftLevel(g_engineSettings.audioGearShift);
+        audio->setBackfireLevel(g_engineSettings.audioBackfire);
+        audio->setLimiterLevel(g_engineSettings.audioLimiter);
+        audio->setBrakesLevel(g_engineSettings.audioBrakes);
+        audio->setSkidLevel(g_engineSettings.audioSkid);
+        audio->setTransmissionLevel(g_engineSettings.audioTransmission);
+        audio->setBodyworkLevel(g_engineSettings.audioBodywork);
     }
+    applyUiOverlays();     // the overlays a session starts with
     applyCockpitSettings(); // only once the car exists, so no-op before a load
+}
+
+// The overlays SETTINGS -> UI chooses: the race HUD and its style, the H-DASH
+// panel, the INPUTS trace, the telemetry chart and the car's own dash. Safe to
+// repeat (a loadCar() re-applies the player's defaults).
+static void applyUiOverlays() {
+    if (!g_simulation) return;
+    auto& ui = g_simulation->ui();
+    ui.raceHud().setMode(static_cast<ks::sim::ui::RaceHudMode>(
+        std::clamp(g_engineSettings.uiHudMode, 0, 3)));
+    ui.dashboard().setVisible(g_engineSettings.uiDashboard);
+    ui.setInputsVisible(g_engineSettings.uiInputs);
+    ui.telemetry().setVisible(g_engineSettings.uiTelemetry);
+    ui.setCarDashVisible(g_engineSettings.uiCarDash);
+}
+
+// The languages and themes the install actually carries: the UI page offers
+// what is on disk, not a hardcoded list, so dropping system/i18n/fr.json or a
+// system/ui/<name>/theme.json folder adds a choice without touching the code.
+static std::vector<std::string> discoverUiLanguages() {
+    std::vector<std::string> codes;
+    std::error_code ec;
+    const std::filesystem::path dir("system/i18n");
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (!it->is_regular_file(ec) || it->path().extension() != ".json") continue;
+        const std::string code = it->path().stem().string();
+        if (code.size() < 2 || code.size() > 3) continue;
+        bool valid = true;
+        for (char c : code)
+            if (c < 'a' || c > 'z') valid = false;
+        if (valid) codes.push_back(code);
+    }
+    std::sort(codes.begin(), codes.end());
+    // English is the base table every other one merges onto: keep it first.
+    const auto english = std::find(codes.begin(), codes.end(), "en");
+    if (english != codes.end()) std::rotate(codes.begin(), english, english + 1);
+    else codes.insert(codes.begin(), "en");
+    return codes;
+}
+
+static std::vector<std::string> discoverUiThemes() {
+    std::vector<std::string> names;
+    names.push_back(std::string()); // the install default (system/cfg/theme.json)
+    std::error_code ec;
+    const std::filesystem::path dir("system/ui");
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end;
+         it.increment(ec)) {
+        if (!it->is_directory(ec)) continue;
+        if (!std::filesystem::is_regular_file(it->path() / "theme.json", ec)) continue;
+        const std::string name = it->path().filename().string();
+        if (name.empty() || name.size() > 40 || name.find("..") != std::string::npos)
+            continue;
+        names.push_back(name);
+    }
+    std::sort(names.begin() + 1, names.end());
+    return names;
 }
 
 // Assist levels can only reach physics through VehicleSimulator::applySetup(),
@@ -1141,6 +1276,14 @@ static void initSimulation() {
     else if (!g_userLayout.ok)
         printf("[INIT] User folder not writable: %s\n", g_userLayout.player.c_str());
 
+    // The apps shelf: nothing is open on a first launch (see
+    // KinetikaAppsOverlay), and every later change is written straight to
+    // user/<player>/scrlayout.json - which is E:\ksimulator\user\Player\
+    // scrlayout.json for the installed game.
+    g_scrLayoutPath = g_userLayout.player + "/scrlayout.json";
+    g_simulation->ui().kinetikaApps().setLayoutChangedCallback([]() { saveAppsLayout(); });
+    loadAppsLayout();
+
     // Settings, in precedence order: install-wide defaults from
     // system/cfg/ksengine.json, then the player's own overrides. Presence is
     // cleared in between so the write-back at exit only ever reports keys the
@@ -1153,6 +1296,19 @@ static void initSimulation() {
     g_engineSettings.load(g_userLayout.settings);
     applyRuntimeSettings();
     applyAssistSettings();
+    // The interface's own document: the language table the menu speaks through
+    // and the theme folder its skin comes from. Both are read once here, after
+    // the player's settings landed; the UI page re-applies them live.
+    {
+        const std::string language = g_engineSettings.uiLanguage.empty()
+                                         ? ks::engine::config::Locale::detectLanguage()
+                                         : ks::engine::config::Locale::normalize(
+                                               g_engineSettings.uiLanguage);
+        g_locale.load("system/i18n", language);
+        g_simulation->ui().setLocale(&g_locale);
+        ks::sim::ui::NativeUiHub::themeOverride = g_engineSettings.uiTheme;
+        g_simulation->ui().refreshTheme();
+    }
     // The session's telemetry lands beside the player's other dumps: one CSV per
     // session, in user/<player>/telemetry (see SessionTelemetryCsv.h).
     g_simulation->setTelemetryCsvDirectory(g_userLayout.telemetry);
@@ -1183,6 +1339,13 @@ static void initSimulation() {
         set.fuelConsumption = static_cast<float>(g_engineSettings.gameplayFuelConsumption);
         set.tireDamageRate = static_cast<float>(g_engineSettings.gameplayTireDamageRate);
         set.racingRulesStrict = g_engineSettings.gameplayRacingRulesStrict;
+        set.difficultyMultiplier = static_cast<float>(
+            std::clamp(g_engineSettings.gameplayAiDifficulty, 0.8, 1.2));
+        set.aiAggression = static_cast<float>(
+            std::clamp(g_engineSettings.gameplayAiAggression, 0.0, 1.0));
+        set.mechanicalFailures = g_engineSettings.gameplayMechanicalFailures;
+        set.damageAffectsDriving = g_engineSettings.gameplayDamageAffectsDriving;
+        set.spotterEnabled = g_engineSettings.gameplaySpotter;
         // devMode: KS_FUEL_CONSUMPTION=<x> drains the tank at x times the car's
         // rate. A session that starts on a full tank never gets near the low-fuel
         // warning in a capture; x200 does it in about a minute, without touching
@@ -1411,8 +1574,9 @@ static void initSimulation() {
     {
         const std::vector<std::pair<std::string, std::vector<std::string>>> known = {
             {"physics", {"fixedDt", "note"}},
-            {"audio", {"master", "note", "playerCar", "opponentCar", "location",
-             "spotter", "music", "ui", "sources"}},
+            {"audio", {"master", "note", "playerCar", "engine", "turbo", "gearShift",
+             "backfire", "limiter", "brakes", "skid", "transmission", "bodywork",
+             "opponentCar", "location", "spotter", "music", "ui", "sources"}},
             {"assist", {"tc", "abs", "note"}},
             {"telemetry", {"csvHz", "note"}},
             {"video",
@@ -1424,6 +1588,12 @@ static void initSimulation() {
               "anisotropicFiltering", "shadowMapSize", "shadowCascades",
               "mirrors", "mirrorResolution", "particles", "headPhysics", "sources", "note"}},
             {"singleplayer", {"modes", "note", "sources", "defaults"}},
+            {"gameplay", {"fuelConsumption", "tireDamageRate", "strictRules",
+                          "aiDifficulty", "aiAggression", "mechanicalFailures",
+                          "damageAffectsDriving", "spotter", "note"}},
+            {"ui", {"language", "theme", "hudMode", "dashboard", "inputs", "telemetry",
+                    "carDash", "hdashX", "hdashY", "inputsX", "inputsY",
+                    "collapsedSections", "note"}},
         };
         std::vector<std::string> files = {
             ks::engine::assets::Paths::systemCfgFile("ksengine.json"),
@@ -1472,6 +1642,9 @@ static void initSimulation() {
     };
     uiMenu->onStartDrivingRequested = [](ks::sim::GameSessionMode mode, const ks::sim::SessionStartParams& params) {
         g_simulation->ui().menu().setVisible(false);
+        // The welcome mark covers the start, so the menu does not sit frozen
+        // while the grid and the scene are built.
+        g_simulation->showLoadingCover(g_locale.tr("loading.session", "LOADING SESSION"));
         // The sky the WEATHER page chose is what the session runs with: the
         // loop's own WeatherControl holds it, and the physics and the lighting
         // read that.
@@ -1487,6 +1660,7 @@ static void initSimulation() {
         // has a session to describe, and a start that failed has nothing.
         g_simulation->ui().menu().setSessionActive(g_simulation->isRunning());
         printf("Session started: %s\n", ks::sim::sessionModeName(mode));
+        g_simulation->hideLoadingCover();
     };
     uiMenu->onPaintChosen = [](float r, float g, float b) {
         if (g_simulation) g_simulation->setCarPaint(r, g, b);
@@ -1494,14 +1668,17 @@ static void initSimulation() {
     uiMenu->onTrackChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
         g_simulation->ui().menu().setSessionActive(false);
+        g_simulation->showLoadingCover(g_locale.tr("loading.track", "LOADING TRACK"));
         if (g_simulation->loadTrackFolder(dir))
             printf("Track loaded: %s\n", dir.c_str());
         else
             printf("Track load failed: %s\n", dir.c_str());
+        g_simulation->hideLoadingCover();
     };
     uiMenu->onCarChosen = [](const std::string& dir) {
         if (g_simulation->isRunning()) g_simulation->stop();
         g_simulation->ui().menu().setSessionActive(false);
+        g_simulation->showLoadingCover(g_locale.tr("loading.car", "LOADING CAR"));
         if (g_simulation->loadCar(dir)) {
             applyRuntimeSettings(); // audio only exists from the first car on
             g_simulation->ui().menu().setCarDir(dir);
@@ -1509,6 +1686,7 @@ static void initSimulation() {
         } else {
             printf("Car load failed: %s\n", dir.c_str());
         }
+        g_simulation->hideLoadingCover();
     };
     // The session planner changed the car or the track of a session that is
     // up: the content is already loaded above, so the same session starts
@@ -1516,6 +1694,7 @@ static void initSimulation() {
     uiMenu->onSessionRestartRequested = [](const ks::sim::SessionStartParams& params) {
         if (!g_simulation) return;
         const ks::sim::GameSessionMode mode = g_simulation->features().sessionMode;
+        g_simulation->showLoadingCover(g_locale.tr("loading.session", "LOADING SESSION"));
         auto& weather = g_simulation->features().weatherCtrl;
         weather.weather() = ks::sim::presetFor(params.weather);
         weather.setTimeOfDay(params.weather.hourOfDay);
@@ -1525,6 +1704,7 @@ static void initSimulation() {
         menu.closeSessionPlanner();
         menu.setSessionActive(g_simulation->isRunning());
         menu.setVisible(false); // back into the car, like a restart from pause
+        g_simulation->hideLoadingCover();
     };
     // Roadmap 2.8: TEAM row -> load the roster (applies immediately; the next
     // beginRaceSession builds the field from it).
@@ -1709,6 +1889,18 @@ static void initSimulation() {
         return "Exported " + std::to_string(rows.size()) + " row(s): " + path;
     };
     uiMenu->onOpenSettingsPanelRequested = [](const std::string& panel) {
+        // A capture keeps the startup menu live while the scene loads, so a
+        // click that only focused the window - or a key still queued for the
+        // page the wizard opened - can land on FIRST RUN's WHEEL/PAD row and
+        // open this panel. The panel is drawn by its own overlay, so it then
+        // outlives the menu the capture closed and covers the frame, which is
+        // exactly the bad capture this guard prevents. Nothing a screenshot
+        // needs lives behind it, so a capture run refuses to open it.
+        if (!g_shotPath.empty() && panel == "devices") {
+            printf("[menu] KS_SCREENSHOT set: %s panel not opened (capture run)\n",
+                   panel.c_str());
+            return;
+        }
         if (panel == "keyboard") {
             g_simulation->ui().menu().setVisible(false);
             g_simulation->ui().keyRebind().setVisible(true);
@@ -1743,8 +1935,217 @@ static void initSimulation() {
             g_simulation->ui().controllerSettings().setVisible(true);
             return;
         }
+        if (panel == "gameplay") {
+            // SETTINGS -> GAMEPLAY: the session's rules on one page. The page
+            // owns the choices; every move lands in EngineSettings (persisted at
+            // exit), the live GameplayTweaks set (the loop applies it to the AI,
+            // the car and the track limits), the car's driver aids and the
+            // spotter channel.
+            auto& page = g_simulation->ui().gameplaySettings();
+            ks::sim::ui::GameplayPreferences prefs;
+            prefs.difficulty = static_cast<float>(
+                std::clamp(g_engineSettings.gameplayAiDifficulty, 0.8, 1.2));
+            prefs.aiAggression = static_cast<float>(
+                std::clamp(g_engineSettings.gameplayAiAggression, 0.0, 1.0));
+            prefs.fuelIndex = ks::sim::ui::GameplaySettingsOverlay::rateIndexFor(
+                static_cast<float>(g_engineSettings.gameplayFuelConsumption));
+            prefs.tireIndex = ks::sim::ui::GameplaySettingsOverlay::rateIndexFor(
+                static_cast<float>(g_engineSettings.gameplayTireDamageRate));
+            prefs.strictRules = g_engineSettings.gameplayRacingRulesStrict;
+            prefs.mechanicalFailures = g_engineSettings.gameplayMechanicalFailures;
+            prefs.damageAffectsDriving = g_engineSettings.gameplayDamageAffectsDriving;
+            prefs.tcLevel = std::clamp(g_engineSettings.assistTc, 0, 12);
+            prefs.absLevel = std::clamp(g_engineSettings.assistAbs, 0, 12);
+            prefs.spotter = g_engineSettings.gameplaySpotter;
+            prefs.spotterVolume = g_engineSettings.audioSpotter;
+            page.setPreferences(prefs);
+            page.onChanged = [](const ks::sim::ui::GameplayPreferences& chosen) {
+                using Page = ks::sim::ui::GameplaySettingsOverlay;
+                auto& s = g_engineSettings;
+                const float fuel = Page::rateValue(chosen.fuelIndex);
+                const float tyres = Page::rateValue(chosen.tireIndex);
+                s.gameplayFuelConsumption = fuel;
+                s.hasGameplayFuelConsumption = true;
+                s.gameplayTireDamageRate = tyres;
+                s.hasGameplayTireDamageRate = true;
+                s.gameplayRacingRulesStrict = chosen.strictRules;
+                s.hasGameplayRacingRulesStrict = true;
+                s.gameplayAiDifficulty = chosen.difficulty;
+                s.hasGameplayAiDifficulty = true;
+                s.gameplayAiAggression = chosen.aiAggression;
+                s.hasGameplayAiAggression = true;
+                s.gameplayMechanicalFailures = chosen.mechanicalFailures;
+                s.hasGameplayMechanicalFailures = true;
+                s.gameplayDamageAffectsDriving = chosen.damageAffectsDriving;
+                s.hasGameplayDamageAffectsDriving = true;
+                s.gameplaySpotter = chosen.spotter;
+                s.hasGameplaySpotter = true;
+                s.assistTc = chosen.tcLevel;
+                s.hasAssistTc = true;
+                s.assistAbs = chosen.absLevel;
+                s.hasAssistAbs = true;
+                s.audioSpotter = chosen.spotterVolume;
+                s.audioPresence.insert("spotter");
+
+                auto& tweaks = ks::engine::sim::GameplayTweaks::instance();
+                ks::engine::sim::GameplayTweakSet set = tweaks.getTweakSet();
+                set.difficultyMultiplier = chosen.difficulty;
+                set.aiAggression = chosen.aiAggression;
+                set.fuelConsumption = fuel;
+                set.tireDamageRate = tyres;
+                set.racingRulesStrict = chosen.strictRules;
+                set.mechanicalFailures = chosen.mechanicalFailures;
+                set.damageAffectsDriving = chosen.damageAffectsDriving;
+                set.spotterEnabled = chosen.spotter;
+                tweaks.setTweakSet(set);
+
+                // Driver aids: the same light path the cockpit knobs use, so a
+                // row moves the car now and the next car load inherits the level.
+                if (g_simulation) {
+                    ks::sim::SimulationLoop::CockpitKnobs knobs;
+                    knobs.hasTc = true;
+                    knobs.hasAbs = true;
+                    knobs.tcLevel = chosen.tcLevel;
+                    knobs.absLevel = chosen.absLevel;
+                    knobs.hasBias = s.hasCockpitBrakeBiasPct;
+                    knobs.brakeBiasPct = s.cockpitBrakeBiasPct;
+                    g_simulation->setCockpitKnobs(knobs);
+                    if (auto* audio = g_simulation->audio())
+                        audio->setSpotterVolume(chosen.spotterVolume);
+                }
+            };
+            g_simulation->ui().menu().setVisible(false);
+            page.setVisible(true);
+            return;
+        }
         if (panel == "audio") {
-            g_simulation->ui().menu().openOptionsAudio();
+            // SETTINGS -> AUDIO (and the header's speaker): the two-column mix
+            // page. It is fed the values the settings file carries, and every
+            // row it moves is written into g_engineSettings and the live mixer
+            // through the same key audio.json uses. The save at exit writes the
+            // keys back, so the page has no storage of its own.
+            auto& page = g_simulation->ui().audioSettings();
+            ks::sim::ui::AudioLevels levels;
+            levels.playerCar = g_engineSettings.audioPlayerCar;
+            levels.engine = g_engineSettings.audioEngine;
+            levels.turbo = g_engineSettings.audioTurbo;
+            levels.gearShift = g_engineSettings.audioGearShift;
+            levels.backfire = g_engineSettings.audioBackfire;
+            levels.limiter = g_engineSettings.audioLimiter;
+            levels.brakes = g_engineSettings.audioBrakes;
+            levels.skid = g_engineSettings.audioSkid;
+            levels.transmission = g_engineSettings.audioTransmission;
+            levels.bodywork = g_engineSettings.audioBodywork;
+            levels.master = g_engineSettings.audioMaster;
+            levels.opponentCar = g_engineSettings.audioOpponentCar;
+            levels.location = g_engineSettings.audioLocation;
+            levels.spotter = g_engineSettings.audioSpotter;
+            levels.music = g_engineSettings.audioMusic;
+            levels.ui = g_engineSettings.audioUi;
+            page.setLevels(levels);
+            page.onChanged = [](const std::string& key, float value) {
+                auto& s = g_engineSettings;
+                s.audioPresence.insert(key);
+                auto* audio = g_simulation->audio();
+                if (key == "playerCar") {
+                    s.audioPlayerCar = value;
+                    if (audio) audio->setPlayerCarVolume(value);
+                } else if (key == "engine") {
+                    s.audioEngine = value;
+                    if (audio) audio->setEngineLevel(value);
+                } else if (key == "turbo") {
+                    s.audioTurbo = value;
+                    if (audio) audio->setTurboLevel(value);
+                } else if (key == "gearShift") {
+                    s.audioGearShift = value;
+                    if (audio) audio->setGearShiftLevel(value);
+                } else if (key == "backfire") {
+                    s.audioBackfire = value;
+                    if (audio) audio->setBackfireLevel(value);
+                } else if (key == "limiter") {
+                    s.audioLimiter = value;
+                    if (audio) audio->setLimiterLevel(value);
+                } else if (key == "brakes") {
+                    s.audioBrakes = value;
+                    if (audio) audio->setBrakesLevel(value);
+                } else if (key == "skid") {
+                    s.audioSkid = value;
+                    if (audio) audio->setSkidLevel(value);
+                } else if (key == "transmission") {
+                    s.audioTransmission = value;
+                    if (audio) audio->setTransmissionLevel(value);
+                } else if (key == "bodywork") {
+                    s.audioBodywork = value;
+                    if (audio) audio->setBodyworkLevel(value);
+                } else if (key == "master") {
+                    s.audioMaster = value;
+                    s.hasAudioMaster = true;
+                    if (audio) audio->setMasterVolume(value);
+                } else if (key == "opponentCar") {
+                    s.audioOpponentCar = value;
+                    if (audio) audio->setOpponentCarVolume(value);
+                } else if (key == "location") {
+                    s.audioLocation = value;
+                    if (audio) audio->setLocationVolume(value);
+                } else if (key == "spotter") {
+                    s.audioSpotter = value;
+                    if (audio) audio->setSpotterVolume(value);
+                } else if (key == "music") {
+                    s.audioMusic = value;
+                    if (audio) audio->setMusicVolume(value);
+                } else if (key == "ui") {
+                    s.audioUi = value;
+                    if (audio) audio->setUiVolume(value);
+                }
+            };
+            g_simulation->ui().menu().setVisible(false);
+            page.setVisible(true);
+            return;
+        }
+        if (panel == "ui") {
+            // SETTINGS -> UI: language, menu skin and the overlays a session
+            // starts with. The page owns only the choices; every move lands
+            // in g_engineSettings (persisted at exit) and in the live UI.
+            auto& ui = g_simulation->ui();
+            auto& page = ui.uiSettings();
+            page.setLanguages(discoverUiLanguages());
+            page.setThemes(discoverUiThemes());
+            ks::sim::ui::UiPreferences prefs;
+            prefs.language = g_engineSettings.uiLanguage.empty() ? g_locale.language()
+                                                                 : g_engineSettings.uiLanguage;
+            prefs.theme = g_engineSettings.uiTheme;
+            prefs.hudMode = std::clamp(g_engineSettings.uiHudMode, 0, 3);
+            prefs.dashboard = g_engineSettings.uiDashboard;
+            prefs.inputs = g_engineSettings.uiInputs;
+            prefs.telemetry = g_engineSettings.uiTelemetry;
+            prefs.carDash = g_engineSettings.uiCarDash;
+            page.setPreferences(prefs);
+            page.onChanged = [](const ks::sim::ui::UiPreferences& chosen) {
+                auto& s = g_engineSettings;
+                const std::string previousLanguage = s.uiLanguage;
+                const std::string previousTheme = s.uiTheme;
+                s.uiLanguage = chosen.language;
+                s.uiTheme = chosen.theme;
+                s.uiHudMode = std::clamp(chosen.hudMode, 0, 3);
+                s.uiDashboard = chosen.dashboard;
+                s.uiInputs = chosen.inputs;
+                s.uiTelemetry = chosen.telemetry;
+                s.uiCarDash = chosen.carDash;
+                s.hasUiPage = true;
+                applyUiOverlays();
+                auto& hub = g_simulation->ui();
+                if (chosen.language != previousLanguage ||
+                    g_locale.language() != chosen.language) {
+                    g_locale.load("system/i18n", chosen.language);
+                    hub.setLocale(&g_locale);
+                }
+                if (chosen.theme != previousTheme) {
+                    ks::sim::ui::NativeUiHub::themeOverride = chosen.theme;
+                    hub.refreshTheme();
+                }
+            };
+            ui.menu().setVisible(false);
+            page.setVisible(true);
             return;
         }
         if (panel == "graphics") {
@@ -1757,13 +2158,17 @@ static void initSimulation() {
             g_simulation->ui().menu().setVisible(false);
             std::vector<ks::sim::ui::DeviceInfoRow> rows;
             ks::sim::ui::DeviceInfoRow r1;
-            r1.name = "DirectInput wheel/pad";
-            r1.detail = im->isDirectInputConnected() ? "connected" : "not connected";
+            r1.name = g_locale.tr("device.directInput", "DirectInput wheel/pad");
+            r1.detail = im->isDirectInputConnected()
+                            ? g_locale.tr("device.connected", "connected")
+                            : g_locale.tr("device.disconnected", "not connected");
             r1.connected = im->isDirectInputConnected();
             rows.push_back(r1);
             ks::sim::ui::DeviceInfoRow r2;
-            r2.name = "XInput pad";
-            r2.detail = im->isXInputConnected() ? "connected" : "not connected";
+            r2.name = g_locale.tr("device.xinput", "XInput pad");
+            r2.detail = im->isXInputConnected()
+                            ? g_locale.tr("device.connected", "connected")
+                            : g_locale.tr("device.disconnected", "not connected");
             r2.connected = im->isXInputConnected();
             rows.push_back(r2);
             auto& dev = g_simulation->ui().devices();
@@ -2052,16 +2457,6 @@ static void initSimulation() {
             options.particles = s.videoParticles;
             options.headPhysics = s.videoHeadPhysics;
         }
-        // GAMEPLAY rows show what the session applies: the tweak set is the
-        // live truth (a settings file seeded it at start-up).
-        {
-            const auto& gameplay = ks::engine::sim::GameplayTweaks::instance().getTweakSet();
-            options.fuelIndex =
-                ks::sim::GameMenuOverlay::gameplayIndexFor(gameplay.fuelConsumption);
-            options.tireIndex =
-                ks::sim::GameMenuOverlay::gameplayIndexFor(gameplay.tireDamageRate);
-            options.strictRules = gameplay.racingRulesStrict;
-        }
         // The window style is the truth for fullscreen: F11 changes it too.
         const DWORD style = static_cast<DWORD>(GetWindowLongW(g_hWnd, GWL_STYLE));
         options.fullscreen = (style & WS_OVERLAPPEDWINDOW) == 0;
@@ -2180,21 +2575,6 @@ static void initSimulation() {
             if (moved(s.audioMaster, options.masterVolume)) {
                 s.audioMaster = options.masterVolume;
                 s.hasAudioMaster = true;
-            }
-        }
-        // GAMEPLAY: the tweak set is what the loop applies to the car, and the
-        // settings carry the chosen values into the next start. The translation
-        // lives in GameplayOptionsBridge.h so gameplay_settings_test drives the
-        // same code this handler runs.
-        {
-            auto& tweaks = ks::engine::sim::GameplayTweaks::instance();
-            if (ks::sim::applyGameplayOptionsFromMenu(options, tweaks, g_engineSettings)) {
-                printf("[MENU] gameplay: fuel x%.1f, tyres x%.1f, racing rules %s\n",
-                       static_cast<double>(ks::sim::GameMenuOverlay::gameplayValue(
-                           options.fuelIndex)),
-                       static_cast<double>(ks::sim::GameMenuOverlay::gameplayValue(
-                           options.tireIndex)),
-                       options.strictRules ? "strict" : "lenient");
             }
         }
         printf("[MENU] video: vsync %d, frame limit %d, aniso %dx, particles %d, head physics %d, "
@@ -2685,9 +3065,29 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         g_visualDigestPath = vd;
         printf("[INIT] KS_VISUAL_DIGEST=%s\n", vd);
     }
-    if (const char* sd = std::getenv("KS_SCREENSHOT_DELAY")) {
-        const int d = std::atoi(sd);
-        if (d >= 0) g_shotDelay = d;
+    if (char* sd = std::getenv("KS_SCREENSHOT_DELAY")) {
+        // '<number>' and '<number>ms' are milliseconds; '<number>f' (also fr,
+        // frame, frames) keeps the old frame count for a capture pinned to a
+        // frame number rather than a wall-clock moment.
+        char* end = sd;
+        const double value = std::strtod(sd, &end);
+        std::string unit(end != nullptr ? end : "");
+        for (char& c : unit)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        while (!unit.empty() && (unit.front() == ' ' || unit.front() == '\t')) unit.erase(unit.begin());
+        while (!unit.empty() && (unit.back() == ' ' || unit.back() == '\t')) unit.pop_back();
+        if (value >= 0.0) {
+            if (unit == "f" || unit == "fr" || unit == "frame" || unit == "frames") {
+                g_shotDelayFrames = static_cast<int>(value);
+                printf("[INIT] KS_SCREENSHOT_DELAY=%s -> %d frames\n", sd, g_shotDelayFrames);
+            } else {
+                if (!unit.empty() && unit != "ms")
+                    printf("[INIT] KS_SCREENSHOT_DELAY=%s: unknown unit '%s', reading it as milliseconds\n",
+                           sd, unit.c_str());
+                g_shotDelayMs = static_cast<int>(value);
+                printf("[INIT] KS_SCREENSHOT_DELAY=%s -> %d ms\n", sd, g_shotDelayMs);
+            }
+        }
     }
     // Native modules: every *.dll in system/modules (KS_MODULES_DIR overrides),
     // in file-name order. They speak KsModuleApi.h; one built for another ABI, or
@@ -2790,8 +3190,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         struct Page { const char* name; ks::sim::MenuState state; };
         static const Page kPages[] = {
             {"MAIN", ks::sim::MenuState::Main},
-            {"SINGLE PLAYER", ks::sim::MenuState::Singleplayer},
-            {"SINGLEPLAYER", ks::sim::MenuState::Singleplayer},
+            // SINGLE PLAYER opens the event-type page first, so both spellings
+            // name that page; SESSION captures the walk's last page.
+            {"SINGLE PLAYER", ks::sim::MenuState::EventSelect},
+            {"SINGLEPLAYER", ks::sim::MenuState::EventSelect},
+            {"EVENT TYPE", ks::sim::MenuState::EventSelect},
+            {"SESSION", ks::sim::MenuState::Singleplayer},
             {"MULTIPLAYER", ks::sim::MenuState::Multiplayer},
             {"SETTINGS", ks::sim::MenuState::Settings},
             {"VIDEO", ks::sim::MenuState::Options},
@@ -2831,7 +3235,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             if (page.state == ks::sim::MenuState::TrackSelect)
                 g_simulation->ui().menu().openTrackSelect();
             else if (page.state == ks::sim::MenuState::CarSelect)
-                g_simulation->ui().menu().beginSessionSetup();
+                g_simulation->ui().menu().openCarSelect();
             else if (page.state == ks::sim::MenuState::FirstRun)
                 g_simulation->ui().menu().openFirstRun();
             else
@@ -2845,6 +3249,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             printf("[menu] KS_MENU_SCREEN=%s: unknown page\n", screenEnv);
             std::exit(2);
         }
+    }
+    // KS_MENU_HIDDEN=1: capture the frame with the menu closed. The scene and
+    // the apps shelf are what is left, so an empty shelf is visible instead of
+    // being covered by the menu's panels.
+    if (const char* hiddenEnv = std::getenv("KS_MENU_HIDDEN");
+        hiddenEnv && hiddenEnv[0] == '1') {
+        g_simulation->ui().menu().setVisible(false);
+        printf("[menu] KS_MENU_HIDDEN=1 -> menu closed for the capture\n");
     }
     // KS_MENU_WEATHER=<DRY|CUSTOM|TODAY|DATE>: the sky the WEATHER page shows
     // in a capture, on a track from the library so the real modes have
@@ -3048,7 +3460,23 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
         // the same path the menu's EXIT uses (deterministic teardown).
         if (g_nativeRenderer && !g_shotPath.empty()) {
             if (!g_shotRequested) {
-                if (++g_shotFrame > g_shotDelay) {
+                const auto now = std::chrono::steady_clock::now();
+                if (!g_shotClockStarted) {
+                    g_shotClockStart = now;
+                    g_shotClockStarted = true;
+                }
+                const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                           now - g_shotClockStart).count();
+                // Frames when the value asked for a frame number, the clock
+                // otherwise. The first frame is the clock's zero, so the wait
+                // is the time the window actually spent rendering.
+                const bool due = (g_shotDelayFrames >= 0)
+                                     ? (++g_shotFrame > g_shotDelayFrames)
+                                     : (elapsedMs >= g_shotDelayMs);
+                if (due) {
+                    printf("[shot] request after %lld ms (%s)\n",
+                           static_cast<long long>(elapsedMs),
+                           g_shotDelayFrames >= 0 ? "frames" : "ms");
                     g_nativeRenderer->requestScreenshot();
                     g_shotRequested = true;
                 }
@@ -3169,6 +3597,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR lpCmdLine, int) {
             ks::sim::driverStatsFromProfile(
                 g_simulation->ui().menu().profile(),
                 static_cast<int>(g_simulation->features().pb.size())));
+        // The apps shelf follows the driver too: scrlayout.json is rewritten
+        // here even when nothing moved, so the file always matches the session
+        // that just ended.
+        saveAppsLayout();
         // What the driver left in the car and on screen follows him into the
         // next session: the cockpit knobs and the two panel positions.
         if (auto* vehicle = g_simulation->vehicle()) {

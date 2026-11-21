@@ -41,6 +41,7 @@ extern "C" __declspec(dllimport) unsigned int __stdcall timeBeginPeriod(unsigned
 #include "PitBoxesIni.h"    // the boxes an author placed, for the garage row
 #include "PitLaneSpline.h"  // the venue's own pit lane, for the garage row
 #include "NetworkManager.h"
+#include "PhysicsGarage.h"
 #include "SetupGarage.h"
 #include "SetupFile.h"
 #include "SceneAssets.h"
@@ -368,6 +369,28 @@ SimulationLoop::SimulationLoop() : m_vulkanMode(true) {
         else
             std::snprintf(line, sizeof(line), "  BB %d%%", now);
         return line;
+    });
+    // EDIT PHYSICS: the data screen for the turntable car. The hook owns the
+    // car the way the material hooks do: it loads the showroom car's physics
+    // on demand, opens the screen on its live numbers and closes the console,
+    // so the panel's keys do not land in the input line.
+    m_ui.console().setPhysicsEditHook([this]() -> std::string {
+        const std::string carDirectory = showroomCarDirectory();
+        if (carDirectory.empty())
+            return "  EDIT PHYSICS: the room shows no car to edit";
+#if !HAS_VEHICLE_SIM
+        return "  EDIT PHYSICS: no vehicle model in this build";
+#else
+        if (m_vehicle == nullptr) return "  EDIT PHYSICS: no vehicle model loaded";
+        PhysicsGarage* screen = physicsGarage();
+        screen->setVisible(true);
+        m_ui.console().setVisible(false);
+        char line[256];
+        std::snprintf(line, sizeof(line),
+                      "  physics data: %s (rows edit the car live, ENTER writes data/*.ini)",
+                      std::filesystem::path(carDirectory).filename().string().c_str());
+        return line;
+#endif
     });
     // ENTER on a focused inspector row: same document, same reload as MAT.
     m_ui.setInspectorCommitHook(
@@ -988,6 +1011,10 @@ bool SimulationLoop::setupScreenVisible() const {
     return m_setupGarage != nullptr && m_setupGarage->isVisible();
 }
 
+bool SimulationLoop::physicsScreenVisible() const {
+    return m_physicsGarage != nullptr && m_physicsGarage->isVisible();
+}
+
 SetupGarage* SimulationLoop::setupGarage() {
     // Built on first use (menu page, setup load): the loop owns it so the screen
     // outlives a car change, and its edits have somewhere to go.
@@ -1033,6 +1060,37 @@ SetupGarage* SimulationLoop::setupGarage() {
         m_setupGarage->setCarName(m_carName);
     }
     return m_setupGarage.get();
+}
+
+PhysicsGarage* SimulationLoop::physicsGarage() {
+    // Built on first use (showroom `edit physics`): the loop owns it so the
+    // screen outlives a car change, and its edits have somewhere to go.
+    if (!m_physicsGarage) {
+        m_physicsGarage = std::make_unique<PhysicsGarage>();
+        // The hub draws it: the loop owns the screen, the UI layer paints it.
+        m_ui.setPhysicsScreen(m_physicsGarage.get());
+    }
+    // The screen follows the turntable car: the physics is loaded on demand
+    // (the showroom car is visual-only until now) and the rows are rebuilt
+    // from what the vehicle runs on, so the numbers are always live.
+    const std::string carDirectory = showroomCarDirectory();
+    if (!carDirectory.empty() && carDirectory != m_physicsGarageCar) {
+#if HAS_VEHICLE_SIM
+        if (m_vehicle) loadCarPhysics(carDirectory);
+#endif
+        const std::string name =
+            std::filesystem::path(carDirectory).filename().string();
+        m_physicsGarage->attach(
+#if HAS_VEHICLE_SIM
+            m_vehicle.get()
+#else
+            nullptr
+#endif
+            ,
+            carDirectory, name.empty() ? carDirectory : name);
+        m_physicsGarageCar = carDirectory;
+    }
+    return m_physicsGarage.get();
 }
 
 void SimulationLoop::applyGameplayTweaks() {
@@ -1138,23 +1196,11 @@ void SimulationLoop::applySetupToVehicle(const SetupData& s) {
 #endif
 }
 
-bool SimulationLoop::loadCar(const std::string& carDir) {
+// File-by-file physics load, pulled out of loadCar so the showroom data
+// screen (`edit physics`) can put the turntable car on its own numbers on
+// demand, without a driving session.
+void SimulationLoop::loadCarPhysics(const std::string& carDir) {
     namespace fs = std::filesystem;
-    if (!fs::is_directory(carDir)) return false;
-    loadContentMods(carDir); // Lua Mod SDK: <car>/scripts/*.lua
-    m_carName = fs::path(carDir).filename().string();
-    m_carDir = carDir; // roadmap 2.8/2.9: livery + upgrades resolve against it
-    despawnCarVisuals();
-    // Another car's tyres have no history in this one: no bulge, no flat spot.
-    m_tyreVisuals.reset();
-    // The content's own brake-disc settings: the [BRAKEDISC_FX] sections the
-    // conversion folded into model.json. A car that declares none keeps the
-    // glow the thermal model computes, unchanged.
-    m_brakeDiscFx = ks::graphics::readBrakeDiscFx(carDir);
-    if (m_brakeDiscFx.declared) {
-        std::fprintf(stderr, "[brakes] content disc fx: active=%d glowMult=%.3f\n",
-                     m_brakeDiscFx.active ? 1 : 0, m_brakeDiscFx.glowMult);
-    }
 #if HAS_VEHICLE_SIM
     if (m_vehicle) {
         m_vehicle->setMass(1200); m_vehicle->setEnginePower(260); m_vehicle->setMaxRpm(8500);
@@ -1199,6 +1245,28 @@ bool SimulationLoop::loadCar(const std::string& carDir) {
         }
     }
 #endif
+}
+
+bool SimulationLoop::loadCar(const std::string& carDir) {
+    namespace fs = std::filesystem;
+    if (!fs::is_directory(carDir)) return false;
+    loadContentMods(carDir); // Lua Mod SDK: <car>/scripts/*.lua
+    m_carName = fs::path(carDir).filename().string();
+    m_carDir = carDir; // roadmap 2.8/2.9: livery + upgrades resolve against it
+    despawnCarVisuals();
+    // Another car's tyres have no history in this one: no bulge, no flat spot.
+    m_tyreVisuals.reset();
+    // The content's own brake-disc settings: the [BRAKEDISC_FX] sections the
+    // conversion folded into model.json. A car that declares none keeps the
+    // glow the thermal model computes, unchanged.
+    m_brakeDiscFx = ks::graphics::readBrakeDiscFx(carDir);
+    if (m_brakeDiscFx.declared) {
+        std::fprintf(stderr, "[brakes] content disc fx: active=%d glowMult=%.3f\n",
+                     m_brakeDiscFx.active ? 1 : 0, m_brakeDiscFx.glowMult);
+    }
+    // The file-by-file load lives in loadCarPhysics(): the showroom data
+    // screen (`edit physics`) runs the same load on the turntable car.
+    loadCarPhysics(carDir);
     // The car's electronics are read here as well: this path loads the physics
     // file by file, so the unified loader that also reads the manifest never
     // runs during a session.
@@ -1279,6 +1347,37 @@ bool SimulationLoop::openShowroom(const std::string& directory, std::string* err
     return true;
 }
 
+std::string SimulationLoop::showroomCarDirectory() {
+    if (!m_carDir.empty()) return m_carDir;
+    if (!m_showroom.active()) return std::string();
+    const char* noCar = std::getenv("KS_NO_CAR");
+    const char* consoleEnv = std::getenv("KS_CONSOLE");
+    if ((noCar && noCar[0] && noCar[0] != '0') ||
+        (consoleEnv && consoleEnv[0] && consoleEnv[0] != '0'))
+        return std::string();
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    // The room is a turntable: with no car selected yet, the first one that
+    // ships with a model. Cars sit next to the showrooms in the content
+    // folder, so no path needs to be configured for this.
+    const fs::path carsRoot =
+        fs::path(m_showroom.config().directory).parent_path().parent_path() / "cars";
+    std::vector<fs::path> candidates;
+    for (const auto& entry : fs::directory_iterator(carsRoot, ec))
+        if (entry.is_directory(ec)) candidates.push_back(entry.path());
+    std::sort(candidates.begin(), candidates.end());
+    for (const auto& dir : candidates) {
+        bool hasModel = false;
+        for (const auto& file : fs::directory_iterator(dir, ec)) {
+            if (file.path().extension() != ".kn5") continue;
+            hasModel = true;
+            break;
+        }
+        if (hasModel) return dir.string();
+    }
+    return std::string();
+}
+
 void SimulationLoop::loadShowroomCar() {
     if (!m_vulkanRenderer || !m_showroom.active()) return;
     // KS_CONSOLE=1 opens the room as a calibration stage and KS_NO_CAR=1 does
@@ -1301,31 +1400,7 @@ void SimulationLoop::loadShowroomCar() {
         if (!placeholder) return;
     }
     namespace fs = std::filesystem;
-    std::error_code ec;
-    std::string carDirectory = m_carDir;
-    if (carDirectory.empty()) {
-        // The room is a turntable: with no car selected yet, put the first one
-        // that ships with a model on it. Cars sit next to the showrooms in the
-        // content folder, so no path needs to be configured for this.
-        const fs::path carsRoot =
-            fs::path(m_showroom.config().directory).parent_path().parent_path() / "cars";
-        std::vector<fs::path> candidates;
-        for (const auto& entry : fs::directory_iterator(carsRoot, ec))
-            if (entry.is_directory(ec)) candidates.push_back(entry.path());
-        std::sort(candidates.begin(), candidates.end());
-        for (const auto& dir : candidates) {
-            bool hasModel = false;
-            for (const auto& file : fs::directory_iterator(dir, ec)) {
-                if (file.path().extension() != ".kn5") continue;
-                hasModel = true;
-                break;
-            }
-            if (hasModel) {
-                carDirectory = dir.string();
-                break;
-            }
-        }
-    }
+    const std::string carDirectory = showroomCarDirectory();
     if (carDirectory.empty()) {
         std::fprintf(stderr, "[showroom] no car to show: no model in %s\n",
                      (fs::path(m_showroom.config().directory).parent_path().parent_path() /

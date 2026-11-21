@@ -581,6 +581,7 @@ add_executable(SimulatorApp
 	"src/simulator/RaceSessionManager.cpp"
 	"src/simulator/DashboardOverlay.cpp"
 	"src/simulator/SetupGarage.cpp"
+	"src/simulator/PhysicsGarage.cpp"
 	"src/simulator/TelemetryOverlay.cpp"
 	"src/simulator/TrackLoader.cpp"
 	"src/simulator/MultiCarManager.cpp"

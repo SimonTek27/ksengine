@@ -66,6 +66,11 @@ public:
     /** brakes.ini [DATA] as the car declared it; 0 = the car said nothing. */
     float brakeMaxTorque() const { return m_brakeMaxTorque; }
     float brakeFrontShare() const { return m_brakeFrontShare; }
+    /** Live edits from the physics garage (showroom `edit physics`): the same
+     *  acceptance rules as loadBrakesFromIni, so a row can never push the car
+     *  where its own file could not. */
+    void setBrakeMaxTorque(float nm);
+    void setBrakeFrontShare(float share);
     float handbrakeTorque() const { return m_handbrakeTorque; }
     bool brakeBiasAdjustable() const { return m_brakeBiasAdjustable; }
     /** The car's own electronics slip limits (data/electronics.ini through

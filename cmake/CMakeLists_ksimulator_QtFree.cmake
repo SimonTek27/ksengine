@@ -43,6 +43,7 @@ set(KSIM_SOURCES
 	${CMAKE_SOURCE_DIR}/src/simulator/ShadowSystem.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/DashboardOverlay.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/SetupGarage.cpp
+	${CMAKE_SOURCE_DIR}/src/simulator/PhysicsGarage.cpp
 	${CMAKE_SOURCE_DIR}/src/simulator/DevScripting.cpp
 	# native modules: the ABI a DLL speaks and the loader that runs it
 	${CMAKE_SOURCE_DIR}/src/simulator/ModuleLoader.cpp

@@ -701,12 +701,44 @@ void VehicleSimulator::loadAeroFromIni(const std::string& path) {
     if (area > 0.5f) setFrontalArea(area);
 }
 
+void VehicleSimulator::setBrakeMaxTorque(float nm) {
+    if (nm > 0.f) m_brakeMaxTorque = nm;
+}
+void VehicleSimulator::setBrakeFrontShare(float share) {
+    if (share > 0.05f && share < 0.95f) m_brakeFrontShare = share;
+}
+
 void VehicleSimulator::loadSuspensionFromIni(const std::string& path) {
     auto m = parseIni(path);
     float wb = getf(m, "WHEELBASE", getf(m, "SUSPENSION/WHEELBASE", static_cast<float>(m_wheelBase)));
     float tw = getf(m, "TRACK", getf(m, "SUSPENSION/TRACK", static_cast<float>(m_trackWidth)));
     if (wb > 1.5f) m_wheelBase = wb;
     if (tw > 1.0f) m_trackWidth = tw;
+    // The physics garage's own block: the geometry the setup screen does not
+    // own (roll centers, sprung-mass placement, compliances). Same units as
+    // SetupParams, seeded here so a saved car reopens on its own numbers.
+    auto& s = m_setup;
+    s.rollCenterFrontM = std::clamp(getf(m, "GEOMETRY/ROLL_CENTER_FRONT", s.rollCenterFrontM),
+                                    0.f, 0.25f);
+    s.rollCenterRearM = std::clamp(getf(m, "GEOMETRY/ROLL_CENTER_REAR", s.rollCenterRearM),
+                                   0.f, 0.30f);
+    s.cgHeightM = std::clamp(getf(m, "GEOMETRY/CG_HEIGHT", s.cgHeightM), 0.15f, 0.80f);
+    s.frontWeightFrac = std::clamp(getf(m, "GEOMETRY/FRONT_WEIGHT", s.frontWeightFrac),
+                                   0.30f, 0.65f);
+    s.rollSteerFront = std::clamp(getf(m, "GEOMETRY/ROLL_STEER_FRONT", s.rollSteerFront),
+                                  -0.4f, 0.4f);
+    s.rollSteerRear = std::clamp(getf(m, "GEOMETRY/ROLL_STEER_REAR", s.rollSteerRear),
+                                 -0.4f, 0.4f);
+    s.latComplianceFront = std::clamp(getf(m, "GEOMETRY/LAT_COMPLIANCE_FRONT", s.latComplianceFront),
+                                      1.0e4f, 5.0e5f);
+    s.latComplianceRear = std::clamp(getf(m, "GEOMETRY/LAT_COMPLIANCE_REAR", s.latComplianceRear),
+                                     1.0e4f, 5.0e5f);
+    s.alignComplianceFront =
+        std::clamp(getf(m, "GEOMETRY/ALIGN_COMPLIANCE_FRONT", s.alignComplianceFront),
+                   5.0e2f, 5.0e4f);
+    s.alignComplianceRear =
+        std::clamp(getf(m, "GEOMETRY/ALIGN_COMPLIANCE_REAR", s.alignComplianceRear),
+                   5.0e2f, 5.0e4f);
 }
 
 void VehicleSimulator::loadBrakesFromIni(const std::string& path) {

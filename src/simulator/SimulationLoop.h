@@ -80,6 +80,7 @@ class InputManager;
 class CameraController;
 class SimulatorAudio;
 class SetupGarage;
+class PhysicsGarage;
 class NativeRenderer;
 class MultiCarManager;
 class NetworkManager;
@@ -397,11 +398,34 @@ public:
     /// The car folder the setup screen is currently showing: the screen reads
     /// the car's own setup.ini, so it has to follow a car change.
     std::string m_setupGarageCar;
+    /** The physics screen (showroom `edit physics`): the same rows-as-tabs
+     *  shape as the setup screen, but over the car's data files, edited live
+     *  on the vehicle. Public so the app can forward keys to it. */
+    PhysicsGarage* physicsGarage();
+    /// The car folder the physics screen is bound to: the screen loads the
+    /// turntable car's physics on demand, so it has to follow a car change.
+    std::string m_physicsGarageCar;
+    /** The turntable car's folder: the selected car, else the first model in
+     *  content/cars. Empty when the room hides the car (KS_NO_CAR) or has no
+     *  model at all. */
+    std::string showroomCarDirectory();
+    /** File-by-file physics load pulled out of loadCar: the manifest first,
+     *  then the data/*.ini set on top, plus the brake temperature curves. */
+    void loadCarPhysics(const std::string& carDir);
     /// The setup screen is up: a capture keeps the interface out, but this is
     /// the screen the capture was asked for. Defined where SetupGarage is
     /// complete (SimulationLoop.cpp): the header only forward-declares it.
     bool setupScreenVisible() const;
+    /// The physics screen is up (same capture rule as the setup screen).
+    /// Unlike physicsGarage() this never builds the screen: the app calls it
+    /// on every key press, where loading a car's physics would be wrong.
+    bool physicsScreenVisible() const;
     ui::NativeUiHub& ui() { return m_ui; }
+    /** Present the welcome mark as a loading cover right now, before a blocking
+     *  content load, so the player sees it instead of a frozen menu. Paired with
+     *  hideLoadingCover() once the content is in. */
+    void showLoadingCover(const std::string& label);
+    void hideLoadingCover() { m_ui.endLoading(); }
     ui::UiGpuPass* uiGpu() { return m_uiGpu.get(); }
     const SimTrackData& trackData() const { return m_trackData; }
     ks::physics::VehicleSimulator* vehicle() { return m_vehicle.get(); }
@@ -837,6 +861,7 @@ private:
     std::unique_ptr<NetworkManager> m_network;
     std::unique_ptr<SimulatorAudio> m_audio;
     std::unique_ptr<SetupGarage> m_setupGarage;
+    std::unique_ptr<PhysicsGarage> m_physicsGarage;
     // What the loaded car says about its aids: 1 has it, 0 does not, -1 unknown.
     int m_tcPresent = -1;
     int m_absPresent = -1;
