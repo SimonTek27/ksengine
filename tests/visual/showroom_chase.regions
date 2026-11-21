@@ -1,0 +1,8 @@
+ksregions 1
+# The showroom shot (2560x1392): the rectangles the room's grade fix was
+# measured on by hand. Thresholds are |dRGB| sums (0..765) — starting values,
+# the checker prints the actuals every run so they tune by evidence.
+region wall 200 380 400 140 3.0 120.0
+region floor 120 900 300 250 3.0 120.0
+region car 1150 750 250 130 5.0 150.0
+region disc 1050 1150 500 200 5.0 150.0

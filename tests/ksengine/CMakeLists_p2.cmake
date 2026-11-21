@@ -930,6 +930,16 @@ target_include_directories(visual_baseline_test PRIVATE
 target_link_libraries(visual_baseline_test PRIVATE ksengine)
 add_test(NAME visual_baseline_test COMMAND visual_baseline_test)
 
+# Regressione visiva per regioni nominate: le misure fatte a mano sulle
+# catture (muro, pavimento, auto, ...) diventano un test su golden PNG
+# (src/simulator/VisualRegions.h, tools/visual_baseline.ps1 li confronta).
+add_executable(visual_regions_test visual_regions_test.cpp)
+target_include_directories(visual_regions_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src/simulator"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../src")
+target_link_libraries(visual_regions_test PRIVATE ksengine)
+add_test(NAME visual_regions_test COMMAND visual_regions_test)
+
 # Aderenza per tipo di suolo: il modello che rende la query fisica.
 add_executable(surface_grip_test surface_grip_test.cpp)
 target_include_directories(surface_grip_test PRIVATE

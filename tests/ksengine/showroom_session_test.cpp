@@ -9,20 +9,31 @@
  * Header only plus a recording sink: no Vulkan, no content, no window.
  */
 #include "KsTest.h"
+#include "simulator/ShowroomConfig.h"
 #include "simulator/ShowroomSession.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <vector>
 
 namespace {
 
 using ks::sim::LocalLight;
+using ks::sim::RoomDisplayState;
+using ks::sim::ShowroomConfig;
 using ks::sim::ShowroomDisplaySink;
 using ks::sim::ShowroomGrade;
 using ks::sim::ShowroomSessionState;
+using ks::sim::gradeFromConfig;
+using ks::sim::loadShowroom;
+using ks::sim::roomDisplayFromConfig;
 using ks::sim::sameShowroomGrade;
+
+namespace fs = std::filesystem;
 
 /** Everything the session state can ask of the display, recorded. */
 struct RecordingSink : ShowroomDisplaySink {
@@ -31,6 +42,7 @@ struct RecordingSink : ShowroomDisplaySink {
     float sunColor[3] = {0.f, 0.f, 0.f};
     float sunLevel = 0.f;
     std::size_t lampCount = 0;
+    float firstLampIntensity = 0.f;
     float fogColor[3] = {0.f, 0.f, 0.f};
     float fogDensity = 0.f;
     float fogFalloff = 0.f;
@@ -49,6 +61,7 @@ struct RecordingSink : ShowroomDisplaySink {
     void setLamps(const std::vector<LocalLight>& lights) override {
         ++lamps;
         lampCount = lights.size();
+        firstLampIntensity = lights.empty() ? 0.f : lights.front().intensity;
     }
     void setFog(const float color[3], float density, float falloff) override {
         ++fog;
@@ -224,6 +237,102 @@ int main() {
     RecordingSink declaredSink;
     declared.applyTo(declaredSink);
     KS_CHECK_NEAR(declaredSink.sunLevel, 1.25f, 1e-6f);
+
+    // --- the room arrives from a real showroom.json on disk ----------------
+    // Two scratch rooms, read by loadShowroom exactly as the game reads them:
+    // one with no light block (the engine's daylight answers for it) carrying
+    // the asr [COLOR] numbers, one with a declared sun of 1.25, one lamp and
+    // no post-effects at all.
+    const fs::path scratch = fs::temp_directory_path() / "ks_showroom_session_test";
+    std::error_code ec;
+    fs::remove_all(scratch, ec);
+    auto writeText = [](const fs::path& path, const char* text) {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out << text;
+    };
+    fs::create_directories(scratch / "no_light", ec);
+    writeText(scratch / "no_light" / "showroom.json",
+              "{\"name\":\"No Light Hall\","
+              "\"description\":\"a hall with no light block\"}");
+    writeText(scratch / "no_light" / "ppeffects.ini",
+              "[TONEMAPPING]\n"
+              "EXPOSURE=0.90\n"
+              "[COLOR]\n"
+              "HUE=10\n"
+              "SATURATION=0.7\n"
+              "CONTRAST=1.1\n"
+              "SEPIA=0.1\n");
+    fs::create_directories(scratch / "with_light", ec);
+    writeText(scratch / "with_light" / "showroom.json",
+              "{\"name\":\"Lit Hall\","
+              "\"description\":\"a hall with a declared sun\","
+              "\"light\":{\"sun_direction\":[0.42,0.78,0.46],"
+              "\"sun_color\":[1.0,0.97,0.92],\"sun_intensity\":1.25,"
+              "\"ambient_color\":[0.34,0.36,0.40],\"ambient_intensity\":0.55},"
+              "\"lights\":[{\"position\":[0.0,3.0,0.0],\"color\":[1.0,0.2,0.1],"
+              "\"intensity\":8.0,\"range\":30.0}]}");
+
+    // The one mapping under test: documents in, display state out. The stop
+    // the room declares is its own [TONEMAPPING] number here — the preset and
+    // the console outrank it in the game, but neither is a room document.
+    auto sessionFromRoom = [](const ShowroomConfig& cfg, float hallRadius,
+                              const ShowroomGrade& before) {
+        ShowroomSessionState session;
+        session.hallInScene = true;
+        session.roomLightValid = true;
+        session.room = roomDisplayFromConfig(cfg, hallRadius);
+        session.room.exposure = cfg.exposure > 0.0f ? cfg.exposure : 1.0f;
+        session.exposureBefore = 1.0f;
+        session.iblBefore = true;
+        if (cfg.colorDeclared) session.captureGrade(session.room.grade, before);
+        return session;
+    };
+
+    std::string error;
+    // --- no light block: daylight, the room's haze, stop and [COLOR] -------
+    const ShowroomConfig bare = loadShowroom((scratch / "no_light").string(), &error);
+    KS_CHECK(bare.valid);
+    KS_CHECK(!bare.lightDeclared);
+    KS_CHECK_NEAR(bare.sunIntensity, 0.0f, 1e-6f);
+    KS_CHECK(bare.colorDeclared);
+    KS_CHECK_NEAR(bare.exposure, 0.90f, 1e-6f);
+    ShowroomSessionState bareSession = sessionFromRoom(bare, 27.0f, ppfilterGrade());
+    KS_CHECK(bareSession.ownsTheScene());
+    RecordingSink bareSink;
+    bareSession.applyTo(bareSink);
+    KS_CHECK_NEAR(bareSink.sunLevel, 1.0f, 1e-6f); // no [LIGHT] -> daylight
+    KS_CHECK_NEAR(bareSink.sunDirection[0], -0.42f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.sunDirection[1], -0.78f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.fogDensity, 0.0001f * 12.0f / 27.0f, 1e-9f);
+    KS_CHECK_NEAR(bareSink.exposureValue, 0.90f, 1e-6f);
+    KS_CHECK(bareSink.grade == 1);
+    KS_CHECK_NEAR(bareSink.gradeValue.saturation, 0.70f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.gradeValue.contrast, 1.10f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.gradeValue.hue, 10.0f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.gradeValue.sepia, 0.10f, 1e-6f);
+    KS_CHECK_NEAR(bareSink.gradeValue.filter[0], 1.0f, 1e-6f); // no temps
+    RecordingSink bareTrack;
+    bareSession.releaseTo(bareTrack);
+    KS_CHECK(sameShowroomGrade(bareTrack.gradeValue, ppfilterGrade()));
+    KS_CHECK_NEAR(bareTrack.exposureValue, 1.0f, 1e-6f);
+
+    // --- declared sun: its level, its lamp, and no grade anywhere ----------
+    const ShowroomConfig lit = loadShowroom((scratch / "with_light").string(), &error);
+    KS_CHECK(lit.valid);
+    KS_CHECK(lit.lightDeclared);
+    KS_CHECK_NEAR(lit.sunIntensity, 1.25f, 1e-6f);
+    ShowroomSessionState litSession = sessionFromRoom(lit, 27.0f, ppfilterGrade());
+    RecordingSink litSink;
+    litSession.applyTo(litSink);
+    KS_CHECK_NEAR(litSink.sunLevel, 1.25f, 1e-6f);
+    KS_CHECK(litSink.lampCount == 1);
+    KS_CHECK_NEAR(litSink.firstLampIntensity, 8.0f, 1e-6f);
+    KS_CHECK(litSink.grade == 0); // no ppeffects -> no [COLOR]
+    RecordingSink litTrack;
+    litSession.releaseTo(litTrack);
+    KS_CHECK(litTrack.grade == 0);
+
+    fs::remove_all(scratch, ec);
 
     return KS_TEST_RESULT("showroom_session_test");
 }

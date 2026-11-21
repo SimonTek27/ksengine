@@ -15,6 +15,7 @@
  * but the include path.
  */
 #include "LocalLights.h"
+#include "ShowroomConfig.h"
 
 #include <cmath>
 #include <vector>
@@ -148,6 +149,67 @@ struct ShowroomSessionState {
         iblBefore = true;
     }
 };
+
+/** The grade a room's own [COLOR] block describes: hue, saturation, contrast
+ *  and sepia go straight to the display pass, while brightness and the
+ *  white-balance pair are solved on the CPU into the three-float filter
+ *  (ShowroomColor.h). Whether the block answers for the frame is the caller's
+ *  captureGrade, not this — the console's own grade outranks the room's. */
+inline ShowroomGrade gradeFromConfig(const ShowroomConfig& cfg) {
+    ShowroomGrade grade;
+    showroomColorFilter(cfg.colorBrightness, cfg.colorTemp, cfg.whiteBalance, grade.filter);
+    grade.saturation = cfg.colorSaturation;
+    grade.contrast = cfg.colorContrast;
+    grade.hue = cfg.colorHueDeg;
+    grade.sepia = cfg.colorSepia;
+    return grade;
+}
+
+/** The display state a room's own documents describe: its sun (the file points
+ *  at it, the renderer wants the way the light travels), its lamps, its haze
+ *  for this hall radius and its [COLOR] values. The one mapping the menu's
+ *  applyShowroomLight feeds the renderer, so a session inside the hall and the
+ *  menu that opened it cannot disagree about what the room said.
+ *
+ *  hasGrade stays unset on purpose: turning the block on is captureGrade's job
+ *  (it also saves what the display carried). The stop and the IBL choice are
+ *  resolved by the caller too: the stop has a priority chain (console, room,
+ *  preset, fallback) and the IBL depends on whether the hall is a photo. */
+inline RoomDisplayState roomDisplayFromConfig(const ShowroomConfig& cfg, float hallRadius) {
+    RoomDisplayState room;
+    room.sunDirection[0] = -cfg.sunDirection[0];
+    room.sunDirection[1] = -cfg.sunDirection[1];
+    room.sunDirection[2] = -cfg.sunDirection[2];
+    room.sunColor[0] = cfg.sunColor[0];
+    room.sunColor[1] = cfg.sunColor[1];
+    room.sunColor[2] = cfg.sunColor[2];
+    room.sunLevel = ShowroomSessionState::levelFor(cfg.sunIntensity, cfg.lightDeclared);
+    room.lamps.reserve(cfg.localLights.size());
+    for (const ShowroomLocalLight& lamp : cfg.localLights) {
+        LocalLight built;
+        for (int axis = 0; axis < 3; ++axis) {
+            built.position[axis] = lamp.position[axis];
+            built.color[axis] = lamp.color[axis];
+            built.direction[axis] = lamp.direction[axis];
+        }
+        built.range = lamp.range > 0.0f ? lamp.range : 12.0f;
+        built.intensity = lamp.intensity;
+        if (lamp.spot) {
+            built.spot = true;
+            built.cosOuter = std::cos(lamp.outerAngleDeg * 3.14159265358979f / 180.0f);
+            built.cosInner = std::cos(lamp.innerAngleDeg * 3.14159265358979f / 180.0f);
+        }
+        room.lamps.push_back(built);
+    }
+    const float fogScale = ShowroomSessionState::fogScaleFor(hallRadius);
+    room.fogColor[0] = cfg.ambientColor[0];
+    room.fogColor[1] = cfg.ambientColor[1];
+    room.fogColor[2] = cfg.ambientColor[2];
+    room.fogDensity = 0.0001f * fogScale;
+    room.fogFalloff = 0.002f * fogScale;
+    room.grade = gradeFromConfig(cfg);
+    return room;
+}
 
 } // namespace sim
 } // namespace ks

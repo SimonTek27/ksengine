@@ -4679,19 +4679,18 @@ void SimulationLoop::applyShowroomLight() {
             std::fputs("[showroom] auto exposure: the room declares none", stderr);
         }
         std::fputc(10, stderr);
+        // One mapping from the room's documents to the frame: what the menu
+        // feeds the renderer here is the same state the session keeps while
+        // the hall is the scene (roomDisplayFromConfig in ShowroomSession.h,
+        // pinned by showroom_session_test), so the two cannot disagree about
+        // what the room said.
+        const RoomDisplayState roomBuilt =
+            roomDisplayFromConfig(cfg, m_showroom.hallRadius());
         DirectionalLight light;
-        // The file points at the sun, the renderer wants the way the light
-        // travels (its own weather sun carries a negative y for daylight) —
-        // feeding it unconverted left the room lit by ambient alone.
-        light.direction = {-cfg.sunDirection[0], -cfg.sunDirection[1],
-                           -cfg.sunDirection[2]};
-        light.color = {cfg.sunColor[0], cfg.sunColor[1], cfg.sunColor[2]};
-        // The same rule updateWeather() applies to a session inside the hall: a
-        // room that declared no [LIGHT] block keeps the engine's daylight, a
-        // declared level is its own. Without this the menu drew the room with
-        // no sun at all and the session with one, which is the one difference
-        // the two views cannot explain away.
-        light.intensity = cfg.lightDeclared ? cfg.sunIntensity : 1.0f;
+        light.direction = {roomBuilt.sunDirection[0], roomBuilt.sunDirection[1],
+                           roomBuilt.sunDirection[2]};
+        light.color = {roomBuilt.sunColor[0], roomBuilt.sunColor[1], roomBuilt.sunColor[2]};
+        light.intensity = roomBuilt.sunLevel;
         // Kept after the room's own frames: a drive session started inside the
         // hall leaves the hall on screen (closeShowroom keeps the meshes), and
         // its direct light has to stay this sun — see updateWeather().
@@ -4723,29 +4722,9 @@ void SimulationLoop::applyShowroomLight() {
         // same surface response as the sun. A room that declares none leaves the
         // list empty, which is the frame the engine has always drawn.
         {
-            std::vector<ks::sim::LocalLight> lamps;
-            lamps.reserve(cfg.localLights.size());
-            for (const ShowroomLocalLight& lamp : cfg.localLights) {
-                ks::sim::LocalLight lampLight;
-                for (int axis = 0; axis < 3; ++axis) {
-                    lampLight.position[axis] = lamp.position[axis];
-                    lampLight.color[axis] = lamp.color[axis];
-                    lampLight.direction[axis] = lamp.direction[axis];
-                }
-                lampLight.range = lamp.range > 0.0f ? lamp.range : 12.0f;
-                lampLight.intensity = lamp.intensity;
-                if (lamp.spot) {
-                    lampLight.spot = true;
-                    lampLight.cosOuter =
-                        std::cos(lamp.outerAngleDeg * 3.14159265358979f / 180.0f);
-                    lampLight.cosInner =
-                        std::cos(lamp.innerAngleDeg * 3.14159265358979f / 180.0f);
-                }
-                lamps.push_back(lampLight);
-            }
             // Kept past closeShowroom(): the room's lamps are part of what the
             // hall looks like, and a session started inside it is still the hall.
-            m_roomSession.room.lamps = lamps;
+            m_roomSession.room.lamps = roomBuilt.lamps;
             m_vulkanRenderer->setLocalLights(m_roomSession.room.lamps);
         }
         // AC lights a showroom from the hall's own baked materials and a
@@ -4771,17 +4750,16 @@ void SimulationLoop::applyShowroomLight() {
         // Fog belongs to the room's size: these values were written for the
         // 24 m in-memory hall, and at 0.002 a real venue 84 m across dissolves
         // into its ambient colour before the far wall is reached.
-        const float hallRadius = std::max(m_showroom.hallRadius(), 12.0f);
-        const float fogScale = 12.0f / hallRadius;
-        m_vulkanRenderer->setFog({cfg.ambientColor[0], cfg.ambientColor[1], cfg.ambientColor[2]},
-                                 0.0001f * fogScale, 0.002f * fogScale);
+        m_vulkanRenderer->setFog({roomBuilt.fogColor[0], roomBuilt.fogColor[1],
+                                  roomBuilt.fogColor[2]},
+                                 roomBuilt.fogDensity, roomBuilt.fogFalloff);
         // Kept for a session started inside the hall: the weather branch would
         // otherwise draw the same room under a track's haze.
-        m_roomSession.room.fogColor[0] = cfg.ambientColor[0];
-        m_roomSession.room.fogColor[1] = cfg.ambientColor[1];
-        m_roomSession.room.fogColor[2] = cfg.ambientColor[2];
-        m_roomSession.room.fogDensity = 0.0001f * fogScale;
-        m_roomSession.room.fogFalloff = 0.002f * fogScale;
+        m_roomSession.room.fogColor[0] = roomBuilt.fogColor[0];
+        m_roomSession.room.fogColor[1] = roomBuilt.fogColor[1];
+        m_roomSession.room.fogColor[2] = roomBuilt.fogColor[2];
+        m_roomSession.room.fogDensity = roomBuilt.fogDensity;
+        m_roomSession.room.fogFalloff = roomBuilt.fogFalloff;
         // A photographed room is bright: without the extra stop the concrete and
         // the trees read as if the sun were going down. A post-processing
         // preset, when one is loaded (KS_PPFILTER), owns the display exposure
@@ -4854,14 +4832,11 @@ void SimulationLoop::applyShowroomLight() {
             // What the renderer carries before the room turns its block on: the
             // ppfilter's grade, which the track behind the hall expects back.
             const ShowroomGrade gradeBefore = currentShowroomGrade(m_vulkanRenderer);
-            float filter[3] = {1.f, 1.f, 1.f};
-            showroomColorFilter(cfg.colorBrightness, cfg.colorTemp, cfg.whiteBalance,
-                                filter);
-            m_vulkanRenderer->setColorFilter(filter);
-            m_vulkanRenderer->setSaturation(cfg.colorSaturation);
-            m_vulkanRenderer->setContrast(cfg.colorContrast);
-            m_vulkanRenderer->setGradeHue(cfg.colorHueDeg);
-            m_vulkanRenderer->setGradeSepia(cfg.colorSepia);
+            m_vulkanRenderer->setColorFilter(roomBuilt.grade.filter);
+            m_vulkanRenderer->setSaturation(roomBuilt.grade.saturation);
+            m_vulkanRenderer->setContrast(roomBuilt.grade.contrast);
+            m_vulkanRenderer->setGradeHue(roomBuilt.grade.hue);
+            m_vulkanRenderer->setGradeSepia(roomBuilt.grade.sepia);
             // Read back rather than copy the block: the setters clamp, and the
             // session has to re-apply exactly what the frame was drawn with.
             m_roomSession.captureGrade(currentShowroomGrade(m_vulkanRenderer), gradeBefore);
@@ -4876,9 +4851,10 @@ void SimulationLoop::applyShowroomLight() {
                              static_cast<double>(cfg.colorContrast),
                              static_cast<double>(cfg.colorSepia),
                              static_cast<double>(cfg.colorBrightness), cfg.colorTemp,
-                             cfg.whiteBalance, static_cast<double>(filter[0]),
-                             static_cast<double>(filter[1]),
-                             static_cast<double>(filter[2]));
+                             cfg.whiteBalance,
+                             static_cast<double>(roomBuilt.grade.filter[0]),
+                             static_cast<double>(roomBuilt.grade.filter[1]),
+                             static_cast<double>(roomBuilt.grade.filter[2]));
                 std::fputc(10, stderr);
             }
         }
@@ -6155,6 +6131,14 @@ void SimulationLoop::pumpThemeSounds() {
     for (int i = 0; i < count; ++i) m_audio->playUiSound(static_cast<int>(events[i]));
 }
 
+void SimulationLoop::showLoadingCover(const std::string& label) {
+    m_ui.beginLoading(label);
+    // Present the cover before the caller's blocking load: the load can take
+    // seconds (it reads meshes and rebuilds the scene), and without a frame of
+    // its own the last menu image would sit frozen on screen instead.
+    if (m_vulkanRenderer) render(0.0f);
+}
+
 void SimulationLoop::render(float dt) {
     pumpThemeSounds();
     // KS_INSPECT_AT="x,y": run the part pick once, in design units, a second
@@ -6809,6 +6793,21 @@ void SimulationLoop::ensureCarVisual(const std::string& carDir) {
             } else {
                 std::fprintf(stderr, "[scene] upgrade livery folder missing (%s) -> base\n",
                              cand.c_str());
+            }
+        }
+if (textureDir == baked + "/textures") {
+            // Recorded skin (model.json's kn5.skin): the car's own choice, applied
+            // when no upgrade livery or team slot overrides it.
+            sim::Kn5ModelParameters recorded;
+            if (sim::readKn5Parameters(carDir, recorded, nullptr) && !recorded.skin.empty()) {
+                const std::string cand = carDir + "/skins/" + recorded.skin;
+                if (std::filesystem::is_directory(cand)) {
+                    textureDir = cand;
+                    liveryLabel = recorded.skin;
+                } else {
+                    std::fprintf(stderr, "[scene] recorded skin '%s' missing (%s) -> base\n",
+                                 recorded.skin.c_str(), cand.c_str());
+                }
             }
         }
         if (textureDir == baked + "/textures") {
